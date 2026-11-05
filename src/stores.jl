@@ -16,8 +16,11 @@ has_object(s::DirStore, key::AbstractString) = isfile(joinpath(s.dir, key))
 function list_objects(s::DirStore, prefix::AbstractString; modified::Bool = false)
     root = joinpath(s.dir, prefix)
     isdir(root) || return modified ? Pair{String,DateTime}[] : String[]
+    # Not an upload under way, nor a hidden file or folder: Zemi names none so, and a copy made on a Mac
+    # can carry its metadata as `._` files.
+    hidden(d, f) = startswith(f, ".") || (d != root && any(startswith("."), splitpath(relpath(d, root))))
     keys = [prefix * join(splitpath(relpath(joinpath(d, f), root)), '/') for (d, _, fs) in walkdir(root) for f in fs
-            if !endswith(f, ".part")]
+            if !endswith(f, ".part") && !hidden(d, f)]
     return modified ? [k => unix2datetime(mtime(joinpath(s.dir, k))) for k in keys] : keys
 end
 delete_object!(s::DirStore, key::AbstractString) = rm(joinpath(s.dir, key); force = true)

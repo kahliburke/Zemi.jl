@@ -33,7 +33,7 @@ clear. The Docs workflow downloads it from the `demo-dataset-v1` release and che
 `demo/dataset.sha256`. To publish a new one:
 
 ```sh
-tar --zstd -cf demo-dataset.tar.zst -C ~/.local/share/zemi/demo/dataset .
+COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs --zstd -cf demo-dataset.tar.zst -C ~/.local/share/zemi/demo/dataset .
 shasum -a 256 demo-dataset.tar.zst | cut -d' ' -f1 > demo/dataset.sha256
 gh release upload demo-dataset-v1 demo-dataset.tar.zst --clobber
 ```

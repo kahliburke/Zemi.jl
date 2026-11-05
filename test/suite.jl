@@ -3701,6 +3701,17 @@ end
     end
 end
 
+@zset "a folder dataset leaves out hidden files" begin
+    # A dataset unpacked from an archive made on a Mac carries `._` files beside each file.
+    store = K.DirStore(mktempdir())
+    K.write_object!(store, "streams/demo.json", Vector{UInt8}("{\"documents\": {}}"))
+    write(joinpath(store.dir, "streams", "._demo.json"), "\0\x05\x16\aMac OS X")
+    write(joinpath(store.dir, ".DS_Store"), "x")
+    mkpath(joinpath(store.dir, ".hidden")); write(joinpath(store.dir, ".hidden", "x.json"), "x")
+    @test K.list_objects(store, "") == ["streams/demo.json"]
+    @test collect(keys(K.read_streams(store))) == ["demo"]
+end
+
 @zset "Qdrant's API key" begin
     # A Qdrant that takes only its key, as the one Kaimon runs does.
     port = 19000 + rand(0:999)
