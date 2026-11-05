@@ -1887,6 +1887,10 @@ end
     ico = read(K.content_path(c, "assets", "favicon.ico"))
     @test ico[1:6] == UInt8[0, 0, 1, 0, 3, 0] && ico[7] == 16 && ico[23] == 32 && ico[39] == 48
     @test K.site_icon(c, "favicon.ico") == K.content_path(c, "assets", "favicon.ico")
+    # The page shown while the service restarts: its own headline, else the package's.
+    @test count("Back in a moment", K.down_page(c)) == 2
+    tidy = K.Config(; group = K.Group(; restarting = "Tidying <the> shelves"))
+    @test count("Tidying &lt;the&gt; shelves", K.down_page(tidy)) == 2 && !occursin("Back in a moment", K.down_page(tidy))
     @test K.hero_files(c) == ["logo.png" => K.content_path(c, "assets", "logo.png")] && occursin("src: /logo.png", K.hero_image(c))
     @test occursin("at least 64 pixels", String(call("POST", "/api/config/brand/logo", K.png_bytes(red[1:20, 1:20]))[2]))
     @test call("POST", "/api/config/brand/logo", Vector{UInt8}("not an image"))[1] == 400

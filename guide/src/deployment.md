@@ -103,7 +103,9 @@ Installs the Julia packages, `mutool`, Ollama and the embedding models, Caddy (s
 `/etc/caddy/sites/<name>.caddy`), and `<name>.service` (default `zemi`). Refuses to run the service
 as a user who can become root. Several knowledge bases can share a machine, each with its own `name`,
 user, config, host, `[shared] port`, `[shared] kaimon_port` (default 2829) and `collection_prefix`
-(default `"zemi"`; they share one Qdrant). Rerun after changing the host, port or logo.
+(default `"zemi"`; they share one Qdrant). While the service is down or starting, Caddy shows a page
+with the logo and `[group] restarting` (default "Back in a moment"). Rerun after changing the host,
+port, logo or that line.
 
 To move an existing knowledge base in, stop the service, copy its data folder to `data_dir`, and
 start it. Vectors live in Qdrant, not the data folder, so a sync re-embeds the papers (Ollama must

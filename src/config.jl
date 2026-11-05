@@ -396,6 +396,7 @@ Base.@kwdef struct Group
     focus_areas::Vector{FocusArea} = FocusArea[]
     questions::Vector{ProfileQuestion} = DEFAULT_PROFILE
     panels::Vector{Panel} = DEFAULT_PANELS
+    restarting::String = ""
 end
 
 function group_config(t::AbstractDict)
@@ -407,7 +408,8 @@ function group_config(t::AbstractDict)
         [Panel(; title = String(p["title"]), text = String(get(p, "text", "")), link = String(get(p, "link", ""))) for p in t["panels"]] :
         DEFAULT_PANELS
     return Group(; name = strip(String(get(t, "name", ""))), field = strip(String(get(t, "field", ""))),
-                 description = strip(String(get(t, "description", ""))), focus_areas = areas, questions, panels)
+                 description = strip(String(get(t, "description", ""))), focus_areas = areas, questions, panels,
+                 restarting = strip(String(get(t, "restarting", ""))))
 end
 
 """

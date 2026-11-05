@@ -106,7 +106,9 @@ down=/var/www/$name-down
 install -d -m 755 "$down"
 # The knowledge base's own logo where its content has one (see `content_path`), else the package's.
 logo=$(cd "$checkout" && as_user julia --project=app -e 'import Zemi as K; print(K.site_icon(K.load_config(), "logo.png"))')
-install -m 644 "$checkout/deploy/down/index.html" "$down/"
+# Headed with the group's own words where its config has them.
+(cd "$checkout" && as_user julia --project=app -e 'import Zemi as K; write(stdout, K.down_page(K.load_config()))') > "$down/index.html"
+chmod 644 "$down/index.html"
 install -m 644 "$logo" "$down/logo.png"
 sed -e "s|@DOMAIN@|$domain|g" -e "s|@PORT@|$port|g" -e "s|@DOWN@|$down|g" "$checkout/deploy/Caddyfile" > "/etc/caddy/sites/$name.caddy"
 if grep -q '^:80 {' /etc/caddy/Caddyfile 2>/dev/null || [ ! -s /etc/caddy/Caddyfile ]; then

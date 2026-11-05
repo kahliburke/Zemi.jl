@@ -13,6 +13,7 @@ by key: remove a key there to let the config file's value apply.
 name = "Reef Ecology Lab"            # site title
 field = "coral reef ecology"         # given to the agents; read after "in" and "about"
 description = "We study how reef communities recover after bleaching, from field surveys and models."
+restarting = "Surveying the reef"    # the page shown while the service restarts (see Deployment); default: Back in a moment
 
 [[group.focus_areas]]                # what the landscape and the arXiv watch rank papers against
 name = "Bleaching and recovery"

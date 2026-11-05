@@ -97,5 +97,16 @@ function site_icon(c::Config, name::AbstractString = "icon.png")
     return isfile(own) ? own : joinpath(pkgdir(@__MODULE__), "docs", "src", "assets", name)
 end
 
+"""
+    down_page(c) -> String
+
+The page Caddy shows while the service is down or starting (`deploy/down/index.html`), headed with
+the group's `restarting` where its config sets one.
+"""
+function down_page(c::Config)
+    page = read(joinpath(pkgdir(@__MODULE__), "deploy", "down", "index.html"), String)
+    return isempty(c.group.restarting) ? page : replace(page, "Back in a moment" => html_escape(c.group.restarting))
+end
+
 "The head line naming the site's icon, for the service's own pages."
 const ICON_LINK = """<link rel="icon" type="image/png" href="/favicon.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">"""
