@@ -41,17 +41,19 @@ const PAPERS = [
 const DAILY = "2203.05645"
 
 """
-    demo_config(dir; prefix, dataset) -> String
+    demo_config(dir; prefix, dataset, shared) -> String
 
 Write a working config into `dir`: config.toml with its data in `dir`, its content from the
-checkout, Qdrant collections named from `prefix` and `dataset` as its `[dataset]`. Returns its path.
+checkout, Qdrant collections named from `prefix`, `dataset` as its `[dataset]` and `shared`, when
+given, as its `[shared]`. Returns its path.
 """
-function demo_config(dir::AbstractString; prefix::AbstractString, dataset::AbstractDict)
+function demo_config(dir::AbstractString; prefix::AbstractString, dataset::AbstractDict, shared::AbstractDict = Dict{String,Any}())
     t = TOML.parsefile(joinpath(DEMO, "config.toml"))
     t["data_dir"] = joinpath(dir, "data")
     t["content_dir"] = joinpath(DEMO, "content")
     t["collection_prefix"] = prefix
     t["dataset"] = dataset
+    isempty(shared) || (t["shared"] = merge(get(t, "shared", Dict{String,Any}()), shared))
     mkpath(dir)
     path = joinpath(dir, "config.toml")
     open(io -> TOML.print(io, t), path, "w")

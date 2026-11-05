@@ -35,7 +35,7 @@ jobs:
           mkdir -p ~/.local/share/zemi/demo/dataset
           tar --zstd -xf demo-dataset.tar.zst -C ~/.local/share/zemi/demo/dataset
       - run: julia --project=app -e 'using Pkg; Pkg.instantiate()'
-      # The guide's screenshots, taken from the demo served as `zemi` serves it (screenshots.mjs serves
+      # The guide's screenshots, taken from the demo served as `zemi --shared` serves it (screenshots.mjs serves
       # it): Node and a browser to take them, and Ollama for the query a search shot embeds.
       - uses: actions/setup-node@v4
         with:

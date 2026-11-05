@@ -2,7 +2,7 @@
 
 !!! warning "Needs a server"
     Projects, records and findings need `zemi` or `zemi --shared`; a static copy cannot show them. The
-    screenshots are of the demo served by `zemi`.
+    screenshots are of the demo served by `zemi --shared`.
 
 ## Projects
 
@@ -17,12 +17,36 @@ by status: proposed, backlog, ready, in progress, review, done.
 </figure>
 ```
 
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/task-light.png" alt="A task with its plan, subtasks and notes">
+  <img class="dark-only" src="./assets/screenshots/task-dark.png" alt="A task with its plan, subtasks and notes">
+</figure>
+```
+
 Agents use the same board through the task tools ([Agents and MCP](agents.md)):
 
 1. An agent's plan arrives as a proposed task.
 2. A person edits it if needed and approves it.
 3. The agent takes it with `next_task`, reports in notes, and moves it to review.
 4. Questions from agents wait on the task for a person's answer.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/proposal-light.png" alt="An agent's plan waiting for approval">
+  <img class="dark-only" src="./assets/screenshots/proposal-dark.png" alt="An agent's plan waiting for approval">
+</figure>
+```
+
+A project's **library** holds the papers, notebooks and codebases it works from, each with why it
+matters. An agent's addition is proposed until a person keeps it.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/library-light.png" alt="A project's library">
+  <img class="dark-only" src="./assets/screenshots/library-dark.png" alt="A project's library">
+</figure>
+```
 
 References with `@`: `@RB-12` (task), `@arXiv:2401.00001` (paper), `@RB-F3` (finding), `@doc-…`
 (upload), `@rec-…` (record), `@code:path#name` (codebase), and `@[label](kind:target)` for any kind. In a task they
@@ -41,6 +65,13 @@ did on its tasks lately. Each person chooses how much of themselves others see, 
 
 Those in a session, whoever is planning and those following them, can point and draw for each other
 with the **pen** (the toolbar in the window's corner, or `P`); what they draw fades in a moment.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/planning-light.png" alt="Following someone through a planning session, with the pen">
+  <img class="dark-only" src="./assets/screenshots/planning-dark.png" alt="Following someone through a planning session, with the pen">
+</figure>
+```
 
 When a project has a codebase, a commit naming a task is recorded on it: on a trailer line
 (`Tasks: RB-12`, or `Task:`, `Refs:`) or after `Part of`, as its work; anywhere else, as a mention.

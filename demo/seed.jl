@@ -10,14 +10,14 @@ const K = Zemi
 const DEMO_USER = "Rowan"
 
 """
-    demo_kb(dir; store) -> KB
+    demo_kb(dir; store, shared) -> KB
 
-The demo knowledge base in `dir`: its config written there, the dataset at `store` imported, and the
-group's work seeded the first time.
+The demo knowledge base in `dir`: its config written there (with `shared` as its `[shared]`), the
+dataset at `store` imported, and the group's work seeded the first time.
 """
-function demo_kb(dir::AbstractString; store::AbstractString = DEMO_DATASET)
+function demo_kb(dir::AbstractString; store::AbstractString = DEMO_DATASET, shared::AbstractDict = Dict{String,Any}())
     isdir(store) || error("No demo dataset at $store: make it with demo/make_dataset.jl")
-    ENV["ZEMI_CONFIG"] = demo_config(dir; prefix = "zemi_demo",
+    ENV["ZEMI_CONFIG"] = demo_config(dir; prefix = "zemi_demo", shared,
                                      dataset = Dict("role" => "consume", "store" => "dir:$(abspath(store))"))
     K.LOCAL_USER[] = DEMO_USER
     kb = K.kb()
@@ -26,7 +26,7 @@ function demo_kb(dir::AbstractString; store::AbstractString = DEMO_DATASET)
     return kb
 end
 
-"Projects with tasks in every column, a milestone, notes, an agent's plan and question, and findings."
+"Projects with tasks in every column, a milestone, notes, an agent's plan and question, findings and a library."
 function seed_work!(kb)
     rowan, ada, bea, claude = K.person("Rowan"), K.person("Ada"), K.person("Bea"), K.agent("Claude for Rowan")
 
@@ -92,5 +92,10 @@ function seed_work!(kb)
         body = "Temperatures at depth run one to three degrees below the surface, so exposure below 5 m should come from logger-constrained profiles.",
         evidence = [(; kind = "paper", target = "2604.13131",
                      excerpt = "applying satellite SST uniformly to all depths therefore overestimates subsurface thermal stress")])
+
+    K.library_add!(kb, "RB", "2606.14955"; why = "The crowding model we fit to our transects.", by = rowan)
+    K.library_add!(kb, "RB", "2604.13131"; why = "Heat exposure at depth, from satellite SST and loggers.", by = rowan)
+    K.library_add!(kb, "RB", "2511.12234"; why = "What the survey protocol should record for a bleaching assessment.", by = bea)
+    K.library_add!(kb, "RB", "2605.23487"; why = "A slow rise in fishing effort can collapse a reef: the pressure our sites are under.", by = claude)
     return kb
 end

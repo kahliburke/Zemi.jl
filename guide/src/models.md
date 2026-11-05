@@ -27,8 +27,9 @@ Two kinds:
 
 - **API**: one request per section to an OpenAI-compatible endpoint (OpenCode Zen, OpenAI, Ollama's
   `/v1`).
-- **Agent**: run through Kaimon; reads the whole paper before summarizing. Needs Kaimon loaded in the
-  same process (the `zemi` command, the Kaimon extension, Slate notebooks).
+- **Agent**: an agent supporting ACP (Claude Code, opencode, Codex), run through Kaimon; reads the
+  whole paper before summarizing. Needs Kaimon loaded in the same process (the `zemi` command, the
+  Kaimon extension, Slate notebooks).
 
 Built in:
 
