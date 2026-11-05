@@ -1,0 +1,39 @@
+# The demo knowledge base: an invented group, the papers it reads (from the demo dataset, see
+# make_dataset.jl) and what it writes (content/). The scripts here copy this config with a data
+# folder, a Qdrant collection prefix and a dataset of their own, so they never touch another
+# knowledge base on the machine.
+
+content_dir = "content"
+# Claude Opus, through Kaimon's agents, reads each paper's PDF whole before summarizing it, and
+# writes the paper of the day's analysis.
+summarizer = "opus-agent-pdf"
+
+[group]
+name = "Reef Ecology Lab"
+field = "coral reef ecology"
+description = """
+We study how reef communities, and the seagrass meadows beside them, respond to heat stress and \
+fishing, and how they recover: from field surveys, temperature records, and models of coral, algae \
+and larvae."""
+
+[[group.focus_areas]]
+name = "Bleaching and recovery"
+description = "Coral bleaching under heat stress, the mortality it brings, and how reef communities recover after it"
+
+[[group.focus_areas]]
+name = "Heat stress and monitoring"
+description = "Measuring and forecasting the thermal stress reefs are under, from satellites, loggers and surveys"
+
+[[group.focus_areas]]
+name = "Tipping and resilience"
+description = "Shifts between coral- and algae-dominated reefs, tipping points under fishing and warming, and what makes a reef resilient"
+
+[[group.focus_areas]]
+name = "Larvae and reef flow"
+description = "How water moves over and through reefs, and how it carries coral larvae to where they settle"
+
+[watch]
+categories = ["q-bio.PE", "physics.ao-ph"]
+
+[landscape]
+clusters = 5                # its five topics; the default, from the library's size, would give two

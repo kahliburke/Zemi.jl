@@ -1,0 +1,20 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+DocumenterSlate = "5d80218d-9a2a-4b5c-a024-19fb641bfa22"
+DocumenterVitepress = "4710194d-e776-4893-9690-8d956a29c365"
+KaimonSlate = "f7b954f5-0334-4562-ac21-b005218ce1da"
+Zemi = "0e5eba47-1706-456b-9465-8f454330c072"
+
+[sources]
+DocumenterSlate = {rev = "main", url = "https://github.com/kahliburke/DocumenterSlate.jl"}
+KaimonSlate = {rev = "main", url = "https://github.com/kahliburke/KaimonSlate.jl"}
+Zemi = {path = ".."}
+
+# The versions docs/make.jl's changes to the generated VitePress config are written for: it matches
+# that config's text, so a template written differently stops the build.
+[compat]
+Documenter = "1.19"
+DocumenterSlate = "0.1"
+DocumenterVitepress = "0.3.8"
+KaimonSlate = "1.10"
+julia = "1.12"

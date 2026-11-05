@@ -1,0 +1,58 @@
+# A knowledge base's shared service (zemi --shared) under systemd, as `<name>.service`. install.sh
+# fills in its name, who runs it, its checkout and its config.
+[Unit]
+Description=Zemi knowledge base (@NAME@)
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+User=@USER@
+WorkingDirectory=@CHECKOUT@
+Environment=ZEMI_CONFIG=@CONFIG@
+# Without Revise: code pulled into the checkout runs only once the service is restarted.
+Environment=ZEMI_REVISE=0
+# Where `claude` is installed for its user (the service's agents run through it), before the system's.
+Environment=PATH=@HOME@/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# The Qdrant Kaimon starts inherits this environment; it would otherwise listen on every interface.
+Environment=QDRANT__SERVICE__HOST=127.0.0.1
+# Secrets for the service's environment, as NAME=value lines: CLAUDE_CODE_OAUTH_TOKEN (from
+# `claude setup-token`) or ANTHROPIC_API_KEY. Optional; readable only by its user.
+EnvironmentFile=-@HOME@/.config/zemi/service.env
+ExecStart=@CHECKOUT@/zemi --shared
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=60
+
+# A ceiling on the memory the service and its site builds use together, below the machine's, so a
+# build too large is stopped rather than leaving the machine (and ssh) without memory.
+MemoryMax=@MEMORY_MAX@
+
+# The service writes only under its user's home (its data, Julia's depot, the agents' folders, the
+# Qdrant Kaimon runs for it), sees no other home, and makes its files its user's alone.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=@HOME@
+ReadWritePaths=@HOME@
+UMask=0077
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# The calls a service makes, and Landlock's (@sandbox), which confines its agents; a call outside them
+# fails rather than ending the process. Not MemoryDenyWriteExecute: Julia compiles as it runs.
+SystemCallFilter=@system-service @sandbox
+SystemCallErrorNumber=EPERM
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

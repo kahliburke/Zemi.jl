@@ -1,0 +1,6 @@
+[extension]
+namespace = "zemi"
+module = "Zemi"
+tools_function = "create_tools"
+shutdown_function = "shutdown"
+description = "A research group's knowledge base: papers read in full and searchable by meaning, findings, studies, a tutor, and projects agents work on"

@@ -1,0 +1,6 @@
+name = "ZemiTestPlugin"
+uuid = "94c98385-d235-47cb-9ed8-b7cb2192aef5"
+version = "0.1.0"
+
+[deps]
+Zemi = "0e5eba47-1706-456b-9465-8f454330c072"

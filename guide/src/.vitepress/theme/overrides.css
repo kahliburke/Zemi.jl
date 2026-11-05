@@ -1,0 +1,23 @@
+/* The guide's styles, loaded after DocumenterVitepress's own. */
+
+/* Let the home page title wrap; the default keeps it on one line and cuts it off at 600px. */
+.VPHero .clip {
+  white-space: normal;
+  max-width: none;
+}
+
+/* Screenshots come in a light and a dark version, each shown with the theme it was taken in. */
+html:not(.dark) .dark-only,
+html.dark .light-only { display: none; }
+
+.vp-doc .shot img {
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+.vp-doc .shot { margin: 1.2rem 0 1.6rem; }
+.vp-doc .shot figcaption {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--vp-c-text-2);
+}

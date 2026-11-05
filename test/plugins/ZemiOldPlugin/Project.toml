@@ -1,0 +1,6 @@
+name = "ZemiOldPlugin"
+uuid = "859a89f9-2362-47d9-afa1-f8ffc0bd475b"
+version = "0.1.0"
+
+[deps]
+Zemi = "0e5eba47-1706-456b-9465-8f454330c072"

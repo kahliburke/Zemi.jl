@@ -1,0 +1,17 @@
+Manifest.toml
+docs/build/
+docs/slate/
+docs/src/generated/
+docs/node_modules/
+docs/package-lock.json
+docs/src/.vitepress/cache/
+Manifest-v*.toml
+docs/kb_public/
+.DS_Store
+guide/build/
+guide/src/public/
+guide/node_modules/
+guide/package.json
+guide/package-lock.json
+.claude/worktrees/
+guide/src/assets/screenshots/

@@ -1,0 +1,56 @@
+# A knowledge base's shared service behind Caddy, which gets and renews its HTTPS certificate.
+# install.sh fills in the host name, the service's port and the folder of its down page.
+@DOMAIN@ {
+	encode zstd gzip
+
+	# The service reads a request's whole body before it knows who sent it, so only the routes that take
+	# files take large ones: the largest attached file ([media] max_mb, 200 by default) with room for
+	# the request around it. MCP carries files its tools are given as text.
+	@files path /api/media /api/media/upload/* /api/documents /api/notebooks/upload /api/config/brand/* /mcp
+	@other not path /api/media /api/media/upload/* /api/documents /api/notebooks/upload /api/config/brand/* /mcp
+	request_body @files {
+		max_size 256MB
+	}
+	request_body @other {
+		max_size 4MB
+	}
+
+	# Set only where the service has not (`?`): it sends its own for what needs them, as the sandbox
+	# on attached HTML and SVG, which a header set here would replace.
+	header {
+		?Strict-Transport-Security "max-age=31536000"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "same-origin"
+		?Content-Security-Policy "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+		-Server
+	}
+
+	# The page shown while the service is down (deploy/down, which install.sh copies here) and its logo.
+	handle_path /_down/* {
+		root * @DOWN@
+		file_server
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:@PORT@
+	}
+
+	# While the service is down or starting, Caddy answers for it: pages with one that reloads itself
+	# until the site is back, the API and /mcp with a 503 their clients retry.
+	handle_errors 502 503 504 {
+		header Retry-After 5
+		header Cache-Control no-store
+		@api path /api/* /mcp /mcp/*
+		handle @api {
+			header Content-Type application/json
+			respond `{"error":"The knowledge base is restarting. Try again shortly."}` 503
+		}
+		handle {
+			root * @DOWN@
+			rewrite * /index.html
+			file_server {
+				status 503
+			}
+		}
+	}
+}

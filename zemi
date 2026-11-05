@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Zemi from a checkout, through the zemi app (app/), which `pkg> app develop ./app` installs as `zemi`.
+# `./zemi` serves it at http://localhost:8000, `./zemi manual` rebuilds the site only on Enter,
+# `./zemi --shared` serves it to the people signed in to it, and `./zemi help` lists the commands.
+set -euo pipefail
+# The checkout, by absolute path: the commands' file arguments are read from where it is run.
+dir=$(cd "$(dirname "$0")" && pwd)
+# Installing runs in a process of its own, so the app loads what was installed. Its environment has
+# the package by path, so resolving picks up dependencies it has gained since its manifest was
+# written. (The site's environment is installed when a build first needs it: see `install_docs_env`.)
+# A Julia installed afresh has no registry yet, which resolving needs and does not add itself.
+# Resolving keeps the versions installed before; when the project's compat no longer allows one,
+# the packages are updated to versions it does.
+install='using Pkg; isempty(Pkg.Registry.reachable_registries()) && Pkg.Registry.add("General"); try Pkg.resolve() catch; Pkg.update() end; Pkg.instantiate()'
+julia --project="$dir/app" -e "$install"
+# ZEMI_REVISE=0 leaves Revise out, skipping the Julia startup file too, which commonly loads it.
+startup=yes
+[ "${ZEMI_REVISE:-1}" = 0 ] && startup=no
+exec julia --startup-file=$startup --threads=auto --project="$dir/app" -m ZemiApp "$@"

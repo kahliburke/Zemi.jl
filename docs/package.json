@@ -1,0 +1,36 @@
+{
+  "devDependencies": {
+    "@types/markdown-it-footnote": "^3.0.4",
+    "@types/node": "^25.3.5",
+    "playwright-core": "^1.63.0",
+    "typescript": "^6.0.3",
+    "vue-tsc": "^3.3.14"
+  },
+  "scripts": {
+    "docs:dev": "vitepress dev build/.documenter",
+    "docs:build": "vitepress build build/.documenter",
+    "docs:preview": "vitepress preview build/.documenter",
+    "check": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/legacy-modes": "^6.5.4",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
+    "@lezer/common": "^1.5.3",
+    "@lezer/highlight": "^1.2.5",
+    "@lezer/markdown": "^1.7.2",
+    "@mathjax/src": "^4.1.2",
+    "@mdit/plugin-mathjax": "^0.26.1",
+    "@mdit/plugin-tex": "^0.24.1",
+    "@nolebase/vitepress-plugin-enhanced-readabilities": "~2.18.2",
+    "markdown-it": "^14.1.0",
+    "markdown-it-footnote": "^4.0.0",
+    "vitepress": "^1.6.4",
+    "vitepress-plugin-tabs": "^0.8.0"
+  }
+}

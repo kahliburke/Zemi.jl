@@ -1,0 +1,81 @@
+name: Docs
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Importing the demo dataset loads its vectors into Qdrant.
+    services:
+      qdrant:
+        image: qdrant/qdrant
+        ports: ['6333:6333']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      # The demo dataset, a release asset, checked against the hash in the repository.
+      - name: Demo dataset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download demo-dataset-v1 --pattern demo-dataset.tar.zst
+          echo "$(cat demo/dataset.sha256)  demo-dataset.tar.zst" | sha256sum --check
+          mkdir -p ~/.local/share/zemi/demo/dataset
+          tar --zstd -xf demo-dataset.tar.zst -C ~/.local/share/zemi/demo/dataset
+      - run: julia --project=app -e 'using Pkg; Pkg.instantiate()'
+      # The guide's screenshots, taken from the demo served as `zemi` serves it (screenshots.mjs serves
+      # it): Node and a browser to take them, and Ollama for the query a search shot embeds.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/cache@v4
+        with:
+          path: docs/node_modules
+          key: npm-${{ hashFiles('docs/package.json') }}
+      - run: npm install --no-audit --no-fund && npx playwright-core install --with-deps chromium
+        working-directory: docs
+      - uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-qwen3-embedding-4b
+      - name: Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          (ollama serve > ollama.log 2>&1 &)
+          until curl -s localhost:11434/api/tags > /dev/null; do sleep 1; done
+          ollama pull qwen3-embedding:4b
+      - run: node demo/screenshots.mjs
+      # Kept in a release rather than the repository, at addresses that stay, for the README.
+      - name: Screenshots to the docs-assets release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view docs-assets || gh release create docs-assets --prerelease --title "Documentation assets" \
+            --notes "The guide's screenshots, made by the Docs workflow."
+          gh release upload docs-assets guide/src/assets/screenshots/*.png --clobber
+      - run: julia --project=app demo/build.jl _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

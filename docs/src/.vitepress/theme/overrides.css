@@ -1,0 +1,131 @@
+/* Override default DocumenterVitepress styles here.
+   This file is loaded after style.css, so rules here take precedence. */
+
+/* The top bar's title area is as wide as the sidebar, and the logo and site name need a little more
+   than the default 272px. */
+@media (min-width: 960px) {
+  :root { --vp-sidebar-width: 300px; }
+}
+
+/* Let the home page title wrap; the default keeps it on one line and cuts it off at 600px. */
+.VPHero .clip {
+  white-space: normal;
+  max-width: none;
+}
+
+/* ── Knowledge base paper pages ─────────────────────────────────────────── */
+
+.kb-paper-head {
+  margin: 0.5rem 0 1.5rem;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  background: var(--vp-c-bg-soft);
+}
+.kb-paper-head p { margin: 0.4rem 0; }
+.kb-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
+.kb-badge {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-2);
+}
+.vp-doc a.kb-badge { text-decoration: none; }
+.kb-badge-cat { background: var(--vp-c-brand-soft); color: var(--vp-c-brand-1); }
+.kb-rel-3 { background: var(--vp-c-green-soft); color: var(--vp-c-green-1); }
+.kb-rel-2 { background: var(--vp-c-brand-soft); color: var(--vp-c-brand-1); }
+.kb-rel-1, .kb-rel-0 { background: var(--vp-c-default-soft); color: var(--vp-c-text-3); }
+.kb-authors { color: var(--vp-c-text-1); font-weight: 500; }
+.kb-oneline { color: var(--vp-c-text-2); font-style: italic; }
+.kb-buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0 0.4rem; }
+.kb-button {
+  display: inline-block;
+  padding: 0.25rem 0.9rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--vp-c-text-1);
+}
+.vp-doc a.kb-button { text-decoration: none; color: var(--vp-c-text-1); }
+.vp-doc button.kb-button { background: none; font-family: inherit; line-height: inherit; cursor: pointer; }
+.vp-doc a.kb-button:hover, .vp-doc button.kb-button:hover { border-color: var(--vp-c-brand-1); }
+.vp-doc a.kb-button-brand { background: var(--vp-c-brand-1); border-color: var(--vp-c-brand-1); color: var(--vp-c-white); }
+.kb-button-plain { color: var(--vp-c-text-2); }
+/* The knowledge base's components share these. A component adds its own sizes and spacing. */
+.kb-link { background: none; border: none; padding: 0; font: inherit; color: var(--vp-c-brand-1); cursor: pointer; }
+.kb-link:hover { text-decoration: underline; }
+.kb-link:disabled { opacity: 0.4; cursor: default; text-decoration: none; }
+.kb-primary { padding: 0.45rem 1rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer;
+  background: var(--vp-c-brand-1); color: var(--vp-c-white); }
+.kb-primary:disabled { opacity: 0.5; cursor: default; }
+.kb-outline { padding: 0.1rem 0.6rem; border-radius: 6px; border: 1px solid var(--vp-c-brand-1); background: none; font: inherit;
+  color: var(--vp-c-brand-1); cursor: pointer; }
+.kb-outline:disabled { opacity: 0.5; cursor: default; }
+.kb-pill { padding: 0.25rem 0.75rem; border-radius: 999px; border: 1px solid var(--vp-c-divider); background: none; font: inherit;
+  font-size: 0.85rem; color: var(--vp-c-text-2); cursor: pointer; }
+.kb-pill.on { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
+.kb-field { padding: 0.3rem 0.5rem; border-radius: 6px; border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1); font: inherit; }
+.kb-dim { color: var(--vp-c-text-2); }
+.kb-error { color: var(--vp-c-danger-1); }
+/* Controls that need the knowledge base API: the page marks <html> once the API answers. */
+.kb-live-only { display: none !important; }
+html.kb-live .kb-live-only { display: inline-block !important; }
+.kb-posted { font-size: 0.85rem; color: var(--vp-c-text-2); }
+.kb-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: -0.4rem 0 1.5rem; }
+.kb-tag {
+  padding: 0.05rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-2);
+}
+/* A paper's sections: a little air between them, and the full text set off from the summary. */
+.vp-doc h3 + p, .vp-doc h4 + p, .vp-doc h5 + p { margin-top: 0.4rem; }
+.vp-doc .details.custom-block { margin: 0.6rem 0 1.4rem; }
+
+/* ── A paper's reference list ──────────────────────────────────────────── */
+
+.vp-doc .kb-refs { padding-left: 2.2rem; font-size: 0.88rem; line-height: 1.5; }
+.vp-doc .kb-refs li { margin: 0.45rem 0; }
+.vp-doc .kb-refs li::marker { color: var(--vp-c-text-3); font-variant-numeric: tabular-nums; }
+.kb-ref-links { white-space: nowrap; }
+.vp-doc .kb-ref-links a {
+  display: inline-block;
+  margin-left: 0.3rem;
+  padding: 0 0.45rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  text-decoration: none;
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-2);
+}
+.vp-doc .kb-ref-links a:hover { color: var(--vp-c-brand-1); }
+.vp-doc a.kb-ref-kb {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0.05rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  text-decoration: none;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+}
+
+/* ── Figures in both themes ─────────────────────────────────────────────── */
+/* A paper's figure comes with a copy recolored for the theme it was not drawn for (src/themes.jl):
+   each theme shows its own, unless the reader keeps to the originals (the settings menu). */
+.kb-figure img { display: block; max-width: 100%; height: auto; }
+.kb-figure .kb-for-dark, html.dark .kb-figure .kb-for-light { display: none; }
+html.dark .kb-figure .kb-for-dark { display: block; }
+html.kb-original-figures .kb-figure img:not(.kb-original) { display: none !important; }
+html.kb-original-figures .kb-figure img.kb-original { display: block !important; }
+
+/* ── Projects ───────────────────────────────────────────────────────────── */
+/* The boards take the page's width (the page has no sidebar), with the site's margins. */
+.kb-wide { max-width: 1600px; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+.kb-wide h1 { font-size: 1.6rem; font-weight: 600; margin-bottom: 0.4rem; }
