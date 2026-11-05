@@ -31,8 +31,7 @@ after the ゼミ (*zemi*), a Japanese university research seminar.
   read as datasets.
 
 **[Guide](https://kahliburke.github.io/Zemi.jl/)** ·
-**[Demo](https://kahliburke.github.io/Zemi.jl/demo/)** (a static copy: projects, findings and the
-tutor need a running server)
+**[Demo](https://kahliburke.github.io/Zemi.jl/demo/)**
 
 ## Quick start
 
