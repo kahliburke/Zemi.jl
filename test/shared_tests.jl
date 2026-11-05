@@ -699,6 +699,47 @@ end
         @test occursin("screen-1 of $id: Pressure over time", by("s-ada", () -> tools["figure"](id, "screen-1")))
         @test occursin("record of the group's own work", K.chat_context(kb, id))                          # the tutor is told too
 
+        # Presence: present shows only that someone is on a board; planning also the task they have open,
+        # what they write on it and whom they follow; hidden nothing. Only to those who reach the project.
+        empty!(K.PRESENCE_BOARDS)
+        K.report_presence!(as(ada), "present"; project = "PU", open = "PU-1", draft_ref = "PU-1", draft = "Not yet")
+        p = only(K.presence(kb, as(boss)))
+        @test p.name == as(ada).name && p.project == "PU" && !p.planning && p.open == "" && p.draft == ""
+        @test isempty(K.presence(kb, as(ada))) && isempty(K.presence(kb, as(bea)))          # not yourself; not outside the project
+        v = K.PRESENCE_VERSION[]
+        K.report_presence!(as(ada), "present"; project = "PU")
+        @test K.PRESENCE_VERSION[] == v                                                     # nothing new to show: no one is told
+        K.report_presence!(as(ada), "planning"; project = "pu", open = "pu-1", draft_ref = "PU-1", draft = "The seals leak")
+        p = only(K.presence(kb, as(boss)))
+        @test p.planning && p.open == "PU-1" && p.draft == "The seals leak" && K.PRESENCE_VERSION[] > v
+        K.report_presence!(as(boss), "planning"; project = "PU", following = as(ada).user_id)
+        @test only(K.presence(kb, as(ada))).following == as(ada).user_id
+        K.report_presence!(as(ada), "hidden"; project = "PU")
+        @test isempty(K.presence(kb, as(boss)))
+        K.report_presence!(as(ada), "present"; project = "PU")
+        K.report_presence!(as(boss), "present"; project = "PU", at = time() + K.PRESENT_SECONDS + 1)   # Ada stopped reporting: gone
+        @test isempty(K.presence(kb, as(rowan); at = time() + K.PRESENT_SECONDS + 1) |> ps -> filter(q -> q.name == as(ada).name, ps))
+        @test_throws "hidden, present or planning" K.report_presence!(as(ada), "watching"; project = "PU")
+        # The pen: whoever plans on a board, and those following them, point and draw for each other;
+        # someone merely there sees none of it.
+        empty!(K.PRESENCE_BOARDS); empty!(K.INK)
+        K.report_presence!(as(ada), "planning"; project = "PU")
+        K.report_presence!(as(boss), "present"; project = "PU", following = as(ada).user_id)
+        K.report_presence!(as(rowan), "present"; project = "PU")
+        @test K.in_session(as(ada), "PU") && K.in_session(as(boss), "pu") && !K.in_session(as(rowan), "PU")
+        K.add_ink!(as(boss), "PU", "s1", "[{\"a\":\"ref:PU-1\",\"p\":\"\",\"x\":0.5,\"y\":0.5,\"d\":1}]")
+        seen = K.ink_since(as(ada), "PU", 0; timeout = 0)
+        @test only(seen.strokes).name == as(boss).name && only(seen.strokes).stroke == "s1" && seen.seq == K.INK_SEQ[]
+        @test isempty(K.ink_since(as(boss), "PU", 0; timeout = 0).strokes)                     # not one's own
+        @test isempty(K.ink_since(as(rowan), "PU", 0; timeout = 0).strokes)                    # not outside the session
+        @test_throws "in a session" K.add_ink!(as(rowan), "PU", "s2", "[]")
+        empty!(K.PRESENCE_BOARDS); empty!(K.INK)
+        made = K.create_task!(kb, "PU", "Check the seals"; by = K.person("Ada Lovelace"))
+        did = K.people_did(kb, "PU", as(boss))
+        @test first(did).who == "Ada Lovelace" && first(did).kind == "created" && first(did).ref == made && first(did).title == "Check the seals"
+        ada_named = K.Caller(as(ada).user_id, "Ada Lovelace", "ada@x.org", Set(["tasks.view"]), :session, nothing, nothing, nothing)
+        @test !any(e -> e.who == "Ada Lovelace", K.people_did(kb, "PU", ada_named))             # your own are left out
+
         # The bibliography holds the records the caller sees, cited by their ids, and only what `keys` names.
         bib(caller, q = "", headers = Pair{String,String}[]) = K.handle(kb, HTTP.Request("GET", "/api/bib$q", headers), caller)
         r = bib(as(ada))

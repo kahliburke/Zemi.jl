@@ -58,7 +58,9 @@ end
 "Record a request to the API: a page polling, or something its person did."
 function request_seen!(caller::Caller, method::AbstractString, parts)
     caller.user_id === nothing && return
-    method == "GET" && any(==(parts), POLLS) ? page_open!(caller) : seen!(caller, "$method /" * join(parts, '/'), "site")
+    # A board's presence reports and ink, sent on timers and as a pen moves, say a page is open too.
+    (method == "GET" && any(==(parts), POLLS)) || parts in (["api", "presence"], ["api", "ink"]) ? page_open!(caller) :
+        seen!(caller, "$method /" * join(parts, '/'), "site")
 end
 
 """

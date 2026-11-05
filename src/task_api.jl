@@ -84,7 +84,7 @@ route!("POST", "/api/projects"; need = "tasks.edit") do c
 end
 
 # A project's board: its tasks, milestones, codebase, the records linked to it that the caller sees,
-# agents at work and how far the caller reaches it.
+# agents at work, what people did lately (who is there is /api/presence), and how far the caller reaches it.
 route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
     kb, key = c.kb, uppercase(c[:key])
     i = findfirst(x -> x.key == key, projects(kb))
@@ -93,6 +93,7 @@ route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
     Dict("project" => Dict(pairs(p)), "statuses" => STATUS_JSON, "codebase" => codebase_json(kb, p.codebase),
          "access" => access_name(project_access(kb, c.caller, key)), "manages_members" => manages_members(kb, c.caller, key),
          "agents" => Dict(pairs(agents_at_work(kb, key))),
+         "people_did" => Any[Dict(pairs(e)) for e in people_did(kb, key, c.caller)],
          "findings" => Int(scalar(kb, "SELECT count(*) FROM findings WHERE project_id = ? AND archived_at IS NULL", (project_id(kb, key),))),
          "records" => [Dict("id" => r.id, "title" => r.title, "day" => record_day(r.date)) for r in visible_records(kb, c.caller; project = key)],
          "milestones" => [Dict(pairs(m)) for m in milestones(kb, key)],

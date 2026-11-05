@@ -6,6 +6,9 @@ export const TASK_STATUSES: Record<string, string> = {
   proposed: 'Proposed', backlog: 'Backlog', ready: 'Ready', in_progress: 'In progress', review: 'Review', done: 'Done' }
 export const statusLabel = (id: string) => TASK_STATUSES[id] ?? id
 
+/** A task's priority, most pressing first, 0 to 3 (`PRIORITIES` in src/tasks.jl). */
+export const PRIORITIES = ['ASAP', 'high', 'normal', 'low'] as const
+
 /** How relevant a judge rated a paper to the group's work, 0 to 3 (`RELEVANCE` in src/manage.jl). */
 export const RELEVANCE = ['unrelated', 'peripheral', 'related', 'central'] as const
 

@@ -22,6 +22,7 @@ import { findingHref, recordHref, kbPage } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { plainLine } from './kbUtils'
 import { when } from './kbFormat'
+import { PRIORITIES } from './kbLabels'
 
 type Project = { key: string; name: string; description: string; codebase: string; root: string; tasks: number; open: number;
                  active_milestone: string }
@@ -40,13 +41,18 @@ type Full = Task & { body: string; project: string; links: { kind: string; targe
                      mentions: { sha: string; at: string; author: string; subject: string; url: string }[];
                      findings: { ref: string; claim: string; status: string }[] }
 type Codebase = { id: string; title: string; rev: string; remote: string; page: string }
+// Who else has a board open, at the level each chose (src/people_activity.jl); what people did lately.
+type Viewer = { id: number; name: string; project: string; planning: boolean; open: string; draft_ref: string; draft: string;
+                following: number; view: string; at: string }
+type Action = { who: string; kind: string; ref: string; title: string; text: string; detail: Record<string, any>; at: string }
 
 const list = ref<Project[]>([])
 const statuses = ref<Status[]>([])
 const key = ref('')
 const board = ref<{ project: Project; milestones: Milestone[]; tasks: Task[]; codebase: Codebase | null; access: string;
                     manages_members: boolean; findings: number; records: { id: string; title: string; day: string }[];
-                    agents: { tasks: { ref: string; agent: string; at: string; via: string }[]; waiting: { agent: string; since: string }[] } } | null>(null)
+                    agents: { tasks: { ref: string; agent: string; at: string; via: string }[]; waiting: { agent: string; since: string }[] };
+                    people_did: Action[] } | null>(null)
 const open = ref<Full | null>(null)
 // Room on the board for the docked task panel: what the panel covers past the page's own margin.
 const page = ref<HTMLElement | null>(null)
@@ -143,8 +149,8 @@ const atWork = computed(() => new Map((board.value?.agents?.tasks ?? []).filter(
 const workedDirectly = computed(() => [...atWork.value.values()].filter(a => !a.via))
 const agentName = (a: string) => a.replace(/ for .*$/, '')
 // The board bar's menus: the agents at work, and the project's less frequent actions.
-const menu = ref<'' | 'agents' | 'more'>('')
-const toggleMenu = (m: 'agents' | 'more') => { menu.value = menu.value === m ? '' : m }
+const menu = ref<'' | 'people' | 'agents' | 'more'>('')
+const toggleMenu = (m: 'people' | 'agents' | 'more') => { menu.value = menu.value === m ? '' : m }
 const closeMenu = (e: MouseEvent) => { if (menu.value && !(e.target as HTMLElement).closest('.kbp-pop')) menu.value = '' }
 onMounted(() => document.addEventListener('mousedown', closeMenu))
 onBeforeUnmount(() => document.removeEventListener('mousedown', closeMenu))
@@ -154,6 +160,316 @@ const agentsSummary = computed(() => {
   const n = workedDirectly.value.length
   return n ? `${names.join(', ')} · ${n} task${n === 1 ? '' : 's'}` : `${(board.value?.agents?.waiting ?? []).length} agent waiting`
 })
+// Presence (src/people_activity.jl): this board reports its person at the level they chose, hidden,
+// present (the default: on the board, nothing more) or planning (the task open, what is being written
+// on it, and who follows whom); and it follows the others' reports. Hidden stays as this browser was
+// left; planning is chosen each visit.
+const HIDDEN = 'zemi-presence-hidden'
+const PRESENCE_LEVELS = [
+  { id: 'hidden', label: 'Hidden', help: 'Others do not see you here.' },
+  { id: 'present', label: 'Here', help: 'Others see you are on the board, nothing more.' },
+  { id: 'planning', label: 'Planning', help: 'Others see the task you have open and what you write on it, and can follow you.' },
+] as const
+const hidden = ref(false)
+const planning = ref(false)
+const followee = ref(0)
+const presence = ref<Viewer[]>([])
+const myId = ref(0)
+const presenceMode = () => hidden.value ? 'hidden' : planning.value ? 'planning' : 'present'
+function setPresence(m: 'hidden' | 'present' | 'planning') {
+  hidden.value = m === 'hidden'; planning.value = m === 'planning'
+  hidden.value ? localStorage.setItem(HIDDEN, '1') : localStorage.removeItem(HIDDEN)
+}
+// What is in view, for those following: the board's view, the card nearest the middle of the screen,
+// the card pointed at, and how far down the open task's panel is (a share of its height, so screens of
+// different sizes show the same part).
+const inView = ref({ focus: '', hover: '', panel: 0, control: '' })
+const viewNow = () => JSON.stringify({ milestone: milestone.value, declined: !!declined.value, reviewing: reviewing.value,
+                                       library: library.value, ...inView.value })
+let soon: ReturnType<typeof setTimeout> | undefined
+// At most every 120 ms while things move, so a long scroll is followed as it happens, not when it stops.
+const reportSoon = () => { if (planning.value && !soon) soon = setTimeout(() => { soon = undefined; report() }, 120) }
+// The part of the window the board shows through: below the site's top bar, and beside or above the
+// task's panel when it is docked to the right or the bottom.
+function visibleArea() {
+  const top = document.querySelector('.VPNav')?.getBoundingClientRect().bottom ?? 0
+  const dock = document.querySelector<HTMLElement>('.kbd')
+  const d = dock?.getBoundingClientRect()
+  return { top, left: 0, bottom: d && dock!.classList.contains('bottom') ? d.top : innerHeight,
+           right: d && dock!.classList.contains('right') ? d.left : innerWidth }
+}
+// A card brought to the middle of what can be seen of the board, down the page and across the columns.
+function centerOn(el: HTMLElement) {
+  const a = visibleArea(), r = el.getBoundingClientRect()
+  scrollBy({ top: r.top + r.height / 2 - (a.top + a.bottom) / 2, behavior: 'smooth' })
+  const cols = el.closest<HTMLElement>('.kbp-board')
+  if (cols) {
+    const c = cols.getBoundingClientRect(), mid = (Math.max(a.left, c.left) + Math.min(a.right, c.right)) / 2
+    cols.scrollBy({ left: r.left + r.width / 2 - mid, behavior: 'smooth' })
+  }
+}
+function noteFocus() {
+  let best = '', d = Infinity
+  const a = visibleArea(), mx = (a.left + a.right) / 2, my = (a.top + a.bottom) / 2
+  for (const el of document.querySelectorAll<HTMLElement>('.kbp-card[data-ref]')) {
+    const r = el.getBoundingClientRect(), dist = Math.hypot(r.left + r.width / 2 - mx, r.top + r.height / 2 - my)
+    if (dist < d) { d = dist; best = el.dataset.ref ?? '' }
+  }
+  if (best !== inView.value.focus) { inView.value.focus = best; reportSoon() }
+}
+function onScroll(e: Event) {
+  if (!planning.value) return
+  const t = e.target as HTMLElement
+  if (t instanceof HTMLElement && t.classList.contains('kbd-body')) {
+    const share = Math.round(100 * t.scrollTop / Math.max(1, t.scrollHeight - t.clientHeight)) / 100
+    if (share !== inView.value.panel) { inView.value.panel = share; reportSoon() }
+  } else noteFocus()
+}
+// The control being used (`data-control`: a task's status, priority, subtasks, the comment box…).
+function onControl(e: Event) {
+  if (!planning.value) return
+  const c = (e.target as HTMLElement).closest?.<HTMLElement>('[data-control]')?.dataset.control ?? ''
+  if (c !== inView.value.control) { inView.value.control = c; reportSoon() }
+}
+function onPoint(e: Event) {
+  if (!planning.value) return
+  const ref_ = (e.target as HTMLElement).closest?.<HTMLElement>('.kbp-card[data-ref]')?.dataset.ref ?? ''
+  if (ref_ !== inView.value.hover) { inView.value.hover = ref_; reportSoon() }
+}
+onMounted(() => { document.addEventListener('scroll', onScroll, true); document.addEventListener('mouseover', onPoint)
+                  document.addEventListener('focusin', onControl); document.addEventListener('pointerdown', onControl) })
+onBeforeUnmount(() => { document.removeEventListener('scroll', onScroll, true); document.removeEventListener('mouseover', onPoint)
+                        document.removeEventListener('focusin', onControl); document.removeEventListener('pointerdown', onControl) })
+const report = () => shared.value ? post('/api/presence', JSON.stringify({
+  mode: presenceMode(), project: key.value, open: open.value?.ref ?? '', following: followee.value, view: planning.value ? viewNow() : '',
+  draft_ref: planning.value && comment.value.trim() ? open.value?.ref ?? '' : '', draft: planning.value ? comment.value : '' })).catch(() => {}) : null
+let presenceVersion = -1, presenceOn = false, beat: ReturnType<typeof setInterval> | undefined, typing: ReturnType<typeof setTimeout> | undefined
+async function followPresence() {
+  while (presenceOn) {
+    try {
+      const r = await getJSON(`/api/presence?since=${presenceVersion}`)
+      presenceVersion = r.version; myId.value = r.me; presence.value = r.people
+    } catch { await new Promise(res => setTimeout(res, 3000)) }
+  }
+}
+const others = computed(() => presence.value.filter(p => p.project === key.value))
+const peopleDid = computed(() => board.value?.people_did ?? [])
+const followers = computed(() => presence.value.filter(p => p.following === myId.value))
+// Who has each task open, of those planning; and what they are writing on the open one.
+const viewers = computed(() => {
+  const m = new Map<string, string[]>()
+  for (const p of others.value) if (p.planning && p.open) m.set(p.open, [...(m.get(p.open) ?? []), p.name])
+  return m
+})
+const writing = computed(() => others.value.filter(p => p.planning && p.draft && p.draft_ref === open.value?.ref))
+// Following someone, what they are writing is kept in view as it grows.
+const writingEls: Record<number, HTMLElement> = {}
+watch(() => writing.value.find(p => p.id === followee.value)?.draft, d => {
+  if (d) nextTick(() => writingEls[followee.value]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+})
+// Following someone planning: this board goes where theirs goes, until they stop planning or this
+// person opens something else.
+const leader = computed(() => presence.value.find(p => p.id === followee.value) ?? null)
+watch(leader, l => {
+  if (!followee.value) return
+  if (!l || !l.planning) { followee.value = 0; return }
+  if (l.open && l.open !== open.value?.ref) openRef(l.open)
+  else if (!l.open && l.project !== key.value) key.value = l.project
+  else if (!l.open && open.value) open.value = null
+})
+// And what is in view: the board's view, the card in the middle, how far down the open task, and the
+// card pointed at, marked with their initials.
+const pointedBy = ref<{ ref: string; name: string } | null>(null)
+let centered = ''          // the card last brought to the middle, so a repeated report does not move it again
+// The task's panel glides toward how far down the leader is, each frame a share of the way, so reports
+// arriving unevenly move it smoothly rather than starting a new scroll each time.
+let panelShare = 0, gliding = false
+function glideTo(share: number) {
+  panelShare = share
+  if (gliding) return
+  gliding = true
+  const step = () => {
+    const body = document.querySelector<HTMLElement>('.kbd-body')
+    if (!body || !followee.value) { gliding = false; return }
+    const target = panelShare * (body.scrollHeight - body.clientHeight), gap = target - body.scrollTop
+    if (Math.abs(gap) < 1) { body.scrollTop = target; gliding = false; return }
+    body.scrollTop += gap * 0.18
+    requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+watch(() => leader.value?.view, async v => {
+  if (!followee.value || !v) { pointedBy.value = null; return }
+  let w: any; try { w = JSON.parse(v) } catch { return }
+  if (w.milestone !== milestone.value) milestone.value = w.milestone
+  if (!!declined.value !== w.declined) toggleDeclined()
+  reviewing.value = w.reviewing; library.value = w.library
+  pointedBy.value = w.hover ? { ref: w.hover, name: leader.value!.name } : null
+  await nextTick()
+  // The control they are using, outlined (and brought into view in the task's panel).
+  document.querySelectorAll('.kbp-touched').forEach(el => el.classList.remove('kbp-touched'))
+  const ctl = w.control && document.querySelector<HTMLElement>(`[data-control="${w.control}"]`)
+  if (ctl) { ctl.classList.add('kbp-touched'); if (ctl.closest('.kbd-body')) ctl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }
+  const card = w.focus && document.querySelector<HTMLElement>(`.kbp-card[data-ref="${w.focus}"]`)
+  if (card && w.focus !== centered) { centered = w.focus; centerOn(card) }
+  if (open.value) glideTo(w.panel)
+})
+watch(followee, f => { if (!f) { pointedBy.value = null; centered = ''; document.querySelectorAll('.kbp-touched').forEach(el => el.classList.remove('kbp-touched')) } })
+watch(() => open.value?.ref, r => { const l = leader.value; if (followee.value && l && (r ?? '') !== l.open && (r || l.project === key.value)) followee.value = 0 })
+// The pen of a session (src/people_activity.jl): whoever is planning, and those following them.
+// With the pen out, where this person points shows on the others' boards as a dot,
+// and dragging draws a line; both fade in a moment. A point is anchored to what is under it (a card,
+// a control, a place in the open task), so a screen laid out differently shows it over the same thing.
+// A point: the stable container it is in (`a`: a card, a control, the task's panel, the board), the
+// path of child positions from there to the element under the pointer (`p`), and where in that
+// element's box it is (`x`, `y`, shares of its width and height). Two people looking at the same card
+// or task have the same elements inside it, so the path finds the same line, button or paragraph, and
+// a point lands on the same spot of it however their screens lay it out. A line drawn is anchored once,
+// at its first point: the rest are offsets from there (`dx`, `dy`), scaled by how wide its container is
+// here against there (`w`), so a circle stays a circle wherever the things it crosses fall.
+type InkPoint = { a: string; p: string; x: number; y: number; d: 0 | 1; t: number; dx?: number; dy?: number; w?: number }
+const INK_FADE = 1500, DOT_FADE = 700
+const INK_COLORS = ['#ff6b6b', '#4dabf7', '#ffd43b', '#69db7c', '#da77f2', '#ff922b', '#38d9a9', '#f783ac']
+const inkColor = (id: number) => INK_COLORS[Math.abs(id) % INK_COLORS.length]
+const inSession = computed(() => planning.value || !!(leader.value?.planning && leader.value.project === key.value))
+const pen = ref(false)
+watch(inSession, on => { if (!on) pen.value = false })
+const inkCanvas = ref<HTMLCanvasElement | null>(null)
+const strokes = new Map<string, { id: number; name: string; points: InkPoint[] }>()   // by person and stroke
+function containerOf(el: HTMLElement): [string, HTMLElement] {
+  const card = el.closest<HTMLElement>('.kbp-card[data-ref]'); if (card) return [`ref:${card.dataset.ref}`, card]
+  const ctl = el.closest<HTMLElement>('[data-control]'); if (ctl) return [`ctl:${ctl.dataset.control}`, ctl]
+  const body = el.closest<HTMLElement>('.kbd-body'); if (body) return ['panel', body]
+  const board = el.closest<HTMLElement>('.kbp'); if (board) return ['board', board]
+  return ['page', document.body]
+}
+function containerFor(a: string): HTMLElement | null {
+  if (a.startsWith('ref:')) return document.querySelector(`.kbp-card[data-ref="${a.slice(4)}"]`)
+  if (a.startsWith('ctl:')) return document.querySelector(`.kbd [data-control="${a.slice(4)}"]`) ?? document.querySelector(`[data-control="${a.slice(4)}"]`)
+  return a === 'panel' ? document.querySelector('.kbd-body') : a === 'board' ? document.querySelector('.kbp') : document.body
+}
+function anchorAt(x: number, y: number) {
+  const el = (document.elementsFromPoint(x, y) as HTMLElement[]).find(e => !e.closest('.kbp-ink-catch, .kbp-ink, .kbp-session'))
+  if (!el) return { a: 'page', p: '', x: x / innerWidth, y: y / innerHeight }
+  const [a, root] = containerOf(el), path: number[] = []
+  for (let n: HTMLElement = el; n !== root && n.parentElement; n = n.parentElement) path.unshift(Array.prototype.indexOf.call(n.parentElement.children, n))
+  const r = el.getBoundingClientRect()
+  return { a, p: path.join('.'), x: r.width ? (x - r.left) / r.width : 0.5, y: r.height ? (y - r.top) / r.height : 0.5 }
+}
+function placeOf(p: InkPoint): [number, number] | null {
+  let el: Element | null = containerFor(p.a)
+  if (!el) return null
+  // Down the path as far as it goes here; a step that is missing leaves the point on the deepest found.
+  for (const i of p.p ? p.p.split('.').map(Number) : []) { const c: Element | undefined = el!.children[i]; if (!c) break; el = c }
+  const r = el!.getBoundingClientRect(), at: [number, number] = [r.left + p.x * r.width, r.top + p.y * r.height]
+  if (p.dx === undefined || !p.w) return at
+  const scale = (containerFor(p.a)?.getBoundingClientRect().width ?? p.w) / p.w
+  return [at[0] + p.dx * scale, at[1] + (p.dy ?? 0) * scale]
+}
+let drawing = false, inkFrame = 0
+function paint() {
+  const cv = inkCanvas.value; inkFrame = 0
+  if (!cv) return
+  const dpr = devicePixelRatio || 1
+  if (cv.width !== innerWidth * dpr || cv.height !== innerHeight * dpr) { cv.width = innerWidth * dpr; cv.height = innerHeight * dpr }
+  const g = cv.getContext('2d')!; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, innerWidth, innerHeight)
+  const now = performance.now(); let live = false
+  for (const [k, s] of strokes) {
+    s.points = s.points.filter(p => now - p.t < INK_FADE)
+    if (!s.points.length) { strokes.delete(k); continue }
+    live = true
+    const color = inkColor(s.id); g.strokeStyle = color; g.lineWidth = 3; g.lineCap = 'round'; g.lineJoin = 'round'
+    for (let i = 1; i < s.points.length; i++) {
+      const p = s.points[i], q = s.points[i - 1]
+      if (!p.d || !q.d) continue
+      const a = placeOf(q), b = placeOf(p); if (!a || !b) continue
+      g.globalAlpha = Math.max(0, 1 - (now - p.t) / INK_FADE); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke()
+    }
+    const last = s.points[s.points.length - 1], at = placeOf(last), age = now - last.t
+    if (at && age < DOT_FADE) {
+      g.globalAlpha = 1 - age / DOT_FADE; g.fillStyle = color
+      g.shadowColor = color; g.shadowBlur = 12; g.beginPath(); g.arc(at[0], at[1], 6, 0, 2 * Math.PI); g.fill(); g.shadowBlur = 0
+      g.font = '600 11px system-ui, sans-serif'; g.fillText(initials(s.name), at[0] + 9, at[1] - 9)
+    }
+  }
+  g.globalAlpha = 1
+  if (live) inkFrame = requestAnimationFrame(paint)
+}
+const repaint = () => { if (!inkFrame) inkFrame = requestAnimationFrame(paint) }
+function addPoints(id: number, name: string, stroke: string, points: InkPoint[]) {
+  const k = `${id}:${stroke}`, s = strokes.get(k) ?? { id, name, points: [] }
+  s.points.push(...points); strokes.set(k, s); repaint()
+}
+// Sending: points gathered and sent about 20 times a second, the stroke named afresh at each press.
+let stroke = '', unsent: InkPoint[] = [], flushing: ReturnType<typeof setTimeout> | undefined, lastSent = 0
+function send(p: InkPoint) {
+  addPoints(myId.value, me.value?.name ?? '', stroke, [{ ...p, t: performance.now() }])
+  unsent.push(p)
+  if (!flushing) flushing = setTimeout(() => {
+    flushing = undefined; const batch = unsent; unsent = []
+    post('/api/ink', JSON.stringify({ project: key.value, stroke, points: JSON.stringify(batch) })).catch(() => {})
+  }, 50)
+}
+// A line's first point, where it was on this screen, and how wide its container was.
+let origin: ReturnType<typeof anchorAt> | null = null, ox = 0, oy = 0, ow = 0
+function inkMove(e: PointerEvent) {
+  const now = performance.now(); if (!drawing && now - lastSent < 40) return
+  lastSent = now
+  if (drawing && origin) send({ ...origin, d: 1, t: 0, dx: e.clientX - ox, dy: e.clientY - oy, w: ow })
+  else send({ ...anchorAt(e.clientX, e.clientY), d: drawing ? 1 : 0, t: 0 })
+}
+function inkDown(e: PointerEvent) {
+  drawing = true; stroke = Math.random().toString(36).slice(2, 8)
+  origin = anchorAt(e.clientX, e.clientY); ox = e.clientX; oy = e.clientY
+  ow = containerFor(origin.a)?.getBoundingClientRect().width || innerWidth
+  inkMove(e)
+}
+function inkUp() { drawing = false; origin = null; stroke = Math.random().toString(36).slice(2, 8) }
+// The wheel still scrolls what is under the pointer, the task's panel or the page.
+function inkWheel(e: WheelEvent) {
+  const under = (document.elementsFromPoint(e.clientX, e.clientY) as HTMLElement[]).find(el => !el.closest('.kbp-ink-catch, .kbp-ink'))
+  ;(under?.closest<HTMLElement>('.kbd-body') ?? document.scrollingElement)?.scrollBy(0, e.deltaY)
+}
+// Esc puts the pen away; P takes it out or puts it away, unless a field is being typed in.
+const inkKey = (e: KeyboardEvent) => {
+  if (e.key === 'Escape' && pen.value) pen.value = false
+  const typing = (e.target as HTMLElement).closest?.('input, textarea, select, [contenteditable="true"]')
+  if ((e.key === 'p' || e.key === 'P') && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && inSession.value) pen.value = !pen.value
+}
+onMounted(() => document.addEventListener('keydown', inkKey))
+onBeforeUnmount(() => document.removeEventListener('keydown', inkKey))
+// Receiving: the others' points, while in a session.
+let inkSeq = -1, inkOn = false
+async function followInk() {
+  while (inkOn) {
+    try {
+      const r = await getJSON(`/api/ink?since=${inkSeq}&project=${encodeURIComponent(key.value)}`)
+      const first = inkSeq === -1; inkSeq = r.seq
+      if (first) continue
+      const now = performance.now()
+      for (const s of r.strokes) { const ps: InkPoint[] = JSON.parse(s.points); addPoints(s.id, s.name, s.stroke, ps.map((p, i) => ({ ...p, t: now - (ps.length - 1 - i) * 40 }))) }
+    } catch { await new Promise(res => setTimeout(res, 2000)) }
+  }
+}
+watch(inSession, on => { if (on && !inkOn) { inkOn = true; inkSeq = -1; followInk() } else if (!on) inkOn = false })
+onBeforeUnmount(() => { inkOn = false })
+const initials = (name: string) => name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('')
+const hereTitle = (p: Viewer) => `${p.name} · ${p.planning ? (p.open ? `planning, on ${p.open} ${taskTitle(p.open)}` : 'planning, on the board') : 'here'}`
+function actionText(e: Action) {
+  const t = `${e.ref} ${e.title}`
+  switch (e.kind) {
+    case 'created': return `created ${t}`
+    case 'status': return `moved ${t} to ${label(e.detail.to)}`
+    case 'comment': return `commented on ${t}`
+    case 'question': return `asked about ${t}`
+    case 'progress': case 'note': return `wrote on ${t}`
+    default: return `${eventText(e as unknown as TaskEvent)} · ${t}`
+  }
+}
+const since = (at: string) => {
+  const m = Math.max(0, Math.round((clock.value - Date.parse(at)) / 60_000))
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 24 * 60 ? `${Math.round(m / 60)} h ago` : when(at)
+}
 const ago = (at: string) => { const m = Math.max(0, Math.round((clock.value - Date.parse(at)) / 60_000)); return m < 1 ? 'just now' : `${m} min ago` }
 const workTitle = (ref: string) => { const a = atWork.value.get(ref); return a ? `${a.agent} · ${a.via ? `on ${a.via} · ` : ''}${ago(a.at)}` : '' }
 // Deleting the open project with everything in it (its owner, and admins).
@@ -607,6 +923,16 @@ async function saveMilestone() {
 const editingBody = ref(false)
 const draftBody = ref('')
 const comment = ref('')
+// Presence starts once the service says who is here, and reports each move (see `report` above).
+watch(shared, on => {
+  if (!on || presenceOn) return
+  hidden.value = localStorage.getItem(HIDDEN) === '1'
+  presenceOn = true; followPresence(); report(); beat = setInterval(report, 20_000)
+}, { immediate: true })
+onBeforeUnmount(() => { presenceOn = false; clearInterval(beat) })
+watch(() => [key.value, open.value?.ref, hidden.value, planning.value, followee.value], () => { report() })
+watch(() => [milestone.value, !!declined.value, reviewing.value, library.value], () => reportSoon())
+watch(comment, () => { if (planning.value) { clearTimeout(typing); typing = setTimeout(report, 300) } })
 const link = ref({ kind: 'paper', target: '' })
 // A subtask of the open task. One given to an agent is ready for it: a person setting it approves it.
 const newSubtask = ref({ title: '', assignee: 'agent:Claude' })
@@ -694,11 +1020,15 @@ async function showNoteHistory(id: number, again = false) {
 // A question is answered once someone from the other side, agent or person, writes after it: a
 // comment, or a question of their own.
 const answered = (i: number) => { const a = open.value?.activity ?? []; return a.slice(i + 1).some(e => (e.kind === 'comment' || e.kind === 'question') && e.by_agent !== a[i].by_agent) }
+// A field's new value in a task's history, as the board names it: a priority by its name (0 is ASAP),
+// a person by theirs, and nothing as a dash.
+const fieldValue = (field: string, v: any) =>
+  field === 'priority' ? PRIORITIES[v as number] ?? String(v) : field === 'assignee' ? (v ? personLabel(v) : '—') : v === '' || v == null ? '—' : String(v)
 function eventText(e: TaskEvent) {
   switch (e.kind) {
     case 'status': return `moved it from ${label(e.detail.from)} to ${label(e.detail.to)}`
     case 'edit': return e.detail.field === 'parent' ? (e.detail.to ? `put it under ${e.detail.to}` : 'made it a task of its own') :
-      `changed the ${e.detail.field}` + (e.detail.to !== undefined && e.detail.field !== 'body' ? ` to ${e.detail.field === 'assignee' ? (e.detail.to ? personLabel(e.detail.to) : '—') : e.detail.to || '—'}` : '')
+      `changed the ${e.detail.field}` + (e.detail.to !== undefined && e.detail.field !== 'body' ? ` to ${fieldValue(e.detail.field, e.detail.to)}` : '')
     case 'blocked': return `marked it blocked: ${e.text}`
     case 'unblocked': return 'unblocked it'
     case 'link': return e.detail.kind === 'blocks' ? `marked it as blocking ${e.text}` : `linked ${e.detail.kind} ${e.text}`
@@ -741,6 +1071,37 @@ function keepRecordsOpen(open: boolean) {
           <button class="kbp-view" :class="{ on: declined }" :aria-pressed="!!declined" @click="toggleDeclined"><KBIcon name="block" :size="16" />Declined</button>
         </nav>
         <span class="kbp-spacer"></span>
+        <div v-if="(shared && board) || peopleDid.length" class="kbp-pop">
+          <button class="kbp-people-button" :class="{ on: menu === 'people', planning }" :aria-expanded="menu === 'people'"
+                  :title="others.length ? others.map(hereTitle).join('\n') : 'People'" @click="toggleMenu('people')">
+            <span v-for="p in others.slice(0, 4)" :key="p.id" class="kbp-face" :class="{ planning: p.planning }">{{ initials(p.name) }}</span>
+            <span v-if="others.length > 4" class="kbp-face">+{{ others.length - 4 }}</span>
+            <span v-if="!others.length" class="kbp-people-label">People</span></button>
+          <div v-if="menu === 'people'" class="kbp-menu kbp-agents-menu" role="menu">
+            <template v-if="shared">
+              <div class="kbp-menu-label">You are</div>
+              <div class="kbp-levels" role="radiogroup" aria-label="What others see of you">
+                <button v-for="l in PRESENCE_LEVELS" :key="l.id" class="kbp-level" role="radio" :aria-checked="presenceMode() === l.id"
+                        :class="{ on: presenceMode() === l.id }" :title="l.help" @click="setPresence(l.id)">{{ l.label }}</button>
+              </div>
+              <div class="kbp-menu-item kbp-menu-wait">{{ PRESENCE_LEVELS.find(l => l.id === presenceMode())!.help }}</div>
+            </template>
+            <template v-if="others.length">
+              <div class="kbp-menu-label">Here now</div>
+              <div v-for="p in others" :key="p.id" class="kbp-menu-item kbp-person">
+                <span class="kbp-face" :class="{ planning: p.planning }">{{ initials(p.name) }}</span><span class="kbp-menu-title">{{ p.name }}</span>
+                <span class="kbp-menu-dim">{{ p.planning ? (p.open ? `planning · ${p.open}` : 'planning') : 'here' }}</span>
+                <button v-if="p.planning" class="kbp-small" @click="followee = followee === p.id ? 0 : p.id; menu = ''">
+                  {{ followee === p.id ? 'Stop' : 'Follow' }}</button>
+              </div>
+            </template>
+            <div v-if="followers.length" class="kbp-menu-item kbp-menu-wait">Following you: {{ followers.map(p => p.name).join(', ') }}</div>
+            <div class="kbp-menu-label">Lately</div>
+            <button v-for="(e, i) in peopleDid" :key="i" class="kbp-menu-item" role="menuitem" @click="menu = ''; show({ ref: e.ref })">
+              <span class="kbp-menu-title"><b>{{ e.who }}</b> {{ actionText(e) }}</span><span class="kbp-menu-dim">{{ since(e.at) }}</span></button>
+            <div v-if="!peopleDid.length" class="kbp-menu-item kbp-menu-wait">Nothing from others in the last week</div>
+          </div>
+        </div>
         <div v-if="workedDirectly.length || board?.agents?.waiting.length" class="kbp-pop">
           <button class="kbp-agents-button" :class="{ on: menu === 'agents' }" :aria-expanded="menu === 'agents'" @click="toggleMenu('agents')">
             <span v-if="workedDirectly.length" class="kbp-working"></span>{{ agentsSummary }}</button>
@@ -767,6 +1128,19 @@ function keepRecordsOpen(open: boolean) {
           </div>
         </div>
       </div>
+      <!-- At the end of the document, outside the page's wrappers, so these stay fixed to the window. -->
+      <Teleport to="body">
+        <div v-if="inSession" class="kbp-session" :class="{ lit: pen }" role="toolbar" aria-label="Planning session"
+             :title="leader && followee ? `Following ${leader.name}` : `Planning${followers.length ? `, ${followers.length} following` : ''}`">
+          <span v-if="leader && followee" class="kbp-face planning">{{ initials(leader.name) }}</span>
+          <span v-else class="kbp-session-what">{{ followers.length ? `${followers.length} following` : 'Planning' }}</span>
+          <button class="kbp-pen" :class="{ on: pen }" :aria-pressed="pen" aria-label="Pen" title="Pen (P): point to show the others, drag to draw · Esc to stop"
+                  @click="pen = !pen"><KBIcon name="edit" :size="13" /></button>
+          <button v-if="leader && followee" class="kbp-session-stop" title="Stop following" aria-label="Stop following" @click="followee = 0">×</button>
+        </div>
+        <div v-if="pen" class="kbp-ink-catch" @pointermove="inkMove" @pointerdown.prevent="inkDown" @pointerup="inkUp" @pointerleave="inkUp" @wheel="inkWheel"></div>
+        <canvas v-show="inSession" ref="inkCanvas" class="kbp-ink"></canvas>
+      </Teleport>
       <div v-if="key" class="kbp-filters">
         <KBTaskSearch :project="key" @open="openFromSearch" />
         <select v-if="board" v-model="only" class="kbp-select" aria-label="Show tasks in a status"
@@ -921,13 +1295,15 @@ function keepRecordsOpen(open: boolean) {
           <div v-if="strips && editable" class="kbp-drop-top" :class="{ aimed: topOf === s.id }"
                @dragover.prevent.stop="topOf = s.id; target = null" @dragleave="topOf = ''" @drop.prevent.stop="dropTop(s.id)">
             {{ draggedStatus === s.id ? 'To the top' : `Move to ${s.label}` }}</div>
-          <article v-for="t in column(s.id)" :key="t.ref" class="kbp-card"
-                   :class="{ open: open?.ref === t.ref, agent: t.by_agent, flash: flashed.has(t.ref), saving: busy(`task:${t.ref}`), 'drop-before': target?.ref === t.ref && target.zone === 'before',
+          <article v-for="t in column(s.id)" :key="t.ref" class="kbp-card" :data-ref="t.ref"
+                   :data-pointer="pointedBy?.ref === t.ref ? initials(pointedBy.name) : undefined"
+                   :class="{ pointed: pointedBy?.ref === t.ref, open: open?.ref === t.ref, agent: t.by_agent, flash: flashed.has(t.ref), saving: busy(`task:${t.ref}`), 'drop-before': target?.ref === t.ref && target.zone === 'before',
                              'drop-into': target?.ref === t.ref && target.zone === 'into' }"
                    :draggable="editable" @dragstart="startDrag(t.ref)" @dragend="dragEnded"
                    @dragover.prevent.stop="aim($event, t)" @dragleave="target = null" @drop.prevent.stop="drop(s.id, t)" @click="show(t)">
             <div class="kbp-card-top"><span class="kbp-ref">{{ t.ref }}</span>
               <span v-if="atWork.has(t.ref)" class="kbp-working" :title="workTitle(t.ref)"></span>
+              <span v-for="n in viewers.get(t.ref) ?? []" :key="n" class="kbp-face kbp-face-small" :title="`${n} has it open`">{{ initials(n) }}</span>
               <span v-if="t.priority === 0" class="kbp-tag asap" title="Taken before anything else, in the order marked so">ASAP</span>
               <span v-if="t.priority === 1" class="kbp-tag high">high</span>
               <span v-if="t.blocked" class="kbp-tag blocked" :title="t.blocked">blocked</span>
@@ -955,7 +1331,7 @@ function keepRecordsOpen(open: boolean) {
               <button v-if="!t.parent" class="kbp-approve kbp-decline" :disabled="busy(`task:${t.ref}`)" @click.stop="decline(t.ref)">Decline</button>
             </div>
           </article>
-          <form v-if="s.id === 'backlog' && editable" class="kbp-add" @submit.prevent="addTask">
+          <form v-if="s.id === 'backlog' && editable" class="kbp-add" data-control="new-task" @submit.prevent="addTask">
             <input v-model="newTitle" placeholder="+ task" :readonly="busy('task')" :aria-busy="busy('task')" />
             <span v-if="busy('task')" class="kbp-spin kbp-spin-in"></span>
           </form>
@@ -966,7 +1342,7 @@ function keepRecordsOpen(open: boolean) {
       <KBDock v-if="open" name="task" @close="open = null" @space="makeRoom">
         <template #head>
           <span class="kbp-ref">{{ open.ref }}</span>
-          <select v-if="editable" class="kbp-select" :value="moving.get(open.ref) ?? open.status" :disabled="busy(`task:${open.ref}`)" @change="pickStatus">
+          <select v-if="editable" class="kbp-select" data-control="status" :value="moving.get(open.ref) ?? open.status" :disabled="busy(`task:${open.ref}`)" @change="pickStatus">
             <option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.label }}</option>
           </select>
           <span v-else>{{ label(open.status) }}</span>
@@ -996,16 +1372,16 @@ function keepRecordsOpen(open: boolean) {
           <button v-if="!open.parent" class="kb-primary kbp-button kbp-secondary" :disabled="busy(`task:${open.ref}`)" @click="decline(open.ref)">Decline</button>
         </div>
         <div class="kbp-fields" v-if="editable">
-          <label>Milestone <select class="kbp-select" :value="open.milestone" @change="change(open.ref, { milestone: ($event.target as HTMLSelectElement).value })">
+          <label>Milestone <select class="kbp-select" data-control="milestone" :value="open.milestone" @change="change(open.ref, { milestone: ($event.target as HTMLSelectElement).value })">
             <option value="">—</option><option v-for="m in (board?.milestones ?? []).filter(x => !x.closed || x.name === open?.milestone)" :key="m.name" :value="m.name">{{ m.name }}</option></select></label>
-          <label>Priority <select class="kbp-select" :value="open.priority" @change="change(open.ref, { priority: +($event.target as HTMLSelectElement).value })">
-            <option :value="0">ASAP</option><option :value="1">high</option><option :value="2">normal</option><option :value="3">low</option></select></label>
-          <label>Assignee <select class="kbp-select" :value="open.assignee"
+          <label>Priority <select class="kbp-select" data-control="priority" :value="open.priority" @change="change(open.ref, { priority: +($event.target as HTMLSelectElement).value })">
+            <option v-for="(name, n) in PRIORITIES" :key="n" :value="n">{{ name }}</option></select></label>
+          <label>Assignee <select class="kbp-select" data-control="assignee" :value="open.assignee"
             @change="change(open.ref, { assignee: ($event.target as HTMLSelectElement).value })">
             <option value="">nobody</option>
             <option v-if="open.assignee && !people.some(p => p.id === open?.assignee)" :value="open.assignee">{{ open.assignee }}</option>
             <option v-for="p in people" :key="p.id" :value="p.id">{{ p.label }}</option></select></label>
-          <button class="kbp-icon" :class="{ on: open.blocked }" :title="open.blocked ? 'Unblock' : 'Mark blocked'" :aria-label="open.blocked ? 'Unblock' : 'Mark blocked'"
+          <button class="kbp-icon" data-control="blocked" :class="{ on: open.blocked }" :title="open.blocked ? 'Unblock' : 'Mark blocked'" :aria-label="open.blocked ? 'Unblock' : 'Mark blocked'"
                   @click="open.blocked ? change(open.ref, { blocked: '' }) : setBlocked()"><KBIcon name="block" /></button>
         </div>
         <p v-if="open.blocked" class="kbp-blocked">Blocked: {{ open.blocked }}</p>
@@ -1025,14 +1401,14 @@ function keepRecordsOpen(open: boolean) {
           <ul class="kbp-subtasks">
             <li v-for="s in open.subtasks_list" :key="s.ref" :class="{ done: s.status === 'done' }"
                 :draggable="editable" @dragstart="startDrag(s.ref)" @dragend="dragEnded" title="Drag onto a column to make it a task of its own">
-              <input v-if="editable" type="checkbox" :checked="s.status === 'done'"
+              <input v-if="editable" type="checkbox" :data-control="`subtask:${s.ref}`" :checked="s.status === 'done'"
                      @change="($event.target as HTMLInputElement).checked = s.status === 'done'; change(s.ref, { status: s.status === 'done' ? 'backlog' : 'done' })" />
               <button class="kbp-reflink" @click="show(s)">{{ s.ref }}</button> {{ s.title }}
               <span class="kb-dim kbp-dim">{{ label(s.status) }}<template v-if="s.assignee"> · {{ personLabel(s.assignee) }}</template></span>
               <span v-if="open.status === 'proposed' && s.status !== 'proposed'" class="kbp-tag alone" title="Approved on its own, while this task is still proposed">approved alone</span>
             </li>
           </ul>
-          <form v-if="editable" class="kbp-form" @submit.prevent="addSubtask">
+          <form v-if="editable" class="kbp-form" data-control="new-subtask" @submit.prevent="addSubtask">
             <KBRefText :project="key" v-model="newSubtask.title" placeholder="+ subtask" />
             <select v-model="newSubtask.assignee" class="kbp-select" aria-label="Assignee">
               <option value="">nobody</option><option v-for="p in people" :key="p.id" :value="p.id">{{ p.label }}</option></select>
@@ -1124,8 +1500,10 @@ function keepRecordsOpen(open: boolean) {
           </li>
         </ul>
         <form v-if="editable" class="kbp-form kbp-comment" @submit.prevent="addComment()">
+          <div v-for="p in writing" :key="p.id" :ref="el => { if (el) writingEls[p.id] = el as HTMLElement }" class="kbp-writing"><b>{{ p.name }}</b> is writing:<div class="kbp-writing-text">{{ p.draft }}</div></div>
+          <div data-control="comment">
           <KBRefText :project="key" v-model="comment" multiline :rows="3" placeholder="Comment" :draft="`task:${open.ref}:comment`" send="send"
-                     @submit="comment.trim() && addComment('comment')" />
+                     @submit="comment.trim() && addComment('comment')" /></div>
           <div class="kbp-comment-actions">
             <button class="kb-primary kbp-button" :disabled="!comment.trim() || busy('comment')"><span v-if="busy('comment')" class="kbp-spin"></span>Comment</button>
             <button type="button" class="kb-primary kbp-button kbp-secondary" :disabled="!comment.trim() || busy('comment')" title="An agent answers it when it next checks for work"
@@ -1234,6 +1612,44 @@ function keepRecordsOpen(open: boolean) {
 .kbp-menu { position: absolute; z-index: 46; top: calc(100% + 6px); right: 0; min-width: 14rem; padding: 0.3rem; border-radius: 10px;
   border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg); box-shadow: var(--vp-shadow-3); }
 .kbp-agents-menu { width: min(30rem, 90vw); }
+.kbp-people-button { display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.2rem; border-radius: 999px;
+  cursor: pointer; border: 1px solid var(--vp-c-divider); background: none; color: var(--vp-c-text-2); font: inherit; font-size: 0.82rem; }
+.kbp-people-label { padding: 0 0.45rem; }
+.kbp-people-button:hover, .kbp-people-button.on { color: var(--vp-c-text-1); border-color: var(--vp-c-brand-1); }
+.kbp-face { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; font-size: 0.62rem;
+  font-weight: 700; line-height: 1; background: var(--vp-c-brand-soft); color: var(--vp-c-brand-1); box-shadow: 0 0 0 2px var(--vp-c-bg); }
+.kbp-face.planning { background: var(--vp-c-green-soft, rgba(61,214,140,0.16)); color: var(--vp-c-green-1, #3dd68c); }
+.kbp-people-button.planning { border-color: var(--vp-c-green-1, #3dd68c); }
+.kbp-levels { display: flex; gap: 0.3rem; padding: 0.2rem 0.6rem; }
+.kbp-level { flex: 1; padding: 0.25rem 0.4rem; border-radius: 6px; border: 1px solid var(--vp-c-divider); background: none; cursor: pointer;
+  font: inherit; font-size: 0.82rem; color: var(--vp-c-text-2); }
+.kbp-level.on { border-color: var(--vp-c-brand-1); color: var(--vp-c-text-1); background: var(--vp-c-brand-soft); }
+.kbp-person { display: flex; align-items: center; gap: 0.5rem; }
+.kbp-following { display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0; padding: 0.35rem 0.7rem; border-radius: 8px;
+  font-size: 0.85rem; background: var(--vp-c-green-soft, rgba(61,214,140,0.12)); color: var(--vp-c-text-1); }
+.kbp-writing { margin: 0.4rem 0; padding: 0.4rem 0.6rem; border-left: 3px solid var(--vp-c-green-1, #3dd68c); font-size: 0.85rem; color: var(--vp-c-text-2); }
+.kbp-writing-text { white-space: pre-wrap; color: var(--vp-c-text-1); margin-top: 0.2rem; }
+.kbp-card.pointed { outline: 2px solid var(--vp-c-green-1, #3dd68c); outline-offset: 1px; position: relative; }
+.kbp-card.pointed::after { content: attr(data-pointer); position: absolute; top: -9px; right: -9px; padding: 1px 5px; border-radius: 999px;
+  font-size: 0.6rem; font-weight: 700; background: var(--vp-c-green-1, #3dd68c); color: var(--vp-c-bg); }
+.kbp-touched { outline: 2px solid var(--vp-c-green-1, #3dd68c) !important; outline-offset: 2px; border-radius: 6px; }
+/* In the window's bottom-right corner, over the task's panel when it is docked there. */
+.kbp-session { position: fixed; right: 12px; bottom: 12px; z-index: 100;
+  display: flex; align-items: center; gap: 0.3rem; padding: 2px 3px 2px 5px; border-radius: 999px; font-size: 0.72rem;
+  background: var(--vp-c-bg-elv); border: 1px solid var(--vp-c-divider); box-shadow: var(--vp-shadow-1); opacity: 0.55; transition: opacity 0.15s; }
+.kbp-session:hover, .kbp-session.lit { opacity: 1; }
+.kbp-session .kbp-face { width: 18px; height: 18px; font-size: 0.55rem; }
+.kbp-session-what { white-space: nowrap; color: var(--vp-c-text-2); padding: 0 0.15rem; }
+.kbp-pen { display: inline-grid; place-items: center; width: 22px; height: 20px; border-radius: 999px; cursor: pointer;
+  border: 1px solid transparent; background: none; color: var(--vp-c-text-2); padding: 0; }
+.kbp-pen:hover { color: var(--vp-c-text-1); border-color: var(--vp-c-divider); }
+.kbp-pen.on { color: var(--vp-c-bg); background: #ff6b6b; }
+.kbp-session-stop { width: 18px; height: 18px; border-radius: 50%; border: none; background: none; cursor: pointer; color: var(--vp-c-text-3);
+  font-size: 0.85rem; line-height: 1; }
+.kbp-session-stop:hover { color: var(--vp-c-text-1); background: var(--vp-c-default-soft); }
+.kbp-ink-catch { position: fixed; inset: 0; z-index: 60; cursor: crosshair; touch-action: none; }
+.kbp-ink { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 61; pointer-events: none; }
+.kbp-face-small { width: 18px; height: 18px; font-size: 0.55rem; vertical-align: middle; }
 .kbp-menu-label { padding: 0.3rem 0.6rem 0.2rem; font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--vp-c-text-3); }
 .kbp-menu-item { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.4rem 0.6rem; border-radius: 7px; border: none;
   background: none; color: var(--vp-c-text-1); font: inherit; font-size: 0.86rem; text-align: left; cursor: pointer; }
@@ -1330,7 +1746,7 @@ function keepRecordsOpen(open: boolean) {
 .kbp-sub-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vp-c-text-1); }
 .kbp-sub-status { color: var(--vp-c-text-3); font-size: 0.7rem; white-space: nowrap; }
 .kbp-card-top { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
-.kbp-card-top .kbp-ref { white-space: nowrap; }
+.kbp-card-top .kbp-ref { white-space: nowrap; line-height: 18px; }
 .kbp-ref { font-family: var(--vp-font-family-mono); font-size: 0.72rem; color: var(--vp-c-text-2); }
 .kbp-title { margin: 0.15rem 0; line-height: 1.35; color: var(--vp-c-text-1); }
 .kbp-meta { display: flex; flex-wrap: wrap; gap: 0.5rem; font-size: 0.72rem; color: var(--vp-c-text-2); }

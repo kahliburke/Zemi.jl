@@ -28,6 +28,20 @@ References with `@`: `@RB-12` (task), `@arXiv:2401.00001` (paper), `@RB-F3` (fin
 (upload), `@rec-…` (record), `@code:path#name` (codebase), and `@[label](kind:target)` for any kind. In a task they
 become the task's links; in a finding, its sources.
 
+### Working together
+
+In the shared service, a board shows who else has it open, as initials in its header, and what people
+did on its tasks lately. Each person chooses how much of themselves others see, in the people menu:
+
+- **Hidden**: nothing.
+- **Here** (the default): that they are on the board.
+- **Planning**: also the task they have open, what they are writing on it, and what is in view, so
+  others can **follow** them through a planning session instead of sharing a screen. A follower's
+  board opens what they open and scrolls to what they look at.
+
+Those in a session, whoever is planning and those following them, can point and draw for each other
+with the **pen** (the toolbar in the window's corner, or `P`); what they draw fades in a moment.
+
 When a project has a codebase, a commit naming a task is recorded on it: on a trailer line
 (`Tasks: RB-12`, or `Task:`, `Refs:`) or after `Part of`, as its work; anywhere else, as a mention.
 A new commit that says `Fixes`, `Closes`, `Resolves` or `Implements RB-12` also moves the task to
