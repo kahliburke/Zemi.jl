@@ -61,6 +61,14 @@ const SHOTS = [
   ['menu', '/', '.kba-menu', async page => { await page.click('.kba-button') }, { x: 1440 - 480, y: 0, width: 480, height: 300 }],
 ]
 
+// What a page saw, for a shot that went wrong: its top bar, who the service says is asking, and the
+// browser's errors.
+async function explain(page, errors) {
+  console.warn(`  the top bar: ${(await page.locator('.VPNavBar').innerText().catch(() => '')).replace(/\s+/g, ' ')}`)
+  console.warn(`  /api/status: ${await page.evaluate(async () => { try { const r = await fetch('/api/status'); return `${r.status} ${(await r.text()).slice(0, 300)}` } catch (e) { return String(e) } })}`)
+  errors.forEach(x => console.warn(`  browser: ${x}`))
+}
+
 const browser = await chromium.launch().catch(() => chromium.launch({ channel: 'chrome' }))
 for (const theme of ['light', 'dark']) {
   // At twice the pixels, so they stay sharp on high-density screens.
@@ -71,10 +79,22 @@ for (const theme of ['light', 'dark']) {
   await context.addInitScript(t => localStorage.setItem('vitepress-theme-appearance', t), theme)
   for (const [name, path, ready, act, clip] of SHOTS) {
     const page = await context.newPage()
+    const errors = []
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
+    page.on('pageerror', e => errors.push(String(e)))
     // Not 'networkidle': the projects page keeps a connection open for live updates.
     await page.goto(SITE + path, { waitUntil: 'load', timeout: 120_000 })
-    if (act) { await page.waitForTimeout(1000); await act(page) }
-    await page.waitForSelector(ready, { timeout: 30_000 }).catch(() => console.warn(`${name}: no ${ready}`))
+    // A shot whose step fails is left out, with what the page showed, rather than ending the run.
+    if (act) {
+      await page.waitForTimeout(1000)
+      try { await act(page) } catch (e) {
+        console.warn(`${name}-${theme}: left out (${e.message.split('\n')[0]})`)
+        await explain(page, errors)
+        await page.close()
+        continue
+      }
+    }
+    await page.waitForSelector(ready, { timeout: 30_000 }).catch(async () => { console.warn(`${name}: no ${ready}`); await explain(page, errors) })
     await page.waitForTimeout(1500)             // charts and fonts settle
     await page.screenshot({ path: `${OUT}/${name}-${theme}.png`, clip })
     await page.close()
