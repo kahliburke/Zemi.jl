@@ -10,6 +10,7 @@ The first release.
   arXiv watch, and a daily paper with an analysis.
 - **A tutor** per paper, pitched to the reader's background, and notebooks made from papers.
 - **Findings** that cite their evidence, and **projects** whose task boards people and agents share.
+  A board shows who else is on it, and a planning session can follow one person and draw on it.
 - **Agents** use all of it through MCP or Kaimon.
 - **Solo or shared**: one person on a laptop, or a signed-in group on a server with roles, API
   tokens and a bibliography per person, sharing what they read as datasets.
