@@ -112,6 +112,22 @@ end
         got = K.fetch_metadata(["2609.00001"], temp_config())
         @test got["2609.00001"].title == "A Paper About Reefs" && got["2609.00001"].version == "v2"
         @test startswith(first(asked), "/oai?") && occursin("id_list=2609.00001", last(asked))
+        # A category's new papers too, page by page until one reaches back past the day asked from.
+        empty!(asked)
+        new = K.list_new_papers("physics.ao-ph", K.Date("2026-08-25"), temp_config())
+        @test [m.doc_id for m in new] == ["2609.00001"] && occursin("search_query=cat%3Aphysics.ao-ph", last(asked))
+        old = replace(xml, "2026-09-01T" => "2026-08-01T")
+        pages = [replace(xml, "</entry>" => "</entry>" * replace(xml[findfirst("<entry>", xml)[1]:findlast("</entry>", xml)[end]], "00001" => "00002")), old]
+        server2 = K.HTTP.serve!("127.0.0.1", port + 1) do req
+            K.HTTP.Response(200, pages[occursin("start=0", req.target) ? 1 : 2])
+        end
+        K.ARXIV_API[] = "http://127.0.0.1:$(port + 1)/api/query"
+        try
+            @test [m.doc_id for m in K.list_new_papers_api("physics.ao-ph", K.Date("2026-08-25"), temp_config(); page_size = 2)] ==
+                  ["2609.00001", "2609.00002"]
+        finally
+            close(server2)
+        end
     finally
         K.OAI_URL[], K.ARXIV_API[] = saved
         close(server)

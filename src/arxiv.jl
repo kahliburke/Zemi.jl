@@ -205,17 +205,42 @@ const OAI_SETS_LOCK = ReentrantLock()
 
 The papers in arXiv `category` (a paper listed in it as a secondary one too) whose records changed
 since the day `since`, from OAI-PMH, every page of the listing. Their `published` says which are
-new. See [`arxiv_get`](@ref) for `patience`.
+new. When OAI-PMH does not answer, they come from the search API (see
+[`list_new_papers_api`](@ref)). See [`arxiv_get`](@ref) for `patience`.
 """
 function list_new_papers(category::AbstractString, since::Date, c::Config; patience::Real = 0)
-    set = oai_set(category, c)
     out = PaperMeta[]
-    page = oai_get(c, ["verb" => "ListRecords", "metadataPrefix" => "arXiv", "set" => set, "from" => string(since)]; patience)
+    try
+        set = oai_set(category, c)
+        page = oai_get(c, ["verb" => "ListRecords", "metadataPrefix" => "arXiv", "set" => set, "from" => string(since)]; patience)
+        while true
+            got = parse_oai_records(page)
+            append!(out, filter(m -> category in m.categories, got.papers))
+            isempty(got.token) && return out
+            page = oai_get(c, ["verb" => "ListRecords", "resumptionToken" => got.token]; patience)
+        end
+    catch e
+        e isa InterruptException && rethrow()
+        @warn "arXiv's OAI-PMH did not answer; asking its search API instead" category exception = e
+        return list_new_papers_api(category, since, c; patience)
+    end
+end
+
+"""
+    list_new_papers_api(category, since, config; patience = 0) -> Vector{PaperMeta}
+
+The papers in arXiv `category` submitted since the day `since`, from the search API, newest first,
+page by page until one reaches back past `since`.
+"""
+function list_new_papers_api(category::AbstractString, since::Date, c::Config; patience::Real = 0, page_size::Integer = 200)
+    out = PaperMeta[]
+    since_day(m) = !isempty(m.published) && Date(m.published) >= since
+    start = 0
     while true
-        got = parse_oai_records(page)
-        append!(out, filter(m -> category in m.categories, got.papers))
-        isempty(got.token) && return out
-        page = oai_get(c, ["verb" => "ListRecords", "resumptionToken" => got.token]; patience)
+        page = search_arxiv("cat:$category", c; max_results = page_size, sort = "submittedDate", start, patience)
+        append!(out, filter(since_day, page))
+        (length(page) < page_size || !all(since_day, page)) && return out
+        start += page_size
     end
 end
 
@@ -224,13 +249,14 @@ end
 
 Papers matching an arXiv API search query (its `search_query` syntax: `abs:coral AND
 abs:bleaching`, `ti:"graph neural network"`, `cat:q-bio.PE`, …), most relevant first, or with
-`sort = "submittedDate"` newest first. Only arXiv's search API searches, and it is often too busy to
+`sort = "submittedDate"` newest first, from the `start`th. Only arXiv's search API searches, and it is often too busy to
 answer: see [`arxiv_get`](@ref) for `patience`.
 """
 function search_arxiv(query::AbstractString, c::Config; max_results::Integer = 50, sort::AbstractString = "relevance",
-                      patience::Real = 0)
+                      start::Integer = 0, patience::Real = 0)
     r = arxiv_get(ARXIV_API[], c; patience,
-        query = ["search_query" => query, "max_results" => string(max_results), "sortBy" => sort, "sortOrder" => "descending"])
+        query = ["search_query" => query, "start" => string(start), "max_results" => string(max_results), "sortBy" => sort,
+                 "sortOrder" => "descending"])
     return parse_arxiv_feed(String(r.body))
 end
 
