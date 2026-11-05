@@ -110,9 +110,10 @@ DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
                                                       "KBSetup", "KBOpenSource")]
 DocumenterVitepress.vitepress_assets(::KnowledgeBaseSite) = isdir(KB_PUBLIC) ? [KB_PUBLIC] : String[]
 function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, config::String)
-    # ZEMI_SITE_BASE serves the site under a path (the demo's, `/Zemi.jl/demo/`); a service serves it
-    # at the root. The config names the base twice.
-    haskey(ENV, "ZEMI_SITE_BASE") && (config = replace(config, r"base: '[^']*'" => "base: '$(ENV["ZEMI_SITE_BASE"])'"))
+    # ZEMI_SITE_BASE serves the site under a path (the demo's, `/Zemi.jl/demo/`); otherwise it is at the
+    # root, as a service serves it. Set either way: on a CI service DocumenterVitepress takes the base
+    # from the repository's name, for GitHub Pages. The config names the base twice.
+    config = replace(config, r"base: '[^']*'" => "base: '$(get(ENV, "ZEMI_SITE_BASE", "/"))'")
     # ZEMI_SITE_NOTICE, HTML, is shown in a bar above every page: what a static copy cannot do, say.
     # It sits outside the app, so it stays as pages change, in the room VitePress keeps above its nav.
     if !isempty(get(ENV, "ZEMI_SITE_NOTICE", ""))
