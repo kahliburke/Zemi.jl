@@ -18,8 +18,13 @@ const { data: r, error } = useTemplatedPage<Resource>('resources', 'No such reso
   <p v-else-if="!r" class="kb-dim">Loading…</p>
   <template v-else>
     <h1 id="resource-title">{{ r.title }}</h1>
-    <p class="kbrs-made"><span class="kb-chip">{{ r.type || 'resource' }}</span>
-      <template v-if="r.authors.length"> {{ r.authors.join(', ') }}</template><template v-if="r.date"> · {{ r.date }}</template></p>
+    <div class="kb-paper-head">
+      <div class="kb-badges">
+        <span class="kb-badge kb-badge-cat">{{ (r.type || 'resource').replace(/^./, c => c.toUpperCase()) }}</span>
+        <span v-if="r.date" class="kb-badge">{{ r.date }}</span>
+      </div>
+      <p v-if="r.authors.length" class="kb-authors">{{ r.authors.join(', ') }}</p>
+    </div>
     <p v-if="r.note">{{ r.note }}</p>
     <p class="kbrs-where">
       <a v-if="r.url" :href="r.url" target="_blank" rel="noopener">{{ r.url }}</a>
@@ -32,6 +37,5 @@ const { data: r, error } = useTemplatedPage<Resource>('resources', 'No such reso
 </template>
 
 <style scoped>
-.kbrs-made { color: var(--vp-c-text-2); }
 .kbrs-where { overflow-wrap: anywhere; }
 </style>

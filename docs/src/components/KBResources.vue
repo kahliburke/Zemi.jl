@@ -13,6 +13,13 @@ const error = ref('')
 onMounted(async () => {
   try { items.value = await siteJSON('/resources.json', { cache: 'no-store' }) } catch (e: any) { error.value = e.message }
 })
+// A type as a heading: capitalized and plural ("dataset" → "Datasets"), a mass noun as it is.
+const UNCOUNTED = new Set(['news', 'software'])
+function heading(type: string) {
+  if (!type) return 'Other'
+  const plural = UNCOUNTED.has(type) ? type : type.endsWith('sis') ? type.slice(0, -2) + 'es' : type.endsWith('s') ? type : type + 's'
+  return plural[0].toUpperCase() + plural.slice(1)
+}
 // By type, the types in alphabetical order with those of none last.
 const groups = computed(() => {
   const by = new Map<string, Item[]>()
@@ -25,7 +32,7 @@ const groups = computed(() => {
   <p v-if="error" class="kb-error">{{ error }}</p>
   <p v-else-if="!items.length" class="kb-dim">No resources yet.</p>
   <section v-for="[type, xs] in groups" :key="type">
-    <h2>{{ type || 'Other' }}</h2>
+    <h2>{{ heading(type) }}</h2>
     <ul class="kbrl">
       <li v-for="x in xs" :key="x.id"><a :href="kbPage(x.page)">{{ x.title }}</a>
         <span class="kb-dim"><template v-if="x.authors.length"> · {{ x.authors.join(', ') }}</template><template v-if="x.date"> · {{ x.date }}</template></span></li>

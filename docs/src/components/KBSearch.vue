@@ -3,7 +3,7 @@
   runs the full hybrid search: keyword and every embedding layer, with the passages that matched.
   Without one (the site as deployed), it searches the titles, summaries and topics in papers.json,
   which the docs build writes. Live, the projects' findings that match come first, and what is found
-  may be kept to papers, codebases or records; a record says how it was made and when.
+  may be kept to papers, codebases, records or resources; a record says how it was made and when.
 -->
 <script setup lang="ts">
 import KBTitle from './KBTitle.vue'
@@ -26,7 +26,7 @@ type Hit = { id: string; slug: string; kind?: string; page?: string; title: stri
 const query = ref('')
 // The kinds of document found: every kind, or one (see src/kinds.jl).
 const KINDS = [{ id: '', label: 'everything' }, { id: 'paper', label: 'papers' }, { id: 'code', label: 'codebases' },
-               { id: 'record', label: 'records' }]
+               { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }]
 const kind = ref('')
 const hits = ref<Hit[]>([])
 type Found = { ref: string; claim: string; status: string; snippet: string }
