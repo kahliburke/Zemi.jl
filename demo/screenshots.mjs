@@ -63,8 +63,8 @@ const SHOTS = [
     await page.press('.vp-doc input', 'Enter')
   }],
   ['board', '/projects#RB', '.kbp-face'],
-  ['task', '/projects#RB-1', '.kbd-body'],
-  ['proposal', '/projects#RB-9', 'text=Waiting for approval'],
+  ['task', '/projects#RB-6', '.kbd-body'],
+  ['proposal', '/projects#RB-15', 'text=Waiting for approval'],
   ['library', '/projects#RB', '.kbl-box', async page => { await page.click('.kbp-view:has-text("Library")'); await page.mouse.move(0, 0) }],
   // Following Ada, who is planning with a task open and writing on it, and pointing something out with the pen.
   ['planning', '/projects#RB', '.kbp-session', async page => {
@@ -75,7 +75,9 @@ const SHOTS = [
     await page.keyboard.press('p')
     await circle(page, '.kbd [data-control="status"]')
   }, undefined, 0],
+  ['review', '/projects#RB', '.kbr-charts', async page => { await page.click('.kbp-view:has-text("Review")'); await page.mouse.move(0, 0) }],
   ['finding', '/findings#LS-F1', 'text=Millimetre-scale ridges'],
+  ['admin', '/service/administration', '.kbad-chip'],
   ['menu', '/', '.kba-menu', async page => { await page.click('.kba-button') }, { x: 1440 - 480, y: 0, width: 480, height: 300 }],
 ]
 

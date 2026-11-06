@@ -29,12 +29,12 @@ const PEOPLE = [("rowan@example.org", DEMO_USER, "Admin", "maintainer"),
 function keep_present(kb, ids)
     ada, bea = (K.account_caller(kb, ids[e], :session) for e in ("ada@example.org", "bea@example.org"))
     view = K.JSON.json(Dict("milestone" => "", "declined" => false, "reviewing" => false, "library" => false,
-                            "focus" => "RB-5", "hover" => "", "panel" => 0.4, "control" => "comment"))
+                            "focus" => "RB-10", "hover" => "", "panel" => 0.4, "control" => "comment"))
     while true
-        K.report_presence!(ada, "planning"; project = "RB", open = "RB-5", draft_ref = "RB-5",
+        K.report_presence!(ada, "planning"; project = "RB", open = "RB-10", draft_ref = "RB-10",
                            draft = "The 10 m ones: they sit below the thermocline most of the summer, as our deeper", view)
         K.report_presence!(bea, "present"; project = "RB")
-        K.agent_seen!("RB-1", "Claude for Rowan")
+        K.agent_seen!("RB-6", "Claude for Rowan")
         K.agent_waiting!("RB", "Claude for Rowan", true)
         sleep(20)
     end

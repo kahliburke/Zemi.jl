@@ -24,6 +24,16 @@ by status: proposed, backlog, ready, in progress, review, done.
 </figure>
 ```
 
+A project's **review** shows what it finished and when, how long work took from start to done, how
+much was sent back from review, what agents did, its milestones, and its history.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/review-light.png" alt="A project's review">
+  <img class="dark-only" src="./assets/screenshots/review-dark.png" alt="A project's review">
+</figure>
+```
+
 Agents use the same board through the task tools ([Agents and MCP](agents.md)):
 
 1. An agent's plan arrives as a proposed task.

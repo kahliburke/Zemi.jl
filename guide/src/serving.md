@@ -66,6 +66,13 @@ tokens and MCP (at `/mcp` with the default `[shared] kaimon = "embedded"`).
 without a provider. For a server,
 see [Server deployment](deployment.md).
 
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/admin-light.png" alt="The Administration page">
+  <img class="dark-only" src="./assets/screenshots/admin-dark.png" alt="The Administration page">
+</figure>
+```
+
 Admins invite people on the Administration page, each with roles. The roles it starts with, with their daily
 quotas of tutor turns and notebooks:
 
