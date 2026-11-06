@@ -2310,6 +2310,9 @@ end
         d = classified.data
         @test K.keyword_label(["A coral study", "Coral polyps"], ["A kelp study", "A coral study", "Coral polyps"]) ==
               "polyps · coral"
+        # A cluster of papers with no titles yet is left for later rather than named from its ids.
+        untitled = K.name_clusters!(kb, [["2609.99901", "2609.99902"]], [String[]], ["2609.99901", "2609.99902"])
+        @test asked[] == 1 && !only(untitled).named
 
         # The site draws it, and a consumer gets it with the dataset.
         site, public = mktempdir(), mktempdir()

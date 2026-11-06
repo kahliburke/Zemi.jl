@@ -45,7 +45,7 @@ function landscape!(kb::KB; force::Bool = false, progress = msg -> nothing, canc
     input_sha = bytes2hex(sha256(JSON.json(Dict("version" => LANDSCAPE_VERSION, "layer" => l.name, "k" => k,
         "areas" => [(f.name, f.description) for f in c.group.focus_areas],
         # A paper's classification is shown with it, so classifying one rebuilds the landscape too.
-        "papers" => [(r.id, r.text_sha, coalesce(r.classification, "")) for r in rows]))))
+        "papers" => [(r.id, r.text_sha, coalesce(r.title, ""), coalesce(r.classification, "")) for r in rows]))))
     last = read_landscape(c)
     if !force && last !== nothing && get(last, "input_sha", "") == input_sha && all(cl -> cl["named"], last["clusters"])
         return (; data = last, changed = false)
@@ -77,7 +77,9 @@ function landscape!(kb::KB; force::Bool = false, progress = msg -> nothing, canc
     typical = [sort(m; by = i -> -dot(view(X, :, i), view(centres, :, j))) for (j, m) in enumerate(members)]
     titles = [coalesce(r.title, r.id) for r in rows]
     progress("Mapping $(length(rows)) papers: naming the clusters")
-    names = name_clusters!(kb, [[rows[i].id for i in m] for m in typical], [titles[m] for m in typical], titles)
+    # Named from the titles papers have: an id says nothing a name could be made from.
+    named_from = [[rows[i].title for i in m if !ismissing(rows[i].title) && !isempty(rows[i].title)] for m in typical]
+    names = name_clusters!(kb, [[rows[i].id for i in m] for m in typical], named_from, titles)
 
     mean(v) = isempty(v) ? 0.0 : sum(v) / length(v)
     r3(x) = round(x; digits = 4)
@@ -122,8 +124,8 @@ const CLUSTER_SYSTEM = "You name groups of research papers for a research group'
 A `(; name, description, named)` for each cluster, given its papers' ids and titles (most typical
 first). A cluster whose papers were named before keeps that name, as does one that shares at least
 60% of its papers with a named one. The rest are named together by the configured summarizer, so
-their names tell them apart; where it cannot run, they get their most distinctive title words and
-`named = false`.
+their names tell them apart; where it cannot run, or a cluster has no titles yet, they get their
+most distinctive title words and `named = false`.
 """
 function name_clusters!(kb::KB, members, member_titles, all_titles)
     known = [(; ids = Set{String}(JSON.parse(r.members)), r.name, r.description)
@@ -138,7 +140,7 @@ function name_clusters!(kb::KB, members, member_titles, all_titles)
             remember_cluster!(kb, ids, best.name, best.description)
         end
     end
-    todo = [j for j in eachindex(out) if out[j] === nothing]
+    todo = [j for j in eachindex(out) if out[j] === nothing && !isempty(member_titles[j])]
     s = summarizer(kb.config, kb.config.summarizer)
     if !isempty(todo) && summarizer_problem(s) === nothing
         try
