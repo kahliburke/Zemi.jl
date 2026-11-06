@@ -941,6 +941,48 @@ end
     end
 end
 
+@zset "resources" begin
+    kb = open_kb(temp_config(layers = Layer[]))
+    try
+        K.create_project!(kb, "Wetlands"; key = "WE", owner = nothing, by = K.person("Ada"))
+        dem(; kw...) = K.Resource(; key = "AB12CD34", title = "Copernicus DEM GLO-30", type = "dataset", authors = ["ESA"],
+                                     date = "2021", url = "https://example.org/dem", doi = "10.5270/ESA-c5d3d65", note = "Data set, CC BY 4.0",
+                                     projects = ["WE"], kw...)
+        @test_throws "needs a title" K.put_resource!(kb, "zotero", dem(title = " "))
+        @test_throws "No project XX" K.put_resource!(kb, "zotero", dem(projects = ["XX"]))
+        @test isempty(K.query(kb, "SELECT 1 FROM papers"))
+
+        # A resource is a document of its own kind, its source's key naming it; unchanged, it is not written again.
+        id, changed = K.put_resource!(kb, "zotero", dem())
+        @test changed && id == "res-zotero-ab12cd34-" * bytes2hex(K.sha256("zotero\0AB12CD34"))[1:8] && K.is_resource(id)
+        @test K.put_resource!(kb, "zotero", dem()) == (id, false)
+        p = K.paper_row(kb, id)
+        @test p.kind == "resource" && p.title == "Copernicus DEM GLO-30" && p.doi == "10.5270/esa-c5d3d65" && p.abstract == "Data set, CC BY 4.0"
+        @test only(K.mentions(kb, id)).source == "zotero" && only(K.mentions(kb, id)).url == "https://example.org/dem"
+        @test [(x.target, x.status) for x in K.library(kb, "WE")] == [(id, "kept")]
+
+        # Read, it is one section of what it says about itself, searchable; it is not summarized or classified.
+        @test only(K.query(kb, "SELECT title FROM sections WHERE paper_id = ?", (p.id,))).title == "Copernicus DEM GLO-30"
+        text = join([r.text for r in K.query(kb, "SELECT text FROM chunks WHERE paper_id = ?", (p.id,))], "\n")
+        @test occursin("dataset · ESA · 2021", text) && occursin("CC BY 4.0", text) && occursin("doi:10.5270/esa-c5d3d65", text)
+        @test !any(t -> t.id == id, K.sync_plan(kb))
+        @test K.document_note(kb, id) == "Resource (dataset) from zotero: title, authors, date and note only, not read in full."
+        # What its source changes, it is read again for.
+        K.put_resource!(kb, "zotero", dem(note = "Data set, CC BY 4.0; accessed November 2026"); read = false)
+        @test only(t for t in K.sync_plan(kb) if t.id == id).reason == "its source changed it"
+
+        # Cited with `@`, it is a paper's kind of source: kept in a library, and evidence for a finding.
+        @test only(K.at_references("Elevation from @$id.")) == (; kind = "paper", target = id, label = id)
+        @test K.evidence_source("@$id") == (; kind = "paper", target = id, page = 0)
+        K.create_project!(kb, "Floods"; key = "FL", owner = nothing, by = K.person("Bea"))
+        r, _ = K.put_resource!(kb, "zotero", K.Resource(; key = "EF56", title = "Bali flood facts so far", type = "news", projects = ["FL"]);
+                                proposed = true)
+        @test [(x.target, x.status) for x in K.library(kb, "FL")] == [(r, "proposed")]
+    finally
+        close(kb)
+    end
+end
+
 @zset "record sources" begin
     kb = open_kb(temp_config(layers = Layer[], sources = Dict{String,Any}("zz-fake" => Dict{String,Any}("folder" => "/notes", "token" => "file:/nowhere"))))
     saved, stop = K.SOURCES[], Ref(false)

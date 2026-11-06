@@ -1,5 +1,6 @@
 # @-references in a task's plan and comments: what the text is about, named as `@KB-12` (a task),
-# `@arXiv:2401.00001` (a paper), `@doc-5f13926ae1` (an uploaded one), `@rec-notes-2026-10-02` (a record),
+# `@arXiv:2401.00001` (a paper), `@doc-5f13926ae1` (an uploaded one), `@res-zotero-ab12cd34` (a resource),
+# `@rec-notes-2026-10-02` (a record),
 # or `@[label](kind:target)` for any kind, which allows spaces in the
 # label: `@[Ada Lovelace](author:lovelace|a)`, `@[Rowan Hale](person:rowan@example.org)`,
 # `@code:src/tasks.jl#update_project!` (a file or a definition in the project's codebase), `@KB-F3` (a finding),
@@ -12,6 +13,7 @@ const AT_FULL = Regex("@\\[([^\\]\\n]+)\\]\\(($(join(AT_REFERENCE_KINDS, '|'))):
 const AT_TASK = Regex("(?<![\\w@/])@($(TASK_REF.pattern))\\b")
 const AT_PAPER = Regex("(?<![\\w@/])@arXiv:$ARXIV_ID", "i")
 const AT_DOC = r"(?<![\w@/])@(doc-[0-9a-f]{10})\b"
+const AT_RESOURCE = r"(?<![\w@/])@(res-[a-z0-9]+(?:-[a-z0-9]+)*)"
 const AT_RECORD = r"(?<![\w@/])@(rec-[a-z0-9]+(?:-[a-z0-9]+)*)"
 # A file of the project's codebase, or a definition in it: a path ending in a letter or digit, then `#name`.
 const AT_CODE_REF = r"(?<![\w@/])@code:([\w./-]*\w)(?:#([\w!?]+(?:\.[\w!?]+)*))?"
@@ -48,7 +50,7 @@ function at_references(text::AbstractString)
         for m in eachmatch(AT_TASK, piece)
             inside(m) || push!(found, (m.offset, (; kind = "task", target = uppercase(m[1]), label = uppercase(m[1]))))
         end
-        for m in [collect(eachmatch(AT_PAPER, piece)); collect(eachmatch(AT_DOC, piece))]
+        for m in [collect(eachmatch(AT_PAPER, piece)); collect(eachmatch(AT_DOC, piece)); collect(eachmatch(AT_RESOURCE, piece))]
             inside(m) || push!(found, (m.offset, (; kind = "paper", target = String(m[1]), label = String(m[1]))))
         end
         for m in eachmatch(AT_RECORD, piece)

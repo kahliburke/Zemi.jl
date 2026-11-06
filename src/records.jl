@@ -211,9 +211,12 @@ The id of the record `source` keeps as `key`: `rec-`, the source and the key in 
 digits and dashes, at most `RECORD_ID_MAX` long. A key that changes in being made so, or is cut, has
 a hash of the source and key after it, so two keys never give one id and one key always gives the same.
 """
-function record_id(source::AbstractString, key::AbstractString)
+record_id(source::AbstractString, key::AbstractString) = source_id(RECORD.prefix, source, key)
+
+"The id a document a source keeps as `key` is given, after its kind's `prefix` (see [`record_id`](@ref))."
+function source_id(prefix::AbstractString, source::AbstractString, key::AbstractString)
     safe(s) = strip(replace(lowercase(s), r"[^a-z0-9]+" => "-"), '-')
-    id = RECORD.prefix * join(filter(!isempty, [safe(source), safe(key)]), "-")
+    id = prefix * join(filter(!isempty, [safe(source), safe(key)]), "-")
     safe(key) == key && length(id) <= RECORD_ID_MAX && return id
     hash = bytes2hex(sha256(source * "\0" * key))[1:8]
     return rstrip(first(id, RECORD_ID_MAX - 9), '-') * "-" * hash

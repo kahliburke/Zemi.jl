@@ -83,8 +83,12 @@ function reading_out_of_date(kb::KB, d)
         stored = stored_reading_sha(kb, d.id)
         stored === nothing || stored == d.file_sha || push!(reasons, "its source changed it")
     end
+    if is_resource(d.id)
+        r = resource_row(kb, d.id)
+        r === nothing || r.content_sha == d.file_sha || push!(reasons, "its source changed it")
+    end
     d.parser_version == PARSER_VERSION || push!(reasons, "parsed by an older version of the reader")
-    layers = ingest_layers(kb.config)
+    layers = kind_layers(document_kind(d.id), ingest_layers(kb.config))
     for s in unique(summarizer_for(kb.config, l, d.id) for l in layers if !isempty(l.source))
         name = s.name
         rows = query(kb, "SELECT unit_key, model, prompt_version FROM summaries WHERE paper_id = ? AND summarizer = ?", (d.pid, name))

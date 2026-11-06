@@ -25,6 +25,7 @@ A kind of document, as its entry in [`DOCUMENT_KINDS`](@ref):
 - `site`: its pages are built into the site every reader is served (one with access only while it
   is open); the others' pages the service serves as they are read, to those who may see them
 - `classified`: it is classified (see [`classify!`](@ref))
+- `summarized`: its summarizer writes summaries of it (and the layers over summaries embed them)
 - `published`: one added here is published with the dataset when marked shared (one from arXiv
   always is)
 - `category`: what it is classified as, whatever the classifier says (`nothing` to take the
@@ -54,6 +55,7 @@ Base.@kwdef struct DocumentKind
     unassigned::Union{String,Nothing} = nothing
     site::Bool = true
     classified::Bool = true
+    summarized::Bool = true
     published::Bool = false
     category::Union{String,Nothing} = nothing
     summarizer::Symbol
@@ -96,6 +98,15 @@ const RECORD = DocumentKind(;
     note = (kb, id) -> record_note(kb, id),
     page = slug -> "records/$slug")
 
+# A resource the group uses without reading it in full (see resources.jl): what it says about
+# itself is all there is of it, so it is not summarized or classified.
+const RESOURCE = DocumentKind(;
+    name = "resource", prefix = "res-", cited = true, site = false, classified = false, summarized = false,
+    summarizer = :summarizer, prompts = (;),
+    read = (kb, id; kw...) -> read_resource!(kb, id; kw...),
+    note = (kb, id) -> resource_note(kb, id),
+    page = slug -> "resources/$slug")
+
 "Every kind of document the knowledge base holds (see [`DocumentKind`](@ref)), in the order ids are told apart."
 const DOCUMENT_KINDS = DocumentKind[]
 
@@ -116,6 +127,7 @@ end
 document_kind!(PAPER)
 document_kind!(CODEBASE)
 document_kind!(RECORD)
+document_kind!(RESOURCE)
 
 "A document's id when it is an arXiv id without its version, as ids are stored."
 const ARXIV_DOC_ID = Regex("^$ARXIV_ID\$")
@@ -148,6 +160,12 @@ is_codebase(id::AbstractString) = document_kind(id) === CODEBASE
 
 "Whether `id` names a record."
 is_record(id::AbstractString) = document_kind(id) === RECORD
+
+"Whether `id` names a resource."
+is_resource(id::AbstractString) = document_kind(id) === RESOURCE
+
+"The layers a document of kind `k` is embedded in, of `layers`: those over summaries only for a kind that is summarized."
+kind_layers(k::DocumentKind, layers) = k.summarized ? layers : filter(l -> isempty(l.source), layers)
 
 "Whether `id` names a document of the group's reading (see [`DocumentKind`](@ref))."
 is_literature(id::AbstractString) = is_kind(k -> k.literature, id)

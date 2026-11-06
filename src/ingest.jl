@@ -654,6 +654,7 @@ function ingest_paper!(kb::KB, id::AbstractString, layers::AbstractVector{Layer}
                        force_parse::Bool = false, step = msg -> nothing)
     kind = document_kind(id)
     kind === nothing && error("$id is not a kind of document the knowledge base reads")
+    layers = kind_layers(kind, layers)
     parsed = kind.read(kb, id; force = force_parse, step)
     warnings = String[]
     # Its figures and tables, cut once from each reading of its PDF.
