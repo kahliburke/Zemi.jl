@@ -32,6 +32,25 @@ description = "Shifts between coral- and algae-dominated reefs, tipping points u
 name = "Larvae and reef flow"
 description = "How water moves over and through reefs, and how it carries coral larvae to where they settle"
 
+[[group.panels]]
+title = "The reef library"
+text = "What we read on bleaching, heat stress, tipping and larval flow, each paper summarized by section."
+link = "/generated/kb/"
+
+[[group.panels]]
+title = "Ask the tutor"
+text = "New to reef models? Ask about any paper, and the tutor answers at your level."
+
+[[group.panels]]
+title = "What we have found"
+text = "Our conclusions about recovery and settlement, each citing the papers and results behind it."
+link = "/findings"
+
+[[group.panels]]
+title = "This field season"
+text = "Recovery after bleaching and the settlement tiles: the tasks people and agents are working on."
+link = "/projects"
+
 [watch]
 categories = ["q-bio.PE", "physics.ao-ph"]
 
