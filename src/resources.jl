@@ -6,8 +6,8 @@
 # reference manager's library, say), and each records where it came from.
 
 # What a resource carries beyond its row of `papers`: the source that made it and its key there (one
-# resource a key), its type as the source names it, its address, its note, and the hash of all of
-# it, which its reading is made from.
+# resource a key), its type as the source names it, its address, its note, where it appeared, who
+# published it, when it was accessed, and the hash of all of it, which its reading is made from.
 migration!(7, ["""CREATE TABLE resources (
                       paper_id INTEGER PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
                       source TEXT NOT NULL,
@@ -18,24 +18,35 @@ migration!(7, ["""CREATE TABLE resources (
                       content_sha TEXT NOT NULL,
                       updated_at TEXT NOT NULL,
                       UNIQUE (source, key))"""])
+migration!(9, ["ALTER TABLE resources ADD COLUMN container TEXT NOT NULL DEFAULT ''",
+               "ALTER TABLE resources ADD COLUMN publisher TEXT NOT NULL DEFAULT ''",
+               "ALTER TABLE resources ADD COLUMN accessed TEXT NOT NULL DEFAULT ''",
+               "ALTER TABLE resources ADD COLUMN organizations TEXT NOT NULL DEFAULT '[]'"])
 
 """
-    Resource(; key, title, type = "", authors = [], date = "", url = "", doi = "", note = "", projects = [])
+    Resource(; key, title, type = "", authors = [], organizations = [], date = "", url = "", doi = "", note = "",
+               container = "", publisher = "", accessed = "", projects = [])
 
 What a source hands in for a resource: its `key` in the source, its `title`, its `type` as the
-source calls it ("dataset", "report", "law"), its `authors`, its `date` (as precise as known:
-`2021`, `2021-10`, `2021-10-29`), its `url`, its `doi`, a `note` (a license, when it was looked at),
-and the `projects` whose libraries keep it.
+source calls it ("dataset", "report", "law"), its `authors` and which of them are `organizations`
+(an agency, a company), its `date` (as precise as known:
+`2021`, `2021-10`, `2021-10-29`), its `url`, its `doi`, a `note` (a license, say), the `container` it
+appeared in (a journal, newspaper, website, or the book of a chapter), its `publisher` (or the
+institution that issued it), the date it was `accessed`, and the `projects` whose libraries keep it.
 """
 Base.@kwdef struct Resource
     key::String
     title::String
     type::String = ""
     authors::Vector{String} = String[]
+    organizations::Vector{String} = String[]
     date::String = ""
     url::String = ""
     doi::String = ""
     note::String = ""
+    container::String = ""
+    publisher::String = ""
+    accessed::String = ""
     projects::Vector{String} = String[]
 end
 
@@ -48,7 +59,7 @@ letters, digits and dashes (see [`record_id`](@ref) for how a long or unusual ke
 resource_id(source::AbstractString, key::AbstractString) = source_id(RESOURCE.prefix, source, key)
 
 "What a resource is, as what it is read from and the hash that tells when it changed."
-resource_content(r::Resource) = (; r.title, r.type, r.authors, r.date, r.url, r.doi, r.note)
+resource_content(r::Resource) = (; r.title, r.type, r.authors, r.organizations, r.date, r.url, r.doi, r.note, r.container, r.publisher, r.accessed)
 
 """
     put_resource!(kb, source, r; by = nothing, proposed = false, read = true) -> (id, changed)
@@ -87,10 +98,13 @@ function put_resource!(kb::KB, source::AbstractString, r::Resource; by::Union{Ab
                  RESOURCE.name, at, at))
             pid = paper_id(kb, id)
             execute!(kb, """
-                INSERT INTO resources (paper_id, source, key, type, url, note, content_sha, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO resources (paper_id, source, key, type, url, note, container, publisher, accessed, organizations,
+                                       content_sha, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (paper_id) DO UPDATE SET type = excluded.type, url = excluded.url, note = excluded.note,
-                    content_sha = excluded.content_sha, updated_at = excluded.updated_at""",
-                (pid, source, r.key, r.type, r.url, r.note, sha, at))
+                    container = excluded.container, publisher = excluded.publisher, accessed = excluded.accessed,
+                    organizations = excluded.organizations, content_sha = excluded.content_sha, updated_at = excluded.updated_at""",
+                (pid, source, r.key, r.type, r.url, r.note, strip(r.container), strip(r.publisher), strip(r.accessed), JSON.json(r.organizations), sha, at))
             new && execute!(kb, """INSERT INTO mentions (paper_id, source, channel, posted_at, author, url, message)
                                    VALUES (?, ?, NULL, ?, ?, ?, NULL)""",
                             (pid, source, time(), something(by, missing), isempty(r.url) ? missing : r.url))
@@ -107,7 +121,7 @@ end
 "The row of resource `id`, with its source's fields, or `nothing`."
 function resource_row(kb::KB, id::AbstractString)
     rows = query(kb, """SELECT p.id AS pid, p.doc_id, p.title, p.authors, p.published, p.doi, x.source, x.key, x.type, x.url,
-                               x.note, x.content_sha FROM resources x JOIN papers p ON p.id = x.paper_id WHERE p.doc_id = ?""", (id,))
+                               x.note, x.container, x.publisher, x.accessed, x.organizations, x.content_sha FROM resources x JOIN papers p ON p.id = x.paper_id WHERE p.doc_id = ?""", (id,))
     return isempty(rows) ? nothing : first(rows)
 end
 
@@ -115,11 +129,12 @@ end
     parse_resource(r) -> ParsedPaper
 
 What resource row `r` is read as: one section, under its title, of what it says about itself: its
-type, authors and date, its note, and where it is.
+type, authors and date, where it appeared and who published it, its note, and where it is.
 """
 function parse_resource(r)
     authors = json_list(r.authors)
     lines = filter(!isempty, [join(filter(!isempty, [String(r.type), join(authors, ", "), String(coalesce(r.published, ""))]), " · "),
+                              join(filter(!isempty, unique([String(r.container), String(r.publisher)])), " · "),
                               String(r.note), String(r.url), ismissing(r.doi) ? "" : "doi:" * r.doi])
     pieces = [Piece(:heading, 1, (0.0, 0.0, 0.0, 0.0), String(r.title), 1, 0, "")]
     isempty(lines) || push!(pieces, Piece(:paragraph, 1, (0.0, 0.0, 0.0, 0.0), join(lines, "\n\n"), 1, 0, ""))
@@ -161,13 +176,15 @@ end
     resource_json(kb, id) -> Dict
 
 The data of resource `id`'s page (KBResourcePage.vue lays it out): what it is, who made it and when,
-its note, where it is (its address and DOI), and where it came from.
+its note, where it appeared and who published it, where it is (its address and DOI, and when it
+was accessed there), and where it came from.
 """
 function resource_json(kb::KB, id::AbstractString)
     r = resource_row(kb, id)
     return Dict{String,Any}("id" => r.doc_id, "slug" => page_slug(r.doc_id), "title" => r.title, "type" => r.type,
                             "authors" => json_list(r.authors), "date" => coalesce(r.published, ""), "note" => r.note, "url" => r.url,
-                            "doi" => coalesce(r.doi, ""), "source" => r.source)
+                            "doi" => coalesce(r.doi, ""), "container" => r.container, "publisher" => r.publisher,
+                            "accessed" => r.accessed, "source" => r.source)
 end
 
 "Each resource that became another document (see [`promote_resource!`](@ref)), by its slug, with where that one's page is."

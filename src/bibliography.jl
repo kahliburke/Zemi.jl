@@ -27,7 +27,8 @@ end
 A document's BibTeX entry, keyed by [`cite_key`](@ref). A paper is an article: its authors, title,
 year, arXiv record, DOI, journal (its journal reference, else its arXiv record) and `url` (the arXiv
 page). An upload is an article when it has a journal reference, else a `misc`. A record is a `misc`:
-its people, title, date, how it was made and `url`, its page on the site. With `docpage`, the entry
+its people, title, date, how it was made and `url`, its page on the site. A resource is the entry its
+type calls for (see [`resource_bib`](@ref)). With `docpage`, the entry
 also names the knowledge base's page for it under the docs source, which the docs site links a
 citation to.
 """
@@ -46,6 +47,7 @@ function bib_entry(kb::KB, id::AbstractString; pages::AbstractString = "generate
         print(io, "}\n")
         return String(take!(io))
     end
+    is_resource(id) && return resource_bib(kb, id; pages, docpage)
     # An article, the usual form for a preprint: citation styles print an article's year, and its
     # journal is where it appeared or else its arXiv record.
     print(io, "@", arxiv || !ismissing(p.journal_ref) ? "article" : "misc", "{", cite_key(id), ",\n")
@@ -58,7 +60,53 @@ function bib_entry(kb::KB, id::AbstractString; pages::AbstractString = "generate
     end
     journal = !ismissing(p.journal_ref) ? bib_escape(p.journal_ref) : arxiv ? "arXiv preprint arXiv:$id" : missing
     print(io, field("journal", journal), field("doi", p.doi))
-    docpage && print(io, field("docpage", "$(pages)papers/$(page_slug(id)).md"))
+    docpage && print(io, field("docpage", "$(pages)$(document_page(id)).md"))
+    print(io, "}\n")
+    return String(take!(io))
+end
+
+"The BibTeX entry type of each type of resource whose fields a style prints; any other is a `misc`."
+const RESOURCE_ENTRIES = Dict("article" => "article", "news" => "article", "magazine article" => "article", "book" => "book",
+                              "book section" => "incollection", "conference paper" => "inproceedings", "report" => "techreport")
+
+"""
+    resource_bib(kb, id; pages = "generated/kb/", docpage = true) -> String
+
+Resource `id`'s BibTeX entry: an article (in its journal or newspaper), a book or a chapter of one,
+a conference paper, or a report (of its institution), with what a style prints of each; anything
+else (a data set, a portal, software, a law) a `misc`, published where it appeared or by whom, and
+noting its type. Each with its authors, title, date, DOI, address and when it was accessed there.
+"""
+function resource_bib(kb::KB, id::AbstractString; pages::AbstractString = "generated/kb/", docpage::Bool = true)
+    r = resource_row(kb, id)
+    field(k, v; escape = true) = isempty(string(v)) ? "" : "  $k = {$(escape ? bib_escape(v) : v)},\n"
+    entry = get(RESOURCE_ENTRIES, r.type, "misc")
+    entry == "techreport" && isempty(r.publisher) && (entry = "misc")
+    date = coalesce(r.published, "")
+    io = IOBuffer()
+    print(io, "@", entry, "{", cite_key(id), ",\n")
+    # An organization is braced, so a style prints it whole ("others", in an author list, is "et al.").
+    orgs = Set(json_list(r.organizations))
+    name(a) = a in orgs && a != "others" ? "{" * a * "}" : bib_name(a)
+    print(io, field("author", join(name.(json_list(r.authors)), " and ")))
+    print(io, "  title = {{", bib_escape(r.title), "}},\n")
+    print(io, field("year", first(date, 4)), length(date) > 4 ? field("date", date) : "")
+    if entry == "article"
+        print(io, field("journal", r.container))
+    elseif entry in ("incollection", "inproceedings")
+        print(io, field("booktitle", r.container), field("publisher", r.publisher))
+    elseif entry == "book"
+        print(io, field("publisher", r.publisher))
+    elseif entry == "techreport"
+        print(io, field("institution", r.publisher))
+    else
+        print(io, field("howpublished", isempty(r.container) ? r.publisher : r.container))
+        r.type in ("", "document") || print(io, field("note", uppercasefirst(r.type)))
+    end
+    # An address is printed as it is (styles set it with \url), so it is not escaped.
+    print(io, field("doi", coalesce(r.doi, ""); escape = false), field("url", r.url; escape = false),
+          isempty(r.url) ? "" : field("urldate", r.accessed))
+    docpage && print(io, field("docpage", "$(pages)$(document_page(id)).md"))
     print(io, "}\n")
     return String(take!(io))
 end

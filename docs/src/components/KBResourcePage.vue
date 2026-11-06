@@ -12,11 +12,13 @@ import { kbPage } from './kbLinks'
 import KBInLibraries from './KBInLibraries.vue'
 
 type Resource = { id: string; slug: string; title: string; type: string; authors: string[]; date: string; note: string
-                  url: string; doi: string; source: string; moved?: string }
+                  url: string; doi: string; container: string; publisher: string; accessed: string; source: string; moved?: string }
 
 const { data: r, error } = useTemplatedPage<Resource>('resources', 'No such resource.', { title: x => x.title })
 watch(r, x => { if (x?.moved) location.replace(kbPage(x.moved)) })
 
+// Where it appeared and who published it, each once.
+const appeared = computed(() => [...new Set([r.value?.container, r.value?.publisher].filter(Boolean))].join(' · '))
 const type = computed(() => (r.value?.type || 'resource').replace(/^./, c => c.toUpperCase()))
 const uploads = computed(() => mode.value === 'live' && can('paper.add'))
 const busy = ref(false)
@@ -43,12 +45,14 @@ async function upload(e: Event) {
         <span v-if="r.date" class="kb-badge">{{ r.date }}</span>
       </div>
       <p v-if="r.authors.length" class="kb-authors">{{ r.authors.join(', ') }}</p>
+      <p v-if="appeared" class="kbrs-appeared">{{ appeared }}</p>
     </div>
     <p v-if="r.note">{{ r.note }}</p>
     <p class="kbrs-where">
       <a v-if="r.url" :href="r.url" target="_blank" rel="noopener">{{ r.url }}</a>
       <template v-if="r.url && r.doi"> · </template>
       <a v-if="r.doi" :href="`https://doi.org/${r.doi}`" target="_blank" rel="noopener">doi:{{ r.doi }}</a>
+      <span v-if="r.url && r.accessed" class="kb-dim"> · accessed {{ r.accessed }}</span>
     </p>
     <p class="kb-dim">From {{ r.source }} · not read in full
       <template v-if="uploads"> ·
@@ -62,6 +66,7 @@ async function upload(e: Event) {
 
 <style scoped>
 .kbrs-where { overflow-wrap: anywhere; }
+.kbrs-appeared { margin: 0.2rem 0 0; font-style: italic; color: var(--vp-c-text-2); }
 .kbrs-upload { cursor: pointer; }
 .kbrs-upload input { display: none; }
 </style>

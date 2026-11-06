@@ -975,9 +975,13 @@ end
         @test only(K.at_references("Elevation from @$id.")) == (; kind = "paper", target = id, label = id)
         @test K.evidence_source("@$id") == (; kind = "paper", target = id, page = 0)
         K.create_project!(kb, "Floods"; key = "FL", owner = nothing, by = K.person("Bea"))
-        r, _ = K.put_resource!(kb, "zotero", K.Resource(; key = "EF56", title = "Bali flood facts so far", type = "news", projects = ["FL"]);
+        r, _ = K.put_resource!(kb, "zotero", K.Resource(; key = "EF56", title = "Bali flood facts so far", type = "news", projects = ["FL"],
+                                                        container = "Tempo English", url = "https://example.org/floods?id=1_2");
                                 proposed = true)
         @test [(x.target, x.status) for x in K.library(kb, "FL")] == [(r, "proposed")]
+        # Cited: a news story is an article in its newspaper, its address as it is.
+        bib = K.bib_entry(kb, r)
+        @test startswith(bib, "@article{$r,") && occursin("journal = {Tempo English}", bib) && occursin("url = {https://example.org/floods?id=1_2}", bib)
 
         # On the site: a page of each from its data, and the page listing them, linked from the sidebar.
         site, public = mktempdir(), mktempdir()
@@ -3586,6 +3590,11 @@ end
              item("C1", 1, "journalArticle", "A closed paper"; doi = "10.1/closed"),
              item("C2", 1, "journalArticle", "A closed paper"; doi = "10.1/CLOSED"),
              item("B1", 1, "journalArticle", "A paper OpenAlex fails on"; doi = "10.1/boom")]
+    # What a citation needs: who published the data set, an organization as its author, and when it was accessed.
+    merge!(items[3]["data"], Dict("publisher" => "European Space Agency", "extra" => "Published: Copernicus Data Space",
+                                  "creators" => [Dict("creatorType" => "author", "name" => "European Space Agency"),
+                                                 Dict("creatorType" => "author", "firstName" => "Rowan", "lastName" => "Hale")]))
+    items[4]["data"]["note"] = "<p>Data set, CC BY 4.0. Accessed 5 November 2026</p>"
     booms = Ref(0)
     port = 18000 + rand(0:999)
     asked = String[]
@@ -3624,7 +3633,7 @@ end
         # An item that failed does not stop the run, and is tried again in the next.
         @test K.state(run)["retry"] == Dict("1" => ["B1"])
         dem = only(r for r in res if K.paper_row(kb, r).title == "Copernicus DEM GLO-30")
-        @test K.resource_row(kb, dem).note == "Data set, CC BY 4.0" && K.resource_row(kb, dem).type == "document" && K.paper_row(kb, dem).published == "2021-03-01"
+        @test K.resource_row(kb, dem).note == "Data set, CC BY 4.0. Accessed 5 November 2026" && K.resource_row(kb, dem).type == "document" && K.paper_row(kb, dem).published == "2021-03-01"
         closed = only(r for r in res if r != dem)
         @test K.paper_row(kb, closed).doi == "10.1/closed"
         @test Set(x.target for x in K.library(kb, "WE")) == Set(["2401.00002", dem, closed])
@@ -3632,6 +3641,24 @@ end
         # Nothing changed since: Zotero says so, and only the item that failed is asked for again.
         K.zotero_poll(run)
         @test K.state(run)["versions"] == Dict("1" => 1) && K.state(run)["retry"] == Dict("1" => String[])
+
+        # Where it appeared, who published it, which authors are organizations, and when it was accessed.
+        d = K.resource_row(kb, dem)
+        @test (d.container, d.publisher, d.accessed) == ("Copernicus Data Space", "European Space Agency", "2026-11-05")
+        @test K.json_list(d.organizations) == ["European Space Agency"]
+        bib = K.bib_entry(kb, dem)
+        @test startswith(bib, "@misc{$dem,") && occursin("author = {{European Space Agency} and Hale, Rowan}", bib)
+        @test occursin("howpublished = {Copernicus Data Space}", bib) && !occursin("note = ", bib)
+        @test occursin("url = {https://example.org/dem}", bib) && occursin("urldate = {2026-11-05}", bib)
+        @test occursin("docpage = {generated/kb/resources/", bib)
+        # A run made by an older reading reads the whole library again: its resources gain what is read
+        # now, and items that are one work stay one document.
+        resources() = K.scalar(kb, "SELECT count(*) FROM papers WHERE kind = 'resource'")
+        before = resources()
+        K.save_state!(run, merge(K.state(run), Dict("reading" => 1)))
+        empty!(asked)
+        K.zotero_poll(run)
+        @test asked == ["0"] && K.state(run)["reading"] == K.ZOTERO_READING && resources() == before
 
         # The next run asks only for what changed since; a document removed here is not brought in again.
         K.remove_paper!(kb, dem)
@@ -3641,7 +3668,13 @@ end
         @test "1" in asked && ismissing(K.paper_id(kb, dem))
         @test K.state(run)["retry"] == Dict("1" => String[]) && any(r -> K.paper_row(kb, r.doc_id).title == "A paper OpenAlex fails on",
                                                                     K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource'"))
-        @test any(r -> K.paper_row(kb, r.doc_id).title == "Treatment wetlands", K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource'"))
+        wet = only(r.doc_id for r in K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource'")
+                   if K.paper_row(kb, r.doc_id).title == "Treatment wetlands")
+        # A report is a technical report of its institution; without one, a misc.
+        @test startswith(K.bib_entry(kb, wet), "@misc{")
+        items[end]["version"] = 3; items[end]["data"]["institution"] = "University of Kassel"
+        K.zotero_poll(run)
+        @test startswith(K.bib_entry(kb, wet), "@techreport{") && occursin("institution = {University of Kassel}", K.bib_entry(kb, wet))
     finally
         K.ZOTERO_API[], K.DOI_COPIES[] = saved_api, saved_copies
         K.READ_PUT[] = true

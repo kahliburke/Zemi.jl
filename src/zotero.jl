@@ -50,7 +50,10 @@ const ZOTERO_TYPES = Dict("journalArticle" => "article", "conferencePaper" => "c
 
 "An item's authors, as `First Last`, its institution where a work names no person."
 zotero_authors(d) = String[strip(get(c, "name", "") * get(c, "firstName", "") * " " * get(c, "lastName", ""))
-                     for c in get(d, "creators", []) if get(c, "creatorType", "author") in ("author", "editor", "programmer", "contributor")]
+                     for c in zotero_creators(d)]
+zotero_creators(d) = [c for c in get(d, "creators", []) if get(c, "creatorType", "author") in ("author", "editor", "programmer", "contributor")]
+"Which of an item's authors are organizations: those Zotero names in one field, not as a first and last name."
+zotero_organizations(d) = String[strip(c["name"]) for c in zotero_creators(d) if haskey(c, "name")]
 
 "An item's year, or the date as precise as it gives it, from its free-form `date`."
 function zotero_date(d)
@@ -63,6 +66,44 @@ end
 "Whether `url` is a repository on a code host (GitHub, GitLab, Codeberg, Bitbucket): an owner and a name, and no more."
 code_host_repository(url::AbstractString) =
     occursin(r"^https?://(www\.)?(github\.com|gitlab\.com|codeberg\.org|bitbucket\.org)/[^/\s]+/[^/\s#?]+?(\.git)?/?$"i, strip(url))
+
+"Where an item appeared: its journal, newspaper, website, book or proceedings, or the `Published:` line of its `extra`."
+function zotero_container(d)
+    for f in ("publicationTitle", "bookTitle", "proceedingsTitle", "websiteTitle", "blogTitle", "forumTitle", "programTitle",
+              "encyclopediaTitle", "dictionaryTitle")
+        v = strip(get(d, f, ""))
+        isempty(v) || return String(v)
+    end
+    m = match(r"(?m)^\s*Published:\s*(.+?)\s*$", get(d, "extra", ""))
+    return m === nothing ? "" : String(m[1])
+end
+
+"Who published an item: its publisher, or the institution, company or university that issued it."
+function zotero_publisher(d)
+    for f in ("publisher", "institution", "company", "university", "repository", "network", "label")
+        v = strip(get(d, f, ""))
+        isempty(v) || return String(v)
+    end
+    return ""
+end
+
+"""
+When an item was accessed, as `yyyy-mm-dd`: its `accessDate`, else a note that says so ("Accessed 5
+November 2026"); `""` when neither does.
+"""
+function zotero_accessed(d, notes)
+    m = match(r"^(\d{4}-\d{2}-\d{2})", strip(get(d, "accessDate", "")))
+    m === nothing || return String(m[1])
+    for n in notes
+        m = match(r"(?i)accessed\s+(\d{1,2}\s+[a-z]+\s+\d{4}|\d{4}-\d{2}-\d{2})", n)
+        m === nothing && continue
+        t = m[1]
+        occursin('-', t) && return String(t)
+        parsed = tryparse(Date, titlecase(t), dateformat"d U y")
+        parsed === nothing || return string(parsed)
+    end
+    return ""
+end
 
 "The text of Zotero notes, without their HTML."
 note_text(html::AbstractString) = strip(replace(replace(replace(html, r"<[^>]+>" => " "), "&nbsp;" => " ", "&amp;" => "&",
@@ -92,11 +133,19 @@ function zotero_item!(kb::KB, item, notes::AbstractVector{<:AbstractString}; pro
         id = add_doi!(kb, doi; title, authors, published = isempty(date) ? nothing : first(date, 4), source, by)
         id === nothing || return keep(id)
     end
-    r = Resource(; key = String(item["key"]), title, type = get(ZOTERO_TYPES, d["itemType"], d["itemType"]), authors, date,
+    r = Resource(; key = String(item["key"]), title, type = get(ZOTERO_TYPES, d["itemType"], d["itemType"]), authors,
+                 organizations = zotero_organizations(d), date,
                  url, doi, note = join(filter(!isempty, [strip(get(d, "abstractNote", "")); notes]), "\n\n"),
+                 container = zotero_container(d), publisher = zotero_publisher(d), accessed = zotero_accessed(d, notes),
                  projects = isempty(project) ? String[] : [project])
     return first(put_resource!(kb, source, r; by, read = READ_PUT[]))
 end
+
+"""
+What a run reads of an item. A run made by an older one reads each group's whole library once more,
+so what it brought in gains what is read now.
+"""
+const ZOTERO_READING = 2
 
 """
     zotero_poll(run)
@@ -111,7 +160,7 @@ function zotero_poll(run)
     groups = get(d, "groups", Dict())
     key = haskey(d, "key") ? secret(run, "key") : ""
     st = state(run)
-    versions = Dict{String,Any}(get(st, "versions", Dict()))
+    versions = get(st, "reading", 1) < ZOTERO_READING ? Dict{String,Any}() : Dict{String,Any}(get(st, "versions", Dict()))
     made = Dict{String,Any}(get(st, "items", Dict()))
     titled = Dict{String,Any}(get(st, "titles", Dict()))
     again = Dict{String,Any}(get(st, "retry", Dict()))
@@ -149,7 +198,8 @@ function zotero_poll(run)
             doi = normalize_doi(strip(get(it["data"], "DOI", "")))
             t = isempty(doi) ? "title:" * normalize_title(get(it["data"], "title", "")) : "doi:" * doi
             haskey(titled, t) && (titled[t] = current_document(kb, titled[t]))
-            if haskey(titled, t) && !ismissing(paper_id(kb, titled[t])) && !haskey(made, k)
+            # Its own resource, read again, is brought up to date instead.
+            if haskey(titled, t) && !ismissing(paper_id(kb, titled[t])) && !own_resource(kb, titled[t], it["key"])
                 isempty(project) || library_add!(kb, project, titled[t]; by = Actor("zotero", false))
                 made[k] = titled[t]
                 continue
@@ -168,9 +218,13 @@ function zotero_poll(run)
         end
         cancelled(run) || (versions[group] = got.version)
         again[group] = failed
-        save_state!(run, Dict("versions" => versions, "items" => made, "titles" => titled, "retry" => again))
+        save_state!(run, Dict("versions" => versions, "items" => made, "titles" => titled, "retry" => again, "reading" => ZOTERO_READING))
     end
 end
+
+"Whether document `id` is the resource Zotero item `key` made."
+own_resource(kb::KB, id::AbstractString, key::AbstractString) =
+    is_resource(id) && (r = resource_row(kb, id); r !== nothing && r.key == key)
 
 record_source!("zotero"; label = "From a Zotero library", every = 3600, poll = zotero_poll, configured = true,
                budget = (; seconds = 3600.0), api = PLUGIN_API)

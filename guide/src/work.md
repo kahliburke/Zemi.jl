@@ -113,7 +113,9 @@ and a project's board its own. Records are never built into the site: the servic
 A resource is something the group uses or cites without reading it in full: a data set, a data
 portal, a news report, a law, or a book or paper with no copy to read. It has a title, authors, a
 date, its type, a link and a note, and is found by search, cited as `@res-…`, kept in project
-libraries and listed on the Resources page. It is not summarized.
+libraries and listed on the Resources page. It is not summarized. In the bibliography (`zemi bib`)
+it is the entry its type calls for: an article in its journal or newspaper, a book, a chapter, a
+report of its institution, and anything else a `misc` naming where it appeared and when it was accessed.
 
 A Zotero group's library is kept in step with the knowledge base by the Zotero source:
 
