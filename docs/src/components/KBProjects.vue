@@ -1222,7 +1222,7 @@ function keepRecordsOpen(open: boolean) {
       <div v-if="WAITING.some(w => shownWaiting[w.id].length)" class="kbp-waiting" :class="{ pulse }">
         <span class="kbp-waiting-label">Waiting on you</span>
         <button v-for="w in WAITING" :key="w.id" v-show="shownWaiting[w.id].length" class="kbp-ms" :class="{ on: waitingOpen === w.id, pulse: pulsing.has(w.id) }"
-                @click="waitingOpen = waitingOpen === w.id ? '' : w.id">{{ shownWaiting[w.id].length }} {{ w.label }}</button>
+                @click="waitingOpen = waitingOpen === w.id ? '' : w.id"><strong class="kbp-n">{{ shownWaiting[w.id].length }}</strong> {{ w.label }}</button>
         <ul v-if="waitingOpen" class="kbp-waiting-list">
           <li v-for="t in shownWaiting[waitingOpen as Section]" :key="t.ref"
               :class="{ flash: freshRows.has(`${waitingOpen}:${t.ref}`) }">
@@ -1670,8 +1670,14 @@ function keepRecordsOpen(open: boolean) {
 .kbp-button:disabled { opacity: 0.5; cursor: default; }
 .kbp-secondary { display: inline-flex; align-items: center; gap: 0.3rem; background: none; color: var(--vp-c-brand-1); border: 1px solid var(--vp-c-brand-1); }
 
-.kbp-waiting { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.4rem 0 0.8rem; padding: 0.5rem 0.7rem;
-  border-radius: 10px; background: var(--vp-c-bg-soft); }
+/* Shown only when something waits, so it stands out: an accent edge and tint, and counts in the accent. */
+.kbp-waiting { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0.4rem 0 0.8rem; padding: 0.55rem 0.8rem;
+  border-radius: 10px; border-left: 4px solid var(--vp-c-brand-1);
+  background: color-mix(in srgb, var(--vp-c-brand-1) 9%, var(--vp-c-bg-soft)); }
+.kbp-waiting > .kbp-waiting-label { color: var(--vp-c-brand-1); font-weight: 700; }
+.kbp-waiting > .kbp-ms { border-color: color-mix(in srgb, var(--vp-c-brand-1) 55%, var(--vp-c-divider)); }
+.kbp-waiting > .kbp-ms:hover { border-color: var(--vp-c-brand-1); }
+.kbp-n { color: var(--vp-c-brand-1); font-weight: 700; }
 .kbp-waiting-label { font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--vp-c-text-2); margin-right: 0.3rem; }
 .kbp-waiting-list { flex-basis: 100%; list-style: none; margin: 0.3rem 0 0; padding: 0; }
 .kbp-waiting-list li { display: flex; gap: 0.45rem; align-items: baseline; padding: 0.15rem 0; overflow-wrap: anywhere; }
