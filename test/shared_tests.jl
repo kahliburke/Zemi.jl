@@ -216,6 +216,24 @@ end
     end
 end
 
+@zset "privacy page" begin
+    HTTP = K.HTTP
+    sh = shared_config(providers = [K.Provider(name = "GitHub", kind = :github, client_id = "c"),
+                                    K.Provider(name = "Google", issuer = "https://accounts.google.com", client_id = "g")])
+    kb = open_kb(temp_config(; shared = sh, contact = "ada@example.org"))
+    get(target) = K.respond_service(kb, HTTP.Request("GET", target); shared = true)
+    # Shown to anyone, as providers link to it before anyone signs in; other pages still ask for one.
+    r = get("/privacy")
+    page = String(r.body)
+    @test r.status == 200 && occursin("GitHub or Google", page) && occursin("mailto:ada@example.org", page)
+    @test get("/").status == 302
+    @test occursin("href=\"/privacy\"", K.sign_in_page(sh))
+    close(kb)
+    kb = open_kb(temp_config(; shared = sh))
+    @test occursin("the group's admins", String(get("/privacy").body))
+    close(kb)
+end
+
 @zset "permissions on the API" begin
     HTTP, JSON = K.HTTP, K.JSON
     kb = open_kb(temp_config())

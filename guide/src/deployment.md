@@ -33,7 +33,8 @@ the certificate.
 
 **Sign-in.** For GitHub, an OAuth app with callback `https://<host>/auth/callback/github`. For
 Google, in the Google Cloud console under APIs & Services: an OAuth consent screen (External, then
-published, or only its test users can sign in) and a Web application client with redirect URI
+published, or only its test users can sign in; its privacy policy is `https://<host>/privacy`, which
+the service shows to anyone) and a Web application client with redirect URI
 `https://<host>/auth/callback/google`. Each provider's callback ends with its `name`, lowercased,
 other characters as `-` ("Campus Login": `/auth/callback/campus-login`).
 

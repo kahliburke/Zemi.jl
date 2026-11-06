@@ -70,6 +70,9 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             HTTP.setheader(r, "Access-Control-Allow-Origin" => "*")
             HTTP.setheader(r, "Cross-Origin-Resource-Policy" => "cross-origin")
             r
+        elseif shared && uri.path == "/privacy"
+            # To anyone: sign-in providers link to it before anyone has signed in.
+            HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"], privacy_page(kb.config))
         elseif shared && (caller = shared_caller(kb, req)).via == :anonymous
             redirect("/auth/sign-in?return_to=" * HTTP.escapeuri(req.target))
         elseif shared && !can(caller, "read")
