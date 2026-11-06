@@ -3703,7 +3703,7 @@ end
     port = 18000 + rand(0:999)
     server = HTTP.serve!("127.0.0.1", port) do req
         path = HTTP.URI(req.target).path
-        if path == "/v1/chat/completions"
+        if endswith(path, "/chat/completions")
             asked[] += 1
             content = JSON.parse(String(req.body))["messages"][2]["content"]
             prompt = content isa String ? content : join((p["text"] for p in content if p["type"] == "text"), "\n")
@@ -3722,7 +3722,7 @@ end
     K.ZOTERO_PRESCREEN[] = K.zotero_prescreen
     K.READ_PUT[] = false
     s = Summarizer(; name = "fake", url = "http://127.0.0.1:$port", model = "fake-model")
-    kb = open_kb(temp_config(summarizers = [s], summarizer = "fake", layers = Layer[],
+    kb = open_kb(temp_config(summarizers = [s], summarizer = "fake", code_summarizer = "fake", judge = "fake", layers = Layer[],
                              sources = Dict{String,Any}("zotero" => Dict{String,Any}("groups" => Dict{String,Any}("1" => "WE")))))
     try
         K.create_project!(kb, "Wetlands"; key = "WE", owner = nothing, by = K.person("Ada"))
@@ -3737,7 +3737,7 @@ end
         news = resource("Floods in the south")
         @test K.resource_row(kb, news).type == "news" && lib[news].status == "proposed" && occursin("perhaps a report", lib[news].why)
         @test lib["2401.00003"].status == "kept" && lib[resource("A digital elevation model")].status == "kept"
-        @test !any(r -> r.title == "Untitled stub", K.query(kb, "SELECT title FROM papers"))
+        @test K.scalar(kb, "SELECT count(*) FROM papers WHERE title = 'Untitled stub'") == 0
         # One the model left out is tried again in the next run, and only it is asked about.
         @test K.state(run)["retry"] == Dict("1" => ["L1"])
         says["L1"] = Dict("as" => "resource", "type" => "web page", "sure" => true, "why" => "a portal")
