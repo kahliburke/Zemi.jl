@@ -6,9 +6,10 @@
 - To read papers:
   - [Ollama](https://ollama.com) with `qwen3-embedding:4b`
   - [Qdrant](https://qdrant.tech) on port 6333 ([Kaimon](https://github.com/kahliburke/Kaimon.jl) can start it)
-  - `mutool` 1.27 or later from [MuPDF](https://mupdf.com): `brew install mupdf-tools`; distributions'
-    packages are often older, so build it from source there (as `deploy/install.sh` does)
-  - poppler's `pdftoppm`, for agent summarizers reading large PDFs
+  - `mutool` 1.27 or later from [MuPDF](https://mupdf.com): `apt install mupdf-tools` (Ubuntu 26.04,
+    Debian 14 or later), `dnf install mupdf` (Fedora 43 or later), or `brew install mupdf-tools`
+  - poppler's `pdftoppm`, for agent summarizers reading large PDFs: `apt install poppler-utils` or
+    `brew install poppler`
   - access to a summarizer (see [Models](models.md))
 
 Without Ollama and Qdrant, the site and keyword search still work; the Status page lists what is

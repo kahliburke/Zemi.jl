@@ -50,19 +50,27 @@ read -r port qdrant models < <(cd "$checkout" && as_user julia --project=app -e 
     println(c.shared.port, " ", isempty(c.qdrant_url) ? "kaimon" : "own", " ", join(unique(l.model for l in c.layers), " "))')
 
 echo "Reading PDFs: MuPDF's mutool"
-# The version papers are read with, built from MuPDF's source where this one is older: distributions'
-# packages lag behind, and older ones read pages and draw figures differently.
+# The version papers are read with (older ones read pages and draw figures differently): the
+# distribution's package where it is that new, as on Ubuntu 26.04 and Debian 14, else MuPDF's source
+# built here.
 mupdf=1.27.0 mupdf_sha256=ae2442416de499182d37a526c6fa2bacc7a3bed5a888d113ca04844484dfe7c6
-# None installed yet is an empty version, not a failure.
+# Whether version $1 is at least $mupdf. None (an empty version) is not.
+recent() { [ -n "$1" ] && [ "$(printf '%s\n%s\n' "$mupdf" "$1" | sort -V | head -1)" = "$mupdf" ]; }
 have=$(mutool -v 2>&1 | sed -n 's/^mutool version \([0-9.]*\).*/\1/p' | head -1 || true)
-if [ -z "$have" ] || [ "$(printf '%s\n%s\n' "$mupdf" "$have" | sort -V | head -1)" != "$mupdf" ]; then
-    apt-get update -qq >/dev/null && apt-get install -y -qq build-essential pkg-config >/dev/null
-    src=$(mktemp -d)
-    curl -fsSL -o "$src/mupdf.tar.gz" "https://mupdf.com/downloads/archive/mupdf-$mupdf-source.tar.gz"
-    echo "$mupdf_sha256  $src/mupdf.tar.gz" | sha256sum -c --quiet || { echo "MuPDF's source is not the one expected." >&2; exit 1; }
-    tar xzf "$src/mupdf.tar.gz" -C "$src"
-    make -C "$src/mupdf-$mupdf-source" -j"$(nproc)" HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no build=release prefix=/usr/local install >/dev/null
-    rm -rf "$src"
+if ! recent "$have"; then
+    apt-get update -qq >/dev/null
+    packaged=$(apt-cache policy mupdf-tools | sed -n 's/^ *Candidate: \([0-9.]*\).*/\1/p')
+    if recent "$packaged"; then
+        apt-get install -y -qq mupdf-tools >/dev/null
+    else
+        apt-get install -y -qq build-essential pkg-config >/dev/null
+        src=$(mktemp -d)
+        curl -fsSL -o "$src/mupdf.tar.gz" "https://mupdf.com/downloads/archive/mupdf-$mupdf-source.tar.gz"
+        echo "$mupdf_sha256  $src/mupdf.tar.gz" | sha256sum -c --quiet || { echo "MuPDF's source is not the one expected." >&2; exit 1; }
+        tar xzf "$src/mupdf.tar.gz" -C "$src"
+        make -C "$src/mupdf-$mupdf-source" -j"$(nproc)" HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no build=release prefix=/usr/local install >/dev/null
+        rm -rf "$src"
+    fi
 fi
 # Agents read a PDF too large to attach whole as its pages' images, which their Read tool makes with poppler's pdftoppm.
 command -v pdftoppm >/dev/null || apt-get install -y -qq poppler-utils >/dev/null
