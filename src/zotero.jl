@@ -99,7 +99,7 @@ end
 
 A run of the Zotero source: each group in its settings read for the items changed since the last run,
 and each brought in (see [`zotero_item!`](@ref)). The state keeps each group's library version, the
-document each item became, and by title the document a work without a DOI became.
+document each item became, and the document each work became, by its DOI or, without one, its title.
 """
 function zotero_poll(run)
     d = settings(run)
@@ -126,16 +126,17 @@ function zotero_poll(run)
             k = "$group/$(it["key"])"
             # Removed here since: not brought in again.
             haskey(made, k) && ismissing(paper_id(kb, made[k])) && continue
-            t = normalize_title(get(it["data"], "title", ""))
-            if isempty(strip(get(it["data"], "DOI", ""))) && haskey(titled, t) && !ismissing(paper_id(kb, titled[t])) && !haskey(made, k)
+            # The same work as an item seen before: by its DOI, or by its title where it has none.
+            doi = normalize_doi(strip(get(it["data"], "DOI", "")))
+            t = isempty(doi) ? "title:" * normalize_title(get(it["data"], "title", "")) : "doi:" * doi
+            if haskey(titled, t) && !ismissing(paper_id(kb, titled[t])) && !haskey(made, k)
                 isempty(project) || library_add!(kb, project, titled[t]; by = Actor("zotero", false))
                 made[k] = titled[t]
                 continue
             end
             id = zotero_item!(kb, it, get(notes, it["key"], String[]); project)
             id === nothing && continue
-            made[k] = id
-            isempty(strip(get(it["data"], "DOI", ""))) && (titled[t] = id)
+            made[k] = titled[t] = id
             is_resource(id) || is_codebase(id) || READ_PUT[] && queue_reading!(kb, [id])
         end
         cancelled(run) || (versions[group] = got.version)

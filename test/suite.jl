@@ -3562,7 +3562,8 @@ end
              item("D1", 1, "document", "Copernicus DEM GLO-30"; url = "https://example.org/dem"),
              item("N1", 1, "note", ""; parent = "D1", note = "<p>Data set, CC BY 4.0</p>"),
              item("D2", 1, "document", "Copernicus DEM GLO-30"),
-             item("C1", 1, "journalArticle", "A closed paper"; doi = "10.1/closed")]
+             item("C1", 1, "journalArticle", "A closed paper"; doi = "10.1/closed"),
+             item("C2", 1, "journalArticle", "A closed paper"; doi = "10.1/CLOSED")]
     port = 18000 + rand(0:999)
     asked = String[]
     server = K.HTTP.serve!("127.0.0.1", port) do req

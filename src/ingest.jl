@@ -3,10 +3,11 @@
 
 Record papers by arXiv id (URLs and `arXiv:` references are accepted too) without fetching
 anything. Returns the normalized ids. A paper new to the knowledge base gets a mention of how it
-came: `source` is one of [`ARRIVALS`](@ref), and `by` who added it, where known.
+came: `source` is one of [`ARRIVALS`](@ref) or a registered source's name (see
+[`record_source!`](@ref)), and `by` who added it, where known.
 """
 function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::AbstractString = "added", by = nothing)
-    source in keys(ARRIVALS) || record_source(source)      # one of ours, or a source's own name
+    source in keys(ARRIVALS) || registered_source(source) !== nothing || error("Not a way a paper arrives: $source")
     out = String[]
     transaction(kb) do
         for s in ids
