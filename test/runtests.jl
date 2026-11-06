@@ -10,6 +10,8 @@ const K = Zemi
 K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
 K.DOI_COPIES[] = (doi; contact = "") -> (; arxiv = nothing, pdf = nothing)
 K.ARXIV_TITLE_SEARCH[] = (title, c) -> K.PaperMeta[]
+# The Zotero prescreen leaves each item to its Zotero type, unless a test sorts them.
+K.ZOTERO_PRESCREEN[] = (kb, items, notes) -> Dict(String(it["key"]) => (; as = "", type = "", sure = true, why = "") for it in items)
 include("s3_standin.jl")
 
 # A span of body text at the given position; widths are rough, which is all layout needs.

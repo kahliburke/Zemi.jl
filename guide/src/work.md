@@ -123,7 +123,13 @@ A Zotero group's library is kept in step with the knowledge base by the Zotero s
 [sources.zotero]
 groups = { 6748949 = "RB" }       # a group's id, and the project whose library keeps its items ("" for none)
 # key = "file:/srv/zemi/.config/zemi/zotero"   # an API key, for a group that is not public
+# prescreen = false                # leave items to their Zotero types
 ```
+
+Zotero's types are often wrong: a data set or a news story filed as a document, a data set as a
+journal article. So the summarizer first sorts each new or changed item as a paper, a resource (and
+of which type), a codebase, or nothing to bring in. An item it is unsure of comes in proposed in the
+project's library, with its reason, for a person to keep or drop.
 
 Each hour it reads the items changed since its last run. A work with a DOI comes in as a paper when
 a copy can be read: its arXiv copy (which OpenAlex knows, or a search of arXiv by its title finds),

@@ -3683,6 +3683,79 @@ end
     end
 end
 
+@zset "the Zotero prescreen" begin
+    HTTP, JSON = K.HTTP, K.JSON
+    item(key, type, title; doi = "", url = "") =
+        Dict("key" => key, "version" => 1, "data" => Dict("key" => key, "itemType" => type, "title" => title, "DOI" => doi, "url" => url,
+                                                          "creators" => [], "date" => "2025"))
+    items = [item("P1", "journalArticle", "Rain over the hills"; doi = "10.1/rain"),
+             item("J1", "journalArticle", "A digital elevation model"; doi = "10.1/dem"),
+             item("W1", "document", "Floods in the south"; url = "https://example.org/floods"),
+             item("S1", "document", "Untitled stub"),
+             item("L1", "document", "Left out by the model")]
+    # What the model says of each, by key; one it leaves out, and a key it was not asked about.
+    says = Dict("P1" => Dict("as" => "paper", "sure" => true, "why" => "a research article"),
+                "J1" => Dict("as" => "resource", "type" => "dataset", "sure" => true, "why" => "a data set filed as an article"),
+                "W1" => Dict("as" => "resource", "type" => "news", "sure" => false, "why" => "a news story, perhaps a report"),
+                "S1" => Dict("as" => "skip", "sure" => true, "why" => "a placeholder"),
+                "X9" => Dict("as" => "paper", "sure" => true, "why" => "not asked"))
+    asked = Ref(0)
+    port = 18000 + rand(0:999)
+    server = HTTP.serve!("127.0.0.1", port) do req
+        path = HTTP.URI(req.target).path
+        if path == "/v1/chat/completions"
+            asked[] += 1
+            content = JSON.parse(String(req.body))["messages"][2]["content"]
+            prompt = content isa String ? content : join((p["text"] for p in content if p["type"] == "text"), "\n")
+            keys = [m[1] for m in eachmatch(r"- key: (\w+);", prompt)]
+            reply = Dict("items" => [merge(Dict("key" => k), says[k]) for k in [keys; "X9"] if haskey(says, k)])
+            HTTP.Response(200, JSON.json(Dict("choices" => [Dict("message" => Dict("content" => "Sorted: " * JSON.json(reply)))],
+                                              "usage" => Dict("prompt_tokens" => 10, "completion_tokens" => 5))))
+        else
+            HTTP.Response(200, ["Last-Modified-Version" => "1", "Total-Results" => string(length(items))], JSON.json(items))
+        end
+    end
+    saved = (K.ZOTERO_API[], K.DOI_COPIES[], K.ZOTERO_PRESCREEN[])
+    K.ZOTERO_API[] = "http://127.0.0.1:$port"
+    tried = String[]
+    K.DOI_COPIES[] = (doi; contact = "") -> (push!(tried, doi); doi == "10.1/rain" ? (; arxiv = "2401.00003", pdf = nothing) : (; arxiv = nothing, pdf = nothing))
+    K.ZOTERO_PRESCREEN[] = K.zotero_prescreen
+    K.READ_PUT[] = false
+    s = Summarizer(; name = "fake", url = "http://127.0.0.1:$port", model = "fake-model")
+    kb = open_kb(temp_config(summarizers = [s], summarizer = "fake", layers = Layer[],
+                             sources = Dict{String,Any}("zotero" => Dict{String,Any}("groups" => Dict{String,Any}("1" => "WE")))))
+    try
+        K.create_project!(kb, "Wetlands"; key = "WE", owner = nothing, by = K.person("Ada"))
+        run = K.SourceRun(kb, K.registered_source("zotero"))
+        K.zotero_poll(run)
+        # The paper is looked for by its DOI; the data set filed as an article is not, and is a data set.
+        @test tried == ["10.1/rain"] && !ismissing(K.paper_id(kb, "2401.00003"))
+        resource(title) = only(r.doc_id for r in K.query(kb, "SELECT doc_id, title FROM papers WHERE kind = 'resource'") if r.title == title)
+        @test K.resource_row(kb, resource("A digital elevation model")).type == "dataset"
+        # One it is unsure of is proposed, with its reason; the rest are kept; a placeholder is not brought in.
+        lib = Dict(x.target => x for x in K.library(kb, "WE"))
+        news = resource("Floods in the south")
+        @test K.resource_row(kb, news).type == "news" && lib[news].status == "proposed" && occursin("perhaps a report", lib[news].why)
+        @test lib["2401.00003"].status == "kept" && lib[resource("A digital elevation model")].status == "kept"
+        @test !any(r -> r.title == "Untitled stub", K.query(kb, "SELECT title FROM papers"))
+        # One the model left out is tried again in the next run, and only it is asked about.
+        @test K.state(run)["retry"] == Dict("1" => ["L1"])
+        says["L1"] = Dict("as" => "resource", "type" => "web page", "sure" => true, "why" => "a portal")
+        before = asked[]
+        K.zotero_poll(run)
+        @test asked[] == before + 1 && K.resource_row(kb, resource("Left out by the model")).type == "web page"
+        @test K.state(run)["retry"] == Dict("1" => String[])
+        # The model is told each item's fields, and the group.
+        @test K.prescreen_prompt(items[1:1], Dict{String,Vector{String}}(), "Wetland hydrology") |> p ->
+              occursin("- key: P1; zotero type: journalArticle; title: Rain over the hills", p) && occursin("Wetland hydrology", p)
+    finally
+        K.ZOTERO_API[], K.DOI_COPIES[], K.ZOTERO_PRESCREEN[] = saved
+        K.READ_PUT[] = true
+        close(server)
+        close(kb)
+    end
+end
+
 @zset "a paper uploaded that is already here" begin
     dir = mktempdir()
     page = """
