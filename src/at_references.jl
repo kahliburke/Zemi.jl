@@ -87,6 +87,8 @@ function link_at_references!(kb::KB, ref::AbstractString, text::AbstractString; 
             target = uppercase(target)
             ismissing(scalar(kb, "SELECT 1 FROM findings f JOIN projects p ON p.id = f.project_id WHERE p.key || '-F' || f.number = ?",
                              (target,))) && continue
+        elseif kind == "paper"
+            target = current_document(kb, target)
         elseif kind == "code" && !occursin(':', target)
             codebase = task_codebase(kb, id)
             isempty(codebase) && continue

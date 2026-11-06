@@ -18,6 +18,7 @@ function library_source(kb::KB, source::AbstractString; caller::Caller = local_c
     end
     is_repository(s) && return (; kind = "codebase", target = seen_document(kb, caller, link_repository!(kb, s)))
     e = evidence_source(s)
+    e.kind == "paper" && (e = (; e..., target = current_document(kb, e.target)))
     e.kind in ("paper", "notebook") || error("A library holds papers, notebooks and codebases, not a $(e.kind): $s")
     e.kind == "paper" && ismissing(paper_id(kb, e.target)) && not_found("No paper $(e.target) in the knowledge base")
     return (; kind = e.kind, target = e.target)

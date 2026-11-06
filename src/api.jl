@@ -262,6 +262,21 @@ end
 # Add a document and start reading it: a PDF as the body (`?name=…&title=…&by=…`), or JSON with
 # `arxiv` (ids or URLs) or `codebase` (a repository or folder). With `"read": false` papers are only
 # recorded, to be read in full later; `source` is how they came (see ARRIVALS), `by` who added them.
+# A resource's PDF, uploaded to read it in full (see `promote_resource!`): the paper it becomes, being read.
+route!("POST", "/api/resources/:id/pdf"; need = "paper.add") do c
+    kb = c.kb
+    blocked = cannot_run(kb, "ingest", PAPER)
+    isempty(blocked) || error("Can't read documents here: ", join(blocked, "; "))
+    path = tempname() * ".pdf"
+    write(path, body_bytes(c))
+    id = try
+        promote_resource!(kb, c[:id], path; by = adder(nothing, c.caller))
+    finally
+        rm(path; force = true)
+    end
+    Dict("id" => id, "page" => document_page(id), "job" => start_action(kb, "ingest", [id]).id)
+end
+
 route!("POST", "/api/documents"; need = "paper.add") do c
     kb, caller = c.kb, c.caller
     # Documents are added to be read, so nothing is added where they cannot be.

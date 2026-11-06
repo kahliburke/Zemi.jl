@@ -170,9 +170,63 @@ function resource_json(kb::KB, id::AbstractString)
                             "doi" => coalesce(r.doi, ""), "source" => r.source)
 end
 
+"Each resource that became another document (see [`promote_resource!`](@ref)), by its slug, with where that one's page is."
+moved_resources(kb::KB) =
+    [(; slug = page_slug(r.from_id), page = document_page(current_document(kb, r.from_id)))
+     for r in query(kb, "SELECT from_id FROM moved_documents WHERE from_id LIKE ?", (RESOURCE.prefix * "%",))]
+
 "Every resource, as the page listing them shows each (`resources.json`), by title."
 resources_json(kb::KB) =
     [Dict("id" => r.doc_id, "slug" => page_slug(r.doc_id), "page" => document_page(r.doc_id), "title" => r.title, "type" => r.type,
           "authors" => json_list(r.authors), "date" => coalesce(r.published, ""), "source" => r.source)
      for r in query(kb, """SELECT p.doc_id, p.title, p.authors, p.published, x.type, x.source
                            FROM resources x JOIN papers p ON p.id = x.paper_id ORDER BY lower(p.title)""")]
+
+# ── Becoming a paper ──────────────────────────────────────────────────────────────────────────────
+
+# A document that became another (a resource read in full once its PDF was uploaded): `@` mentions
+# and sources that name the first are taken to name the second.
+migration!(8, ["CREATE TABLE moved_documents (from_id TEXT PRIMARY KEY, to_id TEXT NOT NULL, at TEXT NOT NULL)"])
+
+"The document `id` names now: itself, or the one it became (see [`promote_resource!`](@ref))."
+function current_document(kb::KB, id::AbstractString)
+    for _ in 1:10                                     # a document moved again follows each move
+        to = scalar(kb, "SELECT to_id FROM moved_documents WHERE from_id = ?", (id,))
+        ismissing(to) && return String(id)
+        id = to
+    end
+    return String(id)
+end
+
+"""
+    promote_resource!(kb, id, pdf; by = nothing) -> String
+
+Read resource `id` in full from its PDF, at `pdf`: the PDF becomes a paper (see [`add_pdf!`](@ref)),
+with the resource's title, authors, year and DOI where the PDF gives none, and returning the paper's
+id. What named the resource names the paper: project libraries, task links and findings' evidence;
+the resource is removed, and its id names the paper from then on (see [`current_document`](@ref)).
+The paper is not read here (see [`ingest!`](@ref)).
+"""
+function promote_resource!(kb::KB, id::AbstractString, pdf::AbstractString; by = nothing)
+    r = resource_row(kb, id)
+    r === nothing && not_found("No resource $id in the knowledge base")
+    year = coalesce(r.published, "")
+    new = add_pdf!(kb, pdf; title = r.title, authors = json_list(r.authors), published = isempty(year) ? nothing : first(year, 4),
+                   added_by = by)
+    new == id && return new
+    transaction(kb) do
+        ismissing(r.doi) || execute!(kb, "UPDATE papers SET doi = ? WHERE doc_id = ? AND doi IS NULL", (r.doi, new))
+        # Where the paper is named already, the resource's link goes; elsewhere it names the paper.
+        execute!(kb, """DELETE FROM library WHERE kind = 'paper' AND target = ?
+                        AND project_id IN (SELECT project_id FROM library WHERE kind = 'paper' AND target = ?)""", (id, new))
+        execute!(kb, "UPDATE library SET target = ? WHERE kind = 'paper' AND target = ?", (new, id))
+        execute!(kb, """DELETE FROM task_links WHERE kind = 'paper' AND target = ?
+                        AND task_id IN (SELECT task_id FROM task_links WHERE kind = 'paper' AND target = ?)""", (id, new))
+        execute!(kb, "UPDATE task_links SET target = ? WHERE kind = 'paper' AND target = ?", (new, id))
+        execute!(kb, "UPDATE finding_evidence SET target = ? WHERE kind = 'paper' AND target = ?", (new, id))
+        execute!(kb, "INSERT OR REPLACE INTO moved_documents VALUES (?, ?, ?)", (id, new, now_iso()))
+    end
+    remove_paper!(kb, id)
+    tasks_changed!()
+    return new
+end

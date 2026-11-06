@@ -755,6 +755,11 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
         write(joinpath(public, "kb-data", "resources", r["slug"] * ".json"), JSON.json(resource_json(kb, r["id"])))
         write(joinpath(dir, "resources", r["slug"] * ".md"), template_markdown("resources"))
     end
+    # One read in full since: its address leads to the paper it became.
+    for m in moved_resources(kb)
+        write(joinpath(public, "kb-data", "resources", m.slug * ".json"), JSON.json(Dict("moved" => m.page)))
+        write(joinpath(dir, "resources", m.slug * ".md"), template_markdown("resources"))
+    end
     write(joinpath(public, "resources.json"), JSON.json(resources))
     isempty(resources) || write(joinpath(dir, "resources.md"), """
         # Resources

@@ -987,6 +987,27 @@ end
         @test d["title"] == "Copernicus DEM GLO-30" && d["type"] == "dataset" && d["doi"] == "10.5270/esa-c5d3d65" && d["source"] == "zotero"
         @test isfile(joinpath(site, "resources", K.page_slug(id) * ".md")) && K.document_page(id) == "resources/$(K.page_slug(id))"
         @test [x["title"] for x in K.JSON.parsefile(joinpath(public, "resources.json"))] == ["Bali flood facts so far", "Copernicus DEM GLO-30"]
+
+        # Its PDF uploaded, a resource becomes a paper: what named it names the paper, and its id leads there.
+        me = K.person("Ada")
+        t = K.create_task!(kb, "WE", "Map the catchment"; body = "From @$id.", by = me)
+        f = K.create_finding!(kb, "WE", "The catchment drains south"; evidence = [(; kind = "paper", target = id)], by = me)
+        dir = mktempdir()
+        write(joinpath(dir, "dem.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 10 Tf 72 700 Td (Elevation tiles.) Tj ET\n")
+        run(`mutool create -o $(joinpath(dir, "dem.pdf")) $(joinpath(dir, "dem.txt"))`)
+        paper = K.promote_resource!(kb, id, joinpath(dir, "dem.pdf"); by = "Ada")
+        q = K.paper_row(kb, paper)
+        @test startswith(paper, "doc-") && q.title == "Copernicus DEM GLO-30" && q.doi == "10.5270/esa-c5d3d65" && q.published == "2021"
+        @test ismissing(K.paper_id(kb, id)) && K.current_document(kb, id) == paper && K.current_document(kb, paper) == paper
+        @test [x.target for x in K.library(kb, "WE")] == [paper]
+        @test any(l -> l.kind == "paper" && l.target == paper, K.task(kb, t).links)
+        @test only(K.finding(kb, f).evidence).target == paper
+        # A mention of its old id still names the paper.
+        K.update_task!(kb, t; body = "From @$id, again.", by = me)
+        @test count(l -> l.kind == "paper", K.task(kb, t).links) == 1
+        @test_throws "No resource" K.promote_resource!(kb, id, joinpath(dir, "dem.pdf"))
+        K.write_site(kb, site, public; related = false)
+        @test K.JSON.parsefile(joinpath(public, "kb-data", "resources", K.page_slug(id) * ".json")) == Dict("moved" => K.document_page(paper))
     finally
         close(kb)
     end

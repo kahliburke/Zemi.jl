@@ -136,11 +136,19 @@ function zotero_poll(run)
         for it in tops
             cancelled(run) && break
             k = "$group/$(it["key"])"
-            # Removed here since: not brought in again.
+            # Become another document since (a resource read in full): that one; removed here: not brought in again.
+            was = get(made, k, nothing)
+            was === nothing || (made[k] = current_document(kb, was))
             haskey(made, k) && ismissing(paper_id(kb, made[k])) && continue
+            # Read in full since from a PDF uploaded here: the paper it became stays what it is.
+            if was !== nothing && made[k] != was
+                isempty(project) || library_add!(kb, project, made[k]; by = Actor("zotero", false))
+                continue
+            end
             # The same work as an item seen before: by its DOI, or by its title where it has none.
             doi = normalize_doi(strip(get(it["data"], "DOI", "")))
             t = isempty(doi) ? "title:" * normalize_title(get(it["data"], "title", "")) : "doi:" * doi
+            haskey(titled, t) && (titled[t] = current_document(kb, titled[t]))
             if haskey(titled, t) && !ismissing(paper_id(kb, titled[t])) && !haskey(made, k)
                 isempty(project) || library_add!(kb, project, titled[t]; by = Actor("zotero", false))
                 made[k] = titled[t]
