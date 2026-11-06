@@ -108,6 +108,28 @@ its page or the Manage page; then the project's members see it. They may also op
 reader. Run for one person, every record is theirs. The Records page lists those the reader may see,
 and a project's board its own. Records are never built into the site: the service shows their pages.
 
+## Resources and Zotero
+
+A resource is something the group uses or cites without reading it in full: a data set, a data
+portal, a news report, a law, or a book or paper with no copy to read. It has a title, authors, a
+date, its type, a link and a note, and is found by search, cited as `@res-…`, kept in project
+libraries and listed on the Resources page. It is not summarized.
+
+A Zotero group's library is kept in step with the knowledge base by the Zotero source:
+
+```toml
+[sources.zotero]
+groups = { 6748949 = "RB" }       # a group's id, and the project whose library keeps its items ("" for none)
+# key = "file:/srv/zemi/.config/zemi/zotero"   # an API key, for a group that is not public
+```
+
+Each hour it reads the items changed since its last run. A work with a DOI comes in as a paper when
+a copy can be read: its arXiv copy (which OpenAlex knows, or a search of arXiv by its title finds),
+else an open PDF OpenAlex points to. A link to a repository on a code host becomes a codebase.
+Everything else, and a paper with no copy to read, is a resource; upload its PDF to read it in full.
+Items that are the same work (the same DOI, or the same title) come in once, and one removed here is
+not brought in again.
+
 ## Findings
 
 A finding is a claim, a Markdown write-up, and its evidence: papers (with the quoted passage),

@@ -69,6 +69,29 @@ function work_record(w::AbstractDict)
 end
 
 """
+    doi_copies(doi; contact = "") -> (; arxiv, pdf)
+
+Where OpenAlex knows a copy of the work with DOI `doi` to read: its arXiv id, and the address of an
+open PDF of it (its best open copy's first), each `nothing` for none.
+"""
+function doi_copies(doi::AbstractString; contact::AbstractString = "")
+    works = openalex_get(["filter" => "doi:" * doi, "per-page" => "1", "select" => "doi,locations,best_oa_location"]; contact)
+    isempty(works) && return (; arxiv = nothing, pdf = nothing)
+    w = first(works)
+    locations = AbstractDict[l for l in [something(get(w, "best_oa_location", nothing), Dict()); something(w["locations"], [])] if !isempty(l)]
+    arxiv = nothing
+    for l in locations
+        id = parse_arxiv_id(something(get(l, "landing_page_url", nothing), ""))
+        id === nothing || (arxiv = id.id; break)
+    end
+    pdfs = [String(l["pdf_url"]) for l in locations if get(l, "is_oa", false) === true && get(l, "pdf_url", nothing) !== nothing]
+    return (; arxiv, pdf = isempty(pdfs) ? nothing : first(pdfs))
+end
+
+"Where a DOI's copies are looked up (see [`doi_copies`](@ref)); tests put a stand-in here."
+const DOI_COPIES = Ref{Function}(doi_copies)
+
+"""
     openalex_arxiv(dois, contact = "") -> Dict{String,Union{String,Nothing}}
 
 What each of `dois` (at most 50) is on arXiv as, by OpenAlex's record of where the work is posted:

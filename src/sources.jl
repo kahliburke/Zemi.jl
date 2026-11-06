@@ -16,7 +16,8 @@ const SOURCE_MODES = (:local, :shared)
 
 """
 A source of records, as [`record_source!`](@ref) registered it: `every` in seconds (0 for one that
-does not poll), and `plugin` the package that registered it, empty for Zemi's own.
+does not poll), `configured` whether it runs only where the config has its section, and `plugin` the
+package that registered it, empty for Zemi's own.
 """
 struct RecordSource
     name::String
@@ -27,6 +28,7 @@ struct RecordSource
     accepts::Union{Function,Nothing}
     read::Union{Function,Nothing}
     budget::typeof(DEFAULT_BUDGET)
+    configured::Bool
     plugin::String
 end
 
@@ -36,7 +38,7 @@ const SOURCES_LOCK = ReentrantLock()
 
 """
     record_source!(name; label, modes = (:local, :shared), every = nothing, poll = nothing,
-                   accepts = nothing, read = nothing, budget = (;), api) -> RecordSource
+                   accepts = nothing, read = nothing, budget = (;), configured = false, api) -> RecordSource
 
 Register a source of records, or replace the one of that name. A source is code that reads another
 system and hands Zemi what it finds; it is given only a run (see [`SourceRun`](@ref)), and Zemi
@@ -49,6 +51,8 @@ writes, labels and guards what it hands in.
 - `modes`: where it runs, `:local` (`zemi`) and `:shared` (`zemi --shared`)
 - `poll(run)`, run every `every` (a period, or seconds): its scheduled work
 - `accepts(path)` and `read(run, path)`: a file someone uploads that it knows how to read
+- `configured`: it runs, and is listed among the sources, only where the config has its section
+  (`[sources.<name>]`): one Zemi has that only some knowledge bases use
 - `budget`: the most a run may do, as `records` written, `figure_bytes` of their figures and
   `seconds` (see `DEFAULT_BUDGET`); a run that has spent it is stopped
 - `api`: the version of this interface it was written for; one that is not [`PLUGIN_API`](@ref) is refused
@@ -58,7 +62,7 @@ to the source as registered.
 """
 function record_source!(name::AbstractString; label::AbstractString, modes = SOURCE_MODES, every = nothing,
                         poll::Union{Function,Nothing} = nothing, accepts::Union{Function,Nothing} = nothing,
-                        read::Union{Function,Nothing} = nothing, budget = (;), api::Integer)
+                        read::Union{Function,Nothing} = nothing, budget = (;), configured::Bool = false, api::Integer)
     api == PLUGIN_API ||
         error("Source $name is written for Zemi's plugin interface $api, and this Zemi's is $PLUGIN_API: update the one or the other")
     name = record_source(name)
@@ -75,7 +79,7 @@ function record_source!(name::AbstractString; label::AbstractString, modes = SOU
     isempty(extra) || error("Source $name's budget is $(join(keys(DEFAULT_BUDGET), ", ")), not $(join(extra, ", "))")
     b = (; (k => convert(fieldtype(typeof(DEFAULT_BUDGET), k), get(budget, k, DEFAULT_BUDGET[k])) for k in keys(DEFAULT_BUDGET))...)
     all(>(0), values(b)) || error("Source $name's budget is positive: $b")
-    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, get(task_local_storage(), :zemi_plugin, ""))
+    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, configured, get(task_local_storage(), :zemi_plugin, ""))
     lock(SOURCES_LOCK) do
         i = findfirst(x -> x.name == name, SOURCES[])
         SOURCES[] = i === nothing ? [SOURCES[]; s] : [SOURCES[][1:i-1]; s; SOURCES[][i+1:end]]
@@ -91,6 +95,9 @@ serving_mode() = SHARED_MODE[] ? :shared : :local
 
 "Whether source `s` runs in this process's mode."
 runs_here(s::RecordSource) = serving_mode() in s.modes
+
+"Whether source `s` is one this knowledge base uses: any, but one `configured` only where the config has its section."
+used_here(kb::KB, s::RecordSource) = !s.configured || haskey(kb.config.sources, s.name)
 
 # ── A run ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -323,7 +330,7 @@ run is due at `at`; returns their jobs.
 function due_sources!(kb::KB; at::Real = time())
     jobs = Job[]
     for s in SOURCES[]
-        (s.poll === nothing || !runs_here(s) || source_running(s.name)) && continue
+        (s.poll === nothing || !runs_here(s) || !used_here(kb, s) || source_running(s.name)) && continue
         st = source_status(kb, s.name)
         get(st, "paused", false) || get(st, "next_at", 0.0) > at || push!(jobs, start_source_run(kb, s))
     end
@@ -402,7 +409,7 @@ kept but that is not registered (its package not loaded) is listed as such.
 function sources_status(kb::KB)
     counts = Dict(String(r.source) => Int(r.n) for r in query(kb, "SELECT source, count(*) AS n FROM records GROUP BY source"))
     kept = [String(r.key)[length("source_status:")+1:end] for r in query(kb, "SELECT key FROM kv WHERE key LIKE 'source_status:%'")]
-    names = unique([[s.name for s in SOURCES[]]; sort!(unique([collect(keys(counts)); kept]))])
+    names = unique([[s.name for s in SOURCES[] if used_here(kb, s)]; sort!(unique([collect(keys(counts)); kept]))])
     return map(names) do name
         s, st = registered_source(name), source_status(kb, name)
         polls = s !== nothing && s.poll !== nothing

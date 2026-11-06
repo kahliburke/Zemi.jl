@@ -8,6 +8,8 @@ using Zemi: Span, TextLine, RawBlock, parse_blocks, keyword_query, point_id,
 const K = Zemi
 # Uploads are not looked up in OpenAlex here; the look-up is tested with a stand-in.
 K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
+K.DOI_COPIES[] = (doi; contact = "") -> (; arxiv = nothing, pdf = nothing)
+K.ARXIV_TITLE_SEARCH[] = (title, c) -> K.PaperMeta[]
 include("s3_standin.jl")
 
 # A span of body text at the given position; widths are rough, which is all layout needs.

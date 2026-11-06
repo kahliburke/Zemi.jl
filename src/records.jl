@@ -427,21 +427,22 @@ end
 
 # ── Reading ─────────────────────────────────────────────────────────────────────────────────────
 
-"The records waiting to be read, and the job reading them, if one is (see [`queue_reading!`](@ref))."
+"The documents sources handed in that wait to be read, and the job reading them, if one is (see [`queue_reading!`](@ref))."
 const READING = (; ids = Set{String}(), job = Ref{Union{Job,Nothing}}(nothing), lock = ReentrantLock())
 
 """
     queue_reading!(kb, ids) -> Job
 
-Have records `ids` read (see [`ingest!`](@ref)) by the job reading records: one job reads every record
-queued while it runs, so a source handing in many starts one. A record it does not read (the
-service stopping first) is queued again when the service next starts (see [`queue_unread_records!`](@ref)).
+Have documents `ids` that sources handed in read (see [`ingest!`](@ref)) by the job reading them: one
+job reads every document queued while it runs, so a source handing in many starts one. A record it
+does not read (the service stopping first) is queued again when the service next starts (see
+[`queue_unread_records!`](@ref)); another document is left for a sync.
 """
 function queue_reading!(kb::KB, ids)
     lock(READING.lock) do
         union!(READING.ids, ids)
         READING.job[] === nothing || return READING.job[]
-        READING.job[] = start_job("read records"; changes = changes_stamp(kb.config)) do job
+        READING.job[] = start_job("read documents"; changes = changes_stamp(kb.config)) do job
             results = []
             try
                 while true
@@ -450,7 +451,7 @@ function queue_reading!(kb::KB, ids)
                     end
                     id === nothing && break
                     push!(job.ids, id)
-                    is_record(id) && !ismissing(paper_id(kb, id)) &&
+                    !ismissing(paper_id(kb, id)) &&
                         append!(results, ingest!(kb, [id]; progress = m -> report!(job, m)))
                 end
             finally

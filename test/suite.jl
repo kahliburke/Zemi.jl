@@ -3505,6 +3505,117 @@ end
     close(kb)
 end
 
+@zset "papers by DOI" begin
+    dir = mktempdir()
+    write(joinpath(dir, "a.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 24 Tf 72 700 Td (Floods in a Small Catchment) Tj ET\n")
+    run(`mutool create -o $(joinpath(dir, "a.pdf")) $(joinpath(dir, "a.txt"))`)
+    port = 18000 + rand(0:999)
+    server = K.HTTP.serve!("127.0.0.1", port) do req
+        req.target == "/a.pdf" ? K.HTTP.Response(200, read(joinpath(dir, "a.pdf"))) : K.HTTP.Response(200, "<html>a publisher's page</html>")
+    end
+    copies = Dict("10.1/onarxiv" => (; arxiv = "2401.00002", pdf = nothing), "10.1/open" => (; arxiv = nothing, pdf = "http://127.0.0.1:$port/a.pdf"),
+                  "10.1/page" => (; arxiv = nothing, pdf = "http://127.0.0.1:$port/page"))
+    saved = K.DOI_COPIES[]
+    K.DOI_COPIES[] = (doi; contact = "") -> get(copies, doi, (; arxiv = nothing, pdf = nothing))
+    kb = open_kb(temp_config(layers = Layer[]))
+    try
+        # Its arXiv copy is that arXiv paper; its open PDF is read like an upload, with the source's title and the DOI.
+        @test K.add_doi!(kb, "https://doi.org/10.1/OnArxiv"; source = "zotero") == "2401.00002"
+        id = K.add_doi!(kb, "10.1/open"; title = "Floods in a small catchment", authors = ["Ada"], published = "2021", source = "zotero")
+        p = K.paper_row(kb, id)
+        @test startswith(id, "doc-") && p.title == "Floods in a small catchment" && p.doi == "10.1/open" && p.published == "2021"
+        @test [m.source for m in K.mentions(kb, id)] == ["zotero"] && [m.source for m in K.mentions(kb, "2401.00002")] == ["zotero"]
+        # Asked again, it is the paper already here; with no copy to read, or a page in place of one, there is none.
+        @test K.add_doi!(kb, "10.1/open"; source = "zotero") == id
+        @test K.add_doi!(kb, "10.1/page") === nothing && K.add_doi!(kb, "10.1/closed") === nothing
+        # A closed paper kept as a resource is no paper here: its copy, when one is found, is added.
+        K.put_resource!(kb, "zotero", K.Resource(; key = "C1", title = "A closed paper", doi = "10.1/onarxiv2"); read = false)
+        copies["10.1/onarxiv2"] = (; arxiv = "2401.00003", pdf = nothing)
+        @test K.add_doi!(kb, "10.1/onarxiv2") == "2401.00003"
+        # A copy OpenAlex does not know is searched for on arXiv by its title: the same title, and its DOI or an author's surname.
+        meta(id, t, authors; doi = nothing) = K.PaperMeta(; doc_id = id, version = "v1", title = t, abstract = "", authors, published = "2020",
+                                                          updated = "2020", primary_category = "physics.ao-ph", categories = ["physics.ao-ph"], doi)
+        saved_search = K.ARXIV_TITLE_SEARCH[]
+        K.ARXIV_TITLE_SEARCH[] = (t, c) -> [meta("2401.00009", "Rainfall over Bali", ["Rowan Hale"]), meta("2401.00004", "Rainfall over Bali", ["Bea Ng"])]
+        try
+            @test K.add_doi!(kb, "10.1/rain"; title = "Rainfall Over Bali", authors = ["Ng, Bea"]) == "2401.00004"
+            @test K.add_doi!(kb, "10.1/snow"; title = "Snowfall over Bali", authors = ["Ng, Bea"]) === nothing
+            @test K.add_doi!(kb, "10.1/rain2"; title = "Rainfall over Bali", authors = ["Ada Lovelace"]) === nothing
+        finally
+            K.ARXIV_TITLE_SEARCH[] = saved_search
+        end
+        @test_throws "Not a DOI" K.add_doi!(kb, " ")
+    finally
+        K.DOI_COPIES[] = saved
+        close(server)
+        close(kb)
+    end
+end
+
+@zset "zotero" begin
+    # A stand-in for Zotero's API: a group's items, each with the library version it was last changed in.
+    item(key, version, type, title; doi = "", url = "", parent = "", note = "", creators = []) =
+        Dict("key" => key, "version" => version, "data" => Dict("key" => key, "itemType" => type, "title" => title, "DOI" => doi, "url" => url,
+                                                               "parentItem" => parent, "note" => note, "creators" => creators, "date" => "2021-03-01"))
+    items = [item("A1", 1, "journalArticle", "Rainfall over Bali"; doi = "10.1/rain", creators = [Dict("creatorType" => "author", "firstName" => "Bea", "lastName" => "Ng")]),
+             item("A2", 1, "journalArticle", "Rainfall over Bali"; doi = "10.1/rain"),
+             item("D1", 1, "document", "Copernicus DEM GLO-30"; url = "https://example.org/dem"),
+             item("N1", 1, "note", ""; parent = "D1", note = "<p>Data set, CC BY 4.0</p>"),
+             item("D2", 1, "document", "Copernicus DEM GLO-30"),
+             item("C1", 1, "journalArticle", "A closed paper"; doi = "10.1/closed")]
+    port = 18000 + rand(0:999)
+    asked = String[]
+    server = K.HTTP.serve!("127.0.0.1", port) do req
+        q = K.HTTP.queryparams(K.HTTP.URI(req.target))
+        push!(asked, q["since"])
+        since = parse(Int, q["since"])
+        changed = [x for x in items if x["version"] > since]
+        K.HTTP.Response(200, ["Last-Modified-Version" => string(maximum(x -> x["version"], items)), "Total-Results" => string(length(changed))],
+                        K.JSON.json(changed))
+    end
+    saved_api, saved_copies = K.ZOTERO_API[], K.DOI_COPIES[]
+    K.ZOTERO_API[] = "http://127.0.0.1:$port"
+    K.DOI_COPIES[] = (doi; contact = "") -> doi == "10.1/rain" ? (; arxiv = "2401.00002", pdf = nothing) : (; arxiv = nothing, pdf = nothing)
+    K.READ_PUT[] = false
+    kb = open_kb(temp_config(layers = Layer[]))
+    try
+        # Run only where the config has its section.
+        z = K.registered_source("zotero")
+        @test z.configured && !K.used_here(kb, z) && !any(x -> x["name"] == "zotero", K.sources_status(kb))
+        K.create_project!(kb, "Wetlands"; key = "WE", owner = nothing, by = K.person("Ada"))
+        kb.config = K.with_config(kb.config; sources = Dict{String,Any}("zotero" => Dict{String,Any}("groups" => Dict{String,Any}("1" => "WE"))))
+        @test K.used_here(kb, z)
+        @test K.code_host_repository("https://github.com/Ada/Geomorphometry.jl") && K.code_host_repository("https://gitlab.com/ada/flow.git")
+        @test !K.code_host_repository("https://example.org/dem") && !K.code_host_repository("https://github.com/Ada/Geomorphometry.jl/issues/3")
+
+        # The paper with an arXiv copy, once for its two items; the data set a resource with its note, once for its two;
+        # the closed paper a resource with its DOI. All kept in the project's library.
+        run = K.SourceRun(kb, z)
+        K.zotero_poll(run)
+        res = [r.doc_id for r in K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource' ORDER BY title")]
+        @test length(res) == 2 && !ismissing(K.paper_id(kb, "2401.00002"))
+        dem = only(r for r in res if K.paper_row(kb, r).title == "Copernicus DEM GLO-30")
+        @test K.resource_row(kb, dem).note == "Data set, CC BY 4.0" && K.resource_row(kb, dem).type == "document" && K.paper_row(kb, dem).published == "2021-03-01"
+        closed = only(r for r in res if r != dem)
+        @test K.paper_row(kb, closed).doi == "10.1/closed"
+        @test Set(x.target for x in K.library(kb, "WE")) == Set(["2401.00002", dem, closed])
+        @test K.state(run)["versions"] == Dict("1" => 1) && [m.source for m in K.mentions(kb, "2401.00002")] == ["zotero"]
+
+        # The next run asks only for what changed since; a document removed here is not brought in again.
+        K.remove_paper!(kb, dem)
+        items[3]["version"] = 2; items[3]["data"]["title"] = "Copernicus DEM GLO-30 (2021)"
+        push!(items, item("R1", 2, "report", "Treatment wetlands"))
+        K.zotero_poll(run)
+        @test asked[end] == "1" && ismissing(K.paper_id(kb, dem))
+        @test any(r -> K.paper_row(kb, r.doc_id).title == "Treatment wetlands", K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource'"))
+    finally
+        K.ZOTERO_API[], K.DOI_COPIES[] = saved_api, saved_copies
+        K.READ_PUT[] = true
+        close(server)
+        close(kb)
+    end
+end
+
 @zset "a paper uploaded that is already here" begin
     dir = mktempdir()
     page = """

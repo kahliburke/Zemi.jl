@@ -6,7 +6,7 @@ anything. Returns the normalized ids. A paper new to the knowledge base gets a m
 came: `source` is one of [`ARRIVALS`](@ref), and `by` who added it, where known.
 """
 function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::AbstractString = "added", by = nothing)
-    source in keys(ARRIVALS) || error("Not a way a paper arrives: $source")
+    source in keys(ARRIVALS) || record_source(source)      # one of ours, or a source's own name
     out = String[]
     transaction(kb) do
         for s in ids
@@ -69,23 +69,24 @@ record_arrival!(kb::KB, pid, source::AbstractString, by = nothing) =
 
 """
     add_pdf!(kb, path; title = nothing, authors = String[], abstract = nothing, published = nothing,
-             added_by = nothing) -> String
+             added_by = nothing, source = "upload") -> String
 
 Add a paper that is not on arXiv from its PDF, returning its id: `doc-` and the start of the file's
 SHA-256, so adding the same file again gives the same paper. The file is copied into the data
 directory, where [`ingest!`](@ref) finds it like a downloaded one. A title or abstract not given
 is taken from the parsed PDF: the largest type on the first page, and the text under or after
-an "Abstract" heading. The upload is recorded as a mention, with `added_by` who added it where given.
+an "Abstract" heading. Its arrival is recorded as a mention from `source`, with `added_by` who added
+it where given.
 
 A paper is not added twice. An arXiv PDF (its first page stamped with its id, see
 [`arxiv_stamp`](@ref)) is added as that arXiv paper; a PDF whose published record has the DOI of a
 paper here (from arXiv, or uploaded before as another file) gives that paper's id, and adds nothing.
 """
 function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::AbstractVector{<:AbstractString} = String[],
-                  abstract = nothing, published = nothing, added_by = nothing)
+                  abstract = nothing, published = nothing, added_by = nothing, source::AbstractString = "upload")
     startswith(String(read(path, 5)), "%PDF") || error("$path is not a PDF")
     stamp = arxiv_stamp(path, kb.config)
-    stamp === nothing || return only(add_papers!(kb, [stamp]; source = "upload", by = added_by))
+    stamp === nothing || return only(add_papers!(kb, [stamp]; source, by = added_by))
     sha = bytes2hex(open(sha256, path))
     id = PAPER.prefix * sha[1:10]
     dest = joinpath(pdf_dir(kb.config), pdf_filename(id, ""))
@@ -134,14 +135,76 @@ function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::Abstra
             end
         end
         pid = paper_id(kb, id)
-        ismissing(scalar(kb, "SELECT 1 FROM mentions WHERE paper_id = ? AND source = 'upload'", (pid,))) && execute!(kb, """
+        ismissing(scalar(kb, "SELECT 1 FROM mentions WHERE paper_id = ? AND source = ?", (pid, source))) && execute!(kb, """
             INSERT INTO mentions (paper_id, source, channel, posted_at, author, url, message)
-            VALUES (?, 'upload', NULL, ?, ?, NULL, ?)""", (pid, time(), something(added_by, missing), basename(path)))
+            VALUES (?, ?, NULL, ?, ?, NULL, ?)""", (pid, source, time(), something(added_by, missing), basename(path)))
     end
     # A lookup that failed is left for heal_uploads! to try again.
     looked && heal_upload!(kb, id; parsed, lookup = (_; contact) -> rec)
     return id
 end
+
+"""
+    add_doi!(kb, doi; title = nothing, authors = String[], published = nothing, source = "added", by = nothing)
+        -> Union{String,Nothing}
+
+Add the paper with DOI `doi` to be read in full, returning its id: the paper here with that DOI; else
+its arXiv copy, as that arXiv paper, which OpenAlex knows or a search of arXiv for `title` finds (see
+[`arxiv_copy`](@ref)); else the open PDF of it OpenAlex knows (see [`doi_copies`](@ref)),
+added as [`add_pdf!`](@ref) does with `title`, `authors` and `published` where given. `nothing` when
+there is no copy to read, as for a closed paper. Its arrival is a mention from `source`, as `by` added
+it. It is not read here (see [`ingest!`](@ref)).
+"""
+function add_doi!(kb::KB, doi::AbstractString; title = nothing, authors::AbstractVector{<:AbstractString} = String[],
+                  published = nothing, source::AbstractString = "added", by = nothing)
+    d = normalize_doi(doi)
+    isempty(d) && error("Not a DOI: $(repr(doi))")
+    here = paper_with_doi(kb, d)
+    ismissing(here) || return here
+    c = DOI_COPIES[](d; contact = kb.config.contact)
+    arxiv = c.arxiv
+    arxiv === nothing && title !== nothing && (arxiv = arxiv_copy(kb.config, title; doi = d, authors))
+    arxiv === nothing || return only(add_papers!(kb, [arxiv]; source, by))
+    c.pdf === nothing && return nothing
+    path = tempname() * ".pdf"
+    try
+        r = HTTP.get(c.pdf; status_exception = false, connect_timeout = 20, readtimeout = 120, redirect_limit = 5)
+        # A publisher's page in place of the file is no copy to read.
+        (r.status == 200 && length(r.body) > 4 && String(r.body[1:5]) == "%PDF-") || return nothing
+        write(path, r.body)
+        id = add_pdf!(kb, path; title, authors, published, added_by = by, source)
+        execute!(kb, "UPDATE papers SET doi = ? WHERE doc_id = ? AND doi IS NULL", (d, id))
+        return id
+    finally
+        rm(path; force = true)
+    end
+end
+
+"""
+    arxiv_copy(config, title; doi, authors = String[]) -> Union{String,Nothing}
+
+The arXiv id of the work titled `title`, found by searching arXiv for the title: a paper whose title is
+the same and that names `doi` or shares one of `authors`' surnames (any paper of the same title, with
+no authors given). `nothing` for none, and when arXiv's search does not answer.
+"""
+function arxiv_copy(c::Config, title::AbstractString; doi::AbstractString, authors::AbstractVector{<:AbstractString} = String[])
+    found = try
+        ARXIV_TITLE_SEARCH[](title, c)
+    catch e
+        e isa InterruptException && rethrow()
+        @warn "arXiv's search did not answer for a title" title exception = e
+        return nothing
+    end
+    surname(a) = lowercase(last(split(strip(replace(a, r",.*" => "")))))
+    theirs(m) = Set(surname(a) for a in m.authors if !isempty(strip(a)))
+    i = findfirst(m -> same_title(m.title, title) &&
+                       (isequal(m.doi === nothing ? nothing : normalize_doi(m.doi), doi) || isempty(authors) ||
+                        !isempty(intersect(theirs(m), Set(surname(a) for a in authors if !isempty(strip(a)))))), found)
+    return i === nothing ? nothing : found[i].doc_id
+end
+
+"How arXiv is searched for a title (see [`arxiv_copy`](@ref)); tests put a stand-in here."
+const ARXIV_TITLE_SEARCH = Ref{Function}((title, c) -> search_arxiv("ti:\"$(replace(title, '"' => ""))\"", c; max_results = 5))
 
 "How long, in seconds, adding a PDF waits for its published record to be looked up."
 const UPLOAD_LOOKUP_WAIT = Ref(20.0)
@@ -166,11 +229,12 @@ end
     paper_with_doi(kb, doi) -> Union{String,Missing}
 
 The paper here with DOI `doi`: by its own record, or as the arXiv paper the DOI was found to be
-(see [`find_on_arxiv!`](@ref)). `missing` for none.
+(see [`find_on_arxiv!`](@ref)). `missing` for none. A resource with the DOI is no paper: it is what a
+work is kept as until a copy of it can be read.
 """
 function paper_with_doi(kb::KB, doi::AbstractString)
     d = normalize_doi(doi)
-    id = scalar(kb, "SELECT doc_id FROM papers WHERE lower(doi) = ? LIMIT 1", (d,))
+    id = scalar(kb, "SELECT doc_id FROM papers WHERE lower(doi) = ? AND NOT $(kind_in(RESOURCE)) LIMIT 1", (d,))
     ismissing(id) || return String(id)
     id = scalar(kb, "SELECT d.doc_id FROM doi_arxiv d JOIN papers p ON p.doc_id = d.doc_id WHERE lower(d.doi) = ? LIMIT 1", (d,))
     return ismissing(id) ? missing : String(id)
