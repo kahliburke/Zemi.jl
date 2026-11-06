@@ -97,6 +97,7 @@ end
     base = "http://127.0.0.1:$port"
     codes = Dict{String,Any}()          # code => what the provider was asked, as the browser would carry it
     unverified = Ref(false)             # the provider gives the email without saying whether it is verified
+    bare_iss = Ref(false)               # the ID token names its issuer without the scheme
     secret_file = tempname(); write(secret_file, "s3cret\n")
     form(req) = Dict(HTTP.queryparams(String(req.body)))
     jsonr(x; status = 200) = HTTP.Response(status, ["Content-Type" => "application/json"], JSON.json(x))
@@ -112,7 +113,7 @@ end
             delete!(codes, f["code"])
             f["client_secret"] == "s3cret" || return jsonr(Dict("error" => "invalid_client"); status = 401)
             K.base64url(K.sha256(f["code_verifier"])) == c["code_challenge"] || return jsonr(Dict("error" => "invalid_grant"); status = 400)
-            claims = Dict("iss" => base, "aud" => "kb-client", "exp" => time() + 300, "nonce" => get(c, "nonce_override", c["nonce"]),
+            claims = Dict("iss" => bare_iss[] ? "127.0.0.1:$port" : base, "aud" => "kb-client", "exp" => time() + 300, "nonce" => get(c, "nonce_override", c["nonce"]),
                           "sub" => "cl-42", "name" => "Una Ames")
             jsonr(Dict("access_token" => "at", "id_token" => "e30." * K.base64url(Vector{UInt8}(JSON.json(claims))) * ".sig"))
         elseif path == "/userinfo"
@@ -189,6 +190,16 @@ end
         @test startswith(K.begin_sign_in(sh, "github"), "$base/gh/authorize?") && v.q["scope"] == "read:user user:email"
         @test K.finish_sign_in(kb, sh, "github", v.back; browser = "b1").user_id == only(K.users(kb)).id
         @test Set(only(K.users(kb)).sign_ins) == Set(["Campus Login", "GitHub"])
+
+        # An issuer named without its scheme (as Google does in some tokens) is the same issuer.
+        bare_iss[] = true
+        v = visit(K.begin_sign_in(sh, "campus-login"; browser = "b1"))
+        @test K.finish_sign_in(kb, sh, "campus-login", v.back; browser = "b1").user_id == only(K.users(kb)).id
+        bare_iss[] = false
+        @test K.issued_by("accounts.google.com", "https://accounts.google.com")
+        @test K.issued_by("https://accounts.google.com/", "https://accounts.google.com")
+        @test !K.issued_by("evil.example/accounts.google.com", "https://accounts.google.com")
+        @test !K.issued_by("http://accounts.google.com", "https://accounts.google.com")
 
         # Finishing from the address the provider sent the browser to, pasted in, in the same browser.
         v = visit(K.begin_sign_in(sh, "campus-login"; browser = "b1"))

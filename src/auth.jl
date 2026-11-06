@@ -125,6 +125,15 @@ function token_request(url, form; headers = Pair{String,String}[])
     return body
 end
 
+"""
+Whether an ID token's `iss` names `issuer`. Google writes its issuer without the scheme in some
+tokens (`accounts.google.com`), which names the same issuer.
+"""
+function issued_by(iss::AbstractString, issuer::AbstractString)
+    iss = rstrip(iss, '/')
+    return iss == issuer || (!occursin("://", iss) && replace(issuer, r"^https?://" => "") == iss)
+end
+
 function oidc_identity(shared::SharedConfig, p::Provider, code::AbstractString, pending)
     d = discovery(p)
     t = token_request(d["token_endpoint"], ["grant_type" => "authorization_code", "code" => code,
@@ -136,7 +145,7 @@ function oidc_identity(shared::SharedConfig, p::Provider, code::AbstractString, 
     parts = split(t["id_token"], '.')
     length(parts) == 3 || error("$(p.name) returned a malformed ID token")
     claims = JSON.parse(String(base64url_decode(parts[2])))
-    rstrip(string(get(claims, "iss", "")), '/') == p.issuer || error("The ID token is not from $(p.issuer)")
+    issued_by(string(get(claims, "iss", "")), p.issuer) || error("The ID token is not from $(p.issuer)")
     aud = get(claims, "aud", "")
     p.client_id in (aud isa AbstractVector ? aud : [aud]) || error("The ID token is not for this service")
     get(claims, "exp", 0) > time() || error("The ID token has expired")

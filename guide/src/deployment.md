@@ -31,9 +31,11 @@ service of its own on `127.0.0.1`, with an API key.
 **DNS and ports.** A host name pointing at the server, ports 80 and 443 open. Caddy gets and renews
 the certificate.
 
-**Sign-in.** For GitHub, an OAuth app with callback `https://<host>/auth/callback/github`. Each
-provider's callback ends with its `name`, lowercased, other characters as `-` ("Campus Login":
-`/auth/callback/campus-login`).
+**Sign-in.** For GitHub, an OAuth app with callback `https://<host>/auth/callback/github`. For
+Google, in the Google Cloud console under APIs & Services: an OAuth consent screen (External, then
+published, or only its test users can sign in) and a Web application client with redirect URI
+`https://<host>/auth/callback/google`. Each provider's callback ends with its `name`, lowercased,
+other characters as `-` ("Campus Login": `/auth/callback/campus-login`).
 
 **Config** at `/srv/zemi/.config/zemi/config.toml`, secrets in files readable only by `zemi`:
 
@@ -54,7 +56,13 @@ kind = "github"
 client_id = "Ov23…"
 client_secret = "file:/srv/zemi/.config/zemi/github_oauth_secret"
 
-[[shared.providers]]                   # optional: any OpenID Connect provider
+[[shared.providers]]                   # optional: Google
+name = "Google"
+issuer = "https://accounts.google.com"
+client_id = "….apps.googleusercontent.com"
+client_secret = "file:/srv/zemi/.config/zemi/google_oauth_secret"
+
+[[shared.providers]]                   # optional: any other OpenID Connect provider
 name = "Campus"
 issuer = "https://login.example.org"
 client_id = "…"
