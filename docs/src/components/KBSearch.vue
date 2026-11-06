@@ -7,7 +7,7 @@
 -->
 <script setup lang="ts">
 import KBTitle from './KBTitle.vue'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, shallowRef, computed, onMounted, watch } from 'vue'
 import { mode, connect, getJSON, latest, isStale } from './kbApi'
 import { loadPapers, type Paper } from './kbData'
 import { byline } from './kbFormat'
@@ -36,15 +36,15 @@ const error = ref('')
 const seconds = ref<number | null>(null)
 // Showing the keyword matches while those by meaning are still coming.
 const partial = ref(false)
-let papers: readonly Paper[] = []
+const papers = shallowRef<readonly Paper[]>([])
 
 // Live when the knowledge base API answers (see kbApi), otherwise the paper list written with
 // the site.
 async function start(retry = false) {
   await connect(retry)
-  if (mode.value === 'static' && !papers.length) {
+  if (mode.value === 'static' && !papers.value.length) {
     try {
-      papers = await loadPapers()
+      papers.value = await loadPapers()
     } catch { error.value = 'Paper list unavailable.' }
   }
 }
@@ -60,7 +60,7 @@ function searchStatic(q: string): Hit[] {
   if (!terms.length) return []
   // A paper named by its arXiv id (with or without its version) comes first.
   const ids = (q.match(/\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7}/gi) ?? []).map(x => x.toLowerCase())
-  const scored = papers.map(p => {
+  const scored = papers.value.map(p => {
     const title = p.title.toLowerCase(), summary = p.summary.toLowerCase()
     const topics = p.topics.join(' ').toLowerCase(), authors = p.authors.join(' ').toLowerCase()
     let score = ids.includes(p.id.toLowerCase()) ? 100 : 0
@@ -121,7 +121,7 @@ const note = computed(() => mode.value === 'live'
     ? 'Searching by keyword'
     : `${rankings.value} method${rankings.value === 1 ? '' : 's'} (⚙)`
   : mode.value === 'static'
-    ? `Titles, summaries, topics (${papers.length} papers). Semantic search needs zemi.`
+    ? `Titles, summaries, topics (${papers.value.length} papers). Semantic search needs zemi.`
     : 'Connecting…')
 
 // How strong a match is: its fused score against a first place in every ranking of the search.
