@@ -151,7 +151,7 @@ sections its headings.
 
 ## Status
 
-The Status page lists the sources for those who manage documents: each one's label, modes, last
+The Documents page lists the sources for those who manage documents: each one's label, modes, last
 run (what it added, changed and skipped, or why it failed), next run and records, kept across
 restarts. A source whose records are kept but whose plugin is not loaded is shown as such, and a
 plugin that failed to load is shown with its error. A source can be run now, paused and resumed.
@@ -163,7 +163,7 @@ first (`records.purge`). Its state goes too, and a source still registered is pa
 
 `[plugins] env` is a Julia environment holding the plugin packages, and `load` the ones to load.
 The service puts `env` on its `LOAD_PATH` after its own environment and loads each package; one that
-is missing, fails to load or registers for another interface is logged and shown on the Status
+is missing, fails to load or registers for another interface is logged and shown on the Documents
 page, and the service runs on without it. Revise follows a loaded plugin's code as it follows
 Zemi's.
 

@@ -9,7 +9,7 @@ import KBTitle from './KBTitle.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { mode, status, connect, post, getJSON, jobs, followJobs, finishedJobs, blockers, latest, isStale, type Job } from './kbApi'
 import { kbPage } from './kbLinks'
-import { isCodebase, hasAccess } from './kbKinds'
+import { isCodebase, hasAccess, isResource } from './kbKinds'
 import { byline } from './kbFormat'
 import KBJobs from './KBJobs.vue'
 
@@ -112,6 +112,15 @@ async function run(action: string, ids: string[]) {
   } catch (e: any) { error.value = e.message ?? String(e) }
 }
 
+// A resource's PDF, uploaded to read it in full: the paper it becomes takes its place.
+async function promote(e: Event, id: string) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  error.value = ''
+  try { await post(`/api/resources/${encodeURIComponent(id)}/pdf`, file, 'application/pdf'); await load() }
+  catch (err: any) { error.value = err.message ?? String(err) }
+}
+
 function rowAction(e: Event, id: string) {
   const menu = e.target as HTMLSelectElement
   const action = menu.value
@@ -185,7 +194,9 @@ const who = (d: Doc) => byline(d.authors)
             <td>
               <a :href="kbPage(d.page)"><KBTitle :text="d.title" /></a>
               <div class="kbm-dim">{{ who(d) }}<span v-if="who(d)"> · </span><code>{{ d.id }}</code>
-                <span v-if="d.access === 'projects'"> · its projects only</span></div>
+                <span v-if="d.access === 'projects'"> · its projects only</span>
+                <template v-if="isResource(d.id)"> · <label class="kb-link kbm-upload">upload its PDF
+                  <input type="file" accept="application/pdf" @change="promote($event, d.id)" /></label></template></div>
               <div v-if="hasAccess(d.id)" class="kbm-dim kbm-projects">
                 <template v-if="d.projects.length">linked to
                   <span v-for="k in d.projects" :key="k">{{ k }}<button type="button" class="kb-link" :title="`Unlink ${k}`"
@@ -232,6 +243,8 @@ const who = (d: Doc) => byline(d.authors)
 <style scoped>
 .kbm { margin: 1rem 0 2rem; font-size: 0.9rem; }
 .kbm-filters { display: flex; gap: 0.6rem; }
+.kbm-upload { cursor: pointer; }
+.kbm-upload input { display: none; }
 .kbm-input { flex: 1; padding: 0.5rem 0.8rem; border-radius: 8px; }
 .kbm-select { padding: 0.4rem 0.5rem; font: inherit; border: 1px solid var(--vp-c-divider); border-radius: 8px;
   background: var(--vp-c-bg-soft); color: var(--vp-c-text-1); }

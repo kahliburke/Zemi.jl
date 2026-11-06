@@ -703,7 +703,7 @@ the site shows the knowledge base's changes without a build:
 - `index.md`, `timeline.md` and `topics.md`, drawn from `papers.json`; `status.md`, from
   `status.json`; `authors.md`, `landscape.md`, `missing.md`, `watch.md` and `daily.md`, from
   their JSON (see [`landscape!`](@ref), [`cited_works`](@ref), [`watch!`](@ref),
-  [`feature_daily!`](@ref)); and `manage.md`;
+  [`feature_daily!`](@ref)); and `manage.md`, the Documents page;
 - the pages the build still compiles: the lists of codebases (see [`write_code_site`](@ref)) and of
   records (see [`write_records_page`](@ref)), and each notebook's, whose digest is `BUILT_PAGES_FILE`.
 
@@ -801,13 +801,7 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
         ```
         """)
     write(joinpath(dir, "status.md"), status_markdown())
-    write(joinpath(dir, "manage.md"), """
-        # Manage documents
-
-        ```@raw html
-        <KBManager />
-        ```
-        """)
+    write(joinpath(dir, "manage.md"), documents_markdown())
 
     write_site_lists!(kb, dir, public, [paper_record(sp) for sp in papers]; write)
     write(joinpath(dir, "authors.md"), """
@@ -921,14 +915,28 @@ function site_figures!(kb::KB, dir::AbstractString, written::Set{String})
 end
 
 """
-    status_markdown() -> String
+    documents_markdown() -> String
 
-The site's status page: forms to sync and to add documents, the sources of records (KBSources.vue),
-and what the knowledge base holds, its tables drawn from status.json (see [`contents_json`](@ref),
-KBStatusTables.vue), which a refresh rewrites.
+The page where documents are acted on (its address is still `manage.md`): adding them, finding each
+and running its steps again (KBManager.vue), bringing all of them up to date, and the sources that
+bring them in (KBSources.vue).
 """
-status_markdown() = """
-    # Status
+documents_markdown() = """
+    # Documents
+
+    ## Add documents
+
+    arXiv ids, PDFs and Git repositories.
+
+    ```@raw html
+    <KBUpload />
+    ```
+
+    ## Find and manage
+
+    ```@raw html
+    <KBManager />
+    ```
 
     ## Sync
 
@@ -936,18 +944,29 @@ status_markdown() = """
     <KBSync />
     ```
 
-    ## Add documents
-
-    arXiv ids, PDFs and Git repositories. [Manage](./manage.md) reprocesses or removes them.
-
-    ```@raw html
-    <KBUpload />
-    ```
-
     ## Sources
 
     ```@raw html
     <KBSources />
+    ```
+    """
+
+"""
+    status_markdown() -> String
+
+The site's status page: what the knowledge base holds, its tables drawn from status.json (see
+[`contents_json`](@ref), KBStatusTables.vue), which a refresh rewrites. What is done to documents is
+on the Documents page (see [`documents_markdown`](@ref)).
+"""
+status_markdown() = """
+    # Status
+
+    What the knowledge base holds. Documents are added, read again and removed on [Documents](./manage.md).
+
+    ## Services
+
+    ```@raw html
+    <KBServices />
     ```
 
     ## Contents

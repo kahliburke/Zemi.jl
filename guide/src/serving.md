@@ -14,7 +14,7 @@ meaning and running agents need Zemi's API behind it.
 | Adding papers, sync, checking arXiv | | ✓ | ✓ |
 | Projects, tasks, findings | | ✓ | ✓ |
 | Tutor, agent notebooks | | ✓ | ✓ |
-| Configuration, Setup, Operations, Manage | | ✓ | ✓ |
+| Configuration, Setup, Operations, Documents | | ✓ | ✓ |
 | Agent tools | | via Kaimon | MCP at `/mcp` |
 | Sign-in, roles, invitations, API tokens | | | ✓ |
 
@@ -96,7 +96,7 @@ members of the projects linked to it (and those whose roles reach every project)
 no project is seen only by those who manage papers (see [Records](work.md#Records)). A document is
 linked to a project as its codebase or by a link of its own. A codebase from a repository the GitHub
 App reads, a private one, starts closed; the rest start open. Those who manage papers change it on
-the codebase's page or the Manage page. A closed document is left out of the site's build, its
+the codebase's page or the Documents page. A closed document is left out of the site's build, its
 search index and the landscape, and out of the dataset; the service shows its pages to those who
 may see it. Records are never built into the site,
 open or not. Linking a project to a codebase, or keeping one in a library, takes seeing it.

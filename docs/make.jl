@@ -90,7 +90,7 @@ if isempty(ONLY)
                                      "Topics" => kb_page(site.overview), resources..., "Authors" => kb_page(site.authors), "Missing papers" => kb_page(site.missing),
                                      "New on arXiv" => kb_page(site.watch),
                                      "Timeline" => kb_page(site.timeline), "Status" => kb_page(site.status),
-                                     "Manage" => kb_page(site.manage)],
+                                     "Documents" => kb_page(site.manage)],
                 "Code" => ["Codebases" => kb_page(site.code_index); [t => kb_page(p) for (t, p) in site.code]]]
 end
 
@@ -103,7 +103,7 @@ struct KnowledgeBaseSite <: Documenter.Plugin end
 DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
     [(name = n, import_path = "@/$n.vue") for n in ("KBSearch", "KBSettings", "KBUpload", "KBManager", "KBCodeTree", "KBSync", "KBLandscape",
                                                       "KBDownload", "KBBibliography", "KBMissing", "KBWatch", "KBDaily", "KBInLibraries", "KBAuthors", "KBAccount",
-                                                      "KBSources",
+                                                      "KBSources", "KBServices",
                                                       "KBAccountPage", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate",
                                                       "KBProjects", "KBFindings", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
                                                       "KBStatusTables", "KBCodeFilePage", "KBCodebasePage", "KBCodebases", "KBDayPage",

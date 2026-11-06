@@ -1,14 +1,15 @@
 // The kinds of documents, told from their ids as src/kinds.jl tells them: a paper is an arXiv id or
-// an upload's (`doc-…`), a codebase's id begins `code-`, a record's `rec-`. An id of no kind is
+// an upload's (`doc-…`), a codebase's id begins `code-`, a record's `rec-`, a resource's `res-`. An id of no kind is
 // neither a paper nor on arXiv. `access`: one may be open only to the members of its projects (see
 // src/document_access.jl). `noun`: what one is called.
 
-export type DocumentKind = 'paper' | 'code' | 'record'
+export type DocumentKind = 'paper' | 'code' | 'record' | 'resource'
 
 const KINDS: Record<DocumentKind, { prefix: string; access: boolean; noun: string }> = {
   paper: { prefix: 'doc-', access: false, noun: 'paper' },
   code: { prefix: 'code-', access: true, noun: 'codebase' },
   record: { prefix: 'rec-', access: true, noun: 'record' },
+  resource: { prefix: 'res-', access: false, noun: 'resource' },
 }
 
 /** What a document of `kind` is called (`codebase`), the kind's name for one of no kind listed. */
@@ -42,3 +43,6 @@ export function splitCodeTarget(target: string): [string, string] {
   const m = target.match(/^([^:]+):(.*)$/)
   return m && isCodebase(m[1]) ? [m[1], m[2]] : ['', target]
 }
+
+/** Whether `id` names a resource: a work kept without being read in full (see src/resources.jl). */
+export const isResource = (id: string) => documentKind(id) === 'resource'

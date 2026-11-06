@@ -40,7 +40,7 @@ manage a dataset (see [Datasets](datasets.md)). `pkg> app develop ./app` install
 
 ## Add papers
 
-From **Add documents** on the Status page, an agent's `ingest` tool, or Julia:
+From **Add documents** on the Documents page, an agent's `ingest` tool, or Julia:
 
 ```julia
 using Zemi
@@ -50,5 +50,5 @@ search(db, "how the method's error scales with the problem size")
 ```
 
 Ingesting fetches, parses, summarizes and embeds each paper. Finished steps are skipped, so a
-failed run can be repeated. PDFs not on arXiv and Git repositories (as codebases) are added from the
-Status page too. The Manage page finds, reprocesses and removes documents.
+failed run can be repeated. PDFs not on arXiv and Git repositories (as codebases) are added there
+too, and the same page finds, reprocesses and removes documents.

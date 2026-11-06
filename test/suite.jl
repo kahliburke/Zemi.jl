@@ -4219,7 +4219,10 @@ end
         plan = get("/api/sync")[2]                  # the upload is read but not classified; the arXiv paper is unread
         @test plan["unread"] == 1 && plan["job"] === nothing
         @test only(plan["tasks"])["action"] == "classify" && only(plan["tasks"])["page"] == "papers/$id"
-        @test occursin("<KBSync", read(joinpath(site, nav.status), String))
+        # Syncing, adding and the sources are on the Documents page; the Status page shows what the knowledge base holds.
+        docs_page, status_page = read(joinpath(site, nav.manage), String), read(joinpath(site, nav.status), String)
+        @test all(c -> occursin(c, docs_page), ("<KBSync", "<KBUpload", "<KBManager", "<KBSources"))
+        @test occursin("<KBServices", status_page) && !occursin("<KBSync", status_page)
 
         # Managing documents: listing, and changes only from this machine's pages with the header.
         listing = get("/api/documents?q=test+paper")[2]

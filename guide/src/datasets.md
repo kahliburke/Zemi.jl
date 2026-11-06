@@ -36,7 +36,7 @@ Each publisher writes its own stream and imports the others'.
 
 ## Commands
 
-`zemi publish` (or the Status page, or the `publish` tool) and `zemi pull`.
+`zemi publish` (or the Documents page, or the `publish` tool) and `zemi pull`.
 
 Member keys on Cloudflare R2:
 

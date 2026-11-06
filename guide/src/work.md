@@ -104,7 +104,7 @@ it is not in the lists of papers, the landscape, the bibliography or the dataset
 
 Every record says how it was made and when, on its page, in search results and in what agents read.
 A new record is seen only by those who manage documents, until one of them links it to a project on
-its page or the Manage page; then the project's members see it. They may also open it to every
+its page or the Documents page; then the project's members see it. They may also open it to every
 reader. Run for one person, every record is theirs. The Records page lists those the reader may see,
 and a project's board its own. Records are never built into the site: the service shows their pages.
 
