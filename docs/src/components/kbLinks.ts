@@ -21,7 +21,9 @@ export const pageSlug = (id: string) => id.replace(/[./]/g, '-')
 export const fileSlug = (path: string) => path.replace(/\/+$/, '').replace(/[^A-Za-z0-9]+/g, '_')
 
 /** A paper's page, by its id or its page name. */
-export const paperHref = (id: string) => kbPage(`papers/${pageSlug(id)}`)
+export const paperHref = (id: string) => id.startsWith('res-') ? resourceHref(id) : kbPage(`papers/${pageSlug(id)}`)
+/** A resource's page: a data set, a portal, a law or a work not read in full. */
+export const resourceHref = (id: string) => kbPage(`resources/${pageSlug(id)}`)
 /** A notebook's page, under its paper's (`page` as the site names it). */
 export const notebookHref = (paper: string, page: string) => kbPage(`papers/${pageSlug(paper)}/${page}`)
 /** A codebase's page. */

@@ -343,6 +343,7 @@ const TEMPLATED = ("papers" => (; folder = "generated/kb/papers", template = "ge
                    # files are beneath its page's folder.
                    "codebase" => (; folder = "generated/kb/code/*", template = "generated/kb/templates/codebase", component = "KBCodebasePage"),
                    "daily" => (; folder = "generated/kb/daily/*", template = "generated/kb/templates/day", component = "KBDayPage"),
+                   "resources" => (; folder = "generated/kb/resources", template = "generated/kb/templates/resource", component = "KBResourcePage"),
                    # Served by the service alone (see site_records.jl): no page of it is built.
                    "records" => (; folder = "generated/kb/records", template = "generated/kb/templates/record", component = "KBRecordPage"))
 
@@ -747,6 +748,21 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
     write(joinpath(dir, "templates", "code-file.md"), template_markdown("code"))
     write(joinpath(dir, "templates", "codebase.md"), template_markdown("codebase"))
     write(joinpath(dir, "templates", "record.md"), template_markdown("records"))
+    # Each resource's data file and stub, and the page listing them, once there are any.
+    write(joinpath(dir, "templates", "resource.md"), template_markdown("resources"))
+    resources = resources_json(kb)
+    for r in resources
+        write(joinpath(public, "kb-data", "resources", r["slug"] * ".json"), JSON.json(resource_json(kb, r["id"])))
+        write(joinpath(dir, "resources", r["slug"] * ".md"), template_markdown("resources"))
+    end
+    write(joinpath(public, "resources.json"), JSON.json(resources))
+    isempty(resources) || write(joinpath(dir, "resources.md"), """
+        # Resources
+
+        ```@raw html
+        <KBResources />
+        ```
+        """)
     topics = [category_title(c) => "topics/$(page_slug(c)).md" for c in site_categories([paper_record(sp) for sp in papers])]
     write(joinpath(dir, "topics.md"), """
         # Topics
@@ -841,7 +857,7 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
     code = write_code_site(kb, joinpath(dir, "code"), joinpath(public, "code"); write)
     records = write_records_page(kb, dir; write)
     step("wrote the codebases' pages")
-    for folder in (joinpath(dir, "papers"), joinpath(dir, "topics"), joinpath(dir, "code"), joinpath(public, "code"), joinpath(dir, "daily"),
+    for folder in (joinpath(dir, "papers"), joinpath(dir, "topics"), joinpath(dir, "resources"), joinpath(dir, "code"), joinpath(public, "code"), joinpath(dir, "daily"),
                    joinpath(dir, "figures"), joinpath(public, "notebooks"), joinpath(public, "kb-data"),
                    joinpath(dir, "templates"))
         isdir(folder) || continue
@@ -853,7 +869,8 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
     save(joinpath(public, BUILT_PAGES_FILE), built_pages_digest(dir))
     return (; code = [c.title => joinpath("code", c.page) for c in code], code_index = "code/index.md", index = "index.md", timeline = "timeline.md", overview = "topics.md", status = "status.md",
               manage = "manage.md", landscape = "landscape.md", missing = "missing.md", watch = "watch.md", daily = "daily.md", authors = "authors.md", topics,
-              papers = length(papers), records = records ? "records.md" : nothing)
+              papers = length(papers), records = records ? "records.md" : nothing,
+              resources = isempty(resources) ? nothing : "resources.md")
 end
 
 "What [`write_site`](@ref) returns, as JSON, for a build process to read back (see [`site_from_json`](@ref))."
@@ -866,7 +883,8 @@ function site_from_json(text::AbstractString)
     return (; code = pairs_of("code"), code_index = d["code_index"], index = d["index"], timeline = d["timeline"],
               overview = d["overview"], status = d["status"], manage = d["manage"], landscape = d["landscape"],
               missing = d["missing"], watch = d["watch"], daily = d["daily"], authors = d["authors"],
-              topics = pairs_of("topics"), papers = Int(d["papers"]), records = get(d, "records", nothing))
+              topics = pairs_of("topics"), papers = Int(d["papers"]), records = get(d, "records", nothing),
+              resources = get(d, "resources", nothing))
 end
 
 """

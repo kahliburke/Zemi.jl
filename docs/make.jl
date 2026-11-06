@@ -84,9 +84,10 @@ if isempty(ONLY)
     kb_page(path) = relpath(joinpath(KB_PAGES, path), SRC)
     # The records, once there are any (see `KBase.write_records_page`).
     records = site.records === nothing ? [] : ["Records" => kb_page(site.records)]
+    resources = site.resources === nothing ? [] : ["Resources" => kb_page(site.resources)]
     kb_pages = ["Knowledge base" => ["Search" => kb_page(site.index), records..., "Paper of the Day" => kb_page(site.daily),
                                      "Landscape" => kb_page(site.landscape),
-                                     "Topics" => kb_page(site.overview), "Authors" => kb_page(site.authors), "Missing papers" => kb_page(site.missing),
+                                     "Topics" => kb_page(site.overview), resources..., "Authors" => kb_page(site.authors), "Missing papers" => kb_page(site.missing),
                                      "New on arXiv" => kb_page(site.watch),
                                      "Timeline" => kb_page(site.timeline), "Status" => kb_page(site.status),
                                      "Manage" => kb_page(site.manage)],
@@ -106,7 +107,7 @@ DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
                                                       "KBAccountPage", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate",
                                                       "KBProjects", "KBFindings", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
                                                       "KBStatusTables", "KBCodeFilePage", "KBCodebasePage", "KBCodebases", "KBDayPage",
-                                                      "KBRecordPage", "KBRecords",
+                                                      "KBRecordPage", "KBRecords", "KBResourcePage", "KBResources",
                                                       "KBSetup", "KBOpenSource")]
 DocumenterVitepress.vitepress_assets(::KnowledgeBaseSite) = isdir(KB_PUBLIC) ? [KB_PUBLIC] : String[]
 function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, config::String)

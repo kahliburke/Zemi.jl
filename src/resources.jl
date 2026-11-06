@@ -154,3 +154,25 @@ function resource_note(kb::KB, id::AbstractString)
     r === nothing && return ""
     return "Resource$(isempty(r.type) ? "" : " ($(r.type))") from $(r.source): title, authors, date and note only, not read in full."
 end
+
+# ── On the site ───────────────────────────────────────────────────────────────────────────────────
+
+"""
+    resource_json(kb, id) -> Dict
+
+The data of resource `id`'s page (KBResourcePage.vue lays it out): what it is, who made it and when,
+its note, where it is (its address and DOI), and where it came from.
+"""
+function resource_json(kb::KB, id::AbstractString)
+    r = resource_row(kb, id)
+    return Dict{String,Any}("id" => r.doc_id, "slug" => page_slug(r.doc_id), "title" => r.title, "type" => r.type,
+                            "authors" => json_list(r.authors), "date" => coalesce(r.published, ""), "note" => r.note, "url" => r.url,
+                            "doi" => coalesce(r.doi, ""), "source" => r.source)
+end
+
+"Every resource, as the page listing them shows each (`resources.json`), by title."
+resources_json(kb::KB) =
+    [Dict("id" => r.doc_id, "slug" => page_slug(r.doc_id), "page" => document_page(r.doc_id), "title" => r.title, "type" => r.type,
+          "authors" => json_list(r.authors), "date" => coalesce(r.published, ""), "source" => r.source)
+     for r in query(kb, """SELECT p.doc_id, p.title, p.authors, p.published, x.type, x.source
+                           FROM resources x JOIN papers p ON p.id = x.paper_id ORDER BY lower(p.title)""")]

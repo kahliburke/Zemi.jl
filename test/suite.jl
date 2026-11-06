@@ -978,6 +978,15 @@ end
         r, _ = K.put_resource!(kb, "zotero", K.Resource(; key = "EF56", title = "Bali flood facts so far", type = "news", projects = ["FL"]);
                                 proposed = true)
         @test [(x.target, x.status) for x in K.library(kb, "FL")] == [(r, "proposed")]
+
+        # On the site: a page of each from its data, and the page listing them, linked from the sidebar.
+        site, public = mktempdir(), mktempdir()
+        nav = K.write_site(kb, site, public; related = false)
+        @test nav.resources == "resources.md" && K.site_from_json(K.site_json(nav)).resources == "resources.md"
+        d = K.JSON.parsefile(joinpath(public, "kb-data", "resources", K.page_slug(id) * ".json"))
+        @test d["title"] == "Copernicus DEM GLO-30" && d["type"] == "dataset" && d["doi"] == "10.5270/esa-c5d3d65" && d["source"] == "zotero"
+        @test isfile(joinpath(site, "resources", K.page_slug(id) * ".md")) && K.document_page(id) == "resources/$(K.page_slug(id))"
+        @test [x["title"] for x in K.JSON.parsefile(joinpath(public, "resources.json"))] == ["Bali flood facts so far", "Copernicus DEM GLO-30"]
     finally
         close(kb)
     end

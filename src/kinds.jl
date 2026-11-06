@@ -101,7 +101,7 @@ const RECORD = DocumentKind(;
 # A resource the group uses without reading it in full (see resources.jl): what it says about
 # itself is all there is of it, so it is not summarized or classified.
 const RESOURCE = DocumentKind(;
-    name = "resource", prefix = "res-", cited = true, site = false, classified = false, summarized = false,
+    name = "resource", prefix = "res-", cited = true, classified = false, summarized = false,
     summarizer = :summarizer, prompts = (;),
     read = (kb, id; kw...) -> read_resource!(kb, id; kw...),
     note = (kb, id) -> resource_note(kb, id),

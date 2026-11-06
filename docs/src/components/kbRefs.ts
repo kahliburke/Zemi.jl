@@ -15,6 +15,7 @@ const PAPER = /(?<![\w@/\[])@arXiv:(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7}
 const CODE_REF = /(?<![\w@/\[])@code:([\w./-]*\w)(?:#([\w!?]+(?:\.[\w!?]+)*))?/g
 const FINDING = /(?<![\w@/\[])@([A-Za-z][A-Za-z0-9]*-F\d+)\b/gi
 const DOC = /(?<![\w@/\[])@(doc-[0-9a-f]{10})\b/g
+const RESOURCE = /(?<![\w@/\[])@(res-[a-z0-9]+(?:-[a-z0-9]+)*)/g
 const RECORD = /(?<![\w@/\[])@(rec-[a-z0-9]+(?:-[a-z0-9]+)*)/g
 const CITE = /\[(arXiv:[^\]\n]+)\](?!\()/gi
 const CODE = /```[\s\S]*?```|`[^`\n]*`/g
@@ -53,6 +54,7 @@ export function refsToMarkdown(text: string, titles: ReadonlyMap<string, string>
     .replace(TASK, (_, ref) => link(ref, 'task', ref))
     .replace(PAPER, (_, id) => link(`arXiv:${id}`, 'paper', id))
     .replace(DOC, (_, id) => link(id, 'paper', id))
+    .replace(RESOURCE, (_, id) => link(id, 'paper', id))
     .replace(RECORD, (_, id) => link(id, 'record', id))
     .replace(CODE_REF, (_, path, name) => link(name ?? path, 'code', name ? `${path}#${name}` : path))
     .replace(CITE, (_, group) => cite(group))
