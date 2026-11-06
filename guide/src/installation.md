@@ -8,12 +8,15 @@
   - [Qdrant](https://qdrant.tech) on port 6333 ([Kaimon](https://github.com/kahliburke/Kaimon.jl) can start it)
   - `mutool` 1.27 or later from [MuPDF](https://mupdf.com): `apt install mupdf-tools` (Ubuntu 26.04,
     Debian 14 or later), `dnf install mupdf` (Fedora 43 or later), or `brew install mupdf-tools`
-  - poppler's `pdftoppm`, for agent summarizers reading large PDFs: `apt install poppler-utils` or
-    `brew install poppler`
   - access to a summarizer (see [Models](models.md))
 
 Without Ollama and Qdrant, the site and keyword search still work; the Status page lists what is
 missing.
+
+An agent summarizer may need tools of its own. Claude Code reads a PDF too large to attach as page
+images made by poppler's `pdftoppm` (`apt install poppler-utils` or `brew install poppler`); Zemi
+itself does not use it. Other agents may prefer other tools: their own documentation covers what
+they need.
 
 ## Run
 

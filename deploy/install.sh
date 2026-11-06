@@ -72,7 +72,8 @@ if ! recent "$have"; then
         rm -rf "$src"
     fi
 fi
-# Agents read a PDF too large to attach whole as its pages' images, which their Read tool makes with poppler's pdftoppm.
+# Not Zemi's: Claude Code reads a PDF too large to attach whole as its pages' images, which its Read
+# tool makes with poppler's pdftoppm.
 command -v pdftoppm >/dev/null || apt-get install -y -qq poppler-utils >/dev/null
 
 echo "Codebases: git, and openssl to sign as the GitHub App"
