@@ -89,7 +89,11 @@ fi
 
 echo "Embedding: Ollama"
 # Its own service, listening on this machine only; the service embeds queries and new documents with it.
-command -v ollama >/dev/null || curl -fsSL https://ollama.com/install.sh | sh
+# Its installer unpacks with zstd, which minimal systems lack.
+if ! command -v ollama >/dev/null; then
+    command -v zstd >/dev/null || apt-get install -y -qq zstd >/dev/null
+    curl -fsSL https://ollama.com/install.sh | sh
+fi
 # Several requests at once, so a search's query is embedded beside a document being read rather than
 # waiting for it to finish.
 mkdir -p /etc/systemd/system/ollama.service.d
@@ -126,7 +130,9 @@ elif ! grep -q 'import sites/\*' /etc/caddy/Caddyfile; then
     echo 'import sites/*' >> /etc/caddy/Caddyfile
 fi
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
-systemctl reload caddy
+# Started here where its package was installed without starting it.
+systemctl enable caddy >/dev/null 2>&1
+systemctl reload-or-restart caddy
 # HTTP/3, which Caddy offers, runs over UDP: with a firewall, its port is opened beside HTTPS's.
 if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
     ufw allow 80/tcp >/dev/null && ufw allow 443/tcp >/dev/null && ufw allow 443/udp >/dev/null
