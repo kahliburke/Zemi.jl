@@ -90,6 +90,10 @@ async function viewAs(u: User) {
   catch (e: any) { error.value = e.message }
 }
 const testAccount = ref({ name: '', role: 'Reader' })
+async function rename(u: User) {
+  const name = prompt(`Name for ${u.email}`, u.name)
+  if (name !== null && name.trim() && name.trim() !== u.name) await act(`/api/admin/users/${u.id}`, { name: name.trim() }, `Renamed ${u.email}.`)
+}
 async function addTestAccount() {
   if (await act('/api/admin/users/test', { name: testAccount.value.name, roles: [testAccount.value.role] }, `Added ${testAccount.value.name}.`))
     testAccount.value = { name: '', role: 'Reader' }
@@ -138,7 +142,8 @@ const brief = (d: Record<string, any>) => Object.entries(d).filter(([k]) => k !=
                                   : coveredBy(u.roles, r) ? `Included in ${coveredBy(u.roles, r)}` : ''"
                           @click="toggleRole(u, r)">{{ r }}</button></td>
               <td class="kbad-s">{{ u.sign_ins.join(', ') }}</td><td class="kbad-s">{{ when(u.last_seen, '—') }}</td>
-              <td><button v-if="u.email !== me?.email && !u.disabled" class="kb-link kbad-link" @click="viewAs(u)">view as</button>
+              <td><button class="kb-link kbad-link" @click="rename(u)">rename</button>
+                <button v-if="u.email !== me?.email && !u.disabled" class="kb-link kbad-link" @click="viewAs(u)">view as</button>
                 <button v-if="u.email !== me?.email" class="kb-link kbad-link"
                           @click="act(`/api/admin/users/${u.id}`, { disabled: !u.disabled }, `${u.disabled ? 'Enabled' : 'Disabled'} ${u.email}.`)">
                 {{ u.disabled ? 'enable' : 'disable' }}</button></td>

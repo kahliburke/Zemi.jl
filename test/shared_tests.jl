@@ -28,6 +28,11 @@ shared_config(; kw...) = K.SharedConfig(; base_url = "http://127.0.0.1:8800", ad
     @test K.sign_in!(kb, sh, "GitHub", "g9"; email = "student@example.org", verified = true) == student
     @test_throws ErrorException K.sign_in!(kb, sh, "GitHub", "g10"; email = "student@example.org", verified = false)
     @test Set(only(filter(u -> u.id == student, K.users(kb))).sign_ins) == Set(["Campus", "GitHub"])
+    # A name set here stays when a provider's sign-in brings another; an empty one is refused.
+    K.set_name!(kb, student, "  Ada Lovelace ")
+    K.sign_in!(kb, sh, "GitHub", "g9"; email = "student@example.org", verified = true, name = "ada-gh")
+    @test only(filter(u -> u.id == student, K.users(kb))).name == "Ada Lovelace"
+    @test_throws "can't be empty" K.set_name!(kb, student, " ")
     # Open sign-up gives the default role.
     open_sh = shared_config(sign_up = :open, default_role = "Reader")
     reader = K.sign_in!(kb, open_sh, "Campus", "u4"; email = "reader@example.org", verified = true)

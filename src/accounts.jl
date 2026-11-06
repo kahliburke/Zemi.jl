@@ -195,6 +195,19 @@ function users(kb::KB)
             for u in query(kb, "SELECT * FROM users ORDER BY email")]
 end
 
+"""
+    set_name!(kb, uid, name)
+
+Set the name person `uid` is shown by. A provider's sign-in fills in a name only where there is none,
+so this one stays.
+"""
+function set_name!(kb::KB, uid::Integer, name::AbstractString)
+    name = strip(name)
+    isempty(name) && error("A name can't be empty")
+    length(name) <= 100 || error("A name is at most 100 characters")
+    execute!(kb, "UPDATE users SET name = ? WHERE id = ?", (name, uid))
+end
+
 "Disable (or enable again) person `uid`'s account; a disabled account's sessions end."
 function set_disabled!(kb::KB, uid::Integer, disabled::Bool)
     keeping_an_admin(kb) do

@@ -1,5 +1,6 @@
 <!--
-  A person's own account in the shared service: who they are, their roles, what they may do and
+  A person's own account in the shared service: who they are (the name they are shown by, theirs to
+  change), their roles, what they may do and
   today's allowances, and their API tokens, for scripts and for Claude: made with the permissions
   chosen (never more than their own), shown once, and revoked here.
 -->
@@ -31,6 +32,18 @@ function pick(key: string) {
   const p = PRESETS.find(x => x.key === key)
   if (p) chosen.value = p.permissions ? p.permissions.filter(x => acct.value?.permissions.includes(x)) : [...(acct.value?.permissions ?? [])]
 }
+// The name they are shown by, as edited here.
+const shownAs = ref('')
+const savedName = ref(false)
+async function saveName() {
+  error.value = ''
+  try {
+    await post('/api/me', JSON.stringify({ name: shownAs.value }))
+    await load()
+    savedName.value = true
+    setTimeout(() => { savedName.value = false }, 1500)
+  } catch (e: any) { error.value = e.message }
+}
 const made = ref<{ token: string } | null>(null)
 // Which of the new token's lines was copied last, to mark its button for a moment.
 const copied = ref('')
@@ -38,6 +51,7 @@ const copied = ref('')
 async function load() {
   try {
     acct.value = await getJSON('/api/me')
+    shownAs.value = acct.value?.name ?? ''
     if (preset.value !== 'choose') pick(preset.value)
   } catch (e: any) { error.value = e.message }
 }
@@ -76,6 +90,10 @@ const live = computed(() => (acct.value?.tokens ?? []).filter(t => !t.revoked))
       <template v-if="acct">
         <h2>{{ acct.name || acct.email }}</h2>
         <p class="kb-dim">{{ acct.email }} · {{ acct.roles.join(', ') || 'no role' }}</p>
+        <form v-if="acct.accounts" class="kbac-name" @submit.prevent="saveName">
+          <label>Shown as <input v-model="shownAs" maxlength="100" required /></label>
+          <button class="kb-primary kbac-button" :disabled="!shownAs.trim() || shownAs.trim() === acct.name">{{ savedName ? 'Saved' : 'Save' }}</button>
+        </form>
         <p class="kb-dim">Left today: tutor {{ acct.quotas.tutor ?? '∞' }} · notebooks {{ acct.quotas.notebook ?? '∞' }}</p>
         <details class="kbac-perms"><summary>Permissions ({{ acct.permissions.length }})</summary>
           <code v-for="p in acct.permissions" :key="p">{{ p }}</code>
@@ -124,6 +142,8 @@ const live = computed(() => (acct.value?.tokens ?? []).filter(t => !t.revoked))
 </template>
 
 <style scoped>
+.kbac-name { display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0 0.8rem; }
+.kbac-name input { margin-left: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 8px; border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg-soft); color: var(--vp-c-text-1); }
 .kbac-perms code { margin: 0 0.3rem 0.3rem 0; display: inline-block; }
 .kbac-table { width: 100%; font-size: 0.88rem; }
 .kbac-small { font-size: 0.78rem; color: var(--vp-c-text-2); }

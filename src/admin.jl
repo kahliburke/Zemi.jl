@@ -405,6 +405,15 @@ route!("GET", "/api/me") do c
                                       "permission_groups" => permission_groups_json()))
 end
 
+# The name a person is shown by, which they change themselves; not while viewing as someone.
+route!("POST", "/api/me") do c
+    account = c.caller.user_id
+    account === nothing && error("Names belong to accounts; run for one person, the knowledge base has none")
+    c.caller.admin === nothing || not_permitted("Not permitted while viewing as someone: their name is theirs to change")
+    set_name!(c.kb, account, String(get(json_body(c), "name", "")))
+    ok_json()
+end
+
 # Viewing as someone, and going back, which is never refused for a permission they lack.
 route!("POST", "/api/me/view-as"; viewing_as = true) do c
     who = get(json_body(c), "user_id", nothing)
@@ -456,6 +465,7 @@ end
 route!("POST", "/api/admin/users/:id"; need = "users.manage") do c
     uid, b = parse(Int, c[:id]), json_body(c)
     uid == c.caller.user_id && get(b, "disabled", false) === true && error("Can't disable your own account.")
+    haskey(b, "name") && set_name!(c.kb, uid, String(b["name"]))
     haskey(b, "roles") && set_roles!(c.kb, uid, String.(b["roles"]); by = c.caller.user_id)
     haskey(b, "disabled") && set_disabled!(c.kb, uid, b["disabled"] === true)
     ok_json()
