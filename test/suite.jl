@@ -3563,20 +3563,25 @@ end
              item("N1", 1, "note", ""; parent = "D1", note = "<p>Data set, CC BY 4.0</p>"),
              item("D2", 1, "document", "Copernicus DEM GLO-30"),
              item("C1", 1, "journalArticle", "A closed paper"; doi = "10.1/closed"),
-             item("C2", 1, "journalArticle", "A closed paper"; doi = "10.1/CLOSED")]
+             item("C2", 1, "journalArticle", "A closed paper"; doi = "10.1/CLOSED"),
+             item("B1", 1, "journalArticle", "A paper OpenAlex fails on"; doi = "10.1/boom")]
+    booms = Ref(0)
     port = 18000 + rand(0:999)
     asked = String[]
     server = K.HTTP.serve!("127.0.0.1", port) do req
         q = K.HTTP.queryparams(K.HTTP.URI(req.target))
         push!(asked, q["since"])
         since = parse(Int, q["since"])
-        changed = [x for x in items if x["version"] > since]
+        latest = maximum(x -> x["version"], items)
+        K.HTTP.header(req, "If-Modified-Since-Version", "") == string(latest) && return K.HTTP.Response(304, ["Last-Modified-Version" => string(latest)])
+        changed = haskey(q, "itemKey") ? [x for x in items if x["key"] in split(q["itemKey"], ',')] : [x for x in items if x["version"] > since]
         K.HTTP.Response(200, ["Last-Modified-Version" => string(maximum(x -> x["version"], items)), "Total-Results" => string(length(changed))],
                         K.JSON.json(changed))
     end
     saved_api, saved_copies = K.ZOTERO_API[], K.DOI_COPIES[]
     K.ZOTERO_API[] = "http://127.0.0.1:$port"
-    K.DOI_COPIES[] = (doi; contact = "") -> doi == "10.1/rain" ? (; arxiv = "2401.00002", pdf = nothing) : (; arxiv = nothing, pdf = nothing)
+    K.DOI_COPIES[] = (doi; contact = "") -> doi == "10.1/boom" && (booms[] += 1) == 1 ? error("OpenAlex is busy") :
+                                             doi == "10.1/rain" ? (; arxiv = "2401.00002", pdf = nothing) : (; arxiv = nothing, pdf = nothing)
     K.READ_PUT[] = false
     kb = open_kb(temp_config(layers = Layer[]))
     try
@@ -3595,19 +3600,26 @@ end
         K.zotero_poll(run)
         res = [r.doc_id for r in K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource' ORDER BY title")]
         @test length(res) == 2 && !ismissing(K.paper_id(kb, "2401.00002"))
+        # An item that failed does not stop the run, and is tried again in the next.
+        @test K.state(run)["retry"] == Dict("1" => ["B1"])
         dem = only(r for r in res if K.paper_row(kb, r).title == "Copernicus DEM GLO-30")
         @test K.resource_row(kb, dem).note == "Data set, CC BY 4.0" && K.resource_row(kb, dem).type == "document" && K.paper_row(kb, dem).published == "2021-03-01"
         closed = only(r for r in res if r != dem)
         @test K.paper_row(kb, closed).doi == "10.1/closed"
         @test Set(x.target for x in K.library(kb, "WE")) == Set(["2401.00002", dem, closed])
         @test K.state(run)["versions"] == Dict("1" => 1) && [m.source for m in K.mentions(kb, "2401.00002")] == ["zotero"]
+        # Nothing changed since: Zotero says so, and only the item that failed is asked for again.
+        K.zotero_poll(run)
+        @test K.state(run)["versions"] == Dict("1" => 1) && K.state(run)["retry"] == Dict("1" => String[])
 
         # The next run asks only for what changed since; a document removed here is not brought in again.
         K.remove_paper!(kb, dem)
         items[3]["version"] = 2; items[3]["data"]["title"] = "Copernicus DEM GLO-30 (2021)"
         push!(items, item("R1", 2, "report", "Treatment wetlands"))
         K.zotero_poll(run)
-        @test asked[end] == "1" && ismissing(K.paper_id(kb, dem))
+        @test "1" in asked && ismissing(K.paper_id(kb, dem))
+        @test K.state(run)["retry"] == Dict("1" => String[]) && any(r -> K.paper_row(kb, r.doc_id).title == "A paper OpenAlex fails on",
+                                                                    K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource'"))
         @test any(r -> K.paper_row(kb, r.doc_id).title == "Treatment wetlands", K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource'"))
     finally
         K.ZOTERO_API[], K.DOI_COPIES[] = saved_api, saved_copies

@@ -15,17 +15,21 @@
 const ZOTERO_API = Ref("https://api.zotero.org")
 
 """
-    zotero_items(group, since; key = "") -> (; items, version)
+    zotero_items(group, since; key = "", keys = nothing) -> (; items, version)
 
 The items of Zotero group `group` changed since library version `since` (0 for all of them), with
-the library's version now. Read a hundred at a time.
+the library's version now; with `keys`, those items alone (at most fifty). Read a hundred at a time.
 """
-function zotero_items(group::AbstractString, since::Integer; key::AbstractString = "")
+function zotero_items(group::AbstractString, since::Integer; key::AbstractString = "", keys = nothing)
     headers = ["Zotero-API-Version" => "3"; isempty(key) ? Pair{String,String}[] : ["Zotero-API-Key" => key]]
+    # Unchanged since, Zotero answers that alone: a run with nothing new costs one small request.
+    since > 0 && keys === nothing && push!(headers, "If-Modified-Since-Version" => string(since))
     items, start, version = Any[], 0, since
+    chosen = keys === nothing ? Pair{String,String}[] : ["itemKey" => join(keys, ',')]
     while true
-        r = HTTP.get("$(ZOTERO_API[])/groups/$group/items"; headers, status_exception = false, connect_timeout = 20, readtimeout = 60,
-                     query = ["since" => string(since), "format" => "json", "limit" => "100", "start" => string(start)])
+        query = vcat(["since" => string(since), "format" => "json", "limit" => "100", "start" => string(start)], chosen)
+        r = HTTP.get("$(ZOTERO_API[])/groups/$group/items"; headers, query, status_exception = false, connect_timeout = 20, readtimeout = 60)
+        r.status == 304 && return (; items, version)
         r.status == 403 && error("Zotero refused group $group: it is not public, and no key that may read it is set")
         r.status == 200 || error("Zotero answered HTTP $(r.status) for group $group")
         page = JSON.parse(String(r.body))
@@ -98,8 +102,9 @@ end
     zotero_poll(run)
 
 A run of the Zotero source: each group in its settings read for the items changed since the last run,
-and each brought in (see [`zotero_item!`](@ref)). The state keeps each group's library version, the
-document each item became, and the document each work became, by its DOI or, without one, its title.
+and each brought in (see [`zotero_item!`](@ref)). An item that fails is told in the log and tried
+again in the next run. The state keeps each group's library version, the document each item became,
+the document each work became (by its DOI or, without one, its title), and the items to try again.
 """
 function zotero_poll(run)
     d = settings(run)
@@ -109,11 +114,18 @@ function zotero_poll(run)
     versions = Dict{String,Any}(get(st, "versions", Dict()))
     made = Dict{String,Any}(get(st, "items", Dict()))
     titled = Dict{String,Any}(get(st, "titles", Dict()))
+    again = Dict{String,Any}(get(st, "retry", Dict()))
     kb = run.kb
     for (group, project) in groups
         group, project = string(group), String(project)
         isempty(project) || project_id(kb, project)
         got = zotero_items(group, Int(get(versions, group, 0)); key)
+        retry = String.(get(again, group, String[]))
+        listed = Set(String(it["key"]) for it in got.items)
+        for ks in Iterators.partition(filter(!in(listed), retry), 50)
+            append!(got.items, zotero_items(group, 0; key, keys = collect(ks)).items)
+        end
+        failed = String[]
         notes = Dict{String,Vector{String}}()
         for it in got.items
             p = get(it["data"], "parentItem", "")
@@ -134,13 +146,21 @@ function zotero_poll(run)
                 made[k] = titled[t]
                 continue
             end
-            id = zotero_item!(kb, it, get(notes, it["key"], String[]); project)
+            id = try
+                zotero_item!(kb, it, get(notes, it["key"], String[]); project)
+            catch e
+                e isa InterruptException && rethrow()
+                @warn "Zotero item $k could not be brought in; it is tried again in the next run" exception = e
+                push!(failed, String(it["key"]))
+                continue
+            end
             id === nothing && continue
             made[k] = titled[t] = id
             is_resource(id) || is_codebase(id) || READ_PUT[] && queue_reading!(kb, [id])
         end
         cancelled(run) || (versions[group] = got.version)
-        save_state!(run, Dict("versions" => versions, "items" => made, "titles" => titled))
+        again[group] = failed
+        save_state!(run, Dict("versions" => versions, "items" => made, "titles" => titled, "retry" => again))
     end
 end
 

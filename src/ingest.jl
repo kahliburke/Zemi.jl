@@ -169,8 +169,14 @@ function add_doi!(kb::KB, doi::AbstractString; title = nothing, authors::Abstrac
     c.pdf === nothing && return nothing
     path = tempname() * ".pdf"
     try
-        r = HTTP.get(c.pdf; status_exception = false, connect_timeout = 20, readtimeout = 120, redirect_limit = 5)
-        # A publisher's page in place of the file is no copy to read.
+        # A publisher's page in place of the file, or a sign-in it sends the request round, is no copy to read.
+        r = try
+            HTTP.get(c.pdf; status_exception = false, connect_timeout = 20, readtimeout = 120, redirect_limit = 5)
+        catch e
+            e isa InterruptException && rethrow()
+            @warn "The open copy of $d could not be fetched" url = c.pdf exception = e
+            return nothing
+        end
         (r.status == 200 && length(r.body) > 4 && String(r.body[1:5]) == "%PDF-") || return nothing
         write(path, r.body)
         id = add_pdf!(kb, path; title, authors, published, added_by = by, source)
