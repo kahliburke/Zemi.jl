@@ -116,12 +116,13 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     config = replace(config, r"base: '[^']*'" => "base: '$(get(ENV, "ZEMI_SITE_BASE", "/"))'")
     # ZEMI_SITE_NOTICE, HTML, is shown in a bar above every page: what a static copy cannot do, say.
     # It sits outside the app, so it stays as pages change, in the room VitePress keeps above its nav.
+    # vp-raw keeps the router from opening its links as the site's own pages: they lead elsewhere.
     if !isempty(get(ENV, "ZEMI_SITE_NOTICE", ""))
         style = ".kb-notice{position:fixed;top:0;left:0;right:0;z-index:100;padding:6px 16px;text-align:center;" *
                 "font-size:13px;line-height:1.5;background:var(--vp-c-warning-soft);color:var(--vp-c-text-1)}" *
                 ".kb-notice a{color:var(--vp-c-brand-1);text-decoration:underline}"
         script = "document.addEventListener('DOMContentLoaded',()=>{const d=document.createElement('div');" *
-                 "d.className='kb-notice';d.innerHTML=$(KBase.JSON.json(ENV["ZEMI_SITE_NOTICE"]));document.body.prepend(d);" *
+                 "d.className='kb-notice vp-raw';d.innerHTML=$(KBase.JSON.json(ENV["ZEMI_SITE_NOTICE"]));document.body.prepend(d);" *
                  "const h=()=>document.documentElement.style.setProperty('--vp-layout-top-height',d.offsetHeight+'px');" *
                  "h();addEventListener('resize',h)})"
         config = replace(config, "head: [" => "head: [\n    ['style', {}, $(KBase.JSON.json(style))],\n    ['script', {}, $(KBase.JSON.json(script))],"; count = 1)
