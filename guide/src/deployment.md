@@ -97,8 +97,9 @@ sudo -u zemi -H bash -c 'umask 077; read -rsp "Token: " t; echo; printf "CLAUDE_
 
 `ANTHROPIC_API_KEY=…` works instead.
 
-**Summarizers.** The default summarizer, `deepseek-v4.1-flash`, needs an OpenCode Zen login:
-install [OpenCode](https://opencode.ai) as `zemi` and run `opencode auth login`. To summarize with
+**Summarizers.** The default summarizer, `deepseek-v4.1-flash`, needs an OpenCode Zen key: install
+[OpenCode](https://opencode.ai) as `zemi` and run `opencode auth login`, or put the key in
+`service.env` as `OPENCODE_API_KEY=…`. To summarize with
 the Claude token instead, set `summarizer = "opus-agent-pdf"` and `code_summarizer =
 "opus-agent-code"` in the config (see [Models](models.md)).
 

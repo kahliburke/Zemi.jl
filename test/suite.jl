@@ -3213,6 +3213,15 @@ end
     end
     @test_throws ErrorException K.resolve_key("file:/nonexistent/key", "t")
     @test_throws ErrorException K.resolve_key("plain-key", "t")
+    # OpenCode's key: its login where there is one, else OPENCODE_API_KEY (a container's).
+    data = mktempdir()
+    withenv("XDG_DATA_HOME" => data, "OPENCODE_API_KEY" => nothing) do
+        @test_throws "no OPENCODE_API_KEY set" K.resolve_key("opencode", "t")
+        withenv(() -> (@test K.resolve_key("opencode", "t") == "from-env"), "OPENCODE_API_KEY" => "from-env")
+        mkpath(joinpath(data, "opencode"))
+        write(joinpath(data, "opencode", "auth.json"), K.JSON.json(Dict("opencode" => Dict("key" => "from-login"))))
+        withenv(() -> (@test K.resolve_key("opencode", "t") == "from-login"), "OPENCODE_API_KEY" => "from-env")
+    end
 
     seen = Dict{String,Any}()
     port = 18000 + rand(0:999)
