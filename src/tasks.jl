@@ -74,9 +74,8 @@ column_end(kb::KB, pid::Integer, status::AbstractString) =
 
 "Record an event in task `task`'s activity; returns its id."
 function record!(kb::KB, task::Integer, by::Actor, kind::AbstractString; text::AbstractString = "", detail = Dict{String,Any}())
-    execute!(kb, "INSERT INTO task_events (task_id, at, who, by_agent, kind, text, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
-             (task, now_iso(), by.name, by.agent ? 1 : 0, kind, text, JSON.json(detail)))
-    id = Int(scalar(kb, "SELECT last_insert_rowid()"))
+    id = insert_row!(kb, "INSERT INTO task_events (task_id, at, who, by_agent, kind, text, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (task, now_iso(), by.name, by.agent ? 1 : 0, kind, text, JSON.json(detail)))
     # Kept searchable (see task_search.jl): what is said on the task, and its title and plan as they change.
     if kind in SEARCHED_NOTES && !isempty(text)
         index_note!(kb, task, id, text)
@@ -170,11 +169,11 @@ function create_task!(kb::KB, key::AbstractString, title::AbstractString; body::
         n = Int(scalar(kb, "SELECT next_number FROM projects WHERE id = ?", (pid,)))
         execute!(kb, "UPDATE projects SET next_number = next_number + 1 WHERE id = ?", (pid,))
         now = now_iso()
-        execute!(kb, """INSERT INTO tasks (project_id, number, parent_id, milestone_id, title, body, status, priority,
-                        assignee, position, created_by, by_agent, created_at, updated_at, asap_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                 (pid, n, parent_id, mid, strip(title), body, status, priority, assignee,
-                  column_end(kb, pid, status), by.name, by.agent ? 1 : 0, now, now, priority == 0 ? now : missing))
-        record!(kb, Int(scalar(kb, "SELECT last_insert_rowid()")), by, "created"; detail = Dict("status" => status))
+        id = insert_row!(kb, """INSERT INTO tasks (project_id, number, parent_id, milestone_id, title, body, status, priority,
+                                assignee, position, created_by, by_agent, created_at, updated_at, asap_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                         (pid, n, parent_id, mid, strip(title), body, status, priority, assignee,
+                          column_end(kb, pid, status), by.name, by.agent ? 1 : 0, now, now, priority == 0 ? now : missing))
+        record!(kb, id, by, "created"; detail = Dict("status" => status))
         ("$(uppercase(strip(key)))-$n", true)
     end
     made || return ref

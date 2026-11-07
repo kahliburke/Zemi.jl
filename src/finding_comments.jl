@@ -12,9 +12,8 @@ function comment_finding!(kb::KB, ref::AbstractString, text::AbstractString; by:
     isempty(strip(text)) && error("A comment needs text")
     id = finding_id(kb, ref)
     use_media!(kb, something(ref_project(ref)), text)
-    execute!(kb, "INSERT INTO finding_comments (finding_id, who, by_agent, text, at) VALUES (?, ?, ?, ?, ?)",
-             (id, by.name, by.agent ? 1 : 0, strip(text), now_iso()))
-    n = Int(scalar(kb, "SELECT last_insert_rowid()"))
+    n = insert_row!(kb, "INSERT INTO finding_comments (finding_id, who, by_agent, text, at) VALUES (?, ?, ?, ?, ?)",
+                    (id, by.name, by.agent ? 1 : 0, strip(text), now_iso()))
     tasks_changed!()
     return n
 end

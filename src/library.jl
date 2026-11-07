@@ -38,10 +38,9 @@ function library_add!(kb::KB, key::AbstractString, source::AbstractString; why::
     src = library_source(kb, source; caller)
     rows = query(kb, "SELECT id FROM library WHERE project_id = ? AND kind = ? AND target = ?", (pid, src.kind, src.target))
     if isempty(rows)
-        execute!(kb, """INSERT INTO library (project_id, kind, target, why, status, added_by, by_agent, added_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                 (pid, src.kind, src.target, strip(why), by.agent ? "proposed" : "kept", by.name, by.agent ? 1 : 0, now_iso()))
-        id = Int(scalar(kb, "SELECT last_insert_rowid()"))
+        id = insert_row!(kb, """INSERT INTO library (project_id, kind, target, why, status, added_by, by_agent, added_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                         (pid, src.kind, src.target, strip(why), by.agent ? "proposed" : "kept", by.name, by.agent ? 1 : 0, now_iso()))
     else
         id = Int(first(rows).id)
         isempty(strip(why)) || execute!(kb, "UPDATE library SET why = ? WHERE id = ?", (strip(why), id))

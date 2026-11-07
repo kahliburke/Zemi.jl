@@ -282,11 +282,10 @@ function add_evidence!(kb::KB, ref::AbstractString; source::AbstractString = "",
         relation == "supports" && (relation = "builds_on")
     end
     kind == "finding" || relation != "builds_on" || error("Only a finding is built on")
-    execute!(kb, """INSERT INTO finding_evidence (finding_id, kind, target, relation, excerpt, page, note, detail, added_by, added_at, basis)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-             (id, kind, target, relation, strip(excerpt), page, strip(note), JSON.json(detail), by.name, now_iso(),
-              evidence_basis(kb, kind, target)))
-    eid = Int(scalar(kb, "SELECT last_insert_rowid()"))
+    eid = insert_row!(kb, """INSERT INTO finding_evidence (finding_id, kind, target, relation, excerpt, page, note, detail, added_by, added_at, basis)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                      (id, kind, target, relation, strip(excerpt), page, strip(note), JSON.json(detail), by.name, now_iso(),
+                       evidence_basis(kb, kind, target)))
     execute!(kb, "UPDATE findings SET updated_at = ? WHERE id = ?", (now_iso(), id))
     tasks_changed!()
     return eid

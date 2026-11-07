@@ -122,10 +122,9 @@ function read_commits!(kb::KB, codebase::AbstractString)
                                   "removed" => something(tryparse(Int, parts[2]), 0)))
             end
             subject = String(strip(first(split(message, '\n'))))
-            execute!(kb, """INSERT INTO commits (codebase_id, sha, at, author, subject, ref, files) VALUES (?, ?, ?, ?, ?, ?, ?)
-                            ON CONFLICT (codebase_id, sha) DO NOTHING""",
-                     (cid, sha, iso(parse_iso(at)), author, subject, replace(ref, r"^refs/(heads|remotes|tags)/" => ""), JSON.json(files)))
-            new_commit = scalar(kb, "SELECT changes()") == 1
+            new_commit = changed!(kb, """INSERT INTO commits (codebase_id, sha, at, author, subject, ref, files) VALUES (?, ?, ?, ?, ?, ?, ?)
+                                         ON CONFLICT (codebase_id, sha) DO NOTHING""",
+                                  (cid, sha, iso(parse_iso(at)), author, subject, replace(ref, r"^refs/(heads|remotes|tags)/" => ""), JSON.json(files))) == 1
             commit = Int(scalar(kb, "SELECT id FROM commits WHERE codebase_id = ? AND sha = ?", (cid, sha)))
             for (id, rel) in named
                 execute!(kb, """INSERT INTO task_commits (task_id, commit_id, relation) VALUES (?, ?, ?)

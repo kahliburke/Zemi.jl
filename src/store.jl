@@ -188,6 +188,27 @@ function execute!(kb::KB, sql::AbstractString, params = ())
 end
 
 """
+    insert_row!(kb, sql, params = ()) -> Int
+
+Run an INSERT and return the id of the row it made, read under the same lock, so that no other
+write comes between.
+"""
+function insert_row!(kb::KB, sql::AbstractString, params = ())
+    lock(kb.lock) do
+        DBInterface.close!(DBInterface.execute(kb.db, sql, params))
+        Int(SQLite.last_insert_rowid(kb.db))
+    end
+end
+
+"Run a statement for its effect, returning how many rows it changed (counted under the same lock)."
+function changed!(kb::KB, sql::AbstractString, params = ())
+    lock(kb.lock) do
+        DBInterface.close!(DBInterface.execute(kb.db, sql, params))
+        Int(SQLite.C.sqlite3_changes(kb.db.handle))
+    end
+end
+
+"""
     transaction(f, kb)
 
 Run `f()` inside a single SQLite transaction, holding the connection lock throughout.
