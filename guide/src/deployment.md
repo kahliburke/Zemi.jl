@@ -131,6 +131,38 @@ be running).
 - `MemoryMax` is 80% of RAM. Site builds use up to a 12 GB Node heap: 32 GB of RAM is comfortable,
   16 GB can stop a large build. Lower `MemoryMax` when several services share a machine.
 
+## In containers
+
+`deploy/compose.yaml` runs the service with Qdrant, Ollama and Caddy, in place of `install.sh`. From
+the checkout, with Docker and its compose plugin:
+
+```sh
+ZEMI_BASE_URL=https://kb.example.org ZEMI_ADMINS=you@example.org ZEMI_GITHUB_CLIENT_ID=Ov23… \
+    docker compose -f deploy/compose.yaml up -d --build
+```
+
+The first start writes the config at `deploy/config/config.toml` from these variables; from then on
+the file is the config. Put the GitHub app's secret in `deploy/config/github_oauth_secret` before
+starting. The folder belongs to the container's user (uid 10001), so edit it with `sudo`.
+
+The default summarizer's key, `OPENCODE_API_KEY=…`, goes in `deploy/service.env`, which compose
+reads (`chmod 600`). OpenAI's is `deploy/config/openai_key`. The image has no agents' CLIs (Claude
+Code, Codex, OpenCode): a group whose summarizers or tutor run as agents builds an image `FROM zemi`
+that installs them, with their tokens in `service.env`.
+
+- Logs: `docker compose -f deploy/compose.yaml logs -f zemi`.
+- Update: `git pull`, then the same `up -d --build`. The data, Julia's later installs, Qdrant's
+  vectors and Ollama's models are volumes, kept across rebuilds.
+- An NVIDIA GPU for Ollama: uncomment its `deploy` lines in `compose.yaml`.
+
+To try it on one machine, without a domain or Caddy, add `deploy/compose.local.yaml`: the service is
+at `http://localhost:8800` (`ZEMI_LOCAL_PORT` for another port), and anyone on the machine can sign
+in as any invited email.
+
+```sh
+ZEMI_ADMINS=you@example.org docker compose -f deploy/compose.yaml -f deploy/compose.local.yaml up -d --build
+```
+
 ## Agents and notebooks
 
 The service's agents (summarizers, the tutor, notebook agents) and the workers that run notebooks'
