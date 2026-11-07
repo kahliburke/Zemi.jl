@@ -45,10 +45,10 @@ test('signed in, a notebook is attached without asking a name', async () => {
 })
 
 test('a reader is offered no adding of documents', async () => {
-  const mine = await open('/generated/kb/status', '.kbu-drop')
+  const mine = await open('/generated/kb/manage', '.kbu-drop')
   await mine.close()
-  const { page, errors, close } = await open('/generated/kb/status', '.kbu', { prepare: signedIn(READER) })
-  await page.waitForSelector('.kbu-dim:has-text("paper.add")')
+  const { page, errors, close } = await open('/generated/kb/manage', '.kbu', { prepare: signedIn(READER) })
+  await page.waitForSelector('.kbu .kb-dim:has-text("Not permitted")')
   assert.equal(await page.locator('.kbu-drop').count(), 0)
   assert.deepEqual(errors, [])
   await close()
@@ -100,7 +100,7 @@ test('a refused invitation keeps what was entered', async () => {
   const { page, close } = await open('/service/administration', '.kbad-form', { prepare: signedIn(['read', 'users.manage']) })
   await page.locator('.kbad-form input[type=email]').fill('ada@reef')     // the browser's check passes, the service's does not
   await page.locator('.kbad-form button:text-is("Invite")').click()
-  await page.waitForSelector('.kbad-error:has-text("Not an email address")')
+  await page.waitForSelector('.kb-error:has-text("Not an email address")')
   assert.equal(await page.locator('.kbad-form input[type=email]').inputValue(), 'ada@reef')
   await close()
 })

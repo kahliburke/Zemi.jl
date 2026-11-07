@@ -68,7 +68,7 @@ function toggled(e: Event) { (e.target as HTMLDetailsElement).open ? open() : (s
 // Where a figure is in the list, by its key.
 const index = computed(() => new Map(figures.value.map((f, i) => [figureKey(f.kind, numeral(f.label.split(/\s+/).pop() ?? '')), i])))
 // Text that is not discussion: headings, code, links, the gallery and the paper's full text.
-const SKIP = 'h1,h2,h3,h4,h5,h6,a,code,pre,button,.kbf,.kbfig,.kbst,.kb-paper-head,.kbfig-overlay,.kbfig-preview'
+const SKIP = 'h1,h2,h3,h4,h5,h6,a,code,pre,button,.kbf,.kbfig,.kbst,.kb-paper-head,.kb-dialog,.kbfig-preview'
 function linkMentions() {
   const doc = anchor.value?.closest('.vp-doc')
   if (!doc || !figures.value.length) return
