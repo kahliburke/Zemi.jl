@@ -18,9 +18,10 @@ const LINK_KINDS = ("paper", "notebook", "code", "chat", "url", "task", "blocks"
 """
     Actor(name, agent)
 
-Who makes a change: a person, by name, or an agent (`agent = true`), named for whom it works. A
-person's `id` is how tasks are assigned and questions addressed to them (their email in the shared
-service, see [`people`](@ref)); by default their name.
+Who makes a change: a person, by name, or an agent (`agent = true`), named for whom it works. `id`
+is the person as tasks are assigned and questions addressed to them (their email in the shared
+service, see [`people`](@ref)): a person's own, by default their name, and for an agent the person it
+works for, or `""`.
 """
 struct Actor
     name::String
@@ -30,7 +31,7 @@ end
 
 Actor(name::AbstractString, agent::Bool) = Actor(String(name), agent, agent ? "" : String(name))
 person(name::AbstractString; id::AbstractString = name) = Actor(String(name), false, String(id))
-agent(name::AbstractString) = Actor(isempty(name) ? "agent" : String(name), true)
+agent(name::AbstractString; id::AbstractString = "") = Actor(isempty(name) ? "agent" : String(name), true, String(id))
 
 """
 How long after a person makes a task or project the same request from them is taken as a repeat
@@ -85,7 +86,7 @@ function record!(kb::KB, task::Integer, by::Actor, kind::AbstractString; text::A
                  to_whom::AbstractString = "", to_person::AbstractString = "", reply_to::Integer = 0)
     id = insert_row!(kb, """INSERT INTO task_events (task_id, at, who, by_agent, by_person, kind, text, detail, to_whom, to_person, reply_to)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                     (task, now_iso(), by.name, by.agent ? 1 : 0, by.agent ? "" : by.id, kind, text, JSON.json(detail),
+                     (task, now_iso(), by.name, by.agent ? 1 : 0, by.id, kind, text, JSON.json(detail),
                       to_whom, to_person, reply_to > 0 ? reply_to : missing))
     # Kept searchable (see task_search.jl): what is said on the task, and its title and plan as they change.
     if kind in SEARCHED_NOTES && !isempty(text)

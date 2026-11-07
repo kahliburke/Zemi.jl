@@ -3,7 +3,11 @@
 # of the token its session was opened with (see `mcp_person`); otherwise whoever runs the knowledge base.
 
 "The agent making a change through a tool, working for the person calling over /mcp or for whoever runs the knowledge base."
-tool_actor() = agent("Claude for " * something(mcp_person(), local_user(), "this machine"))
+function tool_actor()
+    c = something(mcp_caller(), agent_caller(), Some(nothing))
+    agent("Claude for " * something(mcp_person(), local_user(), "this machine");
+          id = c === nothing ? something(local_user(), "") : person_id(c))
+end
 
 """
 The person an agent's tool call works for, as a caller: the token's holder over /mcp, or the person

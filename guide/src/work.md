@@ -56,13 +56,14 @@ members and anyone. A question waits under **Waiting on you → to answer** for 
 until they reply or someone marks it resolved.
 
 - **Reply** on a question answers it, or asks a question back. A question asked back waits on whoever
-  asked the first, and the first waits on its answer meanwhile.
+  asked the first (for an agent's question, the person the agent works for), and the first waits on
+  its answer meanwhile.
 - A plain comment answers nothing. When a question waits on you, the comment box offers
   "Answers …'s question", ticked, so a comment can still be the answer.
 - Replies sit under their question. Its tag says whom it waits on, or that it was answered or
   resolved.
-- Answers to your questions wait under **answered** until you write on the task again or mark them
-  resolved.
+- Answers to your questions, and to those agents asked for you, wait under **answered** until you
+  write on the task again or mark them resolved.
 
 An agent's question goes to the person it names, else to whoever asked the question it replies to,
 else to the task's assignee, else to anyone. Agents see the questions asked of them before their

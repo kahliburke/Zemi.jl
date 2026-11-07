@@ -1750,9 +1750,16 @@ end
     answered = call(ada, "GET", "/api/tasks/waiting")[2]["answered"]
     @test [(a["question"], a["answer"], a["answerer"]) for a in answered] == [("Which gasket?", "The neoprene one.", "Bea")]
     # An agent's question goes to the assignee; asked back about a person's question, to that person.
-    bot = K.agent("Claude for Ada")
+    bot = K.agent("Claude for Ada"; id = "ada@x.org")
     K.note_task!(kb, "PU-1", "Shall I order spares?"; kind = "question", by = bot)
-    @test last_note().to_person == "bea@x.org"
+    spares = last_note()
+    @test spares.to_person == "bea@x.org" && spares.by_person == "ada@x.org"
+    # Asked back, an agent's question goes to the person it works for, who sees the answer too.
+    note(bea, Dict("kind" => "question", "text" => "How many?", "reply_to" => spares.id))
+    @test (last_note().to_whom, last_note().to_person) == ("person", "ada@x.org") && ("PU-1", "How many?", "Bea") in asked(ada)
+    note(ada, Dict("text" => "Two of each.", "reply_to" => last_note().id))
+    note(bea, Dict("text" => "Yes, order them.", "reply_to" => spares.id))
+    @test ("Shall I order spares?", "Yes, order them.") in [(a["question"], a["answer"]) for a in call(ada, "GET", "/api/tasks/waiting")[2]["answered"]]
     @test call(cy, "POST", "/api/tasks/PU-1/notes", Dict("kind" => "question", "text" => "Can I watch?"))[1] == 403   # a viewer may not
     asked_ada = K.note_task!(kb, "PU-1", "What pressure?"; kind = "question", by = K.person("Ada"; id = "ada@x.org"))
     K.note_task!(kb, "PU-1", "In bar or psi?"; kind = "question", by = bot, reply_to = asked_ada)

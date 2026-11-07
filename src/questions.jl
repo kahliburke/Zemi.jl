@@ -30,20 +30,28 @@ migration!(12, [
          AND NOT EXISTS (SELECT 1 FROM task_events c WHERE c.reply_to = task_events.id AND c.kind = 'comment')""",
 ])
 
+# An agent's notes by the person it works for, from the name it signs with ("Claude for Ada").
+migration!(13, ["""UPDATE task_events SET by_person = coalesce(
+                       (SELECT u.email FROM users u WHERE u.name = substr(task_events.who, instr(task_events.who, ' for ') + 5)
+                                                       OR u.email = substr(task_events.who, instr(task_events.who, ' for ') + 5)
+                        ORDER BY u.id LIMIT 1), '')
+                   WHERE by_agent = 1 AND instr(who, ' for ') > 0"""])
+
 """
     question_recipient(kb, ref, by, to; replied = nothing) -> (to_whom, to_person)
 
 Whom a question on task `ref` by `by` is asked of: `("agents", "")`, `("anyone", "")` (anyone on
 the project) or `("person", id)`. `to` names them: `"agents"`, `"anyone"`, or a person as tasks
 are assigned (their email or name, see [`assignee_id`](@ref)). With no `to`, a question asked back
-about question `replied` goes to whoever asked that; else a person's goes to the agents, and an
-agent's to the task's assignee, or anyone when no person is assigned.
+about question `replied` goes to whoever asked that: for an agent's, the person it works for, or
+the agents when it works for no one. Else a person's goes to the agents, and an agent's to the
+task's assignee, or anyone when no person is assigned.
 """
 function question_recipient(kb::KB, ref::AbstractString, by::Actor, to::AbstractString; replied = nothing)
     to = strip(to)
     if isempty(to)
-        replied === nothing || return replied.by_agent == 1 ? ("agents", "") :
-                                      isempty(replied.by_person) ? ("anyone", "") : ("person", String(replied.by_person))
+        replied === nothing || return !isempty(replied.by_person) ? ("person", String(replied.by_person)) :
+                                      replied.by_agent == 1 ? ("agents", "") : ("anyone", "")
         by.agent || return ("agents", "")
         a = coalesce(scalar(kb, "SELECT assignee FROM tasks WHERE id = ?", (task_ref(kb, ref),)), "")
         return isempty(a) || startswith(a, "agent:") ? ("anyone", "") : ("person", String(a))
@@ -137,8 +145,8 @@ end
 """
     answered_questions(kb, me) -> Vector{NamedTuple}
 
-The questions person `me` asked that a comment answers, not resolved, while they have not written
-on the task since the answer: each task, as [`tasks`](@ref) gives it, with the `question`, its
+The questions person `me` asked, themselves or through an agent working for them, that a comment
+answers, not resolved, while they have not written on the task since the answer: each task, as [`tasks`](@ref) gives it, with the `question`, its
 `note`, the first `answer` and who wrote it (`answerer`), the latest answer first.
 """
 function answered_questions(kb::KB, me::AbstractString)
@@ -147,7 +155,7 @@ function answered_questions(kb::KB, me::AbstractString)
             SELECT e.id, e.task_id, e.text, a.text AS answer, a.who AS answerer
             FROM task_events e JOIN tasks t ON t.id = e.task_id
             JOIN task_events a ON a.id = (SELECT min(r.id) FROM task_events r WHERE r.reply_to = e.id AND r.kind = 'comment')
-            WHERE e.kind = 'question' AND e.by_agent = 0 AND e.by_person = ? AND e.resolved_at IS NULL AND t.archived_at IS NULL
+            WHERE e.kind = 'question' AND e.by_person = ? AND e.resolved_at IS NULL AND t.archived_at IS NULL
               AND NOT EXISTS (SELECT 1 FROM task_events w WHERE w.task_id = e.task_id AND w.id > a.id AND w.by_agent = 0
                               AND w.by_person = ? AND w.kind IN ('comment', 'question'))
             ORDER BY a.id DESC""", (me, me))
