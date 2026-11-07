@@ -3030,8 +3030,9 @@ end
         layers = [K.Layer(; name = "chunks", model = "m", unit = :chunk, query_prefix = "Q: "),
                   K.Layer(; name = "sections", model = "m", unit = :section, query_prefix = "Q: "),
                   K.Layer(; name = "other", model = "n", unit = :chunk)]
-        kb = open_kb(temp_config(; ollama_url = "http://127.0.0.1:$port", layers, ollama_keep_alive = "2h"))
+        kb = open_kb(temp_config(; ollama_url = "http://127.0.0.1:$port", qdrant_url = "http://127.0.0.1:$qport", layers, ollama_keep_alive = "2h"))
         foreach(l -> K.ensure_layer!(kb, l, 2), layers)
+        @test length(colls) == 3                                 # on the stand-in, not a Qdrant this machine runs
         q = "reef crest $(rand(UInt32))"                         # not in the cache of query vectors
         @test [first(r) for r in K.rankings(kb, q)] == ["keyword", "chunks", "sections", "other"]
         @test sort([(b["model"], only(b["input"])) for b in bodies]) == [("m", "Q: $q"), ("n", q)]
