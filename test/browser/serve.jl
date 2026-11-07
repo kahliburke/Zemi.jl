@@ -26,6 +26,8 @@ function seed!(kb)
     me, bot = K.person("Rowan"), K.agent("Claude for Rowan")
     K.create_project!(kb, "Browser tests"; key = "BR", description = "Work the browser tests look at.", by = me)
     K.create_project!(kb, "Other"; key = "OT", by = me)
+    K.put_record!(kb, "notes", (; key = "m1", title = "Reef crest review", date = "2026-10-02", sections = ["Notes" => "It held."],
+                                 projects = ["BR"]); read = false)
     K.create_milestone!(kb, "BR", "First"; due = "2026-12-01")
     t1 = K.create_task!(kb, "BR", "Read the reef papers"; status = "ready", milestone = "First",
                         body = "The rate \$\\omega\$ and\n\n\$\$\\int_0^1 x\\,dx\$\$\n\n- one\n- two", by = me)

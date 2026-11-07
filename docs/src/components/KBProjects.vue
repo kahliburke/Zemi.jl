@@ -1810,13 +1810,15 @@ form.kbp-add { position: relative; }
 .kbp-codebase { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; margin-top: 0.5rem; font-size: 0.85rem; }
 .kbp-codebase code { font-size: 0.75rem; }
 .kbp-records { margin-top: 0.5rem; font-size: 0.85rem; }
-.kbp-records-head { display: flex; gap: 0.5rem; align-items: baseline; cursor: pointer; list-style: none; }
+.kbp-records-head { display: flex; gap: 0.5rem; align-items: baseline; cursor: pointer; list-style: none; width: fit-content; }
 .kbp-records-head::-webkit-details-marker { display: none; }
 .kbp-records-head::before { content: '▸'; color: var(--vp-c-text-3); font-size: 0.75rem; }
 .kbp-records[open] > .kbp-records-head::before { content: '▾'; }
 .kbp-records-list { list-style: none; margin: 0.3rem 0 0; padding: 0; display: grid; grid-template-columns: max-content 1fr;
                     column-gap: 0.9rem; row-gap: 0.15rem; }
 .kbp-records-list li { display: contents; }
+/* A title is a link as wide as its text, not as its column. */
+.kbp-records-list a { justify-self: start; }
 .kbp-records-list .kbp-dim { font-variant-numeric: tabular-nums; }
 .kbp-records-more { display: inline-block; margin-top: 0.2rem; }
 .kbp-commits { list-style: none; padding: 0; margin: 0 0 0.5rem; }
