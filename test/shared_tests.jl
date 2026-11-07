@@ -45,6 +45,14 @@ shared_config(; kw...) = K.SharedConfig(; base_url = "http://127.0.0.1:8800", ad
     c = K.session_caller(kb, s)
     @test c.user_id == student && c.via == :session && K.can(c, "tutor") && !K.can(c, "paper.add")
     @test K.session_caller(kb, "made-up") === K.ANONYMOUS && !K.can(K.ANONYMOUS, "read")
+    # Its use is written down at most once a minute, not on each request.
+    seen() = K.scalar(kb, "SELECT last_seen FROM sessions WHERE token_hash = ?", (K.secret_hash(s),))
+    recently = K.iso_in(K.Dates.Second(-30))
+    K.execute!(kb, "UPDATE sessions SET last_seen = ?", (recently,))
+    @test K.session_caller(kb, s).user_id == student && seen() == recently
+    K.execute!(kb, "UPDATE sessions SET last_seen = ?", (K.iso_in(K.Dates.Minute(-2)),))
+    K.session_caller(kb, s)
+    @test seen() > recently
     K.execute!(kb, "UPDATE sessions SET expires_at = '2000-01-01T00:00:00Z'")
     @test K.session_caller(kb, s) === K.ANONYMOUS
     @test K.scalar(kb, "SELECT count(*) FROM sessions") == 0                   # an expired session is removed
@@ -281,6 +289,10 @@ end
     e = first(K.audit_log(kb))
     @test e.action == "chat" && e.who == "l@x.org" && e.detail["paper"] == "2609.00001" && e.detail["status"] == 400
     @test !haskey(e.detail, "message") && !haskey(e.detail, "profile")
+    # A board's presence and pen change nothing, so they are not in the log.
+    @test call(reader, "POST", "/api/presence", Dict("mode" => "present"))[1] == 200
+    call(reader, "POST", "/api/ink", Dict("project" => "", "stroke" => "s", "points" => "[]"))
+    @test first(K.audit_log(kb)).action == "chat"
     close(kb)
 end
 
@@ -1022,7 +1034,7 @@ end
     r = req("POST", "/auth/sign-out"; headers = [signed; "X-Zemi" => "1"])
     @test r.status == 204 && occursin("Max-Age=0", HTTP.header(r, "Set-Cookie")) && occursin("Secure", HTTP.header(r, "Set-Cookie"))
     @test req("GET", "/api/status"; headers = signed).status == 401
-    @test K.METRICS["site"][1] >= 2 && haskey(K.METRICS, "GET /api/status")
+    @test K.METRICS["site"].count >= 2 && haskey(K.METRICS, "GET /api/status")
     close(kb)
 end
 

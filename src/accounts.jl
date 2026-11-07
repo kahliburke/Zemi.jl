@@ -331,17 +331,24 @@ account. A session in use is kept alive.
 """
 function session_caller(kb::KB, secret::AbstractString)
     isempty(secret) && return ANONYMOUS
-    r = query(kb, "SELECT user_id, expires_at FROM sessions WHERE token_hash = ?", (secret_hash(secret),))
+    h = secret_hash(secret)
+    r = query(kb, "SELECT user_id, expires_at, last_seen, acting_as FROM sessions WHERE token_hash = ?", (h,))
     isempty(r) && return ANONYMOUS
-    if first(r).expires_at < now_iso()
+    s = first(r)
+    if s.expires_at < now_iso()
         end_session!(kb, secret)
         return ANONYMOUS
     end
-    execute!(kb, "UPDATE sessions SET last_seen = ? WHERE token_hash = ?", (now_iso(), secret_hash(secret)))
-    viewed = scalar(kb, "SELECT acting_as FROM sessions WHERE token_hash = ?", (secret_hash(secret),))
-    ismissing(viewed) || return account_caller(kb, viewed, :session; admin = Int(first(r).user_id))
-    return account_caller(kb, first(r).user_id, :session)
+    seen_now(s.last_seen) && execute!(kb, "UPDATE sessions SET last_seen = ? WHERE token_hash = ?", (now_iso(), h))
+    ismissing(s.acting_as) || return account_caller(kb, s.acting_as, :session; admin = Int(s.user_id))
+    return account_caller(kb, s.user_id, :session)
 end
+
+"""
+Whether a session's or token's use is to be written down now: when it was last written (`last`) is
+over a minute ago. A page asks every few seconds, and each write waits its turn for the database.
+"""
+seen_now(last) = coalesce(last, "") < iso_in(Minute(-1))
 
 """
     create_token!(kb, uid; name, permissions = nothing, projects = nothing, days = 90) -> (; id, token)
@@ -386,7 +393,7 @@ function token_caller(kb::KB, token::AbstractString; mcp::Bool = false)
     (ismissing(t.revoked_at) && (ismissing(t.expires_at) || t.expires_at > now_iso())) || return ANONYMOUS
     # A token an MCP client got by OAuth is for /mcp: its tools, not the whole API.
     mcp || ismissing(t.client_id) || return ANONYMOUS
-    execute!(kb, "UPDATE api_tokens SET last_used = ? WHERE id = ?", (now_iso(), t.id))
+    seen_now(t.last_used) && execute!(kb, "UPDATE api_tokens SET last_used = ? WHERE id = ?", (now_iso(), t.id))
     return account_caller(kb, t.user_id, :token; token_id = Int(t.id), only = Set(JSON.parse(t.permissions)),
                           projects = ismissing(t.projects) ? nothing : Set{String}(JSON.parse(t.projects)))
 end

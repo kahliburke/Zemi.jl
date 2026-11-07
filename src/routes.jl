@@ -157,9 +157,15 @@ function handle(kb::KB, req::HTTP.Request, caller::Caller = local_caller())
         json_response(Dict("error" => client_message(e), (e isa DroppedError ? ["dropped" => drop_json(e.drop)] : [])...);
                       status = error_status(e))
     end
-    req.method == "GET" || audit_write!(kb, caller, req, parts, params, r)
+    req.method == "GET" || parts in UNAUDITED || audit_write!(kb, caller, req, parts, params, r)
     return r
 end
+
+"""
+The writes the audit log leaves out: a board's presence and its pen, sent every few seconds while a
+board is open, which report where someone is and change nothing.
+"""
+const UNAUDITED = (["api", "presence"], ["api", "ink"])
 
 "Record a change in the audit log: its route, what it was done to, and how it went."
 function audit_write!(kb::KB, caller::Caller, req::HTTP.Request, parts, params, r::HTTP.Response)
