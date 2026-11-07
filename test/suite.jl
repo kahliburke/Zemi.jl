@@ -5128,12 +5128,10 @@ end
         # What to work on next: approved, unblocked, highest priority first; taking it starts it.
         K.update_task!(kb, "DM-3"; status = "done", by = me)
         @test occursin("Nothing approved", tools["next_task"]("DM")) && occursin("task_wait", tools["next_task"]("DM"))
-        # A project's description, set by its people, comes first in what an agent is given to work on.
+        # A project's description, set by its people, comes with work to do, not with nothing.
         K.update_project!(kb, "DM"; description = "Demo work: keep plans short.", by = me)
-        @test startswith(tools["next_task"]("DM"), "## Project DM: context from its people\n\nDemo work: keep plans short.")
+        @test startswith(tools["next_task"]("DM"), "Nothing approved")
         @test_throws "Only a person" K.update_project!(kb, "DM"; description = "Mine now", by = bot)
-        K.update_project!(kb, "DM"; description = "", by = me)
-        @test !startswith(tools["next_task"]("DM"), "## Project")
         # With nothing to do, an agent waits for people: it hears what a person does, not what agents do.
         waiter = @async tools["task_wait"]("DM"; minutes = 0.5)
         sleep(0.3)
@@ -5147,6 +5145,9 @@ end
         @test occursin("DM-1", heard) && occursin("Rowan wrote: Go ahead with it", heard) && !occursin("chatter", heard)
         @test startswith(tools["task_wait"]("DM"; minutes = 0.01), "Nothing from people on DM")
         K.create_task!(kb, "DM", "Low"; status = "ready", priority = 3, by = me)                    # DM-9
+        @test startswith(tools["next_task"]("DM"), "## Project DM: context from its people\n\nDemo work: keep plans short.")
+        K.update_project!(kb, "DM"; description = "", by = me)
+        @test !startswith(tools["next_task"]("DM"), "## Project")
         # Work approved before the wait began ends it at once: approving it was not missed.
         @test startswith(tools["task_wait"]("DM"; minutes = 5.0), "In DM, waiting for you already: DM-9 is approved and unblocked")
         K.create_task!(kb, "DM", "Waiting"; status = "ready", priority = 1, by = me)                # DM-10
@@ -5251,6 +5252,15 @@ end
         @test startswith(tools["next_task"]("DM"), "## What DM has found (read one with `finding`)\n\n- DM-F2 The survey covers the field\n" *
                                                     "- DM-F1 [contested: Only two papers.] The key papers agree\n\n---\n\n")
         @test tools["findings"]("DM"; status = "superseded") == "No findings in DM superseded."
+        # Its library is counted by kind; only what people said matters is listed.
+        for (key, title) in (("R1", "A data portal"), ("R2", "A news story"), ("R3", "A statistics yearbook"))
+            K.put_resource!(kb, "zotero", K.Resource(; key, title, type = "dataset", projects = ["DM"]); read = false)
+        end
+        portal = K.resource_id("zotero", "R1")
+        K.library_add!(kb, "DM", portal; why = "Where the rain records come from", by = me)
+        ctx = tools["next_task"]("DM")
+        @test occursin("## What DM works from\n\nIts library holds 3 resources", ctx) && occursin("`library(\"DM\")` lists them", ctx)
+        @test occursin("- $portal A data portal: Where the rain records come from\n", ctx) && !occursin("A news story", ctx)
     finally
         K._KB[] = nothing
         close(kb)

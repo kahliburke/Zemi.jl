@@ -234,7 +234,8 @@ tool!("task", task_tool; need = "tasks.view")
 """
     next_task(project::String; take::Bool=false) -> String
 
-What to work on next in `project`: first the questions people asked on its tasks that no agent has
+What to work on next in `project`: the project's context (what its people say of it, what it has
+found, and its library), then the questions people asked on its tasks that no agent has
 answered (answer each with `task_note(kind="comment")`), then the highest-priority approved task
 that is assigned to an agent or to nobody and that nothing open blocks, in full (its plan,
 subtasks and comments). A task a person has taken is theirs, though subtasks under it may be
@@ -245,8 +246,10 @@ move it to review when it is finished.
 function next_task_tool(project::String; take::Bool = false)::String
     refusing() do
         tool_needs(project, CONTRIBUTE)
-        asked = project_context(project) * questions_text(asked_of_agents(kb(), project))
+        questions = questions_text(asked_of_agents(kb(), project))
         ref = next_task(kb(), project)
+        # The project's context comes with work to do: a question to answer or a task.
+        asked = (ref === nothing && isempty(questions) ? "" : project_context(project)) * questions
         ref === nothing && return asked * "Nothing approved and unblocked in $(uppercase(project)): tasks waiting for approval stay in proposed. " *
                                   "Call task_wait to wait for a person to approve, answer or comment, instead of stopping."
         if take
@@ -641,9 +644,10 @@ end
 """
     project_context(key) -> String
 
-What `next_task` gives agents about project `key` before anything else: the context its people set
-for their work, what the project has found (its accepted findings, the latest `FINDINGS_IN_CONTEXT`,
-and those contested, with why), and what it works from: its library, kept items only.
+What `next_task` gives agents about project `key` before the work: the context its people set for
+it, what the project has found (its accepted findings, the latest `FINDINGS_IN_CONTEXT`, and those
+contested, with why), and what it works from: its kept library, counted by kind, with the items
+people said why they matter (a library brought in whole from a reference manager is a count).
 """
 function project_context(key::AbstractString)
     k = uppercase(strip(key))
@@ -666,19 +670,27 @@ function project_context(key::AbstractString)
     end
     kept = filter(x -> x.status == "kept", library(kb(), k; caller = tool_caller()))
     if any(x -> x.id > 0, kept)                       # more than the project's own codebase
-        println(io, "## What $k works from (its library; search within it with `search(query; project=\"$k\")`)\n")
-        for x in first(kept, LIBRARY_IN_CONTEXT)
+        noun(x) = x.kind == "paper" ? something(document_kind(x.target), PAPER).noun : x.kind
+        tally = Dict{String,Int}()
+        foreach(x -> tally[noun(x)] = get(tally, noun(x), 0) + 1, kept)
+        counts = sort!(collect(tally); by = c -> (-c[2], c[1]))
+        println(io, "## What $k works from\n")
+        println(io, "Its library holds ", join(("$n $(n == 1 ? w : w * "s")" for (w, n) in counts), ", ", " and "),
+                ": `library(\"$k\")` lists them, and `search(query; project=\"$k\")` searches within them.\n")
+        said = filter(x -> !isempty(x.why), kept)
+        isempty(said) || println(io, "What its people said matters:\n")
+        for x in first(said, LIBRARY_IN_CONTEXT)
             println(io, "- ", x.kind == "paper" ? cited_as(x.target) : x.target, isempty(x.label) || x.label == x.target ? "" : " $(x.label)",
-                    isempty(x.why) ? "" : ": $(x.why)")
+                    ": $(x.why)")
         end
-        length(kept) > LIBRARY_IN_CONTEXT && println(io, "- … $(length(kept) - LIBRARY_IN_CONTEXT) more: `library(\"$k\")`")
+        length(said) > LIBRARY_IN_CONTEXT && println(io, "- … $(length(said) - LIBRARY_IN_CONTEXT) more")
         println(io)
     end
     out = String(take!(io))
     isempty(out) ? "" : out * "---\n\n"
 end
 
-"How many of a project's library items agents are given with its context."
+"How many of a project's library items with a reason agents are given with its context."
 const LIBRARY_IN_CONTEXT = 30
 
 "How many of a project's accepted findings agents are given with its context, the latest changed first."
