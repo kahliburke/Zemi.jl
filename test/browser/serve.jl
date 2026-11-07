@@ -40,6 +40,10 @@ function seed!(kb)
     K.execute!(kb, """INSERT INTO papers (doc_id, title, authors, published, metadata_at, added_at, kind)
                       VALUES ('2609.00001', 'Patches of recovery on bleached reefs', '["Ada Lovelace"]', '2026-09-01', ?, ?, 'paper')""",
                (K.now_iso(), K.now_iso()))
+    # One for the Documents page to drop and restore.
+    K.execute!(kb, """INSERT INTO papers (doc_id, title, authors, published, metadata_at, added_at, kind)
+                      VALUES ('2609.00099', 'Tide gauges along a reef flat', '["Bea Ng"]', '2026-09-02', ?, ?, 'paper')""",
+               (K.now_iso(), K.now_iso()))
 end
 
 """

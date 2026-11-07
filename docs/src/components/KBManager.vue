@@ -1,7 +1,8 @@
 <!--
   Managing the knowledge base's documents: find them by title, author or id, see how far each has
   been processed, and run any step again, for one document or a selection. A document whose access is
-  set (a codebase, a record) is linked to projects and unlinked here.
+  set (a codebase, a record) is linked to projects and unlinked here. Dropping a document removes it
+  and keeps it out (see src/dropped.jl); the dropped view lists those, to restore.
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
@@ -12,6 +13,7 @@ import { kbPage } from './kbLinks'
 import { isCodebase, hasAccess, isResource } from './kbKinds'
 import { byline } from './kbFormat'
 import KBJobs from './KBJobs.vue'
+import KBDialog from './KBDialog.vue'
 
 type Doc = { id: string; slug: string; page: string; title: string; authors: string[]; published: string; category: string; kind: string;
              access: 'open' | 'projects'; projects: string[]; posted: string; parsed: boolean; passages: number; layers: number; summaries: number }
@@ -42,7 +44,7 @@ const ACTIONS: Action[] = [
   { name: 'unshare', label: 'Unshare', help: 'Exclude from the published dataset' },
   { name: 'open', label: 'Open to all', help: 'Let every reader see the document', access: 'open' },
   { name: 'close', label: 'Projects only', help: 'Let only the members of the projects linked to the document see it', access: 'projects' },
-  { name: 'remove', label: 'Remove', help: 'Delete the document, its text, summaries and vectors' },
+  { name: 'drop', label: 'Drop', help: 'Remove the document and keep it out: no source brings it back until it is restored' },
 ]
 
 // Typing and paging ask in turn: the list shown answers the last.
@@ -50,6 +52,7 @@ const listing = latest()
 async function load() {
   if (mode.value !== 'live') return
   loading.value = true; error.value = ''
+  if (state.value === 'dropped') return loadDropped()
   try {
     const params = new URLSearchParams({ q: q.value, state: state.value, limit: String(PAGE), offset: String(offset.value) })
     const data = await listing(signal => getJSON(`/api/documents?${params}`, { signal }))
@@ -95,9 +98,9 @@ function toggleAll() {
   selected.value = s
 }
 
-async function run(action: string, ids: string[]) {
+async function run(action: string, ids: string[], why = '') {
   if (!ids.length) return
-  if (action === 'remove' && !confirm(`Remove ${ids.length === 1 ? ids[0] : `${ids.length} documents`}?`)) return
+  if (action === 'drop' && !dropping.value) { dropping.value = ids; reason.value = ''; return }
   error.value = ''
   const access = ACTIONS.find(a => a.name === action)?.access
   if (access) {
@@ -106,10 +109,33 @@ async function run(action: string, ids: string[]) {
     return load()
   }
   try {
-    const r = await post('/api/actions', JSON.stringify({ action, ids }))
+    const r = await post('/api/actions', JSON.stringify({ action, ids, why }))
     followJobs(r.job)
-    if (action === 'remove') selected.value = new Set([...selected.value].filter(id => !ids.includes(id)))
+    if (action === 'drop') selected.value = new Set([...selected.value].filter(id => !ids.includes(id)))
   } catch (e: any) { error.value = e.message ?? String(e) }
+}
+
+// Dropping asks why first, in a dialog: the documents it is for, and the reason given.
+const dropping = ref<string[] | null>(null)
+const reason = ref('')
+async function drop() {
+  const ids = dropping.value!
+  await run('drop', ids, reason.value.trim())
+  dropping.value = null
+}
+
+// The dropped view: what is kept out, who dropped each, when and why, to restore.
+type Drop = { id: string; title: string; kind: string; by: string; at: string; why: string }
+const drops = ref<Drop[]>([])
+async function loadDropped() {
+  try { drops.value = (await listing(signal => getJSON('/api/dropped', { signal }))).dropped; total.value = drops.value.length }
+  catch (e: any) { if (!isStale(e)) error.value = `Load failed: ${e.message ?? e}` }
+  loading.value = false
+}
+async function restore(d: Drop) {
+  error.value = ''
+  try { await post('/api/dropped/restore', JSON.stringify({ ids: [d.id] })); await loadDropped() }
+  catch (e: any) { error.value = e.message ?? String(e) }
 }
 
 // A resource's PDF, uploaded to read it in full: the paper it becomes takes its place.
@@ -165,77 +191,106 @@ const who = (d: Doc) => byline(d.authors)
           <option value="uploaded">uploaded PDFs</option>
           <option value="code">codebases</option>
           <option value="record">records</option>
+          <option value="dropped">dropped</option>
         </select>
       </div>
       <p v-if="unavailable.length" class="kbm-dim kbm-unavailable">
         Unavailable here: {{ unavailable.join('; ') }}.
       </p>
-      <div class="kbm-bar">
-        <span>{{ total }} documents<span v-if="selected.size"> · {{ selected.size }} selected</span></span>
-        <template v-if="selected.size">
-          <button v-for="a in ACTIONS" :key="a.name" type="button" :title="tip(a, [...selected])"
-                  :disabled="barred(a, [...selected])"
-                  :class="['kbm-action', { danger: a.name === 'remove' }]" @click="run(a.name, [...selected])">{{ a.label }}</button>
-          <button type="button" class="kb-link" @click="selected = new Set()">clear</button>
-        </template>
-      </div>
-      <p v-if="error" class="kb-error kbm-error">{{ error }}</p>
-      <KBJobs />
-      <table class="kbm-table">
-        <thead>
-          <tr>
-            <th><input type="checkbox" :checked="allShown" @change="toggleAll" /></th>
-            <th>Document</th><th>Category</th><th>State</th><th>Posted</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="d in docs" :key="d.id" :class="{ picked: selected.has(d.id), busy: working.has(d.id) }">
-            <td><input type="checkbox" :checked="selected.has(d.id)" @change="toggle(d.id)" /></td>
-            <td>
-              <a :href="kbPage(d.page)"><KBTitle :text="d.title" /></a>
-              <div class="kbm-dim">{{ who(d) }}<span v-if="who(d)"> · </span><code>{{ d.id }}</code>
-                <span v-if="d.access === 'projects'"> · its projects only</span>
-                <template v-if="isResource(d.id)"> · <label class="kb-link kbm-upload">upload its PDF
-                  <input type="file" accept="application/pdf" @change="promote($event, d.id)" /></label></template></div>
-              <div v-if="hasAccess(d.id)" class="kbm-dim kbm-projects">
-                <template v-if="d.projects.length">linked to
-                  <span v-for="k in d.projects" :key="k">{{ k }}<button type="button" class="kb-link" :title="`Unlink ${k}`"
-                        @click="link(d, k, true)">×</button></span></template>
-                <template v-else>linked to no project</template>
-                <select class="kbm-select small" @change="link(d, ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''">
-                  <option value="">link…</option>
-                  <option v-for="k in projects.filter(k => !d.projects.includes(k))" :key="k" :value="k">{{ k }}</option>
+      <template v-if="state === 'dropped'">
+        <p v-if="error" class="kb-error kbm-error">{{ error }}</p>
+        <p class="kbm-dim">Dropped documents are kept out: no source brings them back. Restoring one lets its source bring it
+          back on its next run, and lets anyone add it again.</p>
+        <p v-if="!drops.length && !loading" class="kbm-dim">Nothing is dropped.</p>
+        <table v-else class="kbm-table">
+          <thead><tr><th>Document</th><th>Dropped</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="d in drops" :key="d.id">
+              <td><KBTitle :text="d.title" /><div class="kbm-dim">{{ d.kind }} · <code>{{ d.id }}</code></div></td>
+              <td class="kbm-dim">by {{ d.by }}, {{ d.at.slice(0, 10) }}<div v-if="d.why" class="kbm-why">{{ d.why }}</div></td>
+              <td><button type="button" class="kbm-action" @click="restore(d)">Restore</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
+      <template v-else>
+        <div class="kbm-bar">
+          <span>{{ total }} documents<span v-if="selected.size"> · {{ selected.size }} selected</span></span>
+          <template v-if="selected.size">
+            <button v-for="a in ACTIONS" :key="a.name" type="button" :title="tip(a, [...selected])"
+                    :disabled="barred(a, [...selected])"
+                    :class="['kbm-action', { danger: a.name === 'drop' }]" @click="run(a.name, [...selected])">{{ a.label }}</button>
+            <button type="button" class="kb-link" @click="selected = new Set()">clear</button>
+          </template>
+        </div>
+        <p v-if="error" class="kb-error kbm-error">{{ error }}</p>
+        <KBJobs />
+        <table class="kbm-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" :checked="allShown" @change="toggleAll" /></th>
+              <th>Document</th><th>Category</th><th>State</th><th>Posted</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="d in docs" :key="d.id" :class="{ picked: selected.has(d.id), busy: working.has(d.id) }">
+              <td><input type="checkbox" :checked="selected.has(d.id)" @change="toggle(d.id)" /></td>
+              <td>
+                <a :href="kbPage(d.page)"><KBTitle :text="d.title" /></a>
+                <div class="kbm-dim">{{ who(d) }}<span v-if="who(d)"> · </span><code>{{ d.id }}</code>
+                  <span v-if="d.access === 'projects'"> · its projects only</span>
+                  <template v-if="isResource(d.id)"> · <label class="kb-link kbm-upload">upload its PDF
+                    <input type="file" accept="application/pdf" @change="promote($event, d.id)" /></label></template></div>
+                <div v-if="hasAccess(d.id)" class="kbm-dim kbm-projects">
+                  <template v-if="d.projects.length">linked to
+                    <span v-for="k in d.projects" :key="k">{{ k }}<button type="button" class="kb-link" :title="`Unlink ${k}`"
+                          @click="link(d, k, true)">×</button></span></template>
+                  <template v-else>linked to no project</template>
+                  <select class="kbm-select small" @change="link(d, ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''">
+                    <option value="">link…</option>
+                    <option v-for="k in projects.filter(k => !d.projects.includes(k))" :key="k" :value="k">{{ k }}</option>
+                  </select>
+                </div>
+              </td>
+              <td class="kbm-dim">{{ d.category }}</td>
+              <td>
+                <template v-if="working.has(d.id)">
+                  <span class="kbm-state working">working</span>
+                  <div class="kbm-dim">{{ working.get(d.id)?.message }}</div>
+                </template>
+                <template v-else>
+                  <span :class="['kbm-state', d.parsed ? 'read' : 'recorded']">{{ stateOf(d) }}</span>
+                  <div v-if="d.parsed" class="kbm-dim">{{ d.passages }} passages · {{ d.summaries }} summaries ·
+                    {{ d.layers ? `${d.layers} layers` : 'not embedded' }}</div>
+                </template>
+              </td>
+              <td class="kbm-dim">{{ d.posted }}</td>
+              <td>
+                <select class="kbm-select small" @change="rowAction($event, d.id)">
+                  <option value="">actions…</option>
+                  <option v-for="a in ACTIONS" :key="a.name" :value="a.name" :title="tip(a, [d.id])"
+                          :disabled="barred(a, [d.id])">{{ a.label }}</option>
                 </select>
-              </div>
-            </td>
-            <td class="kbm-dim">{{ d.category }}</td>
-            <td>
-              <template v-if="working.has(d.id)">
-                <span class="kbm-state working">working</span>
-                <div class="kbm-dim">{{ working.get(d.id)?.message }}</div>
-              </template>
-              <template v-else>
-                <span :class="['kbm-state', d.parsed ? 'read' : 'recorded']">{{ stateOf(d) }}</span>
-                <div v-if="d.parsed" class="kbm-dim">{{ d.passages }} passages · {{ d.summaries }} summaries ·
-                  {{ d.layers ? `${d.layers} layers` : 'not embedded' }}</div>
-              </template>
-            </td>
-            <td class="kbm-dim">{{ d.posted }}</td>
-            <td>
-              <select class="kbm-select small" @change="rowAction($event, d.id)">
-                <option value="">actions…</option>
-                <option v-for="a in ACTIONS" :key="a.name" :value="a.name" :title="tip(a, [d.id])"
-                        :disabled="barred(a, [d.id])">{{ a.label }}</option>
-              </select>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <div class="kbm-pages" v-if="total > PAGE">
-        <button type="button" class="kb-link" :disabled="offset === 0" @click="offset = Math.max(0, offset - PAGE)">previous</button>
-        <span class="kbm-dim">{{ offset + 1 }}–{{ Math.min(offset + PAGE, total) }} of {{ total }}</span>
-        <button type="button" class="kb-link" :disabled="offset + PAGE >= total" @click="offset += PAGE">next</button>
-      </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="kbm-pages" v-if="total > PAGE">
+          <button type="button" class="kb-link" :disabled="offset === 0" @click="offset = Math.max(0, offset - PAGE)">previous</button>
+          <span class="kbm-dim">{{ offset + 1 }}–{{ Math.min(offset + PAGE, total) }} of {{ total }}</span>
+          <button type="button" class="kb-link" :disabled="offset + PAGE >= total" @click="offset += PAGE">next</button>
+        </div>
+      </template>
+      <KBDialog v-if="dropping" width="min(30rem, 94vw)" @close="dropping = null">
+        <h3 class="kbm-title">Drop {{ dropping.length === 1 ? dropping[0] : `${dropping.length} documents` }}?</h3>
+        <p class="kbm-dim">It is removed, with its text, summaries and vectors, and kept out: no source brings it back
+          until it is restored from the dropped list.</p>
+        <textarea v-model="reason" class="kb-field kbm-reason" rows="2" placeholder="Why (optional)"></textarea>
+        <div class="kbm-buttons">
+          <button type="button" class="kb-primary kbm-danger" @click="drop">Drop</button>
+          <button type="button" class="kb-link" @click="dropping = null">cancel</button>
+        </div>
+      </KBDialog>
     </KBNeedsService>
   </div>
 </template>
@@ -267,4 +322,9 @@ const who = (d: Doc) => byline(d.authors)
 .kbm-dim { color: var(--vp-c-text-3); font-size: 0.8rem; }
 .kbm-pages { display: flex; gap: 1rem; align-items: center; margin-top: 0.6rem; }
 .kb-link:disabled { opacity: 0.4; cursor: default; }
+.kbm-title { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.kbm-reason { display: block; width: 100%; box-sizing: border-box; margin: 0.8rem 0; padding: 0.5rem 0.7rem; border-radius: 8px; }
+.kbm-buttons { display: flex; align-items: center; gap: 1rem; }
+.kbm-danger { background: var(--vp-c-danger-1); color: white; }
+.kbm-why { color: var(--vp-c-text-2); margin-top: 0.2rem; }
 </style>

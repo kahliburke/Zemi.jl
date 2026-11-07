@@ -20,7 +20,7 @@ not_permitted(msg...) = throw(Refusal(403, string(msg...)))
 upstream_failed(msg...) = throw(Refusal(502, string(msg...)))
 
 "The reason a failure gives the person, or `nothing` for one that is the service's own (a bug, a crash)."
-reason(e) = e isa Refusal || e isa ErrorException ? e.msg : nothing
+reason(e) = e isa Refusal || e isa ErrorException ? e.msg : e isa DroppedError ? sprint(showerror, e) : nothing
 
-"The HTTP status a failure is answered with."
-error_status(e) = e isa Refusal ? e.status : e isa ErrorException ? 400 : 500
+"The HTTP status a failure is answered with: a document dropped here is a conflict (409)."
+error_status(e) = e isa Refusal ? e.status : e isa ErrorException ? 400 : e isa DroppedError ? 409 : 500

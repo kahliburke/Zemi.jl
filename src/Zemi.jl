@@ -54,6 +54,7 @@ include("code.jl")
 include("repos.jl")
 include("openalex.jl")
 include("ingest.jl")
+include("dropped.jl")
 include("search.jl")
 include("summaries.jl")
 include("agents.jl")
@@ -134,7 +135,7 @@ include("cli.jl")
 
 export Config, Layer, KB, load_config, open_kb, kb
 export parse_arxiv_id, parse_pdf, chunk_paper
-export add_papers!, add_pdf!, refresh_metadata!, fetch_pdf!, parse_paper!, embed_paper!, ingest!, remove_paper!
+export add_papers!, add_pdf!, refresh_metadata!, fetch_pdf!, parse_paper!, embed_paper!, ingest!, remove_paper!, drop!, restore!
 export drop_layer!, build_layer!, search, rankings, compare_rankings, similar_papers, PaperHit, Passage
 export mentions, export_base_set, seed!
 export Record, RecordSection, RecordFigure, RecordSegment, put_record!, delete_record!, purge_source!

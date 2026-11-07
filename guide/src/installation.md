@@ -51,4 +51,4 @@ search(db, "how the method's error scales with the problem size")
 
 Ingesting fetches, parses, summarizes and embeds each paper. Finished steps are skipped, so a
 failed run can be repeated. PDFs not on arXiv and Git repositories (as codebases) are added there
-too, and the same page finds, reprocesses and removes documents.
+too, and the same page finds, reprocesses and drops documents.

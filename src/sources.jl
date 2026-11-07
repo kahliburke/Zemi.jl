@@ -109,7 +109,7 @@ are Zemi's; a source uses these:
 
 - `put!(run, record)`: hand in a record (a [`Record`](@ref), or the NamedTuple or Dict of its
   fields), returning its id. Zemi writes it with the source's name and label, counting it against
-  the budget; an unchanged one is skipped. Once the run is stopped (its budget spent, cancelled,
+  the budget; an unchanged one is skipped, and one a person dropped is kept out (`nothing`). Once the run is stopped (its budget spent, cancelled,
   the service stopping) it throws, which ends the run cleanly
 - `state(run)` and `save_state!(run, dict)`: a small JSON document kept for the source between runs,
   what it last saw, say
@@ -131,10 +131,11 @@ mutable struct SourceRun
     added::Int
     changed::Int
     skipped::Int
+    dropped::Int
     figure_bytes::Int
     spent::String
 end
-SourceRun(kb::KB, s::RecordSource, job = nothing; upload = nothing) = SourceRun(kb, s, job, time(), upload, String[], 0, 0, 0, 0, "")
+SourceRun(kb::KB, s::RecordSource, job = nothing; upload = nothing) = SourceRun(kb, s, job, time(), upload, String[], 0, 0, 0, 0, 0, "")
 
 Base.show(io::IO, run::SourceRun) = print(io, "SourceRun(", run.source.name, ")")
 
@@ -176,7 +177,13 @@ function Base.put!(run::SourceRun, r)
                    r.access, r.label)
     end
     new = ismissing(scalar(run.kb, "SELECT 1 FROM records WHERE source = ? AND key = ?", (s.name, r.key)))
-    id, changed = put_record!(run.kb, s.name, r; read = READ_PUT[], label = s.label, by = run.upload === nothing ? nothing : run.upload.by)
+    id, changed = try
+        put_record!(run.kb, s.name, r; read = READ_PUT[], label = s.label, by = run.upload === nothing ? nothing : run.upload.by)
+    catch e
+        e isa DroppedError || rethrow()
+        run.dropped += 1
+        return nothing
+    end
     push!(run.ids, id)
     if changed
         new ? (run.added += 1) : (run.changed += 1)
@@ -288,6 +295,7 @@ function run_source!(kb::KB, s::RecordSource, job::Union{Job,Nothing} = nothing;
         e isa SourceStopped || (outcome = "failed"; why = sprint(showerror, e); rethrow())
         outcome, why = e.spent ? "spent" : "stopped", e.why
     finally
+        run.dropped > 0 && @info "$(s.name): $(run.dropped) dropped $(run.dropped == 1 ? "item" : "items") kept out"
         failures = outcome == "failed" ? get(source_status(kb, s.name), "failures", 0) + 1 : 0
         source_status!(kb, s.name; finished = now_iso(), outcome, error = why, run.added, run.changed, run.skipped,
                        (scheduled ? (; failures, next_at = time() + (failures == 0 ? s.every : retry_wait(s.every, failures))) : (;))...)
@@ -295,9 +303,9 @@ function run_source!(kb::KB, s::RecordSource, job::Union{Job,Nothing} = nothing;
     return run
 end
 
-"What a run did, in a line: `3 added, 1 changed, 12 skipped`, and why it stopped if it did."
+"What a run did, in a line: `3 added, 1 changed, 12 skipped, 1 dropped kept out`, and why it stopped if it did."
 function run_summary(run::SourceRun)
-    line = "$(run.added) added, $(run.changed) changed, $(run.skipped) skipped"
+    line = "$(run.added) added, $(run.changed) changed, $(run.skipped) skipped" * (run.dropped > 0 ? ", $(run.dropped) dropped kept out" : "")
     return isempty(run.spent) ? line : "$line; stopped as $(run.spent)"
 end
 

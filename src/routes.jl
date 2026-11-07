@@ -151,7 +151,9 @@ function handle(kb::KB, req::HTTP.Request, caller::Caller = local_caller())
         x isa HTTP.Response ? x : json_response(x)
     catch e
         log_failure(req, e, catch_backtrace())
-        json_response(Dict("error" => client_message(e)); status = error_status(e))
+        # A document dropped here, with its drop, for the page to offer adding it anyway.
+        json_response(Dict("error" => client_message(e), (e isa DroppedError ? ["dropped" => drop_json(e.drop)] : [])...);
+                      status = error_status(e))
     end
     req.method == "GET" || audit_write!(kb, caller, req, parts, params, r)
     return r

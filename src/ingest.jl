@@ -1,12 +1,17 @@
 """
-    add_papers!(kb, ids; source = "added", by = nothing) -> Vector{String}
+    add_papers!(kb, ids; source = "added", by = nothing, anyway = false) -> Vector{String}
 
 Record papers by arXiv id (URLs and `arXiv:` references are accepted too) without fetching
 anything. Returns the normalized ids. A paper new to the knowledge base gets a mention of how it
 came: `source` is one of [`ARRIVALS`](@ref) or a registered source's name (see
 [`record_source!`](@ref)), and `by` who added it, where known.
+
+A paper a person dropped (see [`drop!`](@ref)) is left out when a source brings it, and refused with
+a [`DroppedError`](@ref) when a person adds it by hand ([`BY_HAND`](@ref)), unless `anyway`, which
+restores it.
 """
-function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::AbstractString = "added", by = nothing)
+function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::AbstractString = "added", by = nothing,
+                     anyway::Bool = false)
     source in keys(ARRIVALS) || registered_source(source) !== nothing || error("Not a way a paper arrives: $source")
     out = String[]
     transaction(kb) do
@@ -19,6 +24,12 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
             id = parse_arxiv_id(s)
             id === nothing && error("Not an arXiv id or URL: $s")
             new = ismissing(paper_id(kb, id.id))
+            d = new ? dropped_as(kb; id = id.id) : nothing
+            if d !== nothing
+                source in BY_HAND || continue                    # a source's: left out
+                anyway || throw(DroppedError(d))
+                restore!(kb, d.id; by)
+            end
             execute!(kb, "INSERT OR IGNORE INTO papers (doc_id, version, added_at) VALUES (?, ?, ?)",
                 (id.id, id.version, now_iso()))
             new && record_arrival!(kb, paper_id(kb, id.id), source, by)
@@ -36,6 +47,9 @@ elsewhere (a base set's posts in a channel, say) is worded by its source and cha
 const ARRIVALS = Dict("upload" => "uploaded", "added" => "added",
                       "cited" => "added from citations", "watch" => "added from the arXiv watch",
                       "daily" => "picked as paper of the day", "study" => "found for a study")
+
+"The ways in of [`ARRIVALS`](@ref) that are a person's, who is told a paper was dropped rather than it being left out."
+const BY_HAND = ("added", "upload", "cited")
 
 """
     mentions(kb, doc_id) -> Vector{NamedTuple}
@@ -70,7 +84,7 @@ record_arrival!(kb::KB, pid, source::AbstractString, by = nothing) =
 
 """
     add_pdf!(kb, path; title = nothing, authors = String[], abstract = nothing, published = nothing,
-             added_by = nothing, source = "upload") -> String
+             added_by = nothing, source = "upload", anyway = false) -> String
 
 Add a paper that is not on arXiv from its PDF, returning its id: `doc-` and the start of the file's
 SHA-256, so adding the same file again gives the same paper. The file is copied into the data
@@ -82,14 +96,21 @@ it where given.
 A paper is not added twice. An arXiv PDF (its first page stamped with its id, see
 [`arxiv_stamp`](@ref)) is added as that arXiv paper; a PDF whose published record has the DOI of a
 paper here (from arXiv, or uploaded before as another file) gives that paper's id, and adds nothing.
+One a person dropped, as this file, as its arXiv paper or by its DOI, is refused with a
+[`DroppedError`](@ref), unless `anyway`, which restores it.
 """
 function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::AbstractVector{<:AbstractString} = String[],
-                  abstract = nothing, published = nothing, added_by = nothing, source::AbstractString = "upload")
+                  abstract = nothing, published = nothing, added_by = nothing, source::AbstractString = "upload",
+                  anyway::Bool = false)
     startswith(String(read(path, 5)), "%PDF") || error("$path is not a PDF")
     stamp = arxiv_stamp(path, kb.config)
-    stamp === nothing || return only(add_papers!(kb, [stamp]; source, by = added_by))
+    if stamp !== nothing
+        ismissing(paper_id(kb, stamp)) && keep_out!(kb, anyway; by = added_by, id = stamp)
+        return only(add_papers!(kb, [stamp]; source, by = added_by))
+    end
     sha = bytes2hex(open(sha256, path))
     id = PAPER.prefix * sha[1:10]
+    ismissing(paper_id(kb, id)) && keep_out!(kb, anyway; by = added_by, id)
     dest = joinpath(pdf_dir(kb.config), pdf_filename(id, ""))
     copied = !isfile(dest)
     copied && cp(path, dest)
@@ -107,6 +128,14 @@ function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::Abstra
                 looked = true
             catch e
                 @warn "Could not look up the published record of $id" exception = e
+            end
+        end
+        if rec !== nothing && rec.doi !== nothing
+            try
+                keep_out!(kb, anyway; by = added_by, doi = rec.doi)
+            catch
+                copied && rm(dest; force = true)
+                rethrow()
             end
         end
         same = rec === nothing || rec.doi === nothing ? missing : paper_with_doi(kb, rec.doi)
@@ -146,7 +175,7 @@ function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::Abstra
 end
 
 """
-    add_doi!(kb, doi; title = nothing, authors = String[], published = nothing, source = "added", by = nothing)
+    add_doi!(kb, doi; title = nothing, authors = String[], published = nothing, source = "added", by = nothing, anyway = false)
         -> Union{String,Nothing}
 
 Add the paper with DOI `doi` to be read in full, returning its id: the paper here with that DOI; else
@@ -154,25 +183,30 @@ its arXiv copy, as that arXiv paper, which OpenAlex knows or a search of arXiv f
 [`arxiv_copy`](@ref)); else the first of the open PDFs of it OpenAlex knows that is one (see [`doi_copies`](@ref)),
 added as [`add_pdf!`](@ref) does with `title`, `authors` and `published` where given. `nothing` when
 there is no copy to read, as for a closed paper. Its arrival is a mention from `source`, as `by` added
-it. It is not read here (see [`ingest!`](@ref)).
+it. It is not read here (see [`ingest!`](@ref)). A work a person dropped is refused with a
+[`DroppedError`](@ref), unless `anyway`, which restores it.
 """
 function add_doi!(kb::KB, doi::AbstractString; title = nothing, authors::AbstractVector{<:AbstractString} = String[],
-                  published = nothing, source::AbstractString = "added", by = nothing)
+                  published = nothing, source::AbstractString = "added", by = nothing, anyway::Bool = false)
     d = normalize_doi(doi)
     isempty(d) && error("Not a DOI: $(repr(doi))")
     here = paper_with_doi(kb, d)
     ismissing(here) || return here
+    keep_out!(kb, anyway; by, doi = d)
     c = DOI_COPIES[](d; contact = kb.config.contact)
     arxiv = c.arxiv
     arxiv === nothing && title !== nothing && (arxiv = arxiv_copy(kb.config, title; doi = d, authors))
-    arxiv === nothing || return only(add_papers!(kb, [arxiv]; source, by))
+    if arxiv !== nothing
+        ismissing(paper_id(kb, arxiv)) && keep_out!(kb, anyway; by, id = arxiv)
+        return only(add_papers!(kb, [arxiv]; source, by))
+    end
     for url in c.pdfs
         body = open_pdf(url)
         body === nothing && continue
         path = tempname() * ".pdf"
         try
             write(path, body)
-            id = add_pdf!(kb, path; title, authors, published, added_by = by, source)
+            id = add_pdf!(kb, path; title, authors, published, added_by = by, source, anyway)
             execute!(kb, "UPDATE papers SET doi = ? WHERE doc_id = ? AND doi IS NULL", (d, id))
             return id
         finally

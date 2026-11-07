@@ -62,16 +62,17 @@ resource_id(source::AbstractString, key::AbstractString) = source_id(RESOURCE.pr
 resource_content(r::Resource) = (; r.title, r.type, r.authors, r.organizations, r.date, r.url, r.doi, r.note, r.container, r.publisher, r.accessed)
 
 """
-    put_resource!(kb, source, r; by = nothing, proposed = false, why = "", read = true) -> (id, changed)
+    put_resource!(kb, source, r; by = nothing, proposed = false, why = "", read = true, anyway = false) -> (id, changed)
 
 Write resource `r` from `source`: a new one, or the one `source` keeps under `r.key`, in place, its
 id, links and citations kept. Unchanged, nothing is written. It is kept in each of `r.projects`'
 libraries, as `by` (a person's name, or `nothing` for the source itself) put it there, and `proposed`
 there for a person to keep rather than kept, with `why`; its arrival is a mention from `source` with its address. With `read`, it is then read (see [`read_resource!`](@ref))
-and embedded.
+and embedded. A new one a person dropped (by its key, its DOI, or its title where it has no DOI) is
+refused with a [`DroppedError`](@ref), unless `anyway`, which restores it.
 """
 function put_resource!(kb::KB, source::AbstractString, r::Resource; by::Union{AbstractString,Nothing} = nothing,
-                        proposed::Bool = false, why::AbstractString = "", read::Bool = true)
+                        proposed::Bool = false, why::AbstractString = "", read::Bool = true, anyway::Bool = false)
     source = record_source(source)
     title = strip(r.title)
     isempty(title) && error("A resource needs a title")
@@ -80,6 +81,7 @@ function put_resource!(kb::KB, source::AbstractString, r::Resource; by::Union{Ab
     known = scalar(kb, "SELECT p.doc_id FROM resources x JOIN papers p ON p.id = x.paper_id WHERE x.source = ? AND x.key = ?", (source, r.key))
     id = ismissing(known) ? resource_id(source, r.key) : String(known)
     ismissing(known) && !ismissing(paper_id(kb, id)) && error("The id $id of $source's resource $(repr(r.key)) is another document's")
+    ismissing(known) && keep_out!(kb, anyway; by, id, doi = r.doi, title = isempty(strip(r.doi)) ? title : "", source, key = r.key)
     sha = bytes2hex(sha256(JSON.json(resource_content(r))))
     isequal(scalar(kb, "SELECT x.content_sha FROM resources x JOIN papers p ON p.id = x.paper_id WHERE p.doc_id = ?", (id,)), sha) &&
         return (id, false)

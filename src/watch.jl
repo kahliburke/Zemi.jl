@@ -86,6 +86,7 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
     c = kb.config
     rows = query(kb, """SELECT doc_id AS id, relevance, coalesce(reason, '') AS reason FROM watch
                         WHERE relevance IS NOT NULL AND taken IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers)
+                          AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
                         ORDER BY relevance DESC, score DESC""")
     read = [String(r.id) for r in rows if r.relevance >= c.watch_read_from]
     recorded = [String(r.id) for r in rows if c.watch_record_from <= r.relevance < c.watch_read_from]

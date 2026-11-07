@@ -286,7 +286,7 @@ where a paper's abstract does, for what a record's summaries are written from an
 record_abstract(c) = record_day(c.date) * (isempty(c.people) ? "" : ", with " * prose_list(c.people)) * ". " * c.label * "."
 
 """
-    put_record!(kb, source, r; read = true, label = nothing, by = nothing) -> (id, changed)
+    put_record!(kb, source, r; read = true, label = nothing, by = nothing, anyway = false) -> (id, changed)
 
 Store record `r` (a [`Record`](@ref), or the NamedTuple or Dict of its fields, checked as it is made)
 that source `source` made, returning its id (see [`record_id`](@ref)) and whether it changed. The one
@@ -303,10 +303,11 @@ call a source makes for each record it has:
   written in place, it is embedded again where that changed what it embeds, its summaries kept.
 
 `label`, given, is the record's whatever `r` says (a registered source's, see [`record_source!`](@ref));
-`by` is who added it, as its arrival's mention names them.
+`by` is who added it, as its arrival's mention names them. A new record a person dropped is refused
+with a [`DroppedError`](@ref), unless `anyway`, which restores it.
 """
 function put_record!(kb::KB, source::AbstractString, r; read::Bool = true, label::Union{AbstractString,Nothing} = nothing,
-                     by::Union{AbstractString,Nothing} = nothing)
+                     by::Union{AbstractString,Nothing} = nothing, anyway::Bool = false)
     r = as_record(r)
     label === nothing || (r = Record(r.key, r.title, r.date, r.people, r.sections, r.figures, r.transcript, r.url, r.projects, r.access,
                                      String(label)))
@@ -320,6 +321,7 @@ function put_record!(kb::KB, source::AbstractString, r; read::Bool = true, label
     if ismissing(known) && !ismissing(paper_id(kb, id))
         error("The id $id of $source's record $(repr(r.key)) is another document's")
     end
+    ismissing(known) && keep_out!(kb, anyway; by, id, source, key = r.key)
     content = record_content(source, r)
     sha = record_sha(content)
     isequal(scalar(kb, "SELECT x.content_sha FROM records x JOIN papers p ON p.id = x.paper_id WHERE p.doc_id = ?", (id,)), sha) &&

@@ -57,9 +57,9 @@ async function check() {
 const taken = computed(() => data.value?.taken ?? [])
 const manages = computed(() => mode.value === 'live' && can('paper.manage'))
 const acting = ref(new Set<string>())
-// Read a recorded paper in full, or remove one the watch took in.
-async function act(action: 'ingest' | 'remove', t: Taken) {
-  if (action === 'remove' && !confirm(`Remove "${t.title}" from the knowledge base?`)) return
+// Read a recorded paper in full, or drop one the watch took in: removed, and kept out.
+async function act(action: 'ingest' | 'drop', t: Taken) {
+  if (action === 'drop' && !confirm(`Drop "${t.title}"? It is removed from the knowledge base and kept out.`)) return
   error.value = ''; acting.value = new Set([...acting.value, t.id])
   try { await followJobs((await post('/api/actions', JSON.stringify({ action, ids: [t.id] }))).job) }
   catch (e: any) { error.value = e.message ?? String(e) }
@@ -94,7 +94,7 @@ async function add(ps: Paper[]) {
           <span class="kbw-meta"> · {{ t.read ? 'read in full' : 'recorded' }} · {{ day(t.taken_at) }}</span>
           <template v-if="manages">
             <button v-if="!t.read" type="button" class="kb-outline kbw-add" :disabled="acting.has(t.id)" @click="act('ingest', t)">Read in full</button>
-            <button type="button" class="kb-outline kbw-add" :disabled="acting.has(t.id)" @click="act('remove', t)">Remove</button>
+            <button type="button" class="kb-outline kbw-add" :disabled="acting.has(t.id)" @click="act('drop', t)">Drop</button>
           </template>
           <div class="kbw-reason">{{ t.reason }}</div>
         </div>

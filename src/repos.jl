@@ -54,19 +54,20 @@ function codebase_dir(kb::KB, id::AbstractString)
 end
 
 """
-    add_codebase_from!(kb, what) -> String
+    add_codebase_from!(kb, what; by = nothing, anyway = false) -> String
 
 A codebase from `what`: a repository's address (`https://…`, `ssh://…`, `git@host:…`, `file://…`),
 recorded with it and read from this knowledge base's clone of it (see [`fetch_codebase!`](@ref)); or,
-run for one person, a folder on this machine. Returns its id.
+run for one person, a folder on this machine. Returns its id. One a person dropped is refused, unless
+`anyway` (see [`link_repository!`](@ref)).
 """
-function add_codebase_from!(kb::KB, what::AbstractString)
+function add_codebase_from!(kb::KB, what::AbstractString; by = nothing, anyway::Bool = false)
     w = strip(what)
-    occursin(r"^[a-z]+://|^[\w.-]+@[\w.-]+:", w) && return link_repository!(kb, w)
+    occursin(r"^[a-z]+://|^[\w.-]+@[\w.-]+:", w) && return link_repository!(kb, w; by, anyway)
     SHARED_MODE[] && error("A shared service reads codebases from their repositories: give the repository's address")
     root = expanduser(w)
     isdir(root) || error("No folder at $w")
-    return add_codebase!(kb, root)
+    return add_codebase!(kb, root; by, anyway)
 end
 
 "For tests: a shared service may clone repositories on this machine's disk (`file://`)."
@@ -87,19 +88,21 @@ function check_remote(remote::AbstractString)
 end
 
 """
-    link_repository!(kb, url) -> String
+    link_repository!(kb, url; by = nothing, anyway = false) -> String
 
 The codebase of the repository at `url`, recorded with that repository when it is new or records
 none, returning its id. Its name is the repository's; a new one's access is as
-[`default_codebase_access`](@ref) says.
+[`default_codebase_access`](@ref) says. A repository whose codebase a person dropped is refused with
+a [`DroppedError`](@ref), unless `anyway`, which restores it (`by` the person adding it).
 """
-function link_repository!(kb::KB, url::AbstractString)
+function link_repository!(kb::KB, url::AbstractString; by = nothing, anyway::Bool = false)
     remote = clone_url(url)
     check_remote(remote)
     name = replace(basename(rstrip(remote, '/')), r"\.git$" => "")
     isempty(name) && error("No repository name in $url")
     # Another repository of the same name (another owner's) is another codebase.
     id = free_code_id(kb, name, basename(dirname(rstrip(remote, '/'))); same = r -> coalesce(r.remote, remote) == remote)
+    ismissing(paper_id(kb, id)) && keep_out!(kb, anyway; by, source = "repository", key = remote)
     # A new one is open to every reader unless its repository is private (see document_access.jl); one
     # recorded already keeps its own.
     access = ismissing(paper_id(kb, id)) ? default_codebase_access(kb.config, remote) : "open"

@@ -575,8 +575,12 @@ function pull_dataset!(kb::KB; store::DatasetStore = dataset_store(kb.config), n
     qdrant || progress("Qdrant is not running: importing without vectors, so search uses keywords until a later import adds them")
     have = Dict(r.doc_id => r.hash for r in query(kb, "SELECT doc_id, hash FROM dataset_docs"))
     without = Set(r.doc_id for r in query(kb, "SELECT doc_id FROM dataset_docs WHERE vectors = 0"))
-    todo = [(id, name, d) for (id, (name, d)) in winners if name != me &&
+    # What a person here dropped stays out (see dropped.jl).
+    out = Set(d.id for d in dropped_documents(kb))
+    todo = [(id, name, d) for (id, (name, d)) in winners if name != me && !(id in out) &&
             (get(have, id, "") != d["hash"] || (qdrant && d["vectors"] && id in without))]
+    kept_out = count(in(out), keys(winners))
+    kept_out > 0 && progress("Keeping out $kept_out dropped $(kept_out == 1 ? "document" : "documents")")
     bytes = Threads.Atomic{Int}(0)
     # Documents are imported as their downloads arrive, one at a time on this task (the database
     # connection is shared), so one slow download holds up no others and an interrupted import keeps

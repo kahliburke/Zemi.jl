@@ -7,7 +7,7 @@
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
 import { ref, computed, onMounted } from 'vue'
-import { connect, post, followJobs, blockers, shared, can } from './kbApi'
+import { connect, post, followJobs, blockers, shared, can, RequestError } from './kbApi'
 import { kbPage } from './kbLinks'
 import KBJobs from './KBJobs.vue'
 
@@ -23,6 +23,9 @@ const error = ref('')
 // Documents are added to be read; where they cannot be, the form says why instead.
 const cannot = computed(() => blockers('ingest', ['paper']))
 const over = ref(false)
+// A document dropped here, refused: who dropped it and why, to add it anyway (which restores it).
+type Drop = { id: string; title: string; by: string; at: string; why: string }
+const dropped = ref<Drop | null>(null)
 
 onMounted(() => { connect(); followJobs() })
 
@@ -34,30 +37,38 @@ function take(list: FileList | null) {
 const onDrop = (e: DragEvent) => { over.value = false; take(e.dataTransfer?.files ?? null) }
 const onPick = (e: Event) => take((e.target as HTMLInputElement).files)
 
-async function add() {
-  error.value = ''; message.value = ''; busy.value = true
+async function add(anyway = false) {
+  error.value = ''; message.value = ''; dropped.value = null; busy.value = true
   const added: string[] = [], already: string[] = []
   try {
-    for (const f of files.value) {
+    // Each added is taken off the form, so adding anyway after a refusal sends only what is left.
+    const titled = files.value.length === 1 ? title.value.trim() : ''
+    while (files.value.length) {
+      const f = files.value[0]
       const params = new URLSearchParams({ name: f.name })
-      if (title.value.trim() && files.value.length === 1) params.set('title', title.value.trim())
+      if (titled) params.set('title', titled)
+      if (anyway) params.set('anyway', 'true')
       const r = await post(`/api/documents?${params}`, f, 'application/pdf')
       added.push(...r.ids); already.push(...(r.already ?? [])); followJobs(r.job)
+      files.value = files.value.slice(1)
     }
     if (arxiv.value.trim()) {
-      const r = await post('/api/documents', JSON.stringify({ arxiv: arxiv.value }))
+      const r = await post('/api/documents', JSON.stringify({ arxiv: arxiv.value, anyway }))
       added.push(...r.ids); already.push(...(r.already ?? [])); followJobs(r.job)
+      arxiv.value = ''
     }
     if (codebase.value.trim()) {
-      const r = await post('/api/documents', JSON.stringify({ codebase: codebase.value }))
+      const r = await post('/api/documents', JSON.stringify({ codebase: codebase.value, anyway }))
       added.push(...r.ids); already.push(...(r.already ?? [])); followJobs(r.job)
+      codebase.value = ''
     }
     const adding = added.filter(id => !already.includes(id))
     message.value = [adding.length ? `Adding ${adding.join(', ')}.` : '',
                      already.length ? `Already in the knowledge base: ${already.join(', ')}.` : ''].filter(Boolean).join(' ') || 'Nothing to add.'
     files.value = []; title.value = ''; arxiv.value = ''; codebase.value = ''
   } catch (e: any) {
-    error.value = e.message ?? String(e)
+    if (e instanceof RequestError && e.status === 409 && e.dropped) dropped.value = e.dropped
+    else error.value = e.message ?? String(e)
   } finally { busy.value = false }
 }
 </script>
@@ -76,16 +87,19 @@ async function add() {
           <input v-if="files.length === 1" v-model="title" class="kb-field kbu-input" placeholder="Title (optional)" />
           <textarea v-model="arxiv" class="kb-field kbu-input" rows="2" placeholder="arXiv ids or links"></textarea>
         </template>
-        <input v-model="codebase" class="kb-field kbu-input" @keydown.enter="add"
+        <input v-model="codebase" class="kb-field kbu-input" @keydown.enter="add()"
                :placeholder="shared ? 'A codebase: its repository, https://github.com/owner/repo' : 'A codebase: its repository (https://github.com/owner/repo) or a folder here'" />
         <div class="kbu-actions">
-          <button type="button" class="kb-primary kbu-button" :disabled="busy || (!files.length && !arxiv.trim() && !codebase.trim())" @click="add">
+          <button type="button" class="kb-primary kbu-button" :disabled="busy || (!files.length && !arxiv.trim() && !codebase.trim())" @click="add()">
             {{ busy ? 'Adding…' : 'Add' }}</button>
           <button v-if="files.length" type="button" class="kb-link" @click="files = []">clear files</button>
           <a v-if="props.codebases && props.manage && can('paper.manage')" class="kb-link" :href="`${kbPage('manage')}?state=code`">Manage codebases</a>
         </div>
         <p v-if="message" class="kb-dim kbu-dim">{{ message }}</p>
         <p v-if="error" class="kb-error kbu-error">{{ error }}</p>
+        <p v-if="dropped" class="kb-error kbu-error">{{ dropped.title }} ({{ dropped.id }}) was dropped by {{ dropped.by }}
+          on {{ dropped.at.slice(0, 10) }}<template v-if="dropped.why">: {{ dropped.why }}</template>.
+          <button type="button" class="kb-link" :disabled="busy" @click="add(true)">Add it anyway</button>, which restores it.</p>
         <KBJobs />
       </template>
     </KBNeedsService>

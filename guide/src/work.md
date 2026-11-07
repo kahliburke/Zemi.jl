@@ -139,8 +139,15 @@ Each hour it reads the items changed since its last run. A work with a DOI comes
 a copy can be read: its arXiv copy (which OpenAlex knows, or a search of arXiv by its title finds),
 else an open PDF OpenAlex points to. A link to a repository on a code host becomes a codebase.
 Everything else, and a paper with no copy to read, is a resource; upload its PDF to read it in full.
-Items that are the same work (the same DOI, or the same title) come in once, and one removed here is
+Items that are the same work (the same DOI, or the same title) come in once, and one dropped here is
 not brought in again.
+
+## Dropping a document
+
+Drop a document on the Documents page, with a reason if you like, and it is removed and kept out.
+No source brings it back: not the Zotero library, a record source, a dataset pull or the arXiv watch.
+Adding it by hand tells you who dropped it and why, and lets you add it anyway. The dropped view
+lists what is kept out; restoring one lets its source bring it back on its next run.
 
 ## Findings
 

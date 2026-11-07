@@ -12,7 +12,8 @@
 #
 # Zotero numbers each change to a library, so a run asks for the items changed since the last. One
 # item is one document: the same DOI, or for a work without one the same title, is the item seen
-# first. An item whose document was removed here is not brought in again.
+# first. An item whose document was removed or dropped here is not brought in again, until a drop is
+# restored (see dropped.jl).
 
 "Zotero's web API (a stand-in's address in tests)."
 const ZOTERO_API = Ref("https://api.zotero.org")
@@ -257,8 +258,12 @@ function zotero_poll(run)
         isempty(project) || project_id(kb, project)
         got = zotero_items(group, Int(get(versions, group, 0)); key)
         retry = String.(get(again, group, String[]))
+        # The items whose documents were dropped and are restored since: read again.
+        restored = restored_documents(kb)
+        back = [last(split(k, '/'; limit = 2)) for (k, id) in made
+                if startswith(k, "$group/") && id in restored && ismissing(paper_id(kb, id))]
         listed = Set(String(it["key"]) for it in got.items)
-        for ks in Iterators.partition(filter(!in(listed), retry), 50)
+        for ks in Iterators.partition(filter(!in(listed), unique([retry; back])), 50)
             append!(got.items, zotero_items(group, 0; key, keys = collect(ks)).items)
         end
         failed = String[]
@@ -288,10 +293,14 @@ function zotero_poll(run)
         for it in tops
             cancelled(run) && break
             k = "$group/$(it["key"])"
-            # Become another document since (a resource read in full): that one; removed here: not brought in again.
+            # Become another document since (a resource read in full): that one; removed or dropped here: not
+            # brought in again, unless its drop is restored.
             was = get(made, k, nothing)
             was === nothing || (made[k] = current_document(kb, was))
-            haskey(made, k) && ismissing(paper_id(kb, made[k])) && continue
+            if haskey(made, k) && ismissing(paper_id(kb, made[k])) && !(made[k] in restored)
+                dropped_as(kb; id = made[k]) === nothing || (run.dropped += 1)
+                continue
+            end
             # Read in full since from a PDF uploaded here: the paper it became stays what it is.
             if was !== nothing && made[k] != was
                 isempty(project) || library_add!(kb, project, made[k]; by = Actor("zotero", false))
@@ -313,6 +322,12 @@ function zotero_poll(run)
                 zotero_item!(kb, it, get(notes, it["key"], String[]); project, sorted = v)
             catch e
                 e isa InterruptException && rethrow()
+                # Dropped here: kept out, and brought in once the drop is restored.
+                if e isa DroppedError
+                    made[k] = e.drop.id
+                    run.dropped += 1
+                    continue
+                end
                 @warn "Zotero item $k could not be brought in; it is tried again in the next run" exception = e
                 push!(failed, String(it["key"]))
                 continue

@@ -87,14 +87,16 @@ export function blockers(action: string, ids: string[]): string[] {
 // A request refused or failed: the message the API gave (or the status, for an answer without one).
 export class RequestError extends Error {
   status: number
-  constructor(message: string, status: number) { super(message); this.status = status }
+  // A document dropped here, when that is why the request was refused (409).
+  dropped?: { id: string; title: string; kind: string; by: string; at: string; why: string }
+  constructor(message: string, status: number, dropped?: RequestError['dropped']) { super(message); this.status = status; this.dropped = dropped }
 }
 
 // An answer's JSON, or a RequestError.
 async function answer(r: Response) {
   if (r.status === 204) return null
   const body = await r.json().catch(() => null)
-  if (!r.ok) throw new RequestError(body?.error ?? `HTTP ${r.status}${r.statusText ? ` ${r.statusText}` : ''}`, r.status)
+  if (!r.ok) throw new RequestError(body?.error ?? `HTTP ${r.status}${r.statusText ? ` ${r.statusText}` : ''}`, r.status, body?.dropped)
   if (body === null) throw new Error(`${r.url}: not JSON (HTTP ${r.status})`)
   return body
 }

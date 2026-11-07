@@ -2484,7 +2484,7 @@ end
         @test K.action_needs(kb.config, "ingest") == [:parser, :embedder, :qdrant, :summarizer]
         @test K.action_needs(kb.config, "ingest"; kind = K.CODEBASE) == [:embedder, :qdrant, :code_summarizer]
         @test K.action_needs(kb.config, "classify"; kind = K.CODEBASE) == [:summarizer]
-        @test isempty(K.action_needs(kb.config, "remove"))
+        @test isempty(K.action_needs(kb.config, "drop"))
         @test isempty(K.action_needs(temp_config(; layers = Layer[]), "ingest"; kind = K.CODEBASE))
         add_papers!(kb, ["2609.00001"])
         @test isempty(K.cannot_run(kb, "refresh", ["2609.00001"]))
@@ -2496,7 +2496,7 @@ end
         @test request("GET", "/api/documents?q=2609.00001") == 200
         @test request("POST", "/api/documents", K.JSON.json(Dict("arxiv" => "2609.00002"))) == 400
         cannot = K.status_json(kb)["cannot"]
-        @test length(cannot["ingest"]["paper"]) == 4 && isempty(cannot["remove"]["paper"])
+        @test length(cannot["ingest"]["paper"]) == 4 && isempty(cannot["drop"]["paper"])
         # Sync leaves what it cannot read for a machine that can, and says so.
         r = sync!(kb; arxiv = false, classify = false, plan = filter(t -> t.action == :ingest, sync_plan(kb; unread = true)))
         @test isempty(r.ingested) && first(only(r.failed)) == "reading 1 document(s)"
@@ -3691,12 +3691,13 @@ end
         @test resources() == before - 1 && ismissing(K.paper_id(kb, closed)) && K.current_document(kb, closed) == "2401.00003"
         @test "2401.00003" in [x.target for x in K.library(kb, "WE")] && !(closed in [x.target for x in K.library(kb, "WE")])
 
-        # The next run asks only for what changed since; a document removed here is not brought in again.
-        K.remove_paper!(kb, dem)
+        # The next run asks only for what changed since; a document dropped here is not brought in again.
+        K.drop!(kb, dem; by = "Ada", why = "Not ours")
         items[3]["version"] = 2; items[3]["data"]["title"] = "Copernicus DEM GLO-30 (2021)"
         push!(items, item("R1", 2, "report", "Treatment wetlands"))
+        run = K.SourceRun(kb, z)
         K.zotero_poll(run)
-        @test "1" in asked && ismissing(K.paper_id(kb, dem))
+        @test "1" in asked && ismissing(K.paper_id(kb, dem)) && run.dropped == 1
         @test K.state(run)["retry"] == Dict("1" => String[]) && any(r -> K.paper_row(kb, r.doc_id).title == "A paper OpenAlex fails on",
                                                                     K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource'"))
         wet = only(r.doc_id for r in K.query(kb, "SELECT doc_id FROM papers WHERE kind = 'resource'")
@@ -3706,6 +3707,11 @@ end
         items[end]["version"] = 3; items[end]["data"]["institution"] = "University of Kassel"
         K.zotero_poll(run)
         @test startswith(K.bib_entry(kb, wet), "@techreport{") && occursin("institution = {University of Kassel}", K.bib_entry(kb, wet))
+        # Restored, the next run brings it back, though Zotero has no change to it.
+        K.restore!(kb, dem; by = "Ada")
+        empty!(asked)
+        K.zotero_poll(run)
+        @test !ismissing(K.paper_id(kb, dem)) && K.paper_row(kb, dem).title == "Copernicus DEM GLO-30 (2021)"
     finally
         K.ZOTERO_API[], K.DOI_COPIES[] = saved_api, saved_copies
         K.READ_PUT[] = true
@@ -3834,6 +3840,103 @@ end
               K.paper_row(kb, other).title == "Given"                             # but for what the upload gives
     finally
         K.UPLOAD_LOOKUP[] = saved
+        close(kb)
+    end
+end
+
+@zset "a dropped document is kept out" begin
+    dir = mktempdir()
+    write(joinpath(dir, "a.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 24 Tf 72 700 Td (A Survey of Wells) Tj ET\n")
+    run(`mutool create -o $(joinpath(dir, "a.pdf")) $(joinpath(dir, "a.txt"))`)
+    pdf = joinpath(dir, "a.pdf")
+    saved_lookup, saved_copies = K.UPLOAD_LOOKUP[], K.DOI_COPIES[]
+    K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
+    K.DOI_COPIES[] = (doi; contact = "") -> (; arxiv = nothing, pdfs = String[])
+    K.READ_PUT[] = false
+    kb = open_kb(temp_config(layers = Layer[]))
+    try
+        # Dropped, an arXiv paper is gone and listed with who dropped it and why.
+        add_papers!(kb, ["2609.00001"])
+        K.drop!(kb, "2609.00001"; by = "Ada", why = "Off topic")
+        @test ismissing(K.paper_id(kb, "2609.00001"))
+        d = only(K.dropped_documents(kb))
+        @test (d.id, d.title, d.kind, d.by, d.why) == ("2609.00001", "2609.00001", "paper", "Ada", "Off topic")
+        # A source bringing it leaves it out; a person adding it is told, and adding it anyway restores it.
+        @test add_papers!(kb, ["2609.00001", "2609.00002"]; source = "watch") == ["2609.00002"]
+        e = try add_papers!(kb, ["2609.00001"]); nothing catch e; e end
+        @test e isa K.DroppedError && sprint(showerror, e) ==
+              "2609.00001 (2609.00001) was dropped by Ada on $(first(K.now_iso(), 10)): Off topic. Adding it anyway restores it."
+        @test K.error_status(e) == 409 && K.reason(e) == sprint(showerror, e)
+        @test add_papers!(kb, ["2609.00001"]; anyway = true, by = "Rowan") == ["2609.00001"]
+        @test isempty(K.dropped_documents(kb)) && K.restored_documents(kb) == Set(["2609.00001"])
+        @test K.scalar(kb, "SELECT restored_by FROM dropped WHERE doc_id = '2609.00001'") == "Rowan"
+        @test_throws "is not dropped" K.restore!(kb, "2609.00001")
+
+        # An upload is kept out as its file and by its DOI.
+        up = add_pdf!(kb, pdf)
+        K.execute!(kb, "UPDATE papers SET doi = '10.1/wells' WHERE doc_id = ?", (up,))
+        K.drop!(kb, up; by = "Ada")
+        @test_throws K.DroppedError add_pdf!(kb, pdf)
+        @test_throws K.DroppedError K.add_doi!(kb, "https://doi.org/10.1/WELLS"; source = "zotero")
+        K.UPLOAD_LOOKUP[] = (p; contact = "") -> (; title = "A Survey of Wells", authors = String[], year = "2024",
+                                                   journal_ref = nothing, doi = "10.1/wells", abstract = nothing)
+        write(joinpath(dir, "b.txt"), read(joinpath(dir, "a.txt"), String) * "BT /F1 10 Tf 72 600 Td (Another file.) Tj ET\n")
+        run(`mutool create -o $(joinpath(dir, "b.pdf")) $(joinpath(dir, "b.txt"))`)
+        files = length(readdir(K.pdf_dir(kb.config)))
+        @test_throws K.DroppedError add_pdf!(kb, joinpath(dir, "b.pdf"))
+        @test length(readdir(K.pdf_dir(kb.config))) == files                       # its copy not kept
+        @test add_pdf!(kb, pdf; anyway = true) == up && isempty(K.dropped_documents(kb))
+
+        # A record is kept out by its source's key: the run counts it, and it comes back once restored.
+        kb.config = K.with_config(kb.config; sources = Dict{String,Any}("zz-drop" => Dict{String,Any}()))
+        noop(run) = nothing
+        src = record_source!("zz-drop"; label = "Written up", every = 60, poll = noop, api = K.PLUGIN_API)
+        meeting = (; key = "m1", title = "Pump review", date = "2026-10-02", sections = ["Notes" => "It held."])
+        run1 = K.SourceRun(kb, src)
+        id = put!(run1, meeting)
+        K.drop!(kb, id; by = "Ada", why = "A test meeting")
+        run2 = K.SourceRun(kb, src)
+        @test put!(run2, meeting) === nothing && run2.dropped == 1 && ismissing(K.paper_id(kb, id))
+        @test K.run_summary(run2) == "0 added, 0 changed, 0 skipped, 1 dropped kept out"
+        K.restore!(kb, id; by = "Ada")
+        @test put!(K.SourceRun(kb, src), meeting) == id && !ismissing(K.paper_id(kb, id))
+
+        # A resource, by its title where it has no DOI; a codebase, by its repository.
+        rid, _ = K.put_resource!(kb, "zotero", K.Resource(; key = "R1", title = "Well levels, 2020"); read = false)
+        K.drop!(kb, rid; by = "Ada")
+        @test_throws K.DroppedError K.put_resource!(kb, "zotero", K.Resource(; key = "R2", title = "Well Levels 2020"); read = false)
+        @test first(K.put_resource!(kb, "zotero", K.Resource(; key = "R3", title = "Well levels, 2021"); read = false)) != rid
+        code = K.link_repository!(kb, "https://github.com/ada/wells")
+        K.drop!(kb, code; by = "Ada")
+        @test_throws K.DroppedError K.link_repository!(kb, "https://github.com/ada/wells.git")
+        @test K.link_repository!(kb, "https://github.com/ada/wells"; anyway = true) == code
+
+        # The watch does not take in, nor the judge rate, a paper dropped here.
+        K.drop!(kb, "2609.00002"; by = "Ada")
+        K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score,
+                          nearest, found_at, relevance, reason) VALUES ('2609.00002', 'P', '[]', '', '2026-10-10', 'x', 0.5, 'A', 0.5,
+                          '[]', ?, 3, 'Central')""", (K.now_iso(),))
+        @test K.take_watched!(kb; read_in_full = ids -> error("none"), record = ids -> error("none")) == (; read = String[], recorded = String[])
+        @test "2609.00002" ∉ [c.id for c in K.daily_candidates(kb)]
+
+        # Through the API: dropping with a reason, the list, a refusal that says why, restoring.
+        call(method, target, body = Dict()) = (r = K.respond_local(kb, K.HTTP.Request(method, target,
+                                                   ["X-Zemi" => "1", "Content-Type" => "application/json"], K.JSON.json(body)));
+                                               (r.status, K.JSON.parse(String(r.body))))
+        add_papers!(kb, ["2609.00003"])
+        status, body = call("POST", "/api/actions", Dict("action" => "drop", "ids" => ["2609.00003"], "why" => "Duplicate"))
+        @test status == 200
+        @test timedwait(() -> K.get_job(body["job"]).status != :running, 30; pollint = 0.05) == :ok && K.get_job(body["job"]).status == :done
+        listed = call("GET", "/api/dropped")[2]["dropped"]
+        @test [(x["id"], x["why"]) for x in listed] == [("2609.00003", "Duplicate"), ("2609.00002", ""), (rid, "")]
+        status, body = call("POST", "/api/documents", Dict("arxiv" => "2609.00003", "read" => false))
+        @test status == 409 && body["dropped"]["id"] == "2609.00003" && occursin("Duplicate", body["error"])
+        @test call("POST", "/api/dropped/restore", Dict("ids" => [x["id"] for x in listed])) ==
+              (200, Dict("restored" => [x["id"] for x in listed]))
+        @test isempty(call("GET", "/api/dropped")[2]["dropped"])
+    finally
+        K.UPLOAD_LOOKUP[], K.DOI_COPIES[] = saved_lookup, saved_copies
+        K.READ_PUT[] = true
         close(kb)
     end
 end
@@ -4368,7 +4471,7 @@ end
         @test get("/api/documents?state=uploaded")[2]["total"] == 1
         post(target, body; headers = ["X-Zemi" => "1", "Content-Type" => "application/json"]) =
             (r = K.respond_local(kb, K.HTTP.Request("POST", target, headers, body)); (r.status, K.JSON.parse(String(r.body))))
-        remove = K.JSON.json(Dict("action" => "remove", "ids" => ["2609.00001"]))
+        remove = K.JSON.json(Dict("action" => "drop", "ids" => ["2609.00001"]))
         @test post("/api/actions", remove; headers = ["Content-Type" => "application/json"])[1] == 403
         @test post("/api/actions", remove; headers = ["X-Zemi" => "1", "Origin" => "https://example.com"])[1] == 403
         @test post("/api/actions", K.JSON.json(Dict("action" => "explode", "ids" => [id])))[1] == 400

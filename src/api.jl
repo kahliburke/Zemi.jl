@@ -31,7 +31,7 @@ end
 
 # What of a change is kept in the audit log: what it was done to, never what someone wrote (a
 # message to the tutor, a tutoring profile).
-const AUDITED_FIELDS = ("paper", "id", "ids", "action", "arxiv", "day", "source", "chat", "another", "again", "unread",
+const AUDITED_FIELDS = ("paper", "id", "ids", "action", "anyway", "arxiv", "day", "source", "chat", "another", "again", "unread",
                         "project", "status", "key",
                         "email", "roles", "disabled", "who", "write", "revoke", "delete", "permissions", "quotas", "changes", "days")
 
@@ -111,16 +111,19 @@ end
 already_read(kb::KB, ids) = [id for id in ids if !ismissing(scalar(kb,
     "SELECT 1 FROM parses x JOIN papers p ON p.id = x.paper_id WHERE p.doc_id = ?", (id,)))]
 
-"The action names `POST /api/actions` takes, with what each runs on its documents."
+"""
+The action names `POST /api/actions` takes, with what each runs on its documents. Each is given who
+asked (`by`) and why (`why`), which dropping keeps.
+"""
 const ACTIONS = Dict(
-    "ingest" => (kb, ids, job) -> ingest!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job)),
-    "reindex" => (kb, ids, job) -> reindex!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job)),
-    "resummarize" => (kb, ids, job) -> resummarize!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job)),
-    "classify" => (kb, ids, job) -> join([begin
+    "ingest" => (kb, ids, job; _...) -> ingest!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job)),
+    "reindex" => (kb, ids, job; _...) -> reindex!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job)),
+    "resummarize" => (kb, ids, job; _...) -> resummarize!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job)),
+    "classify" => (kb, ids, job; _...) -> join([begin
             report!(job, "[$i/$(length(ids))] classifying $id")
             "$id\n" * format_classification(classify!(kb, id))
         end for (i, id) in enumerate(ids) if !cancelled(job)], "\n\n"),
-    "refresh" => function (kb, ids, job)
+    "refresh" => function (kb, ids, job; _...)
         uploads = filter(is_upload, ids)
         for (i, id) in enumerate(uploads)
             report!(job, "[$i/$(length(uploads))] reading $id's title again")
@@ -131,15 +134,15 @@ const ACTIONS = Dict(
         report!(job, "fetching arXiv metadata")
         return refresh_metadata!(kb, papers; force = true) + length(uploads)
     end,
-    "share" => (kb, ids, job) -> set_shared!(kb, ids, true),
-    "unshare" => (kb, ids, job) -> set_shared!(kb, ids, false),
-    "remove" => (kb, ids, job) -> [begin
-            report!(job, "removing $id")
-            remove_paper!(kb, id)
+    "share" => (kb, ids, job; _...) -> set_shared!(kb, ids, true),
+    "unshare" => (kb, ids, job; _...) -> set_shared!(kb, ids, false),
+    "drop" => (kb, ids, job; by = nothing, why = "") -> [begin
+            report!(job, "dropping $id")
+            drop!(kb, id; by = something(by, "someone"), why)
             id
         end for id in ids])
 
-function start_action(kb::KB, action::AbstractString, ids::Vector{String})
+function start_action(kb::KB, action::AbstractString, ids::Vector{String}; by = nothing, why::AbstractString = "")
     haskey(ACTIONS, action) || error("No action \"$action\"; the actions are $(join(sort!(collect(keys(ACTIONS))), ", "))")
     isempty(ids) && error("No documents.")
     for id in ids
@@ -148,7 +151,7 @@ function start_action(kb::KB, action::AbstractString, ids::Vector{String})
     blocked = cannot_run(kb, action, ids)
     isempty(blocked) || error("Can't $action here: ", join(blocked, "; "))
     label = length(ids) == 1 ? "$action $(only(ids))" : "$action $(length(ids)) documents"
-    return start_job(job -> ACTIONS[action](kb, ids, job), label; ids, changes = changes_stamp(kb.config))
+    return start_job(job -> ACTIONS[action](kb, ids, job; by, why), label; ids, changes = changes_stamp(kb.config))
 end
 
 """
@@ -287,15 +290,18 @@ route!("POST", "/api/documents"; need = "paper.add") do c
         write(path, body_bytes(c))
         title = get(c.params, "title", "")
         id = try
-            add_pdf!(kb, path; title = isempty(title) ? nothing : title, added_by = adder(get(c.params, "by", nothing), caller))
+            add_pdf!(kb, path; title = isempty(title) ? nothing : title, added_by = adder(get(c.params, "by", nothing), caller),
+                     anyway = get(c.params, "anyway", "") == "true")
         finally
             rm(path; force = true)
         end
         return Dict("ids" => [id], "already" => already_read(kb, [id]), "job" => start_action(kb, "ingest", [id]).id)
     end
     b = json_body(c)
+    # A document dropped here is added only `anyway`, which restores it.
+    anyway = get(b, "anyway", false) === true
     if !isempty(strip(String(get(b, "codebase", ""))))
-        id = add_codebase_from!(kb, String(b["codebase"]))
+        id = add_codebase_from!(kb, String(b["codebase"]); by = adder(get(b, "by", nothing), caller), anyway)
         job = start_job("ingest $id"; ids = [id], changes = changes_stamp(kb.config)) do job
             # One read from a clone of its repository is fetched first.
             if codebase_dir(kb, id) == clone_dir(kb.config, id)
@@ -307,7 +313,7 @@ route!("POST", "/api/documents"; need = "paper.add") do c
         return Dict("ids" => [id], "already" => already_read(kb, [id]), "job" => job.id)
     end
     ids = add_papers!(kb, split_list(String(get(b, "arxiv", ""))); source = String(get(b, "source", "added")),
-                      by = adder(get(b, "by", nothing), caller))
+                      by = adder(get(b, "by", nothing), caller), anyway)
     get(b, "read", true) === false && return Dict("ids" => ids, "job" => start_record(kb, ids).id)
     Dict("ids" => ids, "already" => already_read(kb, ids), "job" => start_action(kb, "ingest", ids).id)
 end
@@ -315,7 +321,17 @@ end
 # `{"action": …, "ids": […]}`: one of ACTIONS on documents, as a job.
 route!("POST", "/api/actions"; need = "paper.manage") do c
     b = json_body(c)
-    Dict("job" => start_action(c.kb, String(get(b, "action", "")), [normalize_id(String(x)) for x in get(b, "ids", [])]).id)
+    Dict("job" => start_action(c.kb, String(get(b, "action", "")), [normalize_id(String(x)) for x in get(b, "ids", [])];
+                               by = adder(nothing, c.caller), why = String(get(b, "why", ""))).id)
+end
+
+# What was dropped and is kept out (see dropped.jl), latest first; restoring some (`{"ids": […]}`).
+route!(c -> Dict("dropped" => [drop_json(d) for d in dropped_documents(c.kb)]), "GET", "/api/dropped"; need = "paper.manage")
+route!("POST", "/api/dropped/restore"; need = "paper.manage") do c
+    ids = [String(x) for x in get(json_body(c), "ids", [])]
+    isempty(ids) && error("No documents.")
+    foreach(id -> restore!(c.kb, id; by = adder(nothing, c.caller)), ids)
+    Dict("restored" => ids)
 end
 
 # Background jobs and their progress: the list, and one (its starter's, see `job_visible`).

@@ -32,6 +32,7 @@ end
 function judge_batch!(kb::KB, n::Integer)
     rows = query(kb, """SELECT doc_id AS id, title, abstract FROM watch
                         WHERE relevance IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers)
+                          AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
                         ORDER BY score DESC LIMIT ?""", (n,))
     isempty(rows) && return 0
     s = judge(kb.config)
@@ -73,7 +74,8 @@ function daily_candidates(kb::KB; new::Integer = 8, library::Integer = 5)
     out = Any[(; id = r.id, title = r.title, abstract = r.abstract, source = "new", why = coalesce(r.reason, ""),
                  relevance = Int(r.relevance))
            for r in query(kb, """SELECT doc_id AS id, title, abstract, reason, relevance FROM watch
-                                 WHERE relevance >= 2 ORDER BY relevance DESC, score DESC""") if !(r.id in picked)]
+                                 WHERE relevance >= 2 AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
+                                 ORDER BY relevance DESC, score DESC""") if !(r.id in picked)]
     out = first(out, new)
     land = read_landscape(kb.config)
     near = land === nothing ? Dict{String,Float64}() : Dict(String(p["id"]) => Float64(p["relevance"]) for p in land["papers"])
