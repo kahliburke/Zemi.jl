@@ -10,9 +10,11 @@ import { useTemplatedPage } from './kbTemplates'
 import { mode, can, post } from './kbApi'
 import { kbPage } from './kbLinks'
 import KBInLibraries from './KBInLibraries.vue'
+import KBCite from './KBCite.vue'
 
 type Resource = { id: string; slug: string; title: string; type: string; authors: string[]; date: string; note: string
-                  url: string; doi: string; container: string; publisher: string; accessed: string; source: string; moved?: string }
+                  url: string; doi: string; container: string; publisher: string; accessed: string; source: string; moved?: string
+                  cite?: { reference: string; citation: string; bibtex: string } }
 
 const { data: r, error } = useTemplatedPage<Resource>('resources', 'No such resource.', { title: x => x.title })
 watch(r, x => { if (x?.moved) location.replace(kbPage(x.moved)) })
@@ -46,6 +48,7 @@ async function upload(e: Event) {
       </div>
       <p v-if="r.authors.length" class="kb-authors">{{ r.authors.join(', ') }}</p>
       <p v-if="appeared" class="kbrs-appeared">{{ appeared }}</p>
+      <div v-if="r.cite" class="kb-buttons"><KBCite :cite="r.cite" :title="r.title" /></div>
     </div>
     <p v-if="r.note">{{ r.note }}</p>
     <p class="kbrs-where">

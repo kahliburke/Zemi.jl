@@ -8,7 +8,7 @@
 
 The data of record `p`'s page (KBRecordPage.vue lays it out): what it is and where it came from (its
 date, people, label, source and address), its projects and access, its summary and topics, its text
-with its figures in place and captioned, and its transcript.
+with its figures in place and captioned, its transcript, and how it is cited (see [`cite_json`](@ref)).
 """
 function record_page_json(kb::KB, p)
     id, slug = String(p.doc_id), page_slug(p.doc_id)
@@ -34,7 +34,7 @@ function record_page_json(kb::KB, p)
     sections = [Dict("heading" => String(s["heading"]), "text" => shown(String(s["text"]))) for s in doc["sections"]]
     titles = Dict(String(x.key) => String(x.name) for x in query(kb, "SELECT key, name FROM projects"))
     return Dict{String,Any}(
-        "id" => id, "slug" => slug, "title" => String(p.title), "date" => r.happened, "day" => record_day(r.happened),
+        "id" => id, "slug" => slug, "title" => String(p.title), "date" => r.happened, "day" => record_day(r.happened), "cite" => cite_json(kb, id),
         "people" => json_list(p.authors), "label" => r.label, "source" => r.source, "url" => r.url, "access" => p.access,
         "note" => record_note(kb, id), "updated" => r.updated_at,
         "projects" => [Dict("key" => k, "name" => get(titles, k, k)) for k in document_projects(kb, id)],

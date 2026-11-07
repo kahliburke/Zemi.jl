@@ -17,6 +17,7 @@ import KBFigures from './KBFigures.vue'
 import KBExpandAll from './KBExpandAll.vue'
 import KBSectionText from './KBSectionText.vue'
 import KBPdf from './KBPdf.vue'
+import KBCite from './KBCite.vue'
 import { mode } from './kbApi'
 
 type Link = { id: string; slug: string; title: string; page: string }
@@ -32,6 +33,7 @@ type Paper = {
   notebooks: { title: string; page: string; summary: string; by: string }[]
   figures: number; tables: number; sections: Section[]; references: Reference[]; here: (Link & { label: string })[]
   cited_by: Link[]; classification: { label: string; value: string }[]; related: Link[]
+  cite?: { reference: string; citation: string; bibtex: string }
 }
 
 const { data: paper, error, render } = useTemplatedPage<Paper>('papers', 'No such paper in this knowledge base.', { title: p => p.title })
@@ -89,6 +91,7 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
           <KBPdf v-else-if="mode === 'live'" :id="paper.id" local label="Uploaded PDF" />
           <span v-else class="kb-button kb-button-plain">Uploaded PDF</span>
           <a v-if="paper.doi" class="kb-button" :href="`https://doi.org/${paper.doi}`">DOI</a>
+          <KBCite v-if="paper.cite" :cite="paper.cite" :title="paper.title" />
           <a class="kb-button kb-live-only" :href="manageHref(paper.id)">Manage</a>
         </div>
         <p v-for="(m, i) in paper.posts" :key="i" class="kb-posted">

@@ -14,10 +14,11 @@ import { getJSON, post, can, mediaUrl, me, latest, isStale, onLive } from './kbA
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { sourceHref as refSourceHref, refFor, onTaskRef, setCodebase } from './kbRefs'
 import { splitCodeTarget } from './kbKinds'
-import { projectHref, taskHref } from './kbLinks'
+import { projectHref, taskHref, findingHref } from './kbLinks'
 import { day, when } from './kbFormat'
 import KBRefText from './KBRefText.vue'
 import KBIcon from './KBIcon.vue'
+import KBCite from './KBCite.vue'
 
 type Project = { key: string; name: string; codebase: string; access: string }
 type Row = { ref: string; claim: string; status: string; created_by: string; by_agent: boolean; updated_at: string; recheck: string[] }
@@ -270,6 +271,7 @@ onBeforeUnmount(() => { following = false })
             <div class="kbf-head">
               <span class="kbf-ref">{{ f.ref }}</span>
               <span class="kbf-tag" :class="f.status">{{ f.status }}</span>
+              <KBCite compact :cite="{ reference: `@${f.ref}` }" :title="f.claim" :link="findingHref(f.ref)" />
               <span class="kbf-dim">{{ f.created_by }}{{ f.by_agent ? ' (agent)' : '' }} · {{ when(f.updated_at) }}</span>
               <span class="kbf-spacer"></span>
               <template v-if="editable && !asking && !f.archived_at">

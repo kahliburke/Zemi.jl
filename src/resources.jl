@@ -177,14 +177,14 @@ end
 
 The data of resource `id`'s page (KBResourcePage.vue lays it out): what it is, who made it and when,
 its note, where it appeared and who published it, where it is (its address and DOI, and when it
-was accessed there), and where it came from.
+was accessed there), where it came from, and how it is cited (see [`cite_json`](@ref)).
 """
 function resource_json(kb::KB, id::AbstractString)
     r = resource_row(kb, id)
     return Dict{String,Any}("id" => r.doc_id, "slug" => page_slug(r.doc_id), "title" => r.title, "type" => r.type,
                             "authors" => json_list(r.authors), "date" => coalesce(r.published, ""), "note" => r.note, "url" => r.url,
                             "doi" => coalesce(r.doi, ""), "container" => r.container, "publisher" => r.publisher,
-                            "accessed" => r.accessed, "source" => r.source)
+                            "accessed" => r.accessed, "source" => r.source, "cite" => cite_json(kb, r.doc_id))
 end
 
 "Each resource that became another document (see [`promote_resource!`](@ref)), by its slug, with where that one's page is."

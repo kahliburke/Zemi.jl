@@ -11,6 +11,7 @@ import { getJSON, post, can, me, shared, latest, isStale, onLive } from './kbApi
 import KBDock from './KBDock.vue'
 import KBDialog from './KBDialog.vue'
 import KBIcon from './KBIcon.vue'
+import KBCite from './KBCite.vue'
 import KBRefText from './KBRefText.vue'
 import KBTaskSearch from './KBTaskSearch.vue'
 import KBProjectReview from './KBProjectReview.vue'
@@ -18,7 +19,7 @@ import KBMembers from './KBMembers.vue'
 import KBRecordUpload from './KBRecordUpload.vue'
 import KBLibrary from './KBLibrary.vue'
 import { sourceHref, onTaskRef, setCodebase } from './kbRefs'
-import { findingHref, recordHref, kbPage } from './kbLinks'
+import { findingHref, recordHref, kbPage, taskHref } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { plainLine } from './kbUtils'
 import { when } from './kbFormat'
@@ -1342,6 +1343,7 @@ function keepRecordsOpen(open: boolean) {
       <KBDock v-if="open" name="task" @close="open = null" @space="makeRoom">
         <template #head>
           <span class="kbp-ref">{{ open.ref }}</span>
+          <KBCite compact :cite="{ reference: `@${open.ref}` }" :title="open.title" :link="taskHref(open.ref)" />
           <select v-if="editable" class="kbp-select" data-control="status" :value="moving.get(open.ref) ?? open.status" :disabled="busy(`task:${open.ref}`)" @change="pickStatus">
             <option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.label }}</option>
           </select>

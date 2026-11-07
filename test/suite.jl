@@ -726,6 +726,12 @@ end
     @test occursin("@misc{doc-0123456789,\n  title = {{A handbook}},\n}", bib)   # an upload: its own key, no arXiv fields
     @test !occursin("code-", bib) && !occursin("docpage", bib)                # no codebases; no docs-site paths
     @test occursin("docpage = {generated/kb/papers/2609-00001.md}", bib_entry(kb, "2609.00001"))
+    # In prose: a preprint in its arXiv record; an upload with no authors or date, led by its title, at its page here.
+    @test K.citation(kb, "2609.00001") ==
+          "Lovelace, A., & Reef Survey Team. (2026). Reef & lagoon. arXiv preprint arXiv:2609.00001. https://arxiv.org/abs/2609.00001"
+    @test K.citation(kb, "doc-0123456789") == rstrip("A handbook. (n.d.). " * K.document_link(kb.config, "doc-0123456789"))
+    c = K.cite_json(kb, "2609.00001")
+    @test c["reference"] == "@arXiv:2609.00001" && c["bibtex"] == bib_entry(kb, "2609.00001"; docpage = false)
     close(kb)
 end
 
@@ -982,6 +988,16 @@ end
         # Cited: a news story is an article in its newspaper, its address as it is.
         bib = K.bib_entry(kb, r)
         @test startswith(bib, "@article{$r,") && occursin("journal = {Tempo English}", bib) && occursin("url = {https://example.org/floods?id=1_2}", bib)
+        # In prose, as APA has it: a data set described, a work with no authors led by its title.
+        @test K.citation(kb, id) == "ESA. (2021). Copernicus DEM GLO-30 [Data set]. https://doi.org/10.5270/esa-c5d3d65"
+        @test K.citation(kb, r) == "Bali flood facts so far. (n.d.). Tempo English. https://example.org/floods?id=1_2"
+        @test K.apa_name("Rowan A. Hale") == "Hale, R. A." && K.apa_name("Ng, Bea") == "Ng, B." && K.apa_name("World Bank", Set(["World Bank"])) == "World Bank"
+        @test K.apa_authors(["Hale, R.", "Ng, B.", "Lee, A."]) == "Hale, R., Ng, B., & Lee, A." && K.apa_authors(["Hale, R.", "et al."]) == "Hale, R., et al."
+        @test K.apa_authors(["N$i, A." for i in 1:25]) == join(["N$i, A." for i in 1:19], ", ") * ", … N25, A."
+        K.put_resource!(kb, "zotero", K.Resource(; key = "GH78", title = "Rainfall records", type = "data portal", authors = ["Rowan Hale"],
+                                                 publisher = "Weather Office", url = "https://example.org/rain", accessed = "2026-11-05"); read = false)
+        @test K.citation(kb, K.resource_id("zotero", "GH78")) ==
+              "Hale, R. (n.d.). Rainfall records [Data portal]. Weather Office. Retrieved November 5, 2026, from https://example.org/rain"
 
         # On the site: a page of each from its data, and the page listing them, linked from the sidebar.
         site, public = mktempdir(), mktempdir()
@@ -989,8 +1005,9 @@ end
         @test nav.resources == "resources.md" && K.site_from_json(K.site_json(nav)).resources == "resources.md"
         d = K.JSON.parsefile(joinpath(public, "kb-data", "resources", K.page_slug(id) * ".json"))
         @test d["title"] == "Copernicus DEM GLO-30" && d["type"] == "dataset" && d["doi"] == "10.5270/esa-c5d3d65" && d["source"] == "zotero"
+        @test d["cite"]["reference"] == "@$id" && startswith(d["cite"]["citation"], "ESA. (2021).") && startswith(d["cite"]["bibtex"], "@misc{$id,")
         @test isfile(joinpath(site, "resources", K.page_slug(id) * ".md")) && K.document_page(id) == "resources/$(K.page_slug(id))"
-        @test [x["title"] for x in K.JSON.parsefile(joinpath(public, "resources.json"))] == ["Bali flood facts so far", "Copernicus DEM GLO-30"]
+        @test [x["title"] for x in K.JSON.parsefile(joinpath(public, "resources.json"))] == ["Bali flood facts so far", "Copernicus DEM GLO-30", "Rainfall records"]
 
         # Its PDF uploaded, a resource becomes a paper: what named it names the paper, and its id leads there.
         me = K.person("Ada")

@@ -823,6 +823,8 @@ end
         @test HTTP.header(page, "Cache-Control") == "no-store" && data["title"] == "Pump test review" && data["day"] == "2 October 2026" &&
               data["label"] == "Meeting notes written up by a tool" && data["projects"] == [Dict("key" => "PU", "name" => "Pumps")]
         @test occursin("![Pressure over time](/api/figures/$id/fig-1.webp)", only(data["sections"])["text"]) && only(data["figures"])["placed"]
+        # Cited as a record: dated to the day, described by how it was made.
+        @test data["cite"]["reference"] == "@$id" && occursin("(2026, October 2). Pump test review [Meeting notes written up by a tool].", data["cite"]["citation"])
         # Run for one person, every record is theirs; open, it is still served, never built.
         @test K.record_site_response(kb, K.local_caller(), "/kb-data/records/$id.json").status == 200
         K.set_document_access!(kb, id, "open")

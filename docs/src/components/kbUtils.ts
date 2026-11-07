@@ -33,3 +33,18 @@ export function fenced(code: string, language = '') {
 
 /** A plain copy of a value, to edit apart from it (structuredClone cannot copy Vue's reactive objects). */
 export const plainCopy = <T>(v: T): T => JSON.parse(JSON.stringify(v))
+
+/**
+ * Put `text` on the clipboard. Where the page is not served securely (an address on a network, over
+ * http) the browser has no clipboard API, and a selected field is copied instead.
+ */
+export async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text)
+  const field = document.createElement('textarea')
+  field.value = text
+  field.setAttribute('readonly', '')
+  field.style.position = 'fixed'; field.style.opacity = '0'
+  document.body.appendChild(field)
+  field.select()
+  try { if (!document.execCommand('copy')) throw new Error('The browser would not copy.') } finally { field.remove() }
+}

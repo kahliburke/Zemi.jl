@@ -62,6 +62,10 @@ References with `@`: `@RB-12` (task), `@arXiv:2401.00001` (paper), `@RB-F3` (fin
 (upload), `@rec-…` (record), `@code:path#name` (codebase), and `@[label](kind:target)` for any kind. In a task they
 become the task's links; in a finding, its sources.
 
+Each paper, resource, record, finding and task has a **Cite** button. It shows its `@` reference, its
+address and a Markdown link, and for a document its citation (APA) and BibTeX entry, each to copy.
+The icon beside it copies the reference.
+
 ### Working together
 
 In the shared service, a board shows who else has it open, as initials in its header, and what people

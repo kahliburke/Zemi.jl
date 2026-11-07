@@ -351,15 +351,15 @@ const TEMPLATED = ("papers" => (; folder = "generated/kb/papers", template = "ge
 template_markdown(kind::AbstractString) = "```@raw html\n<$(Dict(TEMPLATED)[kind].component) />\n```\n"
 
 """
-    paper_json(sp; cited_by = [], notebooks = []) -> Dict
+    paper_json(sp; cited_by = [], notebooks = [], cite = nothing) -> Dict
 
 A paper's data file: everything its page shows (KBPaperPage.vue lays it out), with what needs the
 knowledge base worked out here: badges, how it arrived, its sections with where their text and the
 reference list go, and the papers it links to by slug. Texts are as stored (Markdown with `\$…\$`
-mathematics); `cited_by` lists the papers that cite it as `(; doc_id, title)`, and `notebooks` its
-notebooks.
+mathematics); `cited_by` lists the papers that cite it as `(; doc_id, title)`, `notebooks` its
+notebooks, and `cite` how it is cited (see [`cite_json`](@ref)).
 """
-function paper_json(sp::SitePaper; cited_by = [], notebooks = [])
+function paper_json(sp::SitePaper; cited_by = [], notebooks = [], cite = nothing)
     c = something(sp.classification, Dict{String,Any}())
     r = get(c, "relevance", nothing)
     link(id, title) = Dict("id" => id, "slug" => page_slug(id), "title" => title, "page" => document_page(id))
@@ -394,7 +394,7 @@ function paper_json(sp::SitePaper; cited_by = [], notebooks = [])
         d
     end
     return Dict{String,Any}(
-        "id" => sp.doc_id, "slug" => page_slug(sp.doc_id), "title" => sp.title, "local" => !is_arxiv_id(sp.doc_id),
+        "id" => sp.doc_id, "slug" => page_slug(sp.doc_id), "title" => sp.title, "local" => !is_arxiv_id(sp.doc_id), "cite" => cite,
         "version" => sp.version, "authors" => [Dict("name" => a, "key" => author_key(a)) for a in sp.authors],
         "category" => isempty(sp.category) ? nothing :
                       Dict("id" => sp.category, "title" => category_title(sp.category), "slug" => page_slug(sp.category)),
@@ -668,7 +668,7 @@ function write_site_changes!(kb::KB, dir::AbstractString, public::AbstractString
         slug = page_slug(id)
         cited_by = [(; c.doc_id, c.title) for c in get(() -> citing_papers(kb, id; index), citing, id)]
         nbs = paper_notebooks(kb, id)
-        write(joinpath(public, "kb-data", "papers", slug * ".json"), JSON.json(paper_json(sp; cited_by, notebooks = nbs)))
+        write(joinpath(public, "kb-data", "papers", slug * ".json"), JSON.json(paper_json(sp; cited_by, notebooks = nbs, cite = cite_json(kb, id))))
         write(joinpath(dir, "papers", slug * ".md"), template)
         write_notebook_pages(write, kb.config, dir, public, id, sp.title, nbs)
     end
@@ -736,7 +736,8 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
     for sp in papers
         slug = page_slug(sp.doc_id)
         write(joinpath(public, "kb-data", "papers", slug * ".json"),
-              JSON.json(paper_json(sp; cited_by = get(cited_by, sp.doc_id, []), notebooks = get(notebooks, sp.doc_id, []))))
+              JSON.json(paper_json(sp; cited_by = get(cited_by, sp.doc_id, []), notebooks = get(notebooks, sp.doc_id, []),
+                                  cite = cite_json(kb, sp.doc_id))))
         write(joinpath(dir, "papers", slug * ".md"), template)
     end
     titles = Dict(sp.doc_id => sp.title for sp in papers)
