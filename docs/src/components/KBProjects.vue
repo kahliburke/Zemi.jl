@@ -32,8 +32,11 @@ type Milestone = { name: string; description: string; start: string; due: string
 type Task = { ref: string; title: string; status: string; blocked: string; priority: number; assignee: string; milestone: string;
               parent: string; subtasks: number; subtasks_done: number; created_by: string; by_agent: boolean; created_at: string; updated_at: string; sent_back?: boolean;
               archived_at: string }
-type TaskEvent = { id: number; at: string; who: string; by_agent: boolean; kind: string; text: string; detail: Record<string, any>; resolved_at: string;
-               edited_at: string }
+// A question is asked of the agents, a person (`to_person`, as tasks are assigned) or anyone on the
+// project; a reply names the question it answers or asks back about (`reply_to`).
+type TaskEvent = { id: number; at: string; who: string; by_agent: boolean; by_person: string; kind: string; text: string; detail: Record<string, any>;
+                   resolved_at: string; edited_at: string; to_whom: '' | 'agents' | 'anyone' | 'person'; to_person: string; to_label: string;
+                   reply_to: number; state: '' | 'open' | 'asked back' | 'answered' | 'resolved' }
 type Person = { id: string; label: string; agent: boolean }
 type Commit = { sha: string; at: string; author: string; subject: string; ref: string; url: string; task: string;
                 files: { path: string; added: number; removed: number }[]; added: number; removed: number }
@@ -76,6 +79,8 @@ const addingRecords = ref(false)
 // Who tasks can be assigned to: the service's people and the agents.
 const people = ref<Person[]>([])
 const personLabel = (id: string) => people.value.find(p => p.id === id)?.label ?? id
+// Who reaches the open project, whom its questions can be asked of.
+const projectPeople = ref<Person[]>([])
 
 // The address names a project (#KB) or a task in one (#KB-12).
 const fromHash = () => { const m = location.hash.slice(1).toUpperCase().match(/^([A-Z][A-Z0-9]*)(?:-(\d+))?$/); return m ? { key: m[1], task: m[2] ? m[0] : '' } : null }
@@ -90,30 +95,36 @@ async function loadBoard() {
   const k = key.value
   if (!k) { board.value = null; return }
   try {
-    const b = await getJSON(`/api/projects/${k}`)
-    if (k === key.value) { board.value = b; error.value = '' }
+    const [b, them] = await Promise.all([getJSON(`/api/projects/${k}`), getJSON(`/api/tasks/people?project=${k}`).catch(() => [])])
+    if (k === key.value) { board.value = b; projectPeople.value = them; error.value = '' }
   } catch (e: any) { if (k === key.value) error.value = e.message }
 }
 // What waits on the person: plans to approve, tasks in Review, findings agents drafted, and their own open tasks.
-type Asked = Task & { question?: string; answer?: string; claim?: string; recheck?: string[] }
+type Asked = Task & { question?: string; note?: number; asker?: string; answer?: string; answerer?: string; claim?: string; recheck?: string[] }
 type Section = 'proposed' | 'questions' | 'answered' | 'review' | 'findings' | 'mine'
 const waiting = ref<Record<Section, Asked[]>>({ proposed: [], questions: [], answered: [], review: [], findings: [], mine: [] })
 const waitingOpen = ref('')
 const WAITING = [{ id: 'proposed', label: 'to approve' }, { id: 'questions', label: 'to answer' }, { id: 'answered', label: 'answered' },
                  { id: 'review', label: 'to review' }, { id: 'findings', label: 'to accept' }, { id: 'mine', label: 'yours' }] as const
-// An answer to your question waits while the agent has had the last word: replying takes it off
-// (asking again sends it back to the agents), and marking it resolved ends it.
-// With `agents`, the agents' questions there, answered some other way.
-async function resolve(r: string, agents = false) {
-  await sendOnce(`resolve:${r}`, async () => {
+// Marking question `note` on task `r` resolved, settled some other way or no longer needing an
+// answer; with no note, every question open there. An answer to your question waits on you until
+// you write on the task again or mark it resolved.
+async function resolve(r: string, note = 0) {
+  await sendOnce(`resolve:${r}:${note}`, async () => {
     try {
-      const t = await post(`/api/tasks/${r}/resolve`, JSON.stringify({ agents }))
+      const t = await post(`/api/tasks/${r}/resolve`, JSON.stringify({ note }))
       if (open.value?.ref === r) open.value = t
       await loadWaiting()
     } catch (e: any) { error.value = e.message }
   })
 }
-const openWaiting = (t: Asked) => show(t)
+// A question waiting on you opens its task ready for your reply.
+async function openWaiting(t: Asked) {
+  const section = waitingOpen.value
+  await show(t)
+  const e = section === 'questions' && t.note ? open.value?.activity.find(x => x.id === t.note) : undefined
+  if (e) startReply(e)
+}
 async function loadWaiting() { try { waiting.value = await getJSON('/api/tasks/waiting') } catch { /* the board still shows */ } }
 // The project's codebase: where its code is, which agents working there find it by, and whose
 // commits are recorded against its tasks. A person links it, or changes it.
@@ -756,22 +767,15 @@ function confirmDone() {
   doneAsk.value = null
   if (a) change(a.ref, { ...a.fields, with_subtasks: true })
 }
-// The questions on a task still open: an agent's no person has answered, and a person's not resolved.
-function openQuestions(t: Full) {
-  const a = t.activity
-  return a.filter((e, i) => e.kind === 'question' && !e.resolved_at &&
-    !(e.by_agent && a.slice(i + 1).some(x => (x.kind === 'comment' || x.kind === 'question') && !x.by_agent)))
-}
+// The questions on a task still waiting on someone: not answered nor resolved.
+const openQuestions = (t: Full) => t.activity.filter(e => e.kind === 'question' && (e.state === 'open' || e.state === 'asked back'))
 // Marking a task done asks first about its open questions (`asked` once that is settled).
 const questionsAsk = ref<{ ref: string; fields: Record<string, any>; questions: TaskEvent[] } | null>(null)
 async function settleQuestions(resolveThem: boolean) {
   const a = questionsAsk.value
   questionsAsk.value = null
   if (!a) return
-  if (resolveThem) {
-    if (a.questions.some(e => e.by_agent)) await resolve(a.ref, true)
-    if (a.questions.some(e => !e.by_agent)) await resolve(a.ref)
-  }
+  if (resolveThem) await resolve(a.ref)
   change(a.ref, a.fields, true)
 }
 async function change(ref_: string, fields: Record<string, any>, asked = false) {
@@ -957,13 +961,62 @@ async function removeTask() {
   try { await post(`/api/tasks/${t.ref}/delete`, '{}'); open.value = null; await refresh() } catch (e: any) { error.value = e.message }
 }
 async function saveBody() { if (open.value) { await change(open.value.ref, { body: draftBody.value }); editingBody.value = false } }
-// A question waits for an agent's reply; a comment is just said.
+// Questions: each asked of the agents, a person or anyone on the project, waiting on them until a
+// reply answers it. A comment is a reply when it answers the question being replied to, or the one
+// waiting on you (unless unticked); a question asked while replying asks back, of whoever asked.
+const myPersonId = computed(() => me.value?.id ?? '')
+const waitsOnMe = (e: TaskEvent) => e.kind === 'question' && e.state === 'open' &&
+  (e.to_whom === 'person' ? e.to_person === myPersonId.value : e.to_whom === 'anyone' && e.by_person !== myPersonId.value)
+const questionTag = (e: TaskEvent) =>
+  e.state === 'resolved' ? 'resolved' : e.state === 'answered' ? 'answered' : e.state === 'asked back' ? 'asked back' :
+  waitsOnMe(e) ? 'for you' : e.to_whom === 'agents' ? 'for the agents' : e.to_whom === 'anyone' ? 'for anyone' : `for ${e.to_label}`
+// The activity with each reply under its question, indented by how deep it is.
+const threaded = computed(() => {
+  const a = open.value?.activity ?? []
+  const ids = new Set(a.map(e => e.id))
+  const replies = new Map<number, TaskEvent[]>()
+  for (const e of a) if (e.reply_to && ids.has(e.reply_to)) replies.set(e.reply_to, [...(replies.get(e.reply_to) ?? []), e])
+  const out: { e: TaskEvent; depth: number }[] = []
+  const add = (e: TaskEvent, depth: number) => { out.push({ e, depth }); for (const r of replies.get(e.id) ?? []) add(r, Math.min(depth + 1, 3)) }
+  for (const e of a) if (!(e.reply_to && ids.has(e.reply_to))) add(e, 0)
+  return out
+})
+const replyTo = ref<TaskEvent | null>(null)
+const answersIt = ref(true)
+function startReply(e: TaskEvent) {
+  replyTo.value = e
+  nextTick(() => document.querySelector<HTMLElement>('[data-control="comment"] .cm-content')?.focus())
+}
+watch(() => open.value?.ref, () => { replyTo.value = null; answersIt.value = true })
+// The latest question on the task waiting on you, which a comment answers unless unticked.
+const waitingMine = computed(() => [...(open.value?.activity ?? [])].reverse().find(waitsOnMe) ?? null)
+// Whom a question can be asked of: the task's assignee first (a person, not the one asking), the
+// agents, the project's other people, and anyone on it.
+const askOptions = computed(() => {
+  const t = open.value, mine = myPersonId.value
+  const assignee = t?.assignee && !t.assignee.startsWith('agent:') && t.assignee !== mine ? t.assignee : ''
+  const others = projectPeople.value.filter(p => !p.agent && p.id !== mine && p.id !== assignee)
+  return [...(assignee ? [{ value: assignee, label: `${personLabel(assignee)} (assignee)` }] : []),
+          { value: 'agents', label: 'the agents' },
+          ...others.map(p => ({ value: p.id, label: p.label })),
+          ...(others.length + (assignee ? 1 : 0) > 1 ? [{ value: 'anyone', label: `anyone on ${key.value}` }] : [])]
+})
+const askTo = ref('agents')
+watch(askOptions, o => { if (!o.some(x => x.value === askTo.value)) askTo.value = o[0]?.value ?? 'agents' }, { immediate: true })
+watch(() => open.value?.ref, () => { askTo.value = askOptions.value[0]?.value ?? 'agents' })
 async function addComment(kind: 'comment' | 'question' = 'comment') {
   const r = open.value?.ref
   if (!r || !comment.value.trim()) return
+  const body: Record<string, any> = { text: comment.value, kind }
+  const reply = replyTo.value ?? (kind === 'comment' && answersIt.value ? waitingMine.value : null)
+  if (reply) body.reply_to = reply.id
+  if (kind === 'question' && !replyTo.value) body.to = askTo.value
   await sendOnce('comment', async () => {
-    try { open.value = await post(`/api/tasks/${r}/notes`, JSON.stringify({ text: comment.value, kind })); comment.value = '' }
-    catch (e: any) { error.value = e.message }
+    try {
+      open.value = await post(`/api/tasks/${r}/notes`, JSON.stringify(body))
+      comment.value = ''; replyTo.value = null; answersIt.value = true
+      loadWaiting()
+    } catch (e: any) { error.value = e.message }
   })
 }
 async function addLink(remove = false, l = link.value) {
@@ -1018,9 +1071,6 @@ async function showNoteHistory(id: number, again = false) {
   if (noteHistory.value?.id === id && !again) { noteHistory.value = null; return }
   try { noteHistory.value = { id, rows: await getJSON(`/api/tasks/${open.value!.ref}/notes/${id}/history`) } } catch (e: any) { error.value = e.message }
 }
-// A question is answered once someone from the other side, agent or person, writes after it: a
-// comment, or a question of their own.
-const answered = (i: number) => { const a = open.value?.activity ?? []; return a.slice(i + 1).some(e => (e.kind === 'comment' || e.kind === 'question') && e.by_agent !== a[i].by_agent) }
 // A field's new value in a task's history, as the board names it: a priority by its name (0 is ASAP),
 // a person by theirs, and nothing as a dash.
 const fieldValue = (field: string, v: any) =>
@@ -1225,7 +1275,7 @@ function keepRecordsOpen(open: boolean) {
         <button v-for="w in WAITING" :key="w.id" v-show="shownWaiting[w.id].length" class="kbp-ms" :class="{ on: waitingOpen === w.id, pulse: pulsing.has(w.id) }"
                 @click="waitingOpen = waitingOpen === w.id ? '' : w.id"><strong class="kbp-n">{{ shownWaiting[w.id].length }}</strong> {{ w.label }}</button>
         <ul v-if="waitingOpen" class="kbp-waiting-list">
-          <li v-for="t in shownWaiting[waitingOpen as Section]" :key="t.ref"
+          <li v-for="t in shownWaiting[waitingOpen as Section]" :key="`${t.ref}:${t.note ?? ''}`"
               :class="{ flash: freshRows.has(`${waitingOpen}:${t.ref}`) }">
             <template v-if="t.claim !== undefined"><a class="kbp-reflink" :href="findingHref(t.ref)">{{ t.ref }}</a>
               <span v-if="t.recheck?.length" class="kbp-tag" title="Its evidence changed">re-check</span> {{ t.claim }}
@@ -1234,13 +1284,13 @@ function keepRecordsOpen(open: boolean) {
               <span class="kb-dim kbp-dim">{{ label(t.status) }}<template v-if="t.parent"> · in {{ t.parent }}</template></span></template>
             <button v-if="waitingOpen === 'review' && editable" class="kbp-small kbp-dismiss-wide" @click="startSendBack(t.ref)">Send back</button>
             <button v-if="waitingOpen === 'answered'" class="kbp-icon kbp-dismiss" title="Resolved: answered to your satisfaction"
-                    aria-label="Mark resolved" :disabled="busy(`resolve:${t.ref}`)" @click="resolve(t.ref)">
+                    aria-label="Mark resolved" :disabled="busy(`resolve:${t.ref}:${t.note}`)" @click="resolve(t.ref, t.note)">
               <KBIcon name="check" :size="15" /></button>
-            <button v-if="waitingOpen === 'questions' && editable" class="kbp-icon kbp-dismiss" title="Resolved: answered some other way, or no longer needs an answer"
-                    aria-label="Mark resolved" :disabled="busy(`resolve:${t.ref}`)" @click="resolve(t.ref, true)">
+            <button v-if="waitingOpen === 'questions' && editable" class="kbp-icon kbp-dismiss" title="Resolved: settled some other way, or no longer needs an answer"
+                    aria-label="Mark resolved" :disabled="busy(`resolve:${t.ref}:${t.note}`)" @click="resolve(t.ref, t.note)">
               <KBIcon name="check" :size="15" /></button>
-            <div v-if="t.question" class="kbp-question-line">{{ t.question }}</div>
-            <div v-if="t.answer" class="kbp-question-line kbp-answer-line">{{ plainLine(t.answer) }}</div>
+            <div v-if="t.question" class="kbp-question-line"><b v-if="t.asker && waitingOpen === 'questions'">{{ t.asker }}:</b> {{ t.question }}</div>
+            <div v-if="t.answer" class="kbp-question-line kbp-answer-line"><b v-if="t.answerer">{{ t.answerer }}:</b> {{ plainLine(t.answer) }}</div>
           </li>
         </ul>
       </div>
@@ -1468,8 +1518,11 @@ function keepRecordsOpen(open: boolean) {
 
         <h3>Activity</h3>
         <ul class="kbp-activity">
-          <li v-for="(e, i) in open.activity" :key="i" :class="[e.kind, { flash: flashEvent === e.id }]" :data-event="e.id">
+          <li v-for="{ e, depth } in threaded" :key="e.id" :class="[e.kind, { flash: flashEvent === e.id, reply: depth > 0 }]" :data-event="e.id"
+              :style="depth ? { marginLeft: `${1.2 * depth}rem` } : undefined">
             <div class="kbp-event-head"><span class="kbp-who">{{ e.who }}</span><span v-if="e.by_agent" class="kbp-tag">agent</span>
+              <span v-if="e.reply_to && e.kind === 'comment'" class="kbp-tag kbp-answer-tag">answer</span>
+              <span v-else-if="e.kind === 'question'" class="kb-dim kbp-dim">{{ e.reply_to ? 'asked back' : 'asked' }} {{ e.to_label }}</span>
               <span class="kb-dim kbp-dim kbp-when">{{ when(e.at) }}</span>
               <button v-if="e.edited_at" class="kb-link kbp-link kbp-edited" :title="'Edited ' + when(e.edited_at) + '; show the earlier text'"
                       @click="showNoteHistory(e.id)">edited</button>
@@ -1483,11 +1536,13 @@ function keepRecordsOpen(open: boolean) {
                 <button type="button" class="kb-primary kbp-button kbp-secondary" @click="editingNote = null">Cancel</button>
               </div>
             </form>
-            <div v-else-if="e.kind === 'question'" class="kbp-question" :class="{ open: !answered(i) }">
-              <span class="kbp-tag">{{ e.resolved_at ? 'resolved' : answered(i) ? 'answered' : e.by_agent ? 'question' : 'waiting for an agent' }}</span>
-              <button v-if="editable && !e.by_agent && answered(i) && !e.resolved_at" class="kb-link kbp-link kbp-resolve" :disabled="busy(`resolve:${open.ref}`)" @click="resolve(open.ref)">mark resolved</button>
-              <button v-if="editable && e.by_agent && !answered(i) && !e.resolved_at" class="kb-link kbp-link kbp-resolve"
-                      title="Answered some other way, or no longer needs an answer" :disabled="busy(`resolve:${open.ref}`)" @click="resolve(open.ref, true)">mark resolved</button>
+            <div v-else-if="e.kind === 'question'" class="kbp-question" :class="{ open: e.state === 'open' || e.state === 'asked back', mine: waitsOnMe(e) }">
+              <span class="kbp-tag" :class="{ alone: waitsOnMe(e) }">{{ questionTag(e) }}</span>
+              <button v-if="editable && e.state !== 'resolved'" class="kb-link kbp-link kbp-resolve kbp-reply"
+                      :title="`Answer ${e.who}, or ask a question back`" @click="startReply(e)">reply</button>
+              <button v-if="editable && e.state !== 'resolved'" class="kb-link kbp-link kbp-resolve"
+                      title="Settled some other way, or no longer needs an answer" :disabled="busy(`resolve:${open.ref}:${e.id}`)"
+                      @click="resolve(open.ref, e.id)">mark resolved</button>
               <div class="kbp-note kb-md" v-html="render(e.text)"></div>
             </div>
             <div v-else-if="e.kind === 'comment' || e.kind === 'progress'" class="kbp-note kb-md" v-html="render(e.text)"></div>
@@ -1503,13 +1558,28 @@ function keepRecordsOpen(open: boolean) {
         </ul>
         <form v-if="editable" class="kbp-form kbp-comment" @submit.prevent="addComment()">
           <div v-for="p in writing" :key="p.id" :ref="el => { if (el) writingEls[p.id] = el as HTMLElement }" class="kbp-writing"><b>{{ p.name }}</b> is writing:<div class="kbp-writing-text">{{ p.draft }}</div></div>
+          <div v-if="replyTo" class="kbp-replying">Replying to {{ replyTo.who }}'s question:
+            <span class="kb-dim kbp-dim">{{ plainLine(replyTo.text) }}</span>
+            <button type="button" class="kb-link kbp-link" @click="replyTo = null">not a reply</button></div>
           <div data-control="comment">
-          <KBRefText :project="key" v-model="comment" multiline :rows="3" placeholder="Comment" :draft="`task:${open.ref}:comment`" send="send"
-                     @submit="comment.trim() && addComment('comment')" /></div>
+          <KBRefText :project="key" v-model="comment" multiline :rows="3" :placeholder="replyTo ? 'Your answer, or a question back' : 'Comment'"
+                     :draft="`task:${open.ref}:comment`" send="send" @submit="comment.trim() && addComment('comment')" /></div>
+          <label v-if="!replyTo && waitingMine" class="kbp-answers"><input v-model="answersIt" type="checkbox" />
+            Answers {{ waitingMine.who }}'s question: <span class="kb-dim kbp-dim">{{ plainLine(waitingMine.text) }}</span></label>
           <div class="kbp-comment-actions">
-            <button class="kb-primary kbp-button" :disabled="!comment.trim() || busy('comment')"><span v-if="busy('comment')" class="kbp-spin"></span>Comment</button>
-            <button type="button" class="kb-primary kbp-button kbp-secondary" :disabled="!comment.trim() || busy('comment')" title="An agent answers it when it next checks for work"
-                    @click="addComment('question')">Ask an agent</button>
+            <template v-if="replyTo">
+              <button class="kb-primary kbp-button" :disabled="!comment.trim() || busy('comment')"><span v-if="busy('comment')" class="kbp-spin"></span>Answer</button>
+              <button type="button" class="kb-primary kbp-button kbp-secondary" :disabled="!comment.trim() || busy('comment')"
+                      :title="`Ask ${replyTo.who} a question about it; the first waits on their answer`" @click="addComment('question')">Ask back</button>
+            </template>
+            <template v-else>
+              <button class="kb-primary kbp-button" :disabled="!comment.trim() || busy('comment')"><span v-if="busy('comment')" class="kbp-spin"></span>Comment</button>
+              <span class="kbp-ask">
+                <button type="button" class="kb-primary kbp-button kbp-secondary" :disabled="!comment.trim() || busy('comment')"
+                        title="It waits on them until they reply" @click="addComment('question')">Ask</button>
+                <select v-model="askTo" class="kbp-ask-to" aria-label="Whom to ask">
+                  <option v-for="o in askOptions" :key="o.value" :value="o.value">{{ o.label }}</option></select></span>
+            </template>
           </div>
         </form>
         </div>
@@ -1866,6 +1936,14 @@ form.kbp-add { position: relative; }
 .kbp-note { margin-top: 0.2rem; }
 .kbp-question { margin-top: 0.3rem; padding: 0.3rem 0.6rem; border-left: 3px solid var(--vp-c-divider); }
 .kbp-question.open { border-left-color: var(--vp-c-warning-1); background: var(--vp-c-warning-soft); border-radius: 0 6px 6px 0; }
+.kbp-question.mine { border-left-color: var(--vp-c-brand-1); background: var(--vp-c-brand-soft); }
+.kbp-activity li.reply { border-left: 2px solid var(--vp-c-divider); padding-left: 0.6rem; }
+.kbp-answer-tag { background: var(--vp-c-brand-soft); color: var(--vp-c-brand-1); }
+.kbp-replying, .kbp-answers { font-size: 0.82rem; display: flex; gap: 0.4rem; align-items: baseline; flex-wrap: wrap; }
+.kbp-replying .kb-dim, .kbp-answers .kb-dim { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28rem; }
+.kbp-ask { display: inline-flex; gap: 0.3rem; align-items: center; }
+.kbp-ask-to { font: inherit; font-size: 0.82rem; padding: 0.25rem 0.4rem; border: 1px solid var(--vp-c-divider); border-radius: 6px;
+              background: var(--vp-c-bg); color: var(--vp-c-text-1); max-width: 14rem; }
 .kbp-question-line { flex-basis: 100%; margin: 0.1rem 0 0.3rem 1rem; color: var(--vp-c-text-2); font-size: 0.82rem; }
 .kbp-waiting-list li { flex-wrap: wrap; }
 .kbp-note :deep(p) { margin: 0.2rem 0; }

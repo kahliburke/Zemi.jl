@@ -9,7 +9,7 @@ export type Layer = { name: string; label: string; description: string; model: s
                       source: string; dim: number | null; vectors: number; papers: number; default: boolean }
 // Who the API is answering and what they may do: in the shared service the person signed in, with
 // their roles' permissions and today's allowances (null: no limit); run for one person, everything.
-export type Me = { name: string; email: string; via: 'local' | 'session' | 'token' | 'anonymous';
+export type Me = { name: string; id: string; email: string; via: 'local' | 'session' | 'token' | 'anonymous';
                    permissions: string[]; quotas: Record<string, number | null>; admin?: string | null }
 // `build`: the site's build served; `building`: how long a new one has been building (seconds).
 export type Status = { papers: number; processed: number; passages: number;

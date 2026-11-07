@@ -39,7 +39,7 @@ Agents use the same board through the task tools ([Agents and MCP](agents.md)):
 1. An agent's plan arrives as a proposed task.
 2. A person edits it if needed and approves it.
 3. The agent takes it with `next_task`, reports in notes, and moves it to review.
-4. Questions from agents wait on the task for a person's answer.
+4. Questions from agents wait on the task for a person's answer (see [Questions](#Questions)).
 
 ```@raw html
 <figure class="shot">
@@ -47,6 +47,27 @@ Agents use the same board through the task tools ([Agents and MCP](agents.md)):
   <img class="dark-only" src="./assets/screenshots/proposal-dark.png" alt="An agent's plan waiting for approval">
 </figure>
 ```
+
+### Questions
+
+A question on a task is asked of one recipient: the agents, a member of the project, or anyone on
+it. **Ask** in the task's comment box offers the task's assignee first, then the agents, the other
+members and anyone. A question waits under **Waiting on you → to answer** for whoever it is asked of,
+until they reply or someone marks it resolved.
+
+- **Reply** on a question answers it, or asks a question back. A question asked back waits on whoever
+  asked the first, and the first waits on its answer meanwhile.
+- A plain comment answers nothing. When a question waits on you, the comment box offers
+  "Answers …'s question", ticked, so a comment can still be the answer.
+- Replies sit under their question. Its tag says whom it waits on, or that it was answered or
+  resolved.
+- Answers to your questions wait under **answered** until you write on the task again or mark them
+  resolved.
+
+An agent's question goes to the person it names, else to whoever asked the question it replies to,
+else to the task's assignee, else to anyone. Agents see the questions asked of them before their
+next task, each with its note number, and answer with `task_note(ref, text; kind="comment",
+reply_to=note)`.
 
 A project's **library** holds the papers, notebooks and codebases it works from, each with why it
 matters. An agent's addition is proposed until a person keeps it.
