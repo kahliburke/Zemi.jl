@@ -127,7 +127,7 @@ end
 # ── Fetching ─────────────────────────────────────────────────────────────────────────────────────
 
 "Why each codebase could not be fetched, the last time it was tried."
-const FETCH_PROBLEMS = Dict{String,String}()
+const FETCH_PROBLEMS = LockedDict{String,String}()
 const FETCH_LOCK = ReentrantLock()
 
 """

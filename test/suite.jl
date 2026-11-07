@@ -4237,6 +4237,8 @@ end
         @test route("GET", "/api/presence") == ("GET /api/presence", true) && route("POST", "/api/presence") == ("POST /api/presence", false)
         @test route("GET", "/api/nowhere/at/all") == ("GET /api/nowhere", false)
         @test route("GET", "/auth/sign-in") == ("GET /auth/sign-in", false) && route("GET", "/generated/kb/papers") == ("site", false)
+        # A request's work is done on the default threads: HTTP.jl's one interactive thread only waits.
+        @test K.on_workers(() -> Threads.threadpool()) == :default
         # A route's first requests compile what they run, so they are counted but not timed.
         foreach(s -> K.record!("GET /api/x", 200, s), (5.0, 4.0, 0.010, 0.020, 0.030))
         K.record!("GET /api/x", 500, 0.040)

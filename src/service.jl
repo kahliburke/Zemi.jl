@@ -183,7 +183,7 @@ function serve_shared(; kb::KB = kb(), build = default_site_build, host::Abstrac
     @info "Shared knowledge base at $(c.shared.base_url) (listening on $host:$(c.shared.port))"
     server = HTTP.serve!(host, c.shared.port) do req
         revise_code()
-        Base.invokelatest(respond_shared, kb, req)
+        on_workers(() -> Base.invokelatest(respond_shared, kb, req))
     end
     Threads.@spawn warm_up(kb; shared = true)
     return server
@@ -250,9 +250,18 @@ function serve_local(; kb::KB = kb(), port::Integer = parse(Int, get(ENV, "ZEMI_
     end
     return HTTP.serve!("127.0.0.1", port) do req
         revise_code()
-        Base.invokelatest(respond_service, kb, req; shared = false)
+        on_workers(() -> Base.invokelatest(respond_service, kb, req; shared = false))
     end
 end
+
+"""
+    on_workers(f)
+
+Run `f` on the default thread pool and wait for it. HTTP.jl answers each connection on the
+interactive pool, which has one thread: a request's work done there holds up every other request.
+Done on the default pool, requests are answered side by side, the interactive thread only waiting.
+"""
+on_workers(f) = fetch(Threads.@spawn f())
 
 "The knowledge base served for one person and the address of its setup page, for `announce_setup`."
 const SETUP_ANNOUNCED = Ref{Any}(nothing)
