@@ -8,21 +8,66 @@ const SHARED_MODE = Ref(false)
 
 # ── Metrics ───────────────────────────────────────────────────────────────────────────────────────
 
-"Requests answered, by route: how many, how many failed, and their time, since the service started."
-const METRICS = Dict{String,Vector{Float64}}()    # route => [count, errors, total seconds, max seconds]
+"How many of a route's first requests after a start are left out of its times: they compile what they run."
+const METRIC_WARMUP = 2
+"How many of a route's latest times are kept, for its percentile."
+const METRIC_RECENT = 1000
+
+"""
+A route's requests since the service started: how many, how many failed, and the times of those after
+the warm-up ([`METRIC_WARMUP`](@ref)), the latest kept for a percentile. A route that `waits` (a long poll)
+spends its time waiting for a change.
+"""
+mutable struct RouteTimes
+    count::Int
+    errors::Int
+    timed::Int
+    total::Float64
+    slowest::Float64
+    recent::Vector{Float64}
+    next::Int
+    waits::Bool
+end
+RouteTimes(waits::Bool) = RouteTimes(0, 0, 0, 0.0, 0.0, Float64[], 1, waits)
+
+const METRICS = Dict{String,RouteTimes}()
 const METRICS_LOCK = ReentrantLock()
 const STARTED = Ref(now())
 
-function record!(route::AbstractString, status::Integer, seconds::Real)
+function record!(route::AbstractString, status::Integer, seconds::Real; waits::Bool = false)
     lock(METRICS_LOCK) do
-        m = get!(() -> zeros(4), METRICS, route)
-        m[1] += 1; m[2] += status >= 500; m[3] += seconds; m[4] = max(m[4], seconds)
+        m = get!(() -> RouteTimes(waits), METRICS, route)
+        m.count += 1
+        m.errors += status >= 500
+        m.count > METRIC_WARMUP || return
+        m.timed += 1
+        m.total += seconds
+        m.slowest = max(m.slowest, seconds)
+        if length(m.recent) < METRIC_RECENT
+            push!(m.recent, seconds)
+        else
+            m.recent[m.next] = seconds
+            m.next = mod1(m.next + 1, METRIC_RECENT)
+        end
     end
 end
 
-"The route a request counts under: its method and the API path's first parts, or the site."
-metric_route(req::HTTP.Request, parts) =
-    !isempty(parts) && parts[1] in ("api", "auth", "mcp") ? req.method * " /" * join(first(parts, 2), '/') : "site"
+"The time `p` of a route's latest requests took no longer than (0.95 for the 95th percentile)."
+percentile(m::RouteTimes, p::Real) = isempty(m.recent) ? nothing : sort(m.recent)[clamp(ceil(Int, p * length(m.recent)), 1, length(m.recent))]
+
+"""
+    metric_route(req, parts) -> (route, waits)
+
+The route a request counts under, and whether it waits: an API request under the pattern it matched
+(`GET /api/tasks/:task`), signing in, MCP and an unknown API path under their first parts, and the
+site's pages as one.
+"""
+function metric_route(req::HTTP.Request, parts)
+    (isempty(parts) || !(parts[1] in ("api", "auth", "mcp"))) && return ("site", false)
+    found = parts[1] == "api" ? find_route(req.method, parts) : nothing
+    found === nothing || return (req.method * " " * first(found).pattern, first(found).waits)
+    return (req.method * " /" * join(first(parts, 2), '/'), false)
+end
 
 """
     respond_service(kb, req; shared) -> HTTP.Response
@@ -93,7 +138,8 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
         @error "Request failed" target = req.target exception = (e, catch_backtrace())
         HTTP.Response(500)
     end
-    record!(metric_route(req, parts), r.status, time() - t0)
+    route, waits = metric_route(req, parts)
+    record!(route, r.status, time() - t0; waits)
     return r
 end
 

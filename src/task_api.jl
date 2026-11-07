@@ -222,7 +222,7 @@ route!("GET", "/api/tasks/references"; need = "tasks.view") do c
 end
 
 # Long polling: answered when projects or tasks change, or after a while without.
-route!(c -> Dict("version" => wait_tasks_changed(int_param(c.params, "since", -1))), "GET", "/api/tasks/changes"; need = "tasks.view")
+route!(c -> Dict("version" => wait_tasks_changed(int_param(c.params, "since", -1))), "GET", "/api/tasks/changes"; need = "tasks.view", waits = true)
 
 # What waits on the caller. Findings wait on those who may accept them.
 route!("GET", "/api/tasks/waiting"; need = "tasks.view") do c

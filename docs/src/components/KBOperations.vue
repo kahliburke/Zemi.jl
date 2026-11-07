@@ -6,7 +6,7 @@
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { getJSON, post, can, me, onLive, every, type Job } from './kbApi'
 import { when, bytes } from './kbFormat'
 
@@ -21,9 +21,15 @@ type Ops = {
             site: { building: boolean; started: string | null; queued: boolean; build: string | null; finished: string | null; error: string | null }
             last: { watch: string | null; publish: string | null } }
   jobs: Job[]
-  metrics: { route: string; count: number; errors: number; mean_ms: number; max_ms: number }[]
+  metrics: { route: string; count: number; errors: number; waits: boolean; mean_ms: number | null; p95_ms: number | null;
+             max_ms: number | null }[]
 }
 const ops = ref<Ops | null>(null)
+// Requests answered at once, and long polls, which wait for a change: their time is not work.
+const requests = computed(() => (ops.value?.metrics ?? []).filter(m => !m.waits))
+const waits = computed(() => (ops.value?.metrics ?? []).filter(m => m.waits))
+// A time, or a dash for a route with no request past its warm-up yet.
+const ms = (x: number | null) => x === null ? '—' : x >= 1000 ? `${(x / 1000).toFixed(1)} s` : `${x} ms`
 const agents = ref<Agent[]>([])
 const agentError = ref('')
 const error = ref('')
@@ -151,13 +157,30 @@ const tokens = (u: Record<string, number>) => {
         </template>
 
         <h2>Requests</h2>
-        <table v-if="ops.metrics.length" class="kbo-table">
-          <thead><tr><th>Route</th><th>Answered</th><th>Failed</th><th>Mean</th><th>Slowest</th></tr></thead>
-          <tbody>
-            <tr v-for="m in ops.metrics" :key="m.route"><td><code>{{ m.route }}</code></td><td>{{ m.count }}</td>
-              <td :class="{ 'kb-error': m.errors }">{{ m.errors }}</td><td>{{ m.mean_ms }} ms</td><td>{{ m.max_ms }} ms</td></tr>
-          </tbody>
-        </table>
+        <template v-if="ops.metrics.length">
+          <table class="kbo-table">
+            <thead><tr><th>Route</th><th>Answered</th><th>Failed</th><th>Mean</th><th>95%</th><th>Slowest</th></tr></thead>
+            <tbody>
+              <tr v-for="m in requests" :key="m.route"><td><code>{{ m.route }}</code></td><td>{{ m.count }}</td>
+                <td :class="{ 'kb-error': m.errors }">{{ m.errors }}</td><td>{{ ms(m.mean_ms) }}</td><td>{{ ms(m.p95_ms) }}</td>
+                <td>{{ ms(m.max_ms) }}</td></tr>
+            </tbody>
+          </table>
+          <p class="kbo-dim">Since the service started. The times leave out each route's first two requests, which
+            compile the code they run.</p>
+          <template v-if="waits.length">
+            <h3>Waiting for a change</h3>
+            <p class="kbo-dim">These requests are held until something changes on the board, or for about 25 seconds:
+              their time is waiting, not work.</p>
+            <table class="kbo-table">
+              <thead><tr><th>Route</th><th>Answered</th><th>Failed</th><th>Mean wait</th></tr></thead>
+              <tbody>
+                <tr v-for="m in waits" :key="m.route"><td><code>{{ m.route }}</code></td><td>{{ m.count }}</td>
+                  <td :class="{ 'kb-error': m.errors }">{{ m.errors }}</td><td>{{ ms(m.mean_ms) }}</td></tr>
+              </tbody>
+            </table>
+          </template>
+        </template>
         <p v-else class="kbo-dim">Counted in shared mode.</p>
       </template>
     </KBNeedsService>

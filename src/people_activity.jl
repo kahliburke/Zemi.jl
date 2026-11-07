@@ -129,7 +129,7 @@ route!("POST", "/api/presence"; need = "tasks.view") do c
                      following = Int(get(d, "following", 0)), view = String(get(d, "view", "")))
     ok_json()
 end
-route!("GET", "/api/presence"; need = "tasks.view") do c
+route!("GET", "/api/presence"; need = "tasks.view", waits = true) do c
     v = wait_presence(int_param(c.params, "since", -1))
     Dict("version" => v, "me" => something(c.caller.user_id, 0), "people" => Any[Dict(pairs(p)) for p in presence(c.kb, c.caller)])
 end

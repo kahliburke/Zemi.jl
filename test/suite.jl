@@ -4220,6 +4220,36 @@ end
     @test K.form_body(form) == Dict("url" => "https://example.org", "name" => "Bea") && K.body_bytes(form) == Vector{UInt8}("url=https%3A%2F%2Fexample.org&name=Bea")
 end
 
+@zset "request times" begin
+    saved = copy(K.METRICS)
+    empty!(K.METRICS)
+    try
+        route(method, target) = K.metric_route(K.HTTP.Request(method, target), filter(!isempty, split(target, '/')))
+        # Each request under the pattern it matched; long polls marked; the rest under their first parts.
+        @test route("GET", "/api/tasks/EHS-12") == ("GET /api/tasks/:task", false)
+        @test route("GET", "/api/tasks/changes") == ("GET /api/tasks/changes", true)
+        @test route("GET", "/api/presence") == ("GET /api/presence", true) && route("POST", "/api/presence") == ("POST /api/presence", false)
+        @test route("GET", "/api/nowhere/at/all") == ("GET /api/nowhere", false)
+        @test route("GET", "/auth/sign-in") == ("GET /auth/sign-in", false) && route("GET", "/generated/kb/papers") == ("site", false)
+        # A route's first requests compile what they run, so they are counted but not timed.
+        foreach(s -> K.record!("GET /api/x", 200, s), (5.0, 4.0, 0.010, 0.020, 0.030))
+        K.record!("GET /api/x", 500, 0.040)
+        x = only(m for m in K.metrics_json() if m["route"] == "GET /api/x")
+        @test (x["count"], x["errors"], x["mean_ms"], x["p95_ms"], x["max_ms"]) == (6, 1, 25.0, 40.0, 40.0)
+        foreach(_ -> K.record!("GET /api/w", 200, 25.0; waits = true), 1:3)
+        K.record!("GET /api/y", 200, 0.001)
+        @test [m["route"] for m in K.metrics_json()] == ["GET /api/x", "GET /api/y", "GET /api/w"]   # long polls last
+        @test only(m for m in K.metrics_json() if m["route"] == "GET /api/y")["mean_ms"] === nothing
+        # The latest times are kept for the percentile, the oldest given up.
+        foreach(i -> K.record!("GET /api/z", 200, i / 1000), 1:1102)
+        z = K.METRICS["GET /api/z"]
+        @test length(z.recent) == K.METRIC_RECENT && minimum(z.recent) == 0.103 && K.percentile(z, 0.95) == 1.052
+    finally
+        empty!(K.METRICS)
+        merge!(K.METRICS, saved)
+    end
+end
+
 @zset "routes" begin
     # A literal part wins over a named one; `*paper` takes the rest of the path, slashes and all.
     r, path = K.find_route("GET", ["api", "tasks", "search"])

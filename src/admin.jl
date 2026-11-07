@@ -351,10 +351,15 @@ function health_json(kb::KB)
          "last" => Dict("watch" => kv("watch_checked_at"), "publish" => kv("dataset_published_at"), "pull" => kv("dataset_pulled")))
 end
 
-"Requests answered since the service started, by route: how many, how many failed, their time."
+"""
+Requests answered since the service started, by route (see [`RouteTimes`](@ref)): how many, how many
+failed, and in milliseconds their mean, 95th percentile and slowest, after the warm-up; long polls last.
+"""
 metrics_json() = lock(METRICS_LOCK) do
-    sort!([Dict("route" => r, "count" => Int(m[1]), "errors" => Int(m[2]), "mean_ms" => round(1000m[3] / max(m[1], 1); digits = 1),
-                "max_ms" => round(1000m[4]; digits = 1)) for (r, m) in METRICS]; by = d -> -d["count"])
+    ms(x) = x === nothing ? nothing : round(1000x; digits = 1)
+    sort!([Dict("route" => r, "count" => m.count, "errors" => m.errors, "waits" => m.waits,
+                "mean_ms" => m.timed == 0 ? nothing : ms(m.total / m.timed), "p95_ms" => ms(percentile(m, 0.95)),
+                "max_ms" => m.timed == 0 ? nothing : ms(m.slowest)) for (r, m) in METRICS]; by = d -> (d["waits"], -d["count"]))
 end
 
 "Whose request an agent serves, from its id: a conversation's owner, or the work it does."

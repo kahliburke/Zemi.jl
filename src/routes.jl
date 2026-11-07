@@ -37,6 +37,7 @@ struct Route
     need::String
     project::Union{Int,Nothing}
     viewing_as::Bool
+    waits::Bool
     f::Function
 end
 
@@ -48,21 +49,22 @@ const ROUTES = Ref(Route[])
 const ROUTES_LOCK = ReentrantLock()
 
 """
-    route!(f, method, pattern; need = "read", project = nothing, viewing_as = false)
+    route!(f, method, pattern; need = "read", project = nothing, viewing_as = false, waits = false)
 
 Answer `method` requests to `pattern` with `f(c::APICall)`, for callers with permission `need`. What
-`f` returns is sent as JSON, unless it is a response. Declaring a route again (as Revise does when
-its code changes) replaces it.
+`f` returns is sent as JSON, unless it is a response. A route that `waits` holds each request until
+something changes (a long poll), so its time is waiting, counted apart from the others' (see
+[`record!`](@ref)). Declaring a route again (as Revise does when its code changes) replaces it.
 """
 function route!(f, method::AbstractString, pattern::AbstractString; need::AbstractString = "read",
-                project::Union{Integer,Nothing} = nothing, viewing_as::Bool = false)
+                project::Union{Integer,Nothing} = nothing, viewing_as::Bool = false, waits::Bool = false)
     segs = filter(!isempty, split(pattern, '/'))
     rest = !isempty(segs) && startswith(last(segs), '*') ? Symbol(chop(pop!(segs); head = 1, tail = 0)) : nothing
     parts = Union{String,Symbol}[startswith(s, ':') ? Symbol(s[2:end]) : String(s) for s in segs]
     if project !== nothing
         any(in((:key, :task, :finding)), parts) || error("Route $method $pattern names no project (:key, :task or :finding)")
     end
-    r = Route(method, pattern, parts, rest, need, project, viewing_as, f)
+    r = Route(method, pattern, parts, rest, need, project, viewing_as, waits, f)
     lock(ROUTES_LOCK) do
         ROUTES[] = sort!([filter(x -> (x.method, x.pattern) != (method, pattern), ROUTES[]); r]; by = specificity)
     end
