@@ -292,7 +292,7 @@ function run_source!(kb::KB, s::RecordSource, job::Union{Job,Nothing} = nothing;
         scheduled ? Base.invokelatest(s.poll, run) : Base.invokelatest(s.read, run, path)
         isempty(run.spent) || (outcome = "spent"; why = run.spent)
     catch e
-        e isa SourceStopped || (outcome = "failed"; why = sprint(showerror, e); rethrow())
+        e isa SourceStopped || (outcome = "failed"; why = failure_message(e); rethrow())
         outcome, why = e.spent ? "spent" : "stopped", e.why
     finally
         run.dropped > 0 && @info "$(s.name): $(run.dropped) dropped $(run.dropped == 1 ? "item" : "items") kept out"

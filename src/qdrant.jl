@@ -93,7 +93,7 @@ function upsert_points(collection::AbstractString, points::AbstractVector)
     try
         return with_retry(() -> _ok(_put("/collections/$collection/points", Dict("points" => points))), "Upserting into Qdrant"; tries = 4)
     catch e
-        @error "Upserting into Qdrant failed" collection reason = sprint(showerror, e)
+        @error "Upserting into Qdrant failed" collection reason = failure_message(e)
         return false
     end
 end
@@ -128,7 +128,7 @@ function search(collection::AbstractString, vector::AbstractVector; limit::Integ
     catch e
         e isa HTTP.StatusError && e.status == 404 && return Dict{String,Any}[]
         @error "Searching Qdrant failed" collection exception = e
-        return [Dict("error" => sprint(showerror, e))]
+        return [Dict("error" => failure_message(e))]
     end
 end
 

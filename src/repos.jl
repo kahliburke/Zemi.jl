@@ -171,7 +171,7 @@ function fetch_codebase!(kb::KB, id::AbstractString)
             delete!(FETCH_PROBLEMS, id)
             return true
         catch e
-            problem = e isa ErrorException ? e.msg : sprint(showerror, e)
+            problem = e isa ErrorException ? e.msg : failure_message(e)
             get(FETCH_PROBLEMS, id, "") == problem || @warn "Codebase $id could not be fetched from $remote" problem
             FETCH_PROBLEMS[id] = problem
             return false

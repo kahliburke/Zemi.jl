@@ -306,7 +306,7 @@ function request_build!(c::Config; build = default_site_build, settle::Real = 0)
             nothing
         catch e
             @error "The site did not build; the last build is still served" exception = (e, catch_backtrace())
-            sprint(showerror, e)
+            failure_message(e)
         end
         err === nothing && Base.invokelatest(announce_setup)
         more = lock(SITE_LOCK) do

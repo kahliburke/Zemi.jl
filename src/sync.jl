@@ -136,7 +136,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
             pulled = pull!(kb; progress, cancelled)
         catch e
             e isa InterruptException && rethrow()
-            push!(failed, "dataset" => sprint(showerror, e))
+            push!(failed, "dataset" => failure_message(e))
         end
     end
     plan === nothing && (plan = sync_plan(kb; unread))
@@ -147,7 +147,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
         metadata = try
             refresh_metadata!(kb, ids(:metadata))
         catch e
-            push!(failed, "arXiv records" => sprint(showerror, e)); 0
+            push!(failed, "arXiv records" => failure_message(e)); 0
         end
     end
     # Uploads not yet matched to their published record, so a title misread from a PDF corrects itself.
@@ -156,7 +156,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
             heal_uploads!(kb; progress)
         catch e
             e isa InterruptException && rethrow()
-            push!(failed, "uploads' published records" => sprint(showerror, e))
+            push!(failed, "uploads' published records" => failure_message(e))
         end
     end
     embedded = 0
@@ -170,7 +170,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
                 embed_records!(kb, records; progress, cancelled)
             catch e
                 e isa InterruptException && rethrow()
-                push!(failed, "abstracts" => sprint(showerror, e)); 0
+                push!(failed, "abstracts" => failure_message(e)); 0
             end
         end
     end
@@ -189,7 +189,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
                 refresh_metadata!(kb, arxiv_read; force = true)
                 newer = [id for id in arxiv_read if !isequal(paper_row(kb, id).version, before[id])]
             catch e
-                push!(failed, "arXiv versions" => sprint(showerror, e))
+                push!(failed, "arXiv versions" => failure_message(e))
             end
         end
     end
@@ -232,7 +232,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
             progress("classified $id ($(length(classified)) so far)")
         catch e
             e isa InterruptException && rethrow()
-            push!(failed, id => sprint(showerror, e))
+            push!(failed, id => failure_message(e))
         end
     end
     ingested = try
@@ -253,7 +253,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
                 landscape = landscape!(kb; progress, cancelled)
             catch e
                 e isa InterruptException && rethrow()
-                push!(failed, "landscape" => sprint(showerror, e))
+                push!(failed, "landscape" => failure_message(e))
             end
         end
     end
@@ -266,7 +266,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
             published = publish!(kb; progress, cancelled)
         catch e
             e isa InterruptException && rethrow()
-            push!(failed, "publishing" => sprint(showerror, e))
+            push!(failed, "publishing" => failure_message(e))
         end
     end
     return (; metadata, embedded, newer, ingested, classified, failed, pulled, landscape, published,

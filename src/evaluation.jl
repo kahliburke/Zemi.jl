@@ -259,7 +259,7 @@ function judge_summaries(kb::KB, judge::Summarizer, names::AbstractVector{<:Abst
              for (j, i) in enumerate(order)]
         catch e
             e isa InterruptException && rethrow()
-            push!(failed, "$(c.id) $(c.path): " * first(sprint(showerror, e), 200))
+            push!(failed, "$(c.id) $(c.path): " * first(failure_message(e), 200))
             []
         end
         progress("judged $(Threads.atomic_add!(done, 1) + 1)/$(length(picked)) sections")

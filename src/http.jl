@@ -42,7 +42,7 @@ function with_retry(f, what; tries::Integer = 3, patience::Real = 60, pause::Rea
             e isa InterruptException && rethrow()
             se = http_status_error(e)
             status = se === nothing ? 0 : Int(se.status)
-            why = se === nothing ? sprint(showerror, e) : "HTTP $status: $(first(body_text(se.response.body), 300))"
+            why = se === nothing ? failure_message(e) : "HTTP $status: $(first(body_text(se.response.body), 300))"
             if status in (429, 503)
                 busy += 1
                 wait = something(tryparse(Float64, HTTP.header(se.response, "Retry-After", "")), min(pause * 2.0^(busy - 1), MAX_PAUSE))

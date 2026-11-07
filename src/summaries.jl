@@ -183,7 +183,7 @@ function reply_json(text::AbstractString, who::AbstractString)
         JSON.parse(json)
     catch e
         e isa ArgumentError || rethrow()
-        try JSON.parse(escape_inner_quotes(json)) catch; error("$who returned JSON that does not parse: $(sprint(showerror, e))") end
+        try JSON.parse(escape_inner_quotes(json)) catch; error("$who returned JSON that does not parse: $(failure_message(e))") end
     end
 end
 

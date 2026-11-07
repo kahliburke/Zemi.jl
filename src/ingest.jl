@@ -734,7 +734,7 @@ function ingest!(kb::KB, ids::AbstractVector{<:AbstractString};
                 catch e
                     e isa InterruptException && rethrow()
                     @warn "Classifying failed" id exception = e
-                    warning = join(filter(!isnothing, [warning, "classifier: $(sprint(showerror, e))"]), "; ")
+                    warning = join(filter(!isnothing, [warning, "classifier: $(failure_message(e))"]), "; ")
                 end
             end
             push!(results, (; id, ok = true, r..., classified, error = warning, seconds = time() - t0))
@@ -743,7 +743,7 @@ function ingest!(kb::KB, ids::AbstractVector{<:AbstractString};
             e isa InterruptException && rethrow()
             @error "Ingest failed" id exception = (e, catch_backtrace())
             push!(results, (; id, ok = false, parsed = false, summarized = 0, embedded = Dict{String,Int}(), classified = false,
-                error = sprint(showerror, e), seconds = time() - t0))
+                error = failure_message(e), seconds = time() - t0))
         end
     end
     return results
@@ -778,7 +778,7 @@ function ingest_paper!(kb::KB, id::AbstractString, layers::AbstractVector{Layer}
             cut_paper_figures!(kb, id)
         catch e
             e isa InterruptException && rethrow()
-            push!(warnings, "figures: $(sprint(showerror, e))")
+            push!(warnings, "figures: $(failure_message(e))")
         end
     end
     failed = Set{String}()
@@ -789,7 +789,7 @@ function ingest_paper!(kb::KB, id::AbstractString, layers::AbstractVector{Layer}
         catch e
             e isa InterruptException && rethrow()
             push!(failed, s.name)
-            push!(warnings, "summarizer $(s.name): $(sprint(showerror, e))")
+            push!(warnings, "summarizer $(s.name): $(failure_message(e))")
             @warn "Summarizing failed; skipping its layers" id summarizer = s.name exception = e
         end
     end

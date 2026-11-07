@@ -135,7 +135,7 @@ function cli(args::AbstractVector{<:AbstractString})
         return 0
     catch e
         e isa InterruptException && rethrow()
-        println(stderr, "zemi $cmd: ", sprint(showerror, e))
+        println(stderr, "zemi $cmd: ", failure_message(e))
         return 1
     end
 end

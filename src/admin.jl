@@ -370,7 +370,7 @@ end
 
 "The agents Kaimon runs, with what each is doing and has used."
 function agents_json(kb::KB)
-    list = try kaimon_tool(:agent_list, Dict{String,Any}()) catch e; return Dict("error" => sprint(showerror, e), "agents" => []) end
+    list = try kaimon_tool(:agent_list, Dict{String,Any}()) catch e; return Dict("error" => failure_message(e), "agents" => []) end
     agents = map(get(list, "agents", [])) do a
         id = String(a["id"])
         steps = [s for s in (agent_step(e) for e in last(agent_events(id), 40)) if s !== nothing]
@@ -506,7 +506,7 @@ route!(c -> (revoke_token!(c.kb, parse(Int, c[:id])); ok_json()), "POST", "/api/
 route!("GET", "/api/admin/keys"; need = "tokens.manage") do c
     d = c.kb.config.dataset
     why = isempty(d.endpoint) || isempty(d.bucket) ? "no R2 dataset configured" :
-          (try r2_account(c.kb.config); "" catch e; sprint(showerror, e) end)
+          (try r2_account(c.kb.config); "" catch e; failure_message(e) end)
     isempty(why) && !isfile(d.admin_credentials) && (why = "no Cloudflare admin token")
     isempty(why) || return Dict("available" => false, "why" => why, "keys" => [])
     Dict("available" => true, "keys" => [Dict("name" => k.name, "status" => k.status) for k in list_keys(c.kb.config)])

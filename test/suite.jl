@@ -3213,6 +3213,11 @@ end
     end
     @test_throws ErrorException K.resolve_key("file:/nonexistent/key", "t")
     @test_throws ErrorException K.resolve_key("plain-key", "t")
+    # A model's refusal, thrown in one of the tasks that summarize, is told as itself: no task, no stack trace.
+    e = try asyncmap(_ -> K.upstream_failed("Summarizer s answered HTTP 401: expired"), 1:2; ntasks = 2); nothing catch e; e end
+    @test !(e isa K.Refusal) && K.failure_message(e) == "Summarizer s answered HTTP 401: expired"
+    @test K.error_status(e) == 502 && K.reason(e) == "Summarizer s answered HTTP 401: expired"
+    @test K.failure_message(ErrorException("plain")) == "plain"
     # OpenCode's key: its login where there is one, else OPENCODE_API_KEY (a container's).
     data = mktempdir()
     withenv("XDG_DATA_HOME" => data, "OPENCODE_API_KEY" => nothing) do

@@ -137,7 +137,7 @@ dataset it reaches in the settings file, as Setup does, unless the configuration
 Returns what was done, for people.
 """
 function install_key(file::AbstractString; path::AbstractString = config_path())
-    d = try save_key(read(file, String); config_dir = dirname(path)) catch e; error(replace(sprint(showerror, e), "This" => file)) end
+    d = try save_key(read(file, String); config_dir = dirname(path)) catch e; error(replace(failure_message(e), "This" => file)) end
     current = load_config(path).dataset
     if current.role != :none
         return "Saved the key as $(d["credentials"]). The configuration already shares a dataset ($(current.store)), so it was left as it is."

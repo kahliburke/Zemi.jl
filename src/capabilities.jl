@@ -124,7 +124,7 @@ end
 key_problem(spec, who) = try
     resolve_key(spec, who); nothing
 catch e
-    sprint(showerror, e)
+    failure_message(e)
 end
 
 function summarizer_problem(s::Summarizer)

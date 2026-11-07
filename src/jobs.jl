@@ -123,7 +123,7 @@ function start_job(f, name::AbstractString; ids = String[], changes::Union{Strin
             note_failures!(job)
         catch e
             job.status = :failed
-            job.error = sprint(showerror, e)          # (the backtrace goes to the log)
+            job.error = failure_message(e)          # (the backtrace goes to the log)
             @error "Job $id ($name) failed" exception = (e, catch_backtrace())
         finally
             # The documents it worked on are noted before the stamp moves, for the refresh it starts.

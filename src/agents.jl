@@ -28,7 +28,7 @@ function kaimon_tool(name::Symbol, args::Dict{String,Any})
         AGENT_CALL[](name, args)
     catch e
         e isa InterruptException && rethrow()
-        msg = sprint(showerror, e)
+        msg = failure_message(e)
         occursin("no ZMQ context", msg) || occursin("service endpoint not available", msg) || rethrow()
         error("Agent summarizers work through Kaimon: run this from the zemi extension, a Slate notebook " *
               "or the zemi command, with Kaimon running ($msg)")

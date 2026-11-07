@@ -189,7 +189,7 @@ function feature_daily!(kb::KB, day::AbstractString, id::AbstractString; progres
         return (; id, figures = cut)
     catch e
         e isa InterruptException && rethrow()
-        setstatus("failed", sprint(showerror, e))
+        setstatus("failed", failure_message(e))
         rethrow()
     end
 end
