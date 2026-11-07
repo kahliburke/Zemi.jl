@@ -1,0 +1,76 @@
+# A knowledge base's shared service in containers, beside install.sh: the service (Dockerfile), Qdrant,
+# Ollama and Caddy for HTTPS. Its config is config/config.toml beside this file. The first start
+# writes it from these, with the GitHub OAuth app's secret in config/github_oauth_secret:
+#
+#   ZEMI_BASE_URL=https://kb.example.org ZEMI_ADMINS=you@example.org ZEMI_GITHUB_CLIENT_ID=Ov23… \
+#       docker compose -f deploy/compose.yaml up -d --build
+#
+# From then on the file is the config. Other secrets are files in config/, named in the config by
+# their path in the container (file:/srv/zemi/.config/zemi/<name>). The models' and agents' keys are
+# NAME=value lines in service.env beside this file, which compose reads on the host (chmod 600): the
+# default summarizer's is OPENCODE_API_KEY, an OpenCode Zen key. A group with a Qdrant or Ollama of
+# its own removes that service and names its own in the config.
+name: zemi
+
+services:
+  zemi:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: zemi
+    restart: unless-stopped
+    init: true
+    depends_on: [qdrant, ollama]
+    # For a first config, where there is none yet.
+    environment:
+      - ZEMI_BASE_URL
+      - ZEMI_ADMINS
+      - ZEMI_GITHUB_CLIENT_ID
+    env_file:
+      - path: service.env
+        required: false
+    volumes:
+      - ./config:/srv/zemi/.config/zemi
+      - data:/srv/zemi/data
+      - julia:/srv/zemi/.julia
+      - caddy-site:/srv/zemi/caddy
+
+  qdrant:
+    image: qdrant/qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant:/qdrant/storage
+
+  ollama:
+    image: ollama/ollama
+    restart: unless-stopped
+    environment:
+      # Several requests at once, so a search's query is embedded beside a document being read.
+      - OLLAMA_NUM_PARALLEL=4
+    volumes:
+      - ollama:/root/.ollama
+    # With an NVIDIA GPU and its container toolkit:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{driver: nvidia, count: all, capabilities: [gpu]}]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    # The site the service writes for it at its start.
+    command: sh -c 'until [ -f /srv/zemi/caddy/site.caddy ]; do sleep 1; done; exec caddy run --config /srv/zemi/caddy/site.caddy --adapter caddyfile'
+    volumes:
+      - caddy-site:/srv/zemi/caddy:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  data:
+  julia:
+  caddy-site:
+  qdrant:
+  ollama:
+  caddy-data:
+  caddy-config:

@@ -15,3 +15,5 @@ guide/package.json
 guide/package-lock.json
 .claude/worktrees/
 guide/src/assets/screenshots/
+deploy/config/
+deploy/service.env

@@ -1,0 +1,20 @@
+# What the image built from this checkout leaves out (see deploy/Dockerfile): what git does, and git's own folder.
+.git
+.claude
+**/.DS_Store
+**/node_modules
+**/Manifest*.toml
+docs/build
+docs/slate
+docs/src/generated
+docs/src/.vitepress/cache
+docs/kb_public
+docs/package-lock.json
+guide/build
+guide/src/public
+guide/package.json
+guide/package-lock.json
+guide/src/assets/screenshots
+# The config and the agents' tokens beside compose.yaml hold secrets.
+deploy/config
+deploy/service.env

@@ -1,0 +1,15 @@
+# Trying the containers on one machine, at http://localhost:8800 with the local sign-in and without
+# Caddy, reachable from this machine only. A first config needs only the admins; an existing one has
+# base_url "http://localhost:<port>" and [shared] host "127.0.0.1". ZEMI_LOCAL_PORT publishes it on
+# another port than 8800, and a first config's base_url names that port.
+#
+#   ZEMI_ADMINS=you@example.org docker compose -f deploy/compose.yaml -f deploy/compose.local.yaml up -d --build
+services:
+  zemi:
+    ports: ["127.0.0.1:${ZEMI_LOCAL_PORT:-8800}:8800"]
+    environment:
+      - ZEMI_LOCAL_SIGN_IN=1
+      - ZEMI_LOCAL_PORT
+
+  caddy:
+    profiles: [public]
