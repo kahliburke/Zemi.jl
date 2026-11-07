@@ -10,6 +10,12 @@ A project has a key, `RB`, and numbered tasks, `RB-1`. A task has a Markdown pla
 milestone, a priority, an assignee and notes (progress, comments, questions). The board groups tasks
 by status: proposed, backlog, ready, in progress, review, done.
 
+Each column is in the order its cards were dragged into, with those agents are working on first. The
+board's **Sort** sorts every column instead by priority (ASAP first, in the order marked so), by when
+the milestone is due, by assignee (yours first), by when tasks last changed, or newest first. Cards
+ranked alike keep the dragged order. The browser keeps the choice. Sorted otherwise, dragging still
+moves a card between columns or under another task; reordering by hand needs the dragged order.
+
 ```@raw html
 <figure class="shot">
   <img class="light-only" src="./assets/screenshots/board-light.png" alt="A project board">

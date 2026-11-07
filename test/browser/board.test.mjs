@@ -175,3 +175,26 @@ test('a question waiting on you opens ready for your reply, and the answer goes 
   assert.deepEqual(errors, [])
   await close()
 })
+
+test('a column sorts by priority, ASAP first, and stays so on the next visit', async () => {
+  const made = []
+  for (const [title, priority] of [['Low one', 3], ['ASAP one', 0], ['High one', 1]])
+    made.push((await api('/api/tasks', { project: 'OT', title, priority, status: 'ready' })).ref)
+  const [low, asap, high] = made
+  try {
+    const { page, errors, close } = await open('/projects#OT', '.kbp-card')
+    await page.waitForSelector(`.kbp-card:has(.kbp-ref:text-is("${high}"))`)
+    assert.deepEqual(await cards(page, 'ready'), ['OT-1', low, asap, high])
+    await page.getByLabel('Sort each column').selectOption('priority')
+    assert.deepEqual(await cards(page, 'ready'), [asap, high, 'OT-1', low])
+    await page.reload()
+    await page.waitForSelector(`.kbp-card:has(.kbp-ref:text-is("${high}"))`)
+    assert.deepEqual(await cards(page, 'ready'), [asap, high, 'OT-1', low])
+    await page.getByLabel('Sort each column').selectOption('manual')
+    assert.deepEqual(await cards(page, 'ready'), ['OT-1', low, asap, high])
+    assert.deepEqual(errors, [])
+    await close()
+  } finally {
+    for (const r of made) await api(`/api/tasks/${r}/delete`, {})
+  }
+})

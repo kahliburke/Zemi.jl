@@ -31,7 +31,7 @@ type Status = { id: string; label: string }
 type Milestone = { name: string; description: string; start: string; due: string; closed: boolean; done: number; total: number; active: boolean }
 type Task = { ref: string; title: string; status: string; blocked: string; priority: number; assignee: string; milestone: string;
               parent: string; subtasks: number; subtasks_done: number; created_by: string; by_agent: boolean; created_at: string; updated_at: string; sent_back?: boolean;
-              archived_at: string }
+              archived_at: string; asap_at?: string }
 // A question is asked of the agents, a person (`to_person`, as tasks are assigned) or anyone on the
 // project; a reply names the question it answers or asks back about (`reply_to`).
 type TaskEvent = { id: number; at: string; who: string; by_agent: boolean; by_person: string; kind: string; text: string; detail: Record<string, any>;
@@ -719,13 +719,57 @@ const shown = computed(() => (board.value?.tasks ?? []).map(t => moving.value.ha
   .filter(t => t.ref === open.value?.ref || !t.parent && (!milestone.value || t.milestone === milestone.value) && (!only.value || holds(t))))
 // The subtasks a card lists: all of them, or with a status chosen, those in it and the ones leading to them.
 const cardSubs = (r: string) => flat(below(r)).filter(n => !only.value || holds(n.t))
-// A card an agent is working on now, itself or under it, comes first in its column; the rest keep
-// the order they were put in.
+// How each column is sorted, as this browser was left. In the order the cards were put in (by
+// dragging), a card an agent is working on now, itself or under it, comes first. The other sorts
+// keep that order among cards they rank alike.
+const SORT = 'zemi-board-sort'
+const SORTS = [
+  { id: 'manual', label: 'Your order', help: 'The order cards were dragged into, with those agents are working on first' },
+  { id: 'priority', label: 'Priority', help: 'ASAP first, in the order marked so, then high, normal and low' },
+  { id: 'milestone', label: 'Milestone', help: 'By when their milestone is due, the soonest first; tasks in none last' },
+  { id: 'assignee', label: 'Assignee', help: 'Yours first, then by whom, the unassigned last' },
+  { id: 'updated', label: 'Recently changed', help: 'The latest changed first' },
+  { id: 'created', label: 'Newest', help: 'The latest made first' },
+] as const
+type SortId = typeof SORTS[number]['id']
+const sortBy = ref<SortId>('manual')
+const sorted = computed(() => sortBy.value !== 'manual')
+watch(sortBy, s => s === 'manual' ? localStorage.removeItem(SORT) : localStorage.setItem(SORT, s))
+onMounted(() => {
+  const s = localStorage.getItem(SORT)
+  if (SORTS.some(x => x.id === s)) sortBy.value = s as SortId
+})
 const working = computed(() => marked(t => atWork.value.has(t.ref)))
+// A milestone's place: dated ones by when they are due, then undated ones as the board lists them,
+// then no milestone.
+const milestoneRank = computed(() => {
+  const ms = board.value?.milestones ?? []
+  const dated = ms.filter(m => m.due).sort((a, b) => a.due.localeCompare(b.due))
+  return new Map([...dated, ...ms.filter(m => !m.due)].map((m, i) => [m.name, i]))
+})
+const assigneeKey = (t: Task) => !t.assignee ? '￿' : t.assignee === myPersonId.value ? '' : personLabel(t.assignee).toLowerCase()
+function sortKey(t: Task): (number | string)[] {
+  switch (sortBy.value) {
+    case 'priority': return [t.priority, t.priority === 0 ? (t.asap_at ?? '') : '']
+    case 'milestone': return [t.milestone ? milestoneRank.value.get(t.milestone) ?? Infinity : Infinity]
+    case 'assignee': return [assigneeKey(t)]
+    case 'updated': return [-Date.parse(t.updated_at)]
+    case 'created': return [-Date.parse(t.created_at)]
+    default: return [working.value.has(t.ref) ? 0 : 1]
+  }
+}
+const compareKeys = (a: (number | string)[], b: (number | string)[]) => {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1
+  return 0
+}
 const columns = computed(() => {
   const m = new Map<string, Task[]>()
   for (const t of shown.value) { if (!m.has(t.status)) m.set(t.status, []); m.get(t.status)!.push(t) }
-  for (const [s, ts] of m) m.set(s, [...ts.filter(t => working.value.has(t.ref)), ...ts.filter(t => !working.value.has(t.ref))])
+  // Array sort is stable: cards ranked alike keep the board's order.
+  for (const [s, ts] of m) {
+    const keys = new Map(ts.map(t => [t.ref, sortKey(t)]))
+    m.set(s, ts.sort((a, b) => compareKeys(keys.get(a.ref)!, keys.get(b.ref)!)))
+  }
   return m
 })
 const column = (s: string) => columns.value.get(s) ?? []
@@ -824,6 +868,8 @@ const allDone = (r: string): boolean => {
 function aim(e: DragEvent, t: Task) {
   const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
   const zone = e.clientY - box.top >= box.height * 0.3 && (t.status !== 'done' || allDone(dragging.value)) ? 'into' : 'before'
+  // Sorted otherwise than by hand, a card has no place before another: dropped there, it goes to the column.
+  if (sorted.value && zone === 'before') { if (target.value) target.value = null; return }
   // Dragging over a card fires many times a second: the board is drawn again only when the aim changes.
   if (target.value?.ref !== t.ref || target.value.zone !== zone) target.value = { ref: t.ref, zone }
 }
@@ -847,6 +893,7 @@ function dropped(): Task | undefined {
 }
 function drop(status: string, onto?: Task) {
   const zone = target.value?.zone
+  if (sorted.value && zone !== 'into') onto = undefined
   const t = dropped()
   if (!t || t.ref === onto?.ref) return
   const fields: Record<string, any> = {}
@@ -862,6 +909,9 @@ function drop(status: string, onto?: Task) {
 // its top and at the top level, however full of cards it is.
 const topOf = ref('')
 const draggedStatus = computed(() => board.value?.tasks.find(x => x.ref === dragging.value)?.status ?? '')
+const draggedParent = computed(() => board.value?.tasks.find(x => x.ref === dragging.value)?.parent ?? '')
+// Sorted otherwise than by hand, a column's top is only for moving a card there, or a subtask out of its task.
+const topStrip = (s: string) => !sorted.value || draggedStatus.value !== s || !!draggedParent.value
 function dropTop(status: string) {
   const t = dropped()
   if (!t) return
@@ -869,7 +919,7 @@ function dropTop(status: string) {
   if (t.status !== status) fields.status = status
   if (t.parent) fields.parent = ''
   const first = column(status).find(x => !x.parent && x.ref !== t.ref)
-  if (first) fields.before = first.ref
+  if (first && !sorted.value) fields.before = first.ref
   if (Object.keys(fields).length) change(t.ref, fields)
 }
 // A milestone's chip, while a card is dragged: dropped there, the task goes into that milestone, or
@@ -1197,6 +1247,9 @@ function keepRecordsOpen(open: boolean) {
         <select v-if="board" v-model="only" class="kbp-select" aria-label="Show tasks in a status"
                 title="Show the tasks in a status, and those with a subtask in it">
           <option value="">Every status</option><option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.label }}</option></select>
+        <select v-if="board" v-model="sortBy" class="kbp-select" aria-label="Sort each column"
+                :title="`Sort each column: ${SORTS.find(x => x.id === sortBy)!.help.toLowerCase()}${sorted ? '. Dragging moves a card between columns; reorder by hand in Your order' : ''}`">
+          <option v-for="x in SORTS" :key="x.id" :value="x.id">Sort: {{ x.label }}</option></select>
         <label class="kbp-check"><input v-model="subtasks" type="checkbox" /> Subtasks</label>
       </div>
       <form v-if="newProject" class="kbp-form" @submit.prevent="addProject">
@@ -1343,9 +1396,9 @@ function keepRecordsOpen(open: boolean) {
           <h3>{{ s.label }} <span class="kb-dim kbp-dim">{{ column(s.id).length }}</span>
             <button v-if="s.id === 'done' && editable && column('done').length" class="kbp-icon kbp-col-action" title="Archive every done task"
                      aria-label="Archive every done task" @click="archiveDone"><KBIcon name="archive" :size="15" /></button></h3>
-          <div v-if="strips && editable" class="kbp-drop-top" :class="{ aimed: topOf === s.id }"
+          <div v-if="strips && editable && topStrip(s.id)" class="kbp-drop-top" :class="{ aimed: topOf === s.id }"
                @dragover.prevent.stop="topOf = s.id; target = null" @dragleave="topOf = ''" @drop.prevent.stop="dropTop(s.id)">
-            {{ draggedStatus === s.id ? 'To the top' : `Move to ${s.label}` }}</div>
+            {{ draggedStatus !== s.id ? `Move to ${s.label}` : sorted ? 'Out of its task' : 'To the top' }}</div>
           <article v-for="t in column(s.id)" :key="t.ref" class="kbp-card" :data-ref="t.ref"
                    :data-pointer="pointedBy?.ref === t.ref ? initials(pointedBy.name) : undefined"
                    :class="{ pointed: pointedBy?.ref === t.ref, open: open?.ref === t.ref, agent: t.by_agent, flash: flashed.has(t.ref), saving: busy(`task:${t.ref}`), 'drop-before': target?.ref === t.ref && target.zone === 'before',
