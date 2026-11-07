@@ -670,9 +670,8 @@ function project_context(key::AbstractString)
     end
     kept = filter(x -> x.status == "kept", library(kb(), k; caller = tool_caller()))
     if any(x -> x.id > 0, kept)                       # more than the project's own codebase
-        noun(x) = x.kind == "paper" ? something(document_kind(x.target), PAPER).noun : x.kind
         tally = Dict{String,Int}()
-        foreach(x -> tally[noun(x)] = get(tally, noun(x), 0) + 1, kept)
+        foreach(x -> tally[library_noun(x)] = get(tally, library_noun(x), 0) + 1, kept)
         counts = sort!(collect(tally); by = c -> (-c[2], c[1]))
         println(io, "## What $k works from\n")
         println(io, "Its library holds ", join(("$n $(n == 1 ? w : w * "s")" for (w, n) in counts), ", ", " and "),

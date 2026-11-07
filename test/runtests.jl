@@ -8,7 +8,7 @@ using Zemi: Span, TextLine, RawBlock, parse_blocks, keyword_query, point_id,
 const K = Zemi
 # Uploads are not looked up in OpenAlex here; the look-up is tested with a stand-in.
 K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
-K.DOI_COPIES[] = (doi; contact = "") -> (; arxiv = nothing, pdf = nothing)
+K.DOI_COPIES[] = (doi; contact = "") -> (; arxiv = nothing, pdfs = String[])
 K.ARXIV_TITLE_SEARCH[] = (title, c) -> K.PaperMeta[]
 # The Zotero prescreen leaves each item to its Zotero type, unless a test sorts them.
 K.ZOTERO_PRESCREEN[] = (kb, items, notes) -> Dict(String(it["key"]) => (; as = "", type = "", sure = true, why = "") for it in items)

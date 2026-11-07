@@ -151,7 +151,7 @@ end
 
 Add the paper with DOI `doi` to be read in full, returning its id: the paper here with that DOI; else
 its arXiv copy, as that arXiv paper, which OpenAlex knows or a search of arXiv for `title` finds (see
-[`arxiv_copy`](@ref)); else the open PDF of it OpenAlex knows (see [`doi_copies`](@ref)),
+[`arxiv_copy`](@ref)); else the first of the open PDFs of it OpenAlex knows that is one (see [`doi_copies`](@ref)),
 added as [`add_pdf!`](@ref) does with `title`, `authors` and `published` where given. `nothing` when
 there is no copy to read, as for a closed paper. Its arrival is a mention from `source`, as `by` added
 it. It is not read here (see [`ingest!`](@ref)).
@@ -166,25 +166,34 @@ function add_doi!(kb::KB, doi::AbstractString; title = nothing, authors::Abstrac
     arxiv = c.arxiv
     arxiv === nothing && title !== nothing && (arxiv = arxiv_copy(kb.config, title; doi = d, authors))
     arxiv === nothing || return only(add_papers!(kb, [arxiv]; source, by))
-    c.pdf === nothing && return nothing
-    path = tempname() * ".pdf"
-    try
-        # A publisher's page in place of the file, or a sign-in it sends the request round, is no copy to read.
-        r = try
-            HTTP.get(c.pdf; status_exception = false, connect_timeout = 20, readtimeout = 120, redirect_limit = 5)
-        catch e
-            e isa InterruptException && rethrow()
-            @warn "The open copy of $d could not be fetched" url = c.pdf exception = e
-            return nothing
+    for url in c.pdfs
+        body = open_pdf(url)
+        body === nothing && continue
+        path = tempname() * ".pdf"
+        try
+            write(path, body)
+            id = add_pdf!(kb, path; title, authors, published, added_by = by, source)
+            execute!(kb, "UPDATE papers SET doi = ? WHERE doc_id = ? AND doi IS NULL", (d, id))
+            return id
+        finally
+            rm(path; force = true)
         end
-        (r.status == 200 && length(r.body) > 4 && String(r.body[1:5]) == "%PDF-") || return nothing
-        write(path, r.body)
-        id = add_pdf!(kb, path; title, authors, published, added_by = by, source)
-        execute!(kb, "UPDATE papers SET doi = ? WHERE doc_id = ? AND doi IS NULL", (d, id))
-        return id
-    finally
-        rm(path; force = true)
     end
+    isempty(c.pdfs) || @info "None of the open copies of $d could be read" copies = c.pdfs
+    return nothing
+end
+
+# The PDF at `url`, or `nothing` when it is not one: a publisher's page in place of the file, a
+# sign-in it sends the request round, a refusal.
+function open_pdf(url::AbstractString)
+    r = try
+        HTTP.get(url; status_exception = false, connect_timeout = 20, readtimeout = 120, redirect_limit = 5)
+    catch e
+        e isa InterruptException && rethrow()
+        @warn "An open copy could not be fetched" url exception = e
+        return nothing
+    end
+    return r.status == 200 && length(r.body) > 4 && String(r.body[1:5]) == "%PDF-" ? r.body : nothing
 end
 
 """

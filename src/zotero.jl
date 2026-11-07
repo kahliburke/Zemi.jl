@@ -141,7 +141,13 @@ function zotero_item!(kb::KB, item, notes::AbstractVector{<:AbstractString}; pro
     date = zotero_date(d)
     if !isempty(doi) && as in ("", "paper")
         id = add_doi!(kb, doi; title, authors, published = isempty(date) ? nothing : first(date, 4), source, by)
-        id === nothing || return keep(id)
+        if id !== nothing
+            # A copy found since it came in as a resource: the paper takes the resource's place.
+            was = scalar(kb, "SELECT p.doc_id FROM resources x JOIN papers p ON p.id = x.paper_id WHERE x.source = ? AND x.key = ?",
+                         (source, String(item["key"])))
+            ismissing(was) || move_document!(kb, String(was), id)
+            return keep(id)
+        end
     end
     type = sorted === nothing || isempty(sorted.type) ? get(ZOTERO_TYPES, d["itemType"], d["itemType"]) : sorted.type
     r = Resource(; key = String(item["key"]), title, type, authors, organizations = zotero_organizations(d), date,
@@ -223,7 +229,7 @@ const ZOTERO_PRESCREEN = Ref{Function}(zotero_prescreen)
 What a run reads of an item. A run made by an older one reads each group's whole library once more,
 so what it brought in gains what is read now.
 """
-const ZOTERO_READING = 2
+const ZOTERO_READING = 3
 
 """
     zotero_poll(run)

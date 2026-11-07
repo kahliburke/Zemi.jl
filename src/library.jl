@@ -133,6 +133,9 @@ library_papers(kb::KB, key::AbstractString) =
     Set(String(r.target) for r in query(kb, "SELECT target FROM library WHERE project_id = ? AND kind = 'paper' AND status = 'kept'",
                                         (project_id(kb, key),)))
 
+"What library item `x` is, in a word: its document's kind (a paper, a resource, a record) or the item's kind."
+library_noun(x) = x.kind == "paper" ? something(document_kind(x.target), PAPER).noun : x.kind
+
 """
     format_library(kb, key; caller = local_caller()) -> String
 
@@ -146,7 +149,7 @@ function format_library(kb::KB, key::AbstractString; caller::Caller = local_call
     io = IOBuffer()
     for x in items
         name = x.kind == "paper" ? cited_as(x.target) : x.target
-        print(io, "- ", x.kind, " ", name, x.label == x.target || isempty(x.label) ? "" : " ($(x.label))")
+        print(io, "- ", library_noun(x), " ", name, x.label == x.target || isempty(x.label) ? "" : " ($(x.label))")
         x.status == "proposed" && print(io, " [proposed by $(x.added_by)]")
         isempty(x.why) || print(io, ": ", x.why)
         cites = [x.tasks; x.findings]

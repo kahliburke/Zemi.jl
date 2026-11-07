@@ -230,20 +230,33 @@ function promote_resource!(kb::KB, id::AbstractString, pdf::AbstractString; by =
     year = coalesce(r.published, "")
     new = add_pdf!(kb, pdf; title = r.title, authors = json_list(r.authors), published = isempty(year) ? nothing : first(year, 4),
                    added_by = by)
-    new == id && return new
+    new == id || move_document!(kb, id, new)
+    return new
+end
+
+"""
+    move_document!(kb, id, to)
+
+Make document `to` stand for resource `id`, which it is a copy of: what named the resource names `to`
+(project libraries, task links, findings' evidence), `to` gets the resource's DOI where it has none,
+the resource is removed, and its id names `to` from then on (see [`current_document`](@ref)).
+"""
+function move_document!(kb::KB, id::AbstractString, to::AbstractString)
+    r = resource_row(kb, id)
+    r === nothing && not_found("No resource $id in the knowledge base")
     transaction(kb) do
-        ismissing(r.doi) || execute!(kb, "UPDATE papers SET doi = ? WHERE doc_id = ? AND doi IS NULL", (r.doi, new))
+        ismissing(r.doi) || execute!(kb, "UPDATE papers SET doi = ? WHERE doc_id = ? AND doi IS NULL", (r.doi, to))
         # Where the paper is named already, the resource's link goes; elsewhere it names the paper.
         execute!(kb, """DELETE FROM library WHERE kind = 'paper' AND target = ?
-                        AND project_id IN (SELECT project_id FROM library WHERE kind = 'paper' AND target = ?)""", (id, new))
-        execute!(kb, "UPDATE library SET target = ? WHERE kind = 'paper' AND target = ?", (new, id))
+                        AND project_id IN (SELECT project_id FROM library WHERE kind = 'paper' AND target = ?)""", (id, to))
+        execute!(kb, "UPDATE library SET target = ? WHERE kind = 'paper' AND target = ?", (to, id))
         execute!(kb, """DELETE FROM task_links WHERE kind = 'paper' AND target = ?
-                        AND task_id IN (SELECT task_id FROM task_links WHERE kind = 'paper' AND target = ?)""", (id, new))
-        execute!(kb, "UPDATE task_links SET target = ? WHERE kind = 'paper' AND target = ?", (new, id))
-        execute!(kb, "UPDATE finding_evidence SET target = ? WHERE kind = 'paper' AND target = ?", (new, id))
-        execute!(kb, "INSERT OR REPLACE INTO moved_documents VALUES (?, ?, ?)", (id, new, now_iso()))
+                        AND task_id IN (SELECT task_id FROM task_links WHERE kind = 'paper' AND target = ?)""", (id, to))
+        execute!(kb, "UPDATE task_links SET target = ? WHERE kind = 'paper' AND target = ?", (to, id))
+        execute!(kb, "UPDATE finding_evidence SET target = ? WHERE kind = 'paper' AND target = ?", (to, id))
+        execute!(kb, "INSERT OR REPLACE INTO moved_documents VALUES (?, ?, ?)", (id, to, now_iso()))
     end
     remove_paper!(kb, id)
     tasks_changed!()
-    return new
+    return to
 end

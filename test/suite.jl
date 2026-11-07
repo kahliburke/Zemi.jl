@@ -3538,10 +3538,11 @@ end
     server = K.HTTP.serve!("127.0.0.1", port) do req
         req.target == "/a.pdf" ? K.HTTP.Response(200, read(joinpath(dir, "a.pdf"))) : K.HTTP.Response(200, "<html>a publisher's page</html>")
     end
-    copies = Dict("10.1/onarxiv" => (; arxiv = "2401.00002", pdf = nothing), "10.1/open" => (; arxiv = nothing, pdf = "http://127.0.0.1:$port/a.pdf"),
-                  "10.1/page" => (; arxiv = nothing, pdf = "http://127.0.0.1:$port/page"))
+    copies = Dict("10.1/onarxiv" => (; arxiv = "2401.00002", pdfs = String[]), "10.1/open" => (; arxiv = nothing, pdfs = ["http://127.0.0.1:$port/a.pdf"]),
+                  "10.1/page" => (; arxiv = nothing, pdfs = ["http://127.0.0.1:$port/page"]),
+                  "10.1/second" => (; arxiv = nothing, pdfs = ["http://127.0.0.1:$port/page", "http://127.0.0.1:$port/a.pdf"]))
     saved = K.DOI_COPIES[]
-    K.DOI_COPIES[] = (doi; contact = "") -> get(copies, doi, (; arxiv = nothing, pdf = nothing))
+    K.DOI_COPIES[] = (doi; contact = "") -> get(copies, doi, (; arxiv = nothing, pdfs = String[]))
     kb = open_kb(temp_config(layers = Layer[]))
     try
         # Its arXiv copy is that arXiv paper; its open PDF is read like an upload, with the source's title and the DOI.
@@ -3553,9 +3554,11 @@ end
         # Asked again, it is the paper already here; with no copy to read, or a page in place of one, there is none.
         @test K.add_doi!(kb, "10.1/open"; source = "zotero") == id
         @test K.add_doi!(kb, "10.1/page") === nothing && K.add_doi!(kb, "10.1/closed") === nothing
+        # A copy that is a page is passed over for the next.
+        @test startswith(something(K.add_doi!(kb, "10.1/second"), ""), "doc-")
         # A closed paper kept as a resource is no paper here: its copy, when one is found, is added.
         K.put_resource!(kb, "zotero", K.Resource(; key = "C1", title = "A closed paper", doi = "10.1/onarxiv2"); read = false)
-        copies["10.1/onarxiv2"] = (; arxiv = "2401.00003", pdf = nothing)
+        copies["10.1/onarxiv2"] = (; arxiv = "2401.00003", pdfs = String[])
         @test K.add_doi!(kb, "10.1/onarxiv2") == "2401.00003"
         # A copy OpenAlex does not know is searched for on arXiv by its title: the same title, and its DOI or an author's surname.
         meta(id, t, authors; doi = nothing) = K.PaperMeta(; doc_id = id, version = "v1", title = t, abstract = "", authors, published = "2020",
@@ -3610,8 +3613,10 @@ end
     end
     saved_api, saved_copies = K.ZOTERO_API[], K.DOI_COPIES[]
     K.ZOTERO_API[] = "http://127.0.0.1:$port"
+    opened = Ref(false)                              # the closed paper's copy, found later
     K.DOI_COPIES[] = (doi; contact = "") -> doi == "10.1/boom" && (booms[] += 1) == 1 ? error("OpenAlex is busy") :
-                                             doi == "10.1/rain" ? (; arxiv = "2401.00002", pdf = nothing) : (; arxiv = nothing, pdf = nothing)
+                                             doi == "10.1/rain" ? (; arxiv = "2401.00002", pdfs = String[]) :
+                                             doi == "10.1/closed" && opened[] ? (; arxiv = "2401.00003", pdfs = String[]) : (; arxiv = nothing, pdfs = String[])
     K.READ_PUT[] = false
     kb = open_kb(temp_config(layers = Layer[]))
     try
@@ -3659,6 +3664,12 @@ end
         empty!(asked)
         K.zotero_poll(run)
         @test asked == ["0"] && K.state(run)["reading"] == K.ZOTERO_READING && resources() == before
+        # A copy of a closed paper found since: the paper takes its resource's place.
+        opened[] = true
+        K.save_state!(run, merge(K.state(run), Dict("reading" => 1)))
+        K.zotero_poll(run)
+        @test resources() == before - 1 && ismissing(K.paper_id(kb, closed)) && K.current_document(kb, closed) == "2401.00003"
+        @test "2401.00003" in [x.target for x in K.library(kb, "WE")] && !(closed in [x.target for x in K.library(kb, "WE")])
 
         # The next run asks only for what changed since; a document removed here is not brought in again.
         K.remove_paper!(kb, dem)
@@ -3718,7 +3729,7 @@ end
     saved = (K.ZOTERO_API[], K.DOI_COPIES[], K.ZOTERO_PRESCREEN[])
     K.ZOTERO_API[] = "http://127.0.0.1:$port"
     tried = String[]
-    K.DOI_COPIES[] = (doi; contact = "") -> (push!(tried, doi); doi == "10.1/rain" ? (; arxiv = "2401.00003", pdf = nothing) : (; arxiv = nothing, pdf = nothing))
+    K.DOI_COPIES[] = (doi; contact = "") -> (push!(tried, doi); doi == "10.1/rain" ? (; arxiv = "2401.00003", pdfs = String[]) : (; arxiv = nothing, pdfs = String[]))
     K.ZOTERO_PRESCREEN[] = K.zotero_prescreen
     K.READ_PUT[] = false
     s = Summarizer(; name = "fake", url = "http://127.0.0.1:$port", model = "fake-model")
@@ -5261,6 +5272,7 @@ end
         ctx = tools["next_task"]("DM")
         @test occursin("## What DM works from\n\nIts library holds 3 resources", ctx) && occursin("`library(\"DM\")` lists them", ctx)
         @test occursin("- $portal A data portal: Where the rain records come from\n", ctx) && !occursin("A news story", ctx)
+        @test occursin("- resource $portal (A data portal): Where the rain records come from", K.format_library(kb, "DM"))
     finally
         K._KB[] = nothing
         close(kb)

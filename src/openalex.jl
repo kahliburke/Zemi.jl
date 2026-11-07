@@ -69,14 +69,14 @@ function work_record(w::AbstractDict)
 end
 
 """
-    doi_copies(doi; contact = "") -> (; arxiv, pdf)
+    doi_copies(doi; contact = "") -> (; arxiv, pdfs)
 
-Where OpenAlex knows a copy of the work with DOI `doi` to read: its arXiv id, and the address of an
-open PDF of it (its best open copy's first), each `nothing` for none.
+Where OpenAlex knows a copy of the work with DOI `doi` to read: its arXiv id (`nothing` for none), and
+the addresses of the open PDFs of it, its best open copy's first.
 """
 function doi_copies(doi::AbstractString; contact::AbstractString = "")
     works = openalex_get(["filter" => "doi:" * doi, "per-page" => "1", "select" => "doi,locations,best_oa_location"]; contact)
-    isempty(works) && return (; arxiv = nothing, pdf = nothing)
+    isempty(works) && return (; arxiv = nothing, pdfs = String[])
     w = first(works)
     locations = AbstractDict[l for l in [something(get(w, "best_oa_location", nothing), Dict()); something(w["locations"], [])] if !isempty(l)]
     arxiv = nothing
@@ -84,8 +84,8 @@ function doi_copies(doi::AbstractString; contact::AbstractString = "")
         id = parse_arxiv_id(something(get(l, "landing_page_url", nothing), ""))
         id === nothing || (arxiv = id.id; break)
     end
-    pdfs = [String(l["pdf_url"]) for l in locations if get(l, "is_oa", false) === true && get(l, "pdf_url", nothing) !== nothing]
-    return (; arxiv, pdf = isempty(pdfs) ? nothing : first(pdfs))
+    pdfs = unique!([String(l["pdf_url"]) for l in locations if get(l, "is_oa", false) === true && get(l, "pdf_url", nothing) !== nothing])
+    return (; arxiv, pdfs)
 end
 
 "Where a DOI's copies are looked up (see [`doi_copies`](@ref)); tests put a stand-in here."
