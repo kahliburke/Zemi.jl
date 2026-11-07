@@ -64,10 +64,18 @@ function ensure_qdrant(c::Config; patience::Real = 0)
     end
 end
 
-const UNAVAILABLE = Ref{Tuple{Float64,Dict{Symbol,String}}}((0.0, Dict{Symbol,String}()))
+"The services' last check (see [`unavailable`](@ref)): when, what it found, and whether the service was starting."
+const UNAVAILABLE = Ref((; at = 0.0, out = Dict{Symbol,String}(), starting = false))
+const CHECKING_SERVICES = Threads.Atomic{Bool}(false)
 
 "Set while the shared service is still starting Qdrant and its Kaimon, which are then said to be starting."
 const STARTING = Ref(false)
+
+"""
+Whether the services' check `u` is too old to show: after half a minute, or a few seconds while the
+service starts, and as soon as it has started if `u` was made before.
+"""
+services_stale(u) = time() - u.at > (u.starting || STARTING[] ? 5 : 30) || (u.starting && !STARTING[])
 
 """
     unavailable(kb; fresh = false) -> Dict{Symbol,String}
@@ -76,11 +84,29 @@ The services this machine lacks, each with a sentence saying what is missing: `:
 mutool), `:embedder` (Ollama with the layers' models, or a hosted layer's key), `:qdrant`,
 and each kind of document's summarizer, by the config's name for it (`:summarizer`,
 `:code_summarizer`, see [`DocumentKind`](@ref)). A summarizer is only needed when a layer embeds summaries.
-The answer is reused for half a minute unless `fresh`, and not kept while the service is starting.
+
+The answer is the last check's, unless `fresh` or there is none yet: a request never waits on
+Ollama, Qdrant or Kaimon to answer. A check too old to show (see [`services_stale`](@ref)) is still
+given, and one new check is started for the next.
 """
 function unavailable(kb::KB; fresh::Bool = false)
-    t, last = UNAVAILABLE[]
-    !fresh && time() - t < 30 && return last
+    u = UNAVAILABLE[]
+    (fresh || u.at == 0) && return check_services!(kb)
+    if services_stale(u) && !Threads.atomic_xchg!(CHECKING_SERVICES, true)
+        Threads.@spawn try
+            check_services!(kb)
+        catch e
+            @warn "Checking the services failed" exception = e
+        finally
+            CHECKING_SERVICES[] = false
+        end
+    end
+    return u.out
+end
+
+"Check the services [`unavailable`](@ref) names now, keeping the answer for it."
+function check_services!(kb::KB)
+    starting = STARTING[]
     c = kb.config
     out = Dict{Symbol,String}()
     Sys.which(c.mutool) === nothing && (out[:parser] = "MuPDF's `$(c.mutool)` is not installed")
@@ -107,7 +133,7 @@ function unavailable(kb::KB; fresh::Bool = false)
             isempty(problems) || (out[service] = join(problems, "; "))
         end
     end
-    STARTING[] || (UNAVAILABLE[] = (time(), out))
+    UNAVAILABLE[] = (; at = time(), out, starting)
     return out
 end
 

@@ -2472,14 +2472,20 @@ end
         @test Set(keys(gone)) == Set([:parser, :embedder, :qdrant, :summarizer, :code_summarizer, :record_summarizer])
         @test occursin("no-such-mutool", gone[:parser]) && occursin("opus-agent-code", gone[:code_summarizer])
         @test occursin("Ollama is not running", gone[:embedder]) && occursin("ZEMI_NO_SUCH_KEY", gone[:embedder])
-        # While the service starts Qdrant and its Kaimon, they are said to be starting, and that is not kept.
+        # While the service starts Qdrant and its Kaimon, they are said to be starting. Once it has
+        # started, that check is given once more while a new one is made, without waiting on it.
         K.STARTING[] = true
-        kept = K.UNAVAILABLE[]
         starting = K.unavailable(kb; fresh = true)
         @test starting[:qdrant] == "Qdrant is starting" && occursin("Kaimon is starting", starting[:summarizer])
-        @test K.UNAVAILABLE[] === kept
+        @test K.UNAVAILABLE[].starting && !K.services_stale(K.UNAVAILABLE[])
         K.STARTING[] = false
+        @test K.services_stale(K.UNAVAILABLE[]) && K.unavailable(kb)[:qdrant] == "Qdrant is starting"
+        @test timedwait(() -> !K.UNAVAILABLE[].starting, 30) == :ok
         @test occursin("not answering", K.unavailable(kb)[:qdrant])
+        # A check half a minute old is given, and replaced in the background.
+        K.UNAVAILABLE[] = (; at = time() - 60, out = Dict(:qdrant => "an old answer"), starting = false)
+        @test K.unavailable(kb) == Dict(:qdrant => "an old answer")
+        @test timedwait(() -> K.UNAVAILABLE[].at > time() - 30, 30) == :ok && occursin("not answering", K.unavailable(kb)[:qdrant])
         # A codebase is read from its files, so it needs no PDF parser; removing needs nothing.
         @test K.action_needs(kb.config, "ingest") == [:parser, :embedder, :qdrant, :summarizer]
         @test K.action_needs(kb.config, "ingest"; kind = K.CODEBASE) == [:embedder, :qdrant, :code_summarizer]
@@ -2504,7 +2510,7 @@ end
     finally
         K.AGENTS_AVAILABLE[] = saved_agents
         restore_qdrant!(saved_qdrant)
-        K.UNAVAILABLE[] = (0.0, Dict{Symbol,String}())
+        K.UNAVAILABLE[] = (; at = 0.0, out = Dict{Symbol,String}(), starting = false)
         K.STARTING[] = false
     end
 end
