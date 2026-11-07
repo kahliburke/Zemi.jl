@@ -4,14 +4,24 @@
 An open knowledge base: its configuration and its SQLite database. SQLite holds everything except
 the vectors (papers, where they were mentioned, parse output, chunk text, the keyword index, and a
 record of what has been embedded in which layer), so the database can always rebuild the vector
-store. Access to the connection is serialized through `lock`, because tool calls arrive on
-separate tasks.
+store.
+
+Writes go through one connection, `db`, serialized by `lock`. Reads outside a transaction take a
+connection of their own from `readers` (see [`query`](@ref)), so requests answered at once read at
+once: in WAL mode each sees the database as last committed.
 """
 mutable struct KB
     config::Config
     db::SQLite.DB
     lock::ReentrantLock
+    readers::Channel{SQLite.DB}          # idle reading connections
+    opened::Threads.Atomic{Int}          # reading connections opened
 end
+
+KB(config::Config, db::SQLite.DB, lock::ReentrantLock) = KB(config, db, lock, Channel{SQLite.DB}(Inf), Threads.Atomic{Int}(0))
+
+"How many reading connections a knowledge base opens at most: one for each thread that answers requests."
+max_readers() = Threads.nthreads(:default)
 
 # MIGRATIONS[v] takes the database from version v-1 to v; the schema version is their number. A
 # database records how many it has applied, so new migrations go at the end, never between others.
@@ -70,7 +80,14 @@ function open_kb(config::Config = load_config())
     return kb
 end
 
-Base.close(kb::KB) = lock(() -> SQLite.close(kb.db), kb.lock)
+function Base.close(kb::KB)
+    lock(kb.lock) do
+        while isready(kb.readers)
+            SQLite.close(take!(kb.readers))
+        end
+        SQLite.close(kb.db)
+    end
+end
 
 function Base.show(io::IO, kb::KB)
     print(io, "KB(", db_path(kb.config), ")")
@@ -102,10 +119,60 @@ end
 """
     query(kb, sql, params = ()) -> Vector{NamedTuple}
 
-Run a SELECT and materialize its rows.
+Run a SELECT and materialize its rows. Outside a transaction it reads on a connection of its own
+(see [`KB`](@ref)); inside one, and for SQL that writes, on the writing connection.
 """
-query(kb::KB, sql::AbstractString, params = ()) =
-    lock(() -> Tables.rowtable(DBInterface.execute(kb.db, sql, params)), kb.lock)
+function query(kb::KB, sql::AbstractString, params = ())
+    (holds(kb) || !reads_only(sql) || !shareable(kb.db)) && return lock(() -> rows(kb.db, sql, params), kb.lock)
+    db = take_reader!(kb)
+    try
+        return rows(db, sql, params)
+    finally
+        put!(kb.readers, db)
+    end
+end
+
+function rows(db::SQLite.DB, sql::AbstractString, params)
+    q = DBInterface.execute(db, sql, params)
+    try
+        return Tables.rowtable(q)
+    finally
+        DBInterface.close!(q)                 # a cursor left open would keep its snapshot of the database
+    end
+end
+
+"Whether this task holds the writing connection, in a transaction say: its reads stay on it, to see what it wrote."
+holds(kb::KB) = kb.lock.locked_by === current_task()
+
+"Whether `sql` only reads. A reading connection refuses one that writes, so a mistake here is an error, not a write outside the lock."
+reads_only(sql::AbstractString) =
+    occursin(r"^\s*SELECT\b"i, sql) || (occursin(r"^\s*WITH\b"i, sql) && !occursin(r"\b(INSERT|UPDATE|DELETE|REPLACE)\b"i, sql))
+
+"Whether other connections can open database `db`: not one in memory."
+shareable(db::SQLite.DB) = !(db.file in ("", ":memory:")) && !startswith(db.file, "file::memory:")
+
+"An idle reading connection, or a new one while fewer than [`max_readers`](@ref) are open; else the next one given back."
+function take_reader!(kb::KB)
+    isready(kb.readers) && return take!(kb.readers)
+    if Threads.atomic_add!(kb.opened, 1) < max_readers()
+        try
+            return open_reader(kb.db.file)
+        catch
+            Threads.atomic_sub!(kb.opened, 1)
+            rethrow()
+        end
+    end
+    Threads.atomic_sub!(kb.opened, 1)
+    return take!(kb.readers)
+end
+
+function open_reader(file::AbstractString)
+    db = SQLite.DB(file)
+    for pragma in ("query_only = ON", "busy_timeout = 60000")
+        DBInterface.close!(DBInterface.execute(db, "PRAGMA $pragma"))
+    end
+    return db
+end
 
 """
     execute!(kb, sql, params = ())

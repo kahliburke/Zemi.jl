@@ -448,6 +448,36 @@ end
     close(kb)
 end
 
+@zset "reading connections" begin
+    @test K.reads_only("SELECT 1") && K.reads_only("  with x AS (SELECT 1) SELECT * FROM x")
+    @test !K.reads_only("WITH x AS (SELECT 1) DELETE FROM papers") && !K.reads_only("INSERT INTO kv VALUES ('a', 'b')")
+    @test !K.reads_only("PRAGMA user_version")
+    kb = open_kb(temp_config())
+    add_papers!(kb, ["2609.00001"])
+    # A transaction's own reads see what it wrote; others, on connections of their own, see the
+    # database as last committed, without waiting for the transaction to end.
+    seen_inside = seen_outside = -1
+    K.transaction(kb) do
+        K.execute!(kb, "INSERT INTO kv VALUES ('reading', 'yes')")
+        seen_inside = scalar(kb, "SELECT count(*) FROM kv WHERE key = 'reading'")
+        seen_outside = fetch(Threads.@spawn scalar(kb, "SELECT count(*) FROM kv WHERE key = 'reading'"))
+    end
+    @test seen_inside == 1 && seen_outside == 0
+    @test scalar(kb, "SELECT count(*) FROM kv WHERE key = 'reading'") == 1
+    @test 1 <= kb.opened[] <= K.max_readers()
+    # A reading connection refuses to write.
+    db = take!(kb.readers)
+    @test_throws K.SQLite.SQLiteException K.DBInterface.execute(db, "DELETE FROM kv")
+    put!(kb.readers, db)
+    # Many reads at once share at most max_readers connections.
+    @test all(==(1), fetch.([Threads.@spawn scalar(kb, "SELECT count(*) FROM papers") for _ in 1:50]))
+    @test kb.opened[] <= K.max_readers()
+    close(kb)
+    # A database in memory is read on its one connection.
+    mem = K.KB(Config(; data_dir = mktempdir()), K.SQLite.DB(), ReentrantLock())
+    @test scalar(mem, "SELECT 2") == 2 && mem.opened[] == 0
+end
+
 @zset "agent steps" begin
     ev(title, input) = Dict("kind" => "tool_use", "data" => Dict("call" => Dict("title" => title, "rawInput" => input)))
     step(title, input) = K.agent_step(ev(title, input)).says
