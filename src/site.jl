@@ -962,7 +962,7 @@ on the Documents page (see [`documents_markdown`](@ref)).
 status_markdown() = """
     # Status
 
-    What the knowledge base holds. Documents are added, read again and removed on [Documents](./manage.md).
+    What the knowledge base holds. Documents are added, read again and dropped on [Documents](./manage.md).
 
     ## Services
 

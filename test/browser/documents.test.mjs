@@ -6,7 +6,7 @@ import { open, closeBrowser } from './browser.mjs'
 after(closeBrowser)
 
 test('a document dropped with a reason is listed as dropped, and restored from there', async () => {
-  const { page, errors, close } = await open('/service/manage', '.kbm-table')
+  const { page, errors, close } = await open('/generated/kb/manage', '.kbm-table')
   await page.locator('.kbm-input').fill('2609.00099')
   const row = page.locator('.kbm-table tbody tr', { hasText: 'Tide gauges along a reef flat' })
   await row.waitFor()
