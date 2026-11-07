@@ -998,6 +998,9 @@ end
                                                  publisher = "Weather Office", url = "https://example.org/rain", accessed = "2026-11-05"); read = false)
         @test K.citation(kb, K.resource_id("zotero", "GH78")) ==
               "Hale, R. (n.d.). Rainfall records [Data portal]. Weather Office. Retrieved November 5, 2026, from https://example.org/rain"
+        K.put_resource!(kb, "zotero", K.Resource(; key = "IJ90", title = "Land cover", type = "dataset", authors = ["Weather Office"],
+                                                 organizations = ["Weather Office"], publisher = "Weather Office", date = "2022"); read = false)
+        @test K.citation(kb, K.resource_id("zotero", "IJ90")) == "Weather Office. (2022). Land cover [Data set]."
 
         # On the site: a page of each from its data, and the page listing them, linked from the sidebar.
         site, public = mktempdir(), mktempdir()
@@ -1007,7 +1010,7 @@ end
         @test d["title"] == "Copernicus DEM GLO-30" && d["type"] == "dataset" && d["doi"] == "10.5270/esa-c5d3d65" && d["source"] == "zotero"
         @test d["cite"]["reference"] == "@$id" && startswith(d["cite"]["citation"], "ESA. (2021).") && startswith(d["cite"]["bibtex"], "@misc{$id,")
         @test isfile(joinpath(site, "resources", K.page_slug(id) * ".md")) && K.document_page(id) == "resources/$(K.page_slug(id))"
-        @test [x["title"] for x in K.JSON.parsefile(joinpath(public, "resources.json"))] == ["Bali flood facts so far", "Copernicus DEM GLO-30", "Rainfall records"]
+        @test [x["title"] for x in K.JSON.parsefile(joinpath(public, "resources.json"))] == ["Bali flood facts so far", "Copernicus DEM GLO-30", "Land cover", "Rainfall records"]
 
         # Its PDF uploaded, a resource becomes a paper: what named it names the paper, and its id leads there.
         me = K.person("Ada")

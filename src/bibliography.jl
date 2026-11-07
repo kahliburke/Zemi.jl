@@ -205,8 +205,10 @@ function citation(kb::KB, id::AbstractString)
         date = coalesce(r.published, "")
         kind = get(RESOURCE_ENTRIES, r.type, "misc")
         what = haskey(APA_DESCRIPTIONS, r.type) ? "$(r.title) [$(APA_DESCRIPTIONS[r.type])]" : r.title
-        where = kind == "article" || isempty(r.publisher) ? r.container :
-                isempty(r.container) || r.container == r.publisher ? r.publisher : "$(r.container). $(r.publisher)"
+        # A publisher that is also its author is named once, as the author.
+        publisher = r.publisher in json_list(r.authors) ? "" : r.publisher
+        where = kind == "article" || isempty(publisher) ? r.container :
+                isempty(r.container) || r.container == publisher ? publisher : "$(r.container). $(publisher)"
         address = !isempty(doi_link(r.doi)) ? doi_link(r.doi) :
                   isempty(r.url) ? "" : kind == "misc" && !isempty(r.accessed) ? "Retrieved $(spelled_date(r.accessed)), from $(r.url)" : r.url
         return apa_reference(apa_authors([apa_name(a, orgs) for a in json_list(r.authors)]), isempty(date) ? "n.d." : apa_date(date; day = kind == "article" && r.type != "article"),
