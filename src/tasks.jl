@@ -448,6 +448,11 @@ function task_row(r)
        asap_at = coalesce(r.asap_at, ""))
 end
 
+# A task's subtasks are found by its id, and the recent activity by when, so neither reads the
+# tasks archived over a project's life.
+migration!(11, ["CREATE INDEX tasks_parent ON tasks (parent_id)",
+                "CREATE INDEX task_events_at ON task_events (at)"])
+
 # A task's progress counts its subtasks at every level below it.
 const BELOW = """WITH RECURSIVE below(id, status) AS (SELECT id, status FROM tasks WHERE parent_id = t.id
                  UNION ALL SELECT x.id, x.status FROM tasks x JOIN below b ON x.parent_id = b.id)"""

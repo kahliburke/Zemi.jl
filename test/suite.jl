@@ -478,6 +478,22 @@ end
     @test scalar(mem, "SELECT 2") == 2 && mem.opened[] == 0
 end
 
+@zset "a board reads only its own tasks' subtasks and the recent activity" begin
+    kb = open_kb(temp_config())
+    me = K.person("Rowan")
+    K.create_project!(kb, "Board"; key = "BO", by = me)
+    for i in 1:5
+        K.create_task!(kb, "BO", "Task $i"; status = "ready", subtasks = ["a", "b"], by = me)
+    end
+    plan(sql, args) = [String(r.detail) for r in K.query(kb, "EXPLAIN QUERY PLAN " * sql, args)]
+    board = plan(K.TASK_SELECT * " WHERE t.archived_at IS NULL AND p.key = ?", ("BO",))
+    @test !any(contains("SCAN tasks"), board) && any(contains("tasks_parent"), board)
+    # Each insert's id comes back from the call that made it, also with reads on other connections.
+    ids = fetch.([Threads.@spawn K.create_task!(kb, "BO", "At once $i"; by = me) for i in 1:8])
+    @test allunique(ids) && all(r -> K.task(kb, r).activity[1].kind == "created", ids)
+    close(kb)
+end
+
 @zset "agent steps" begin
     ev(title, input) = Dict("kind" => "tool_use", "data" => Dict("call" => Dict("title" => title, "rawInput" => input)))
     step(title, input) = K.agent_step(ev(title, input)).says
