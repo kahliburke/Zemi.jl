@@ -68,6 +68,7 @@ Slate hub, or the one on `[notebooks] slate_port`. `ZEMI_SITE_NOTEBOOKS=0` leave
 | Key | Default | |
 |:---|:---|:---|
 | `ollama_url` | `http://localhost:11434` | the embedding service |
+| `ollama_keep_alive` | `"24h"` | how long Ollama keeps an embedding model loaded after its last use, so a search does not wait for it to load (Ollama's own default is five minutes) |
 | `qdrant_url`, `qdrant_key` | Kaimon's Qdrant, else `http://localhost:6333` | the vector store, and its API key as `"env:NAME"` or `"file:PATH"` |
 | `collection_prefix` | `"zemi"` | Qdrant collections are `<prefix>_<layer>` |
 | `mutool` | `"mutool"` | MuPDF's command |

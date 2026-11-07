@@ -3016,6 +3016,34 @@ end
     end
 end
 
+@zset "a search embeds its query once for the layers of one model" begin
+    qdrant, colls, qport = standin_qdrant()
+    saved = qdrant_state()
+    port, bodies = 17000 + rand(0:999), Any[]
+    server = K.HTTP.serve!("127.0.0.1", port) do req
+        body = K.JSON.parse(String(req.body))
+        push!(bodies, body)
+        K.HTTP.Response(200, K.JSON.json(Dict("embeddings" => [[1f0, 0f0] for _ in body["input"]])))
+    end
+    try
+        K.Qdrant.use!("http://127.0.0.1:$qport")
+        layers = [K.Layer(; name = "chunks", model = "m", unit = :chunk, query_prefix = "Q: "),
+                  K.Layer(; name = "sections", model = "m", unit = :section, query_prefix = "Q: "),
+                  K.Layer(; name = "other", model = "n", unit = :chunk)]
+        kb = open_kb(temp_config(; ollama_url = "http://127.0.0.1:$port", layers, ollama_keep_alive = "2h"))
+        foreach(l -> K.ensure_layer!(kb, l, 2), layers)
+        q = "reef crest $(rand(UInt32))"                         # not in the cache of query vectors
+        @test [first(r) for r in K.rankings(kb, q)] == ["keyword", "chunks", "sections", "other"]
+        @test sort([(b["model"], only(b["input"])) for b in bodies]) == [("m", "Q: $q"), ("n", q)]
+        @test all(b -> b["keep_alive"] == "2h", bodies)
+        close(kb)
+    finally
+        close(server)
+        restore_qdrant!(saved)
+        close(qdrant)
+    end
+end
+
 @zset "summarizer configuration" begin
     path = tempname() * ".toml"
     write(path, """

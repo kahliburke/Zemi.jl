@@ -113,8 +113,11 @@ function rankings(kb::KB, q::AbstractString; layers = nothing, keyword::Bool = t
     qfilter = qdrant_filter(nothing, since)
     out = Pair{String,Vector{String}}[]
     keyword && push!(out, "keyword" => keyword_ranking(kb, q; limit = depth))
+    # Layers of one model and instruction share the query's vector, embedded once.
+    same(l) = (l.url, l.model, l.query_prefix)
+    vectors = Dict(same(l) => Threads.@spawn(query_vector(kb.config, l, q)) for l in unique(same, use))
     tasks = [Threads.@spawn begin
-                 hits = vector_search(collection_name(kb.config, l), query_vector(kb.config, l, q);
+                 hits = vector_search(collection_name(kb.config, l), fetch(vectors[same(l)]);
                      limit = l.unit == :paper ? depth ÷ 2 : depth, filter = qfilter)
                  l.name => [h.key for h in hits]
              end for l in use]

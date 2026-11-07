@@ -517,6 +517,7 @@ Base.@kwdef struct Config
     data_dir::String = joinpath(xdg_home("XDG_DATA_HOME", ".local/share"), "zemi")
     content_dir::String = joinpath(data_dir, "content")
     ollama_url::String = "http://localhost:11434"
+    ollama_keep_alive::String = "24h"
     qdrant_url::String = ""
     qdrant_key::String = ""
     collection_prefix::String = "zemi"
@@ -673,7 +674,7 @@ function load_config(path::AbstractString = config_path())
     data_dir = here(get(t, "data_dir", d.data_dir))
     c = Config(;
         data_dir, content_dir = here(get(t, "content_dir", joinpath(data_dir, "content"))),
-        ollama_url = get(t, "ollama_url", d.ollama_url),
+        ollama_url = get(t, "ollama_url", d.ollama_url), ollama_keep_alive = string(get(t, "ollama_keep_alive", d.ollama_keep_alive)),
         qdrant_url = get(t, "qdrant_url", d.qdrant_url), qdrant_key = get(t, "qdrant_key", d.qdrant_key),
         collection_prefix = get(t, "collection_prefix", d.collection_prefix),
         mutool = get(t, "mutool", d.mutool),

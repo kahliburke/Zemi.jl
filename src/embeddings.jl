@@ -77,7 +77,7 @@ end
 # A batch that outlasts the timeout (long texts on a machine without a GPU) is embedded in halves,
 # down to one text at a time, which is retried like any other failure.
 function ollama_embed_batch(c::Config, model::AbstractString, batch::Vector; timeout = 600, size = Ref(length(batch)))
-    body = JSON.json(Dict("model" => model, "input" => batch, "truncate" => true))
+    body = JSON.json(Dict("model" => model, "input" => batch, "truncate" => true, "keep_alive" => c.ollama_keep_alive))
     request() = JSON.parse(String(HTTP.post("$(c.ollama_url)/api/embed", ["Content-Type" => "application/json"], body;
                                             read_idle_timeout = timeout).body))
     data = try
