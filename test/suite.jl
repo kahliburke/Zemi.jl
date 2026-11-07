@@ -4883,62 +4883,75 @@ end
     @test "NE-4" in [t.ref for t in w.proposed] && !any(t -> t.parent == "DM-6", w.proposed)       # DM-6's subtasks come with it
     @test [t.ref for t in w.review] == ["NE-2"] && [t.ref for t in w.mine] == ["NE-1", "NE-2"]
     @test isempty(K.waiting(kb).mine)
-    # An agent's question waits on the person until a person comments after it.
-    K.note_task!(kb, "NE-1", "Should the bottom task stay under NE-1?"; kind = "question", by = bot)
-    q = K.waiting(kb).questions
-    @test [(t.ref, t.question) for t in q] == [("NE-1", "Should the bottom task stay under NE-1?")]
-    K.note_task!(kb, "NE-1", "Still checking"; kind = "progress", by = bot)                     # not an answer
-    @test length(K.waiting(kb).questions) == 1
-    K.note_task!(kb, "NE-1", "Yes, keep it there."; by = me)
-    @test isempty(K.waiting(kb).questions)
+    # An agent's question goes to the task's assignee and waits on them until they reply to it: a
+    # comment that is not a reply, or an agent's progress, answers nothing.
+    q1 = K.note_task!(kb, "NE-1", "Should the bottom task stay under NE-1?"; kind = "question", by = bot)
+    asked_of(who) = [(t.ref, t.question, t.asker) for t in K.waiting(kb; me = who).questions]
+    @test asked_of("Rowan") == [("NE-1", "Should the bottom task stay under NE-1?", "Claude for Rowan")]
+    @test isempty(asked_of("Bea")) && isempty(K.waiting(kb).questions)
+    progress = K.note_task!(kb, "NE-1", "Still checking"; kind = "progress", by = bot)
+    K.note_task!(kb, "NE-1", "Looking at it."; by = me)
+    @test length(asked_of("Rowan")) == 1
+    @test_throws "a reply is to a question" K.note_task!(kb, "NE-1", "Seen"; by = me, reply_to = progress)
+    @test_throws "A reply is a comment" K.note_task!(kb, "NE-1", "Done"; kind = "progress", by = bot, reply_to = q1)
+    @test_throws "Only a question" K.note_task!(kb, "NE-1", "Hello"; by = me, to = "agents")
+    K.note_task!(kb, "NE-1", "Yes, keep it there."; by = me, reply_to = q1)
+    @test isempty(asked_of("Rowan"))
+    # An agent waiting for people (task_wait) is told what answers its question.
+    @test occursin("Rowan answered note $q1: Yes, keep it there.", K.people_events_text(K.people_events(kb, "NE", q1)))
+    @test occursin("asked Rowan (answered): Should", K.format_task(K.task(kb, "NE-1")))
     @test_throws ErrorException K.note_task!(kb, "NE-1", "?"; kind = "shout", by = bot)
-    # A question asked back answers one too, and waits on the other side in turn.
-    K.note_task!(kb, "NE-1", "Shall I split it?"; kind = "question", by = bot)
-    K.note_task!(kb, "NE-1", "Split how?"; kind = "question", by = me)
-    @test isempty(K.waiting(kb).questions)
-    @test [(t.ref, t.question) for t in K.asked_of_agents(kb, "NE")] == [("NE-1", "Split how?")]
-    @test occursin("asked (answered): Shall I split it?", K.format_task(K.task(kb, "NE-1")))
-    K.note_task!(kb, "NE-1", "In two, by phase."; kind = "comment", by = bot)
-    @test isempty(K.asked_of_agents(kb, "NE"))
-    K.resolve_question!(kb, "NE-1"; asker = "Rowan")
-    # A person's question waits on the agents, shown before the next task, until an agent comments after it.
-    K.note_task!(kb, "NE-2", "Why is this in Review?"; kind = "question", by = me)
+    # A question asked back goes to whoever asked the first, which waits on its answer meanwhile.
+    q2 = K.note_task!(kb, "NE-1", "Shall I split it?"; kind = "question", by = bot)
+    back = K.note_task!(kb, "NE-1", "Split how?"; kind = "question", by = me, reply_to = q2)
+    @test isempty(asked_of("Rowan"))
+    a = K.asked_of_agents(kb, "NE")
+    @test [(t.ref, t.question, t.note) for t in a] == [("NE-1", "Split how?", back)]
+    @test occursin("Rowan asked [note $back]: Split how?", K.questions_text(a))
+    states() = Dict(e.id => e.state for e in K.task(kb, "NE-1").activity if e.kind == "question")
+    @test states()[q2] == "asked back" && states()[back] == "open"
+    K.note_task!(kb, "NE-1", "In two, by phase."; by = bot, reply_to = back)
+    @test isempty(K.asked_of_agents(kb, "NE")) && asked_of("Rowan") == [("NE-1", "Shall I split it?", "Claude for Rowan")]
+    @test states()[q2] == "open" && states()[back] == "answered"
+    K.note_task!(kb, "NE-1", "Yes, split it."; by = me, reply_to = q2)
+    @test isempty(asked_of("Rowan")) && states()[q2] == "answered"
+    # A person's question goes to the agents, shown before the next task, until an agent replies to it.
+    w1 = K.note_task!(kb, "NE-2", "Why is this in Review?"; kind = "question", by = me)
     a = K.asked_of_agents(kb, "NE")
     @test [(t.ref, t.question, t.asker) for t in a] == [("NE-2", "Why is this in Review?", "Rowan")]
-    @test isempty(K.waiting(kb).questions) && isempty(K.asked_of_agents(kb, "DM"))
-    @test occursin("Rowan asked: Why is this in Review?", K.questions_text(a))
-    @test occursin("asked (waiting for an agent's reply): Why", K.format_task(K.task(kb, "NE-2")))
-    K.note_task!(kb, "NE-2", "Adding to that."; by = me)                                         # not an answer
+    @test isempty(asked_of("Rowan")) && isempty(K.asked_of_agents(kb, "DM"))
+    @test occursin("asked the agents (waiting for an agent's reply): Why", K.format_task(K.task(kb, "NE-2")))
+    @test_throws "Ask someone else" K.note_task!(kb, "NE-2", "Me?"; kind = "question", by = me, to = "Rowan")
+    K.note_task!(kb, "NE-2", "Its subtasks are done."; by = bot)                                  # not a reply
     @test length(K.asked_of_agents(kb, "NE")) == 1
-    K.note_task!(kb, "NE-2", "Its subtasks are done."; kind = "comment", by = bot)
-    @test isempty(K.asked_of_agents(kb, "NE")) && K.questions_text(K.asked_of_agents(kb, "NE")) == ""
-    @test occursin("asked (answered): Why", K.format_task(K.task(kb, "NE-2")))
-    # An answer waits on whoever asked while the agent has had the last word: writing again takes it
-    # off, asking again sends it back to the agents, their next reply brings it back, and marking it
-    # resolved ends it.
-    answered() = [(t.ref, t.question, t.answer) for t in K.waiting(kb; asker = "Rowan").answered]
-    @test answered() == [("NE-2", "Why is this in Review?", "Its subtasks are done.")]
-    @test isempty(K.waiting(kb; asker = "Ada").answered) && isempty(K.waiting(kb).answered)
-    K.note_task!(kb, "NE-2", "Which ones?"; kind = "question", by = me)
+    K.note_task!(kb, "NE-2", "Its subtasks are done."; by = bot, reply_to = w1)
+    @test isempty(K.asked_of_agents(kb, "NE"))
+    # The answer waits on whoever asked until they write on the task again or mark it resolved.
+    answered() = [(t.ref, t.question, t.answer, t.answerer) for t in K.waiting(kb; me = "Rowan").answered]
+    @test answered() == [("NE-2", "Why is this in Review?", "Its subtasks are done.", "Claude for Rowan")]
+    @test isempty(K.waiting(kb; me = "Ada").answered) && isempty(K.waiting(kb).answered)
+    w2 = K.note_task!(kb, "NE-2", "Which ones?"; kind = "question", by = me)
     @test isempty(answered()) && any(t -> t.ref == "NE-2", K.asked_of_agents(kb, "NE"))
-    K.note_task!(kb, "NE-2", "All three."; kind = "comment", by = bot)
-    @test answered() == [("NE-2", "Which ones?", "All three.")]
-    K.resolve_question!(kb, "NE-2"; asker = "Rowan")
+    K.note_task!(kb, "NE-2", "All three."; by = bot, reply_to = w2)
+    @test answered() == [("NE-2", "Which ones?", "All three.", "Claude for Rowan")]
+    K.resolve_question!(kb, "NE-2", w2; by = me)
     @test isempty(answered())
-    # An agent's question waits until someone writes after it, or a person marks it resolved (answered
-    # some other way); on a task that is done it no longer waits.
+    @test_throws "No open question" K.resolve_question!(kb, "NE-2", w2; by = me)
+    # A question with no one assigned goes to anyone; resolved, or on a task that is done, it waits no
+    # more. An agent resolves only its own.
     qt = K.create_task!(kb, "NE", "Ask about it"; status = "ready", by = me)
-    K.note_task!(kb, qt, "Which mesh?"; kind = "question", by = bot)
+    mesh = K.note_task!(kb, qt, "Which mesh?"; kind = "question", by = bot)
     asking() = [t.ref for t in K.waiting(kb).questions]
-    @test qt in asking()
-    K.resolve_question!(kb, qt; agents = true)
+    @test qt in asking() && qt in [t.ref for t in K.waiting(kb; me = "Bea").questions]
+    @test_throws "only its own" K.resolve_question!(kb, qt, mesh; by = K.agent("Claude for Bea"))
+    K.resolve_question!(kb, qt, mesh; by = me)
     @test !(qt in asking())
     K.note_task!(kb, qt, "And the boundary?"; kind = "question", by = bot)
     @test qt in asking()
     K.update_task!(kb, qt; status = "done", by = me)
     @test !(qt in asking())
     K.delete_task!(kb, qt; by = me)
-    @test occursin("asked (resolved): Which ones?", K.format_task(K.task(kb, "NE-2")))
+    @test occursin("asked the agents (resolved): Which ones?", K.format_task(K.task(kb, "NE-2")))
     # @-references: read from the prose (not code), each once, and shown to agents plainly.
     text = "See @NE-1 and @arXiv:2402.00785, with @[Dana Iles](author:iles|d), `@NE-2` and @NE-1 again."
     @test [(r.kind, r.target, r.label) for r in K.at_references(text)] ==

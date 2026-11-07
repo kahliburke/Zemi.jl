@@ -23,7 +23,7 @@ chat_access(kb::KB, caller::Caller, chat::AbstractString) = caller.via == :local
 
 "Who the caller is and what they may do, for the site to show what they can use."
 function me_json(kb::KB, c::Caller)
-    Dict("name" => caller_name(c), "email" => c.email, "via" => string(c.via), "permissions" => sort!(collect(c.permissions)),
+    Dict("name" => caller_name(c), "id" => person_id(c), "email" => c.email, "via" => string(c.via), "permissions" => sort!(collect(c.permissions)),
          "quotas" => Dict(k => quota_left(kb, c, k) for k in ("tutor", "notebook")),
          # An admin viewing as this person: the admin, to go back to.
          "admin" => c.admin === nothing ? nothing : coalesce(scalar(kb, "SELECT email FROM users WHERE id = ?", (c.admin,)), ""))

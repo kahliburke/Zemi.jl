@@ -76,7 +76,7 @@ function project_review(kb::KB, key::AbstractString; now::DateTime = Dates.now(U
     reached_review = count(id -> any(m -> m[2] == "review", moves[id]), keys(moves))
     reworked = length(unique(first.(sent_back)))
     questions = count(e -> e.kind == "question", events)
-    open_q = length([q for q in [open_questions(kb; agents = true); open_questions(kb; agents = false)] if Int(q.task_id) in ids])
+    open_q = count(q -> q.task_id in ids, waiting_questions(kb))
     stats = Dict(
         "done" => length(done_ids),
         "done_week" => count(id -> any(m -> m[2] == "done" && m[1] >= now - Day(7), moves[id]), done_ids),

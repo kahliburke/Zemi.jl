@@ -100,6 +100,9 @@ can(c::Caller, permission::AbstractString) = permission in c.permissions
 "The name additions are recorded under: the person's, or whoever runs the knowledge base."
 caller_name(c::Caller) = isempty(c.name) ? something(local_user(), "") : c.name
 
+"How tasks are assigned and questions addressed to `c`: their email in the shared service, else their name."
+person_id(c::Caller) = c.via == :local ? caller_name(c) : c.email
+
 """
     ensure_roles!(kb)
 

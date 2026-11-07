@@ -1712,3 +1712,58 @@ end
         close(kb)
     end
 end
+
+@zset "questions between people" begin
+    HTTP, JSON = K.HTTP, K.JSON
+    kb = open_kb(temp_config())
+    K.ensure_roles!(kb)
+    sh = shared_config(sign_up = :open, default_role = "Reader")
+    account(email, name) = (uid = K.sign_in!(kb, sh, "Campus", email; email, name, verified = true); K.set_roles!(kb, uid, ["Curator"]); uid)
+    as(uid) = K.session_caller(kb, K.start_session!(kb, uid, sh))
+    call(uid, method, target, body = nothing) = (r = K.handle(kb, HTTP.Request(method, target, ["Content-Type" => "application/json"],
+                                                                                body === nothing ? UInt8[] : JSON.json(body)), as(uid));
+                                                  (r.status, JSON.parse(String(r.body))))
+    ada, bea, cy = account("ada@x.org", "Ada"), account("bea@x.org", "Bea"), account("cy@x.org", "Cy")
+    call(ada, "POST", "/api/projects", Dict("name" => "Pumps", "key" => "PU"))
+    K.set_member!(kb, "PU", "bea@x.org", "contributor")
+    K.set_member!(kb, "PU", "cy@x.org", "viewer")
+    call(ada, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Test the seals"))
+    call(ada, "POST", "/api/tasks/PU-1", Dict("assignee" => "bea@x.org"))
+    note(uid, body) = call(uid, "POST", "/api/tasks/PU-1/notes", body)
+    asked(uid) = [(q["ref"], q["question"], q["asker"]) for q in call(uid, "GET", "/api/tasks/waiting")[2]["questions"]]
+    last_note() = K.task(kb, "PU-1").activity[end]
+    # A person asks another by email or name; it waits on them alone, labelled with their name.
+    @test note(ada, Dict("kind" => "question", "text" => "Which gasket?", "to" => "Bea"))[1] == 200
+    q = last_note()
+    @test (q.to_whom, q.to_person, q.to_label, q.by_person, q.state) == ("person", "bea@x.org", "Bea", "ada@x.org", "open")
+    @test asked(bea) == [("PU-1", "Which gasket?", "Ada")] && isempty(asked(ada)) && isempty(asked(cy))
+    @test note(ada, Dict("kind" => "question", "text" => "Who?", "to" => "nobody@x.org"))[1] == 400
+    # Asked back, the question goes to whoever asked; answered, the first waits on Bea again.
+    note(bea, Dict("kind" => "question", "text" => "For the inlet or the outlet?", "reply_to" => q.id))
+    back = last_note()
+    @test (back.to_whom, back.to_person) == ("person", "ada@x.org") && isempty(asked(bea))
+    @test asked(ada) == [("PU-1", "For the inlet or the outlet?", "Bea")]
+    note(ada, Dict("text" => "The inlet.", "reply_to" => back.id))
+    @test asked(bea) == [("PU-1", "Which gasket?", "Ada")] && isempty(asked(ada))
+    note(bea, Dict("text" => "The neoprene one.", "reply_to" => q.id))
+    @test isempty(asked(bea))
+    answered = call(ada, "GET", "/api/tasks/waiting")[2]["answered"]
+    @test [(a["question"], a["answer"], a["answerer"]) for a in answered] == [("Which gasket?", "The neoprene one.", "Bea")]
+    # An agent's question goes to the assignee; asked back about a person's question, to that person.
+    bot = K.agent("Claude for Ada")
+    K.note_task!(kb, "PU-1", "Shall I order spares?"; kind = "question", by = bot)
+    @test last_note().to_person == "bea@x.org"
+    @test call(cy, "POST", "/api/tasks/PU-1/notes", Dict("kind" => "question", "text" => "Can I watch?"))[1] == 403   # a viewer may not
+    asked_ada = K.note_task!(kb, "PU-1", "What pressure?"; kind = "question", by = K.person("Ada"; id = "ada@x.org"))
+    K.note_task!(kb, "PU-1", "In bar or psi?"; kind = "question", by = bot, reply_to = asked_ada)
+    @test last_note().to_person == "ada@x.org"
+    # A question to anyone waits on those who may contribute, but not on whoever asked it.
+    note(ada, Dict("kind" => "question", "text" => "Anyone free Friday?", "to" => "anyone"))
+    @test ("PU-1", "Anyone free Friday?", "Ada") in asked(bea) && !any(x -> x[2] == "Anyone free Friday?", asked(ada))
+    @test !any(x -> x[2] == "Anyone free Friday?", asked(cy))
+    # Marked resolved, it waits on no one.
+    friday = last_note().id
+    @test call(bea, "POST", "/api/tasks/PU-1/resolve", Dict("note" => friday))[1] == 200
+    @test !any(x -> x[2] == "Anyone free Friday?", asked(bea))
+    close(kb)
+end

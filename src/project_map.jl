@@ -48,8 +48,10 @@ function project_map(kb::KB, key::AbstractString)
                 for r in query(kb, """SELECT p.key || '-F' || f.number AS ref, f.claim, f.status, f.created_at FROM findings f
                                       JOIN projects p ON p.id = f.project_id WHERE f.project_id = ? AND f.archived_at IS NULL ORDER BY f.number""", (pid,))]
     refs = Dict(Int(r.id) => String(r.ref) for r in query(kb, "SELECT t.id, $ref AS ref $within WHERE t.project_id = ?", (pid,)))
-    questions = [Dict("task" => refs[Int(q.task_id)], "text" => String(q.text), "by_agent" => agents)
-                 for agents in (true, false) for q in open_questions(kb; agents) if haskey(refs, Int(q.task_id))]
+    labels = person_labels(kb, key)
+    questions = [Dict("task" => refs[q.task_id], "text" => q.text, "by_agent" => q.by_agent, "asker" => q.asker,
+                      "to" => q.to_whom == "person" ? get(labels, q.to_person, q.to_person) : q.to_whom)
+                 for q in waiting_questions(kb) if haskey(refs, q.task_id)]
     return Dict("project" => Dict("key" => key, "name" => String(p.name), "description" => str(p.description), "created_at" => String(p.created_at)),
                 "generated_at" => now_iso(),
                 "milestones" => [Dict(String(k) => v for (k, v) in pairs(m) if k in (:name, :description, :start, :due, :closed, :closed_at, :created_at))

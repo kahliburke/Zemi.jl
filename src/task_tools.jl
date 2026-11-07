@@ -235,8 +235,8 @@ tool!("task", task_tool; need = "tasks.view")
     next_task(project::String; take::Bool=false) -> String
 
 What to work on next in `project`: the project's context (what its people say of it, what it has
-found, and its library), then the questions people asked on its tasks that no agent has
-answered (answer each with `task_note(kind="comment")`), then the highest-priority approved task
+found, and its library), then the questions asked of the agents on its tasks that wait for a reply
+(answer each with `task_note(kind="comment", reply_to=<its note>)`), then the highest-priority approved task
 that is assigned to an agent or to nobody and that nothing open blocks, in full (its plan,
 subtasks and comments). A task a person has taken is theirs, though subtasks under it may be
 assigned to an agent. With `take=true` it is also moved to in_progress and assigned to you. Work
@@ -313,18 +313,22 @@ end
 tool!("task_update", task_update_tool; need = "tasks.edit")
 
 """
-    task_note(ref::String, text::String; kind::String="progress") -> String
+    task_note(ref::String, text::String; kind::String="progress", to::String="", reply_to::Int=0) -> String
 
 Report on task `ref` in its activity: what you did, found or decided (`kind="progress"`), a
-reply (`kind="comment"`, which also answers a person's question), or a question for the person
-(`kind="question"`), which waits on their list until they answer it in a comment. People read the
-activity to follow and steer the work. Refer to tasks and papers as `@KB-12` and `@arXiv:2401.00001`
-(see `plan` for the other kinds); each becomes one of the task's links.
+comment (`kind="comment"`), or a question (`kind="question"`), which waits on the list of whom it
+is asked until they reply. Ask `to` a project member (their name or email), or `"anyone"` on the
+project; with no `to`, a question goes to the task's assignee. To answer a question, give its note
+number as `reply_to` with `kind="comment"`; with `kind="question"` you ask back about it, and
+the question goes to whoever asked it. People read the activity to follow and steer the work.
+Refer to tasks and papers as `@KB-12` and `@arXiv:2401.00001` (see `plan` for the other kinds);
+each becomes one of the task's links.
 """
-task_note_tool(ref::String, text::String; kind::String = "progress")::String = refusing() do
+task_note_tool(ref::String, text::String; kind::String = "progress", to::String = "", reply_to::Int = 0)::String = refusing() do
     tool_needs(ref, CONTRIBUTE)
-    note = note_task!(kb(), ref, attach_local_files(text, ref_project(ref)); kind, by = tool_actor())
-    "Noted on $(uppercase(strip(ref))) (note $note)."
+    note = note_task!(kb(), ref, attach_local_files(text, ref_project(ref)); kind, by = tool_actor(), to, reply_to)
+    t = kind == "question" ? only(e for e in task(kb(), ref).activity if e.id == note) : nothing
+    "Noted on $(uppercase(strip(ref))) (note $note)" * (t === nothing ? "." : ", asked of $(t.to_label).")
 end
 tool!("task_note", task_note_tool; need = "tasks.edit")
 
@@ -699,16 +703,20 @@ const FINDINGS_IN_CONTEXT = 20
 function questions_text(asked)
     isempty(asked) && return ""
     io = IOBuffer()
-    println(io, "Questions waiting for an agent's reply (answer each with task_note(kind=\"comment\")):\n")
+    println(io, "Questions asked of the agents, waiting for a reply. Answer each with ",
+            "task_note(ref, text; kind=\"comment\", reply_to=<its note>), or ask back with kind=\"question\":\n")
     for q in asked
-        println(io, "- ", task_line(q), "\n  ", q.asker, " asked: ", replace(q.question, "\n" => "\n  "))
+        println(io, "- ", task_line(q), "\n  ", q.asker, " asked [note $(q.note)]: ", replace(q.question, "\n" => "\n  "))
     end
     println(io)
     return String(take!(io))
 end
 
-# Whether the question at `i` in `activity` has a comment after it from the other side.
-answered(activity, i) = any(e -> e.kind in ("comment", "question") && e.by_agent != activity[i].by_agent, activity[i+1:end])
+"What question `e` of a task's activity waits on, as agents read it (see [`with_question_states`](@ref))."
+question_state_text(e) =
+    e.state == "resolved" ? "resolved" : e.state == "answered" ? "answered" :
+    e.state == "asked back" ? "waiting on the answer to a question asked back" :
+    e.to_whom == "agents" ? "waiting for an agent's reply" : "waiting for $(e.to_label)"
 
 function format_task(t)
     io = IOBuffer()
@@ -735,8 +743,8 @@ function format_task(t)
                                                                         for c in t.mentions), "\n"))
     println(io, "\n## Activity\n")
     for (i, e) in enumerate(t.activity)
-        what = e.kind == "question" ? (!isempty(e.resolved_at) ? "asked (resolved): " : answered(t.activity, i) ? "asked (answered): " :
-                                       e.by_agent ? "asked (waiting for a person): " : "asked (waiting for an agent's reply): ") * plain_at_references(e.text) :
+        what = e.kind == "question" ? "asked $(e.to_label)" * (e.reply_to > 0 ? ", about note $(e.reply_to)" : "") *
+                                      " ($(question_state_text(e))): " * plain_at_references(e.text) :
                event_text(e)
         note = e.kind in SEARCHED_NOTES ? " [note $(e.id)$(isempty(e.edited_at) ? "" : ", edited")]" : ""
         println(io, "- $(first(e.at, 16)) $(e.who)$(e.by_agent ? " (agent)" : "")$note: $what")
@@ -746,7 +754,8 @@ end
 
 "What event `e` of a task's activity did, as agents read it."
 event_text(e) =
-    e.kind == "question" ? "asked: " * plain_at_references(e.text) :
+    e.kind == "question" ? (e.reply_to > 0 ? "asked back about note $(e.reply_to): " : "asked: ") * plain_at_references(e.text) :
+    e.kind == "comment" && get(e, :reply_to, 0) > 0 ? "answered note $(e.reply_to): " * plain_at_references(e.text) :
     e.kind == "status" ? "moved it from $(STATUS_LABELS[e.detail["from"]]) to $(STATUS_LABELS[e.detail["to"]])" :
     e.kind == "edit" ? "changed its $(e.detail["field"])" * (haskey(e.detail, "to") && e.detail["field"] != "body" ? " to $(e.detail["to"])" : "") :
     e.kind in ("comment", "progress") ? Dict("progress" => "reported: ", "comment" => "wrote: ")[e.kind] * plain_at_references(e.text) :

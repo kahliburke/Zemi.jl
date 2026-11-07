@@ -21,7 +21,7 @@ json_body(c::APICall) = json_body(c.req)
 opt(d, k) = haskey(d, k) && d[k] !== nothing ? d[k] : nothing
 
 "Who made a request, as tasks and findings record them."
-person_of(c::APICall) = person(caller_name(c.caller))
+person_of(c::APICall) = person(caller_name(c.caller); id = person_id(c.caller))
 
 """
 One route: its method, its path (`/api/tasks/:task/notes`, with `*paper` last for the rest of the

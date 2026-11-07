@@ -18,14 +18,18 @@ const LINK_KINDS = ("paper", "notebook", "code", "chat", "url", "task", "blocks"
 """
     Actor(name, agent)
 
-Who makes a change: a person, by name, or an agent (`agent = true`), named for whom it works.
+Who makes a change: a person, by name, or an agent (`agent = true`), named for whom it works. A
+person's `id` is how tasks are assigned and questions addressed to them (their email in the shared
+service, see [`people`](@ref)); by default their name.
 """
 struct Actor
     name::String
     agent::Bool
+    id::String
 end
 
-person(name::AbstractString) = Actor(String(name), false)
+Actor(name::AbstractString, agent::Bool) = Actor(String(name), agent, agent ? "" : String(name))
+person(name::AbstractString; id::AbstractString = name) = Actor(String(name), false, String(id))
 agent(name::AbstractString) = Actor(isempty(name) ? "agent" : String(name), true)
 
 """
@@ -72,10 +76,17 @@ end
 column_end(kb::KB, pid::Integer, status::AbstractString) =
     coalesce(scalar(kb, "SELECT max(position) FROM tasks WHERE project_id = ? AND status = ?", (pid, status)), 0.0) + 1.0
 
-"Record an event in task `task`'s activity; returns its id."
-function record!(kb::KB, task::Integer, by::Actor, kind::AbstractString; text::AbstractString = "", detail = Dict{String,Any}())
-    id = insert_row!(kb, "INSERT INTO task_events (task_id, at, who, by_agent, kind, text, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                     (task, now_iso(), by.name, by.agent ? 1 : 0, kind, text, JSON.json(detail)))
+"""
+Record an event in task `task`'s activity; returns its id. A question names whom it is asked of
+(`to_whom` and `to_person`, see [`question_recipient`](@ref)), and a reply the question it answers
+or asks back about (`reply_to`).
+"""
+function record!(kb::KB, task::Integer, by::Actor, kind::AbstractString; text::AbstractString = "", detail = Dict{String,Any}(),
+                 to_whom::AbstractString = "", to_person::AbstractString = "", reply_to::Integer = 0)
+    id = insert_row!(kb, """INSERT INTO task_events (task_id, at, who, by_agent, by_person, kind, text, detail, to_whom, to_person, reply_to)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     (task, now_iso(), by.name, by.agent ? 1 : 0, by.agent ? "" : by.id, kind, text, JSON.json(detail),
+                      to_whom, to_person, reply_to > 0 ? reply_to : missing))
     # Kept searchable (see task_search.jl): what is said on the task, and its title and plan as they change.
     if kind in SEARCHED_NOTES && !isempty(text)
         index_note!(kb, task, id, text)
@@ -106,11 +117,12 @@ What people (not agents) did on project `key`'s tasks after event `since`, oldes
 `(; id, ref, title, who, kind, text, detail)`, as in a task's activity.
 """
 function people_events(kb::KB, key::AbstractString, since::Integer)
-    rows = query(kb, """SELECT e.id, e.who, e.kind, e.text, e.detail, p.key || '-' || t.number AS ref, t.title
+    rows = query(kb, """SELECT e.id, e.who, e.kind, e.text, e.detail, e.reply_to, e.to_whom, e.to_person, p.key || '-' || t.number AS ref, t.title
                         FROM task_events e JOIN tasks t ON t.id = e.task_id JOIN projects p ON p.id = t.project_id
                         WHERE p.key = ? AND e.id > ? AND e.by_agent = 0 ORDER BY e.id""", (uppercase(strip(key)), since))
     return [(; id = Int(r.id), ref = String(r.ref), title = String(r.title), who = String(r.who), kind = String(r.kind),
-               text = coalesce(r.text, ""), detail = JSON.parse(coalesce(r.detail, "{}"))) for r in rows]
+               text = coalesce(r.text, ""), detail = JSON.parse(coalesce(r.detail, "{}")), reply_to = coalesce(r.reply_to, 0),
+               to_whom = String(r.to_whom), to_person = String(r.to_person)) for r in rows]
 end
 
 """
@@ -331,17 +343,30 @@ function update_task!(kb::KB, ref::AbstractString; title = nothing, body = nothi
 end
 
 """
-Add a note to task `ref`'s activity: a `comment`, an agent's `progress` report, or a `question`. An
-agent's question waits on people (see [`waiting`](@ref)) and a person's on the agents (see
-[`asked_of_agents`](@ref)), until someone from the other side writes after it. Returns the note's
-number, which [`edit_note!`](@ref) takes.
+    note_task!(kb, ref, text; kind = "comment", by, to = "", reply_to = 0) -> Int
+
+Add a note to task `ref`'s activity: a `comment`, an agent's `progress` report, or a `question`,
+asked of `to` (see [`question_recipient`](@ref)). With `reply_to`, the number of a question on the
+task, a comment answers it and a question asks back about it. Returns the note's number, which
+[`edit_note!`](@ref) and replies take.
 """
-function note_task!(kb::KB, ref::AbstractString, text::AbstractString; kind::AbstractString = "comment", by::Actor)
+function note_task!(kb::KB, ref::AbstractString, text::AbstractString; kind::AbstractString = "comment", by::Actor,
+                    to::AbstractString = "", reply_to::Integer = 0)
     kind in SEARCHED_NOTES || error("A note is a comment, progress or a question: $kind")
     isempty(strip(text)) && error("A note needs text")
+    kind == "question" || isempty(strip(to)) || error("Only a question is asked of someone")
     id = task_ref(kb, ref)
+    replied = nothing
+    if reply_to > 0
+        rows = query(kb, "SELECT kind, by_agent, by_person FROM task_events WHERE id = ? AND task_id = ?", (reply_to, id))
+        isempty(rows) && not_found("No note $reply_to on $(uppercase(strip(ref)))")
+        replied = first(rows)
+        replied.kind == "question" || error("Note $reply_to on $(uppercase(strip(ref))) is not a question; a reply is to a question")
+        kind == "progress" && error("A reply is a comment, which answers the question, or a question asked back")
+    end
+    to_whom, to_person = kind == "question" ? question_recipient(kb, ref, by, to; replied) : ("", "")
     use_media!(kb, something(ref_project(ref)), text)
-    note = record!(kb, id, by, kind; text = strip(text))
+    note = record!(kb, id, by, kind; text = strip(text), to_whom, to_person, reply_to)
     execute!(kb, "UPDATE tasks SET updated_at = ? WHERE id = ?", (now_iso(), id))
     link_at_references!(kb, ref, text; by)
     return note
@@ -508,9 +533,11 @@ function task(kb::KB, ref::AbstractString)
     blocked_by = [String(b.ref) for b in query(kb, """
         SELECT p.key || '-' || t.number AS ref FROM task_links l JOIN tasks t ON t.id = l.task_id JOIN projects p ON p.id = t.project_id
         WHERE l.kind = 'blocks' AND l.target = ?""", (task_row(r).ref,))]
-    activity = [(; id = Int(e.id), at = e.at, who = e.who, by_agent = e.by_agent == 1, kind = e.kind, text = e.text, detail = JSON.parse(e.detail),
-                   resolved_at = coalesce(e.resolved_at, ""), edited_at = coalesce(e.edited_at, ""))
-                for e in query(kb, "SELECT * FROM task_events WHERE task_id = ? ORDER BY id", (id,))]
+    activity = with_question_states([
+        (; id = Int(e.id), at = e.at, who = e.who, by_agent = e.by_agent == 1, by_person = e.by_person, kind = e.kind, text = e.text,
+           detail = JSON.parse(e.detail), resolved_at = coalesce(e.resolved_at, ""), edited_at = coalesce(e.edited_at, ""),
+           to_whom = e.to_whom, to_person = e.to_person, reply_to = coalesce(e.reply_to, 0))
+        for e in query(kb, "SELECT * FROM task_events WHERE task_id = ? ORDER BY id", (id,))]; labels = person_labels(kb, r.key))
     commits = [Base.structdiff(c, (; root = "")) for c in task_commits(kb, id)]
     mentions = task_mentions(kb, id)
     found = findings_citing(kb, "task", task_row(r).ref)            # what the task's work concluded
@@ -601,105 +628,6 @@ function next_task(kb::KB, key::AbstractString)
         isempty(open) && return t.ref
     end
     return nothing
-end
-
-"""
-    waiting(kb; me = "") -> NamedTuple
-
-What waits on a person, across projects: `proposed`, plans waiting for approval (a whole plan once,
-and a subtask proposed under a task already approved); `questions`, tasks where an agent asked a
-question no person has written after, each with the `question`; `review`, tasks in Review; and
-`mine`, the open tasks assigned to `me` (an email in the shared service, a name run for one person);
-`findings`, the findings agents drafted, to accept, and those whose evidence changed, to look at again
-(see [`check_findings!`](@ref)); and `answered`, the questions `asker` (as their activity names them) put to agents where an agent
-has had the last word (see [`answered_questions`](@ref)). A question on a task that is done no
-longer waits.
-"""
-function waiting(kb::KB; me::AbstractString = "", asker::AbstractString = "")
-    find(where, args = ()) = NamedTuple[task_row(r) for r in query(kb, TASK_SELECT * " WHERE t.archived_at IS NULL AND (" * where * ") ORDER BY p.key, t.priority, t.position", args)]
-    asked = Dict(Int(r.task_id) => String(r.text) for r in open_questions(kb; agents = true))
-    questions = isempty(asked) ? NamedTuple[] :
-        [merge(t, (; question = asked[task_ref(kb, t.ref)])) for t in find("t.id IN ($(join(keys(asked), ','))) AND t.status != 'done'")]
-    return (; proposed = find("t.status = 'proposed' AND (t.parent_id IS NULL OR pt.status != 'proposed')"),
-              questions,
-              review = find("t.status = 'review'"),
-              mine = isempty(me) ? NamedTuple[] : find("t.assignee = ? AND t.status != 'done'", (me,)),
-              findings = filter(f -> (f.by_agent && f.status == "draft") || !isempty(f.recheck), findings(kb)),
-              answered = isempty(asker) ? NamedTuple[] : answered_questions(kb, asker))
-end
-
-"""
-    answered_questions(kb, asker) -> Vector{NamedTuple}
-
-Questions `asker` put to the agents where an agent has had the last word: an agent replied to their
-latest question on the task, and neither have they written since nor marked it resolved (see
-[`resolve_question!`](@ref)). Writing again (asking again sends it back to the agents) takes it off
-until the next reply. Each task once, as [`tasks`](@ref) gives it, with the `question` and the
-first reply after it (`answer`), the latest first.
-"""
-function answered_questions(kb::KB, asker::AbstractString)
-    out = NamedTuple[]
-    for q in query(kb, """
-            WITH latest AS (SELECT task_id, max(id) AS id FROM task_events
-                            WHERE kind = 'question' AND by_agent = 0 AND who = ? GROUP BY task_id)
-            SELECT e.task_id, e.text, a.id AS answer_id, a.text AS answer
-            FROM latest l JOIN task_events e ON e.id = l.id JOIN tasks t ON t.id = e.task_id
-            JOIN task_events a ON a.id = (SELECT min(r.id) FROM task_events r WHERE r.task_id = e.task_id AND r.id > e.id
-                                          AND r.kind = 'comment' AND r.by_agent = 1)
-            WHERE e.resolved_at IS NULL AND t.archived_at IS NULL
-              AND NOT EXISTS (SELECT 1 FROM task_events w WHERE w.task_id = e.task_id AND w.id > a.id AND w.by_agent = 0
-                              AND w.who = ? AND w.kind IN ('comment', 'question'))
-            ORDER BY a.id DESC""", (asker, asker))
-        r = query(kb, TASK_SELECT * " WHERE t.id = ?", (q.task_id,))
-        isempty(r) || push!(out, merge(task_row(first(r)), (; question = String(q.text), answer = String(q.answer))))
-    end
-    return out
-end
-
-"""
-    resolve_question!(kb, ref; asker)
-    resolve_question!(kb, ref; agents = true)
-
-Mark questions on task `ref` resolved, so they leave what waits: `asker`'s own, answered to their
-satisfaction; or, with `agents`, the agents' questions still open there, answered some other way
-(in conversation, say) or no longer needing an answer.
-"""
-function resolve_question!(kb::KB, ref::AbstractString; asker::AbstractString = "", agents::Bool = false)
-    agents == isempty(asker) || error("Resolve either a person's questions (asker) or the agents' (agents = true)")
-    id = task_ref(kb, ref)
-    if agents
-        execute!(kb, "UPDATE task_events SET resolved_at = ? WHERE task_id = ? AND kind = 'question' AND by_agent = 1 AND resolved_at IS NULL",
-                 (now_iso(), id))
-    else
-        execute!(kb, "UPDATE task_events SET resolved_at = ? WHERE task_id = ? AND kind = 'question' AND by_agent = 0 AND who = ? AND resolved_at IS NULL",
-                 (now_iso(), id, asker))
-    end
-    tasks_changed!()
-    return ref
-end
-
-"Questions asked by agents (`agents`) or by people, not resolved, that nobody from the other side has written after (a comment or a question of their own)."
-open_questions(kb::KB; agents::Bool) = collect(query(kb, """
-    SELECT e.task_id, e.text, e.who FROM task_events e
-    WHERE e.kind = 'question' AND e.by_agent = ? AND e.resolved_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM task_events r WHERE r.task_id = e.task_id AND r.id > e.id AND r.kind IN ('comment', 'question')
-                      AND r.by_agent != e.by_agent)
-    ORDER BY e.id""", (agents ? 1 : 0,)))
-
-"""
-    asked_of_agents(kb, key) -> Vector
-
-The questions people asked on project `key`'s tasks, archived ones aside, that no agent has answered
-yet: each task (as [`tasks`](@ref) gives it) with the `question` and who asked it (`asker`).
-"""
-function asked_of_agents(kb::KB, key::AbstractString)
-    pid = project_id(kb, key)
-    out = NamedTuple[]
-    for q in open_questions(kb; agents = false)
-        r = query(kb, TASK_SELECT * " WHERE t.id = ? AND t.project_id = ? AND t.archived_at IS NULL", (q.task_id, pid))
-        isempty(r) || push!(out, merge(task_row(first(r)), (; question = String(q.text), asker = String(q.who))))
-    end
-    return out
 end
 
 """

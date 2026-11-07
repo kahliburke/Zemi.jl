@@ -53,7 +53,10 @@ function known_people(c::APICall, named = named_project(c))
 end
 
 "The caller as tasks name whom they are assigned to."
-my_name(c::APICall) = c.caller.via == :local ? caller_name(c.caller) : c.caller.email
+my_name(c::APICall) = person_id(c.caller)
+
+"A note's number as a request gives it, a number or its digits; 0 for none."
+int_or_zero(x) = x isa Integer ? Int(x) : x isa AbstractString ? something(tryparse(Int, strip(x)), 0) : 0
 
 finding_reply(c::APICall, ref) = finding_json(c.kb, ref, sees(c); unseen = hidden_documents(c.kb, c.caller))
 task_reply(c::APICall, ref) = task_json(task(c.kb, ref))
@@ -224,11 +227,12 @@ end
 # Long polling: answered when projects or tasks change, or after a while without.
 route!(c -> Dict("version" => wait_tasks_changed(int_param(c.params, "since", -1))), "GET", "/api/tasks/changes"; need = "tasks.view", waits = true)
 
-# What waits on the caller. Findings wait on those who may accept them.
+# What waits on the caller. Findings, and questions to anyone, wait on those who may contribute.
 route!("GET", "/api/tasks/waiting"; need = "tasks.view") do c
-    w = waiting(c.kb; me = my_name(c), asker = caller_name(c.caller))
-    accepts(ref) = project_access(c.kb, c.caller, ref_project(ref)) >= CONTRIBUTE
-    Dict(k => k == :findings ? Any[Dict(pairs(f)) for f in v if accepts(f.ref)] : Any[task_json(t) for t in v if sees(c, t.ref)]
+    w = waiting(c.kb; me = my_name(c))
+    contributes(ref) = project_access(c.kb, c.caller, ref_project(ref)) >= CONTRIBUTE
+    Dict(k => k == :findings ? Any[Dict(pairs(f)) for f in v if contributes(f.ref)] :
+              k == :questions ? Any[task_json(t) for t in v if contributes(t.ref)] : Any[task_json(t) for t in v if sees(c, t.ref)]
          for (k, v) in pairs(w))
 end
 
@@ -251,8 +255,7 @@ route!("GET", "/api/tasks/:task/notes/:note/history"; need = "tasks.view", proje
 end
 
 route!("POST", "/api/tasks/:task/resolve"; need = "tasks.edit", project = CONTRIBUTE) do c
-    get(json_body(c), "agents", false) === true ? resolve_question!(c.kb, c[:task]; agents = true) :
-                                             resolve_question!(c.kb, c[:task]; asker = caller_name(c.caller))
+    resolve_question!(c.kb, c[:task], int_or_zero(get(json_body(c), "note", 0)); by = person_of(c))
     task_reply(c, c[:task])
 end
 
@@ -277,12 +280,14 @@ end
 route!(c -> Dict("deleted" => delete_task!(c.kb, c[:task]; by = person_of(c))), "POST", "/api/tasks/:task/delete";
        need = "tasks.edit", project = CONTRIBUTE)
 
-# A person's note is a comment or a question.
+# A person's note is a comment or a question, asked of `to` (the agents, anyone, or a person); with
+# `reply_to`, a reply to a question.
 route!("POST", "/api/tasks/:task/notes"; need = "tasks.edit", project = CONTRIBUTE) do c
     d = json_body(c)
     kind = get(d, "kind", "comment")
     kind in ("comment", "question") || error("A person's note is a comment or a question: $kind")
-    note_task!(c.kb, c[:task], get(d, "text", ""); kind, by = person_of(c))
+    note_task!(c.kb, c[:task], get(d, "text", ""); kind, by = person_of(c), to = string(get(d, "to", "")),
+               reply_to = int_or_zero(get(d, "reply_to", 0)))
     task_reply(c, c[:task])
 end
 
