@@ -84,27 +84,35 @@ see (see [`document_visible`](@ref)) is left out.
 """
 function library(kb::KB, key::AbstractString; caller::Caller = local_caller())
     pid = project_id(kb, key)
-    cited(kind, target) = (
-        tasks = [String(r.ref) for r in query(kb, """SELECT DISTINCT p.key || '-' || t.number AS ref FROM task_links l
-                    JOIN tasks t ON t.id = l.task_id JOIN projects p ON p.id = t.project_id
-                    WHERE l.kind = ? AND l.target = ? AND t.project_id = ? AND t.archived_at IS NULL ORDER BY t.number""", (kind, target, pid))],
-        findings = [String(r.ref) for r in query(kb, """SELECT DISTINCT p.key || '-F' || f.number AS ref FROM finding_evidence e
-                    JOIN findings f ON f.id = e.finding_id JOIN projects p ON p.id = f.project_id
-                    WHERE e.kind = ? AND e.target = ? AND f.project_id = ? AND f.archived_at IS NULL ORDER BY f.number""", (kind, target, pid))])
-    label(kind, target) = kind == "codebase" ? String(coalesce(scalar(kb, "SELECT title FROM papers WHERE doc_id = ?", (target,)), target)) :
-                          source_label(kb, kind, target)
-    out = NamedTuple[]
+    items = query(kb, """SELECT * FROM library WHERE project_id = ?
+                         ORDER BY status = 'proposed', CASE kind WHEN 'paper' THEN 0 WHEN 'notebook' THEN 1 ELSE 2 END, added_at""", (pid,))
+    # What cites each source, and the documents' titles, each in one query for the whole library.
+    citing(sql) = (d = Dict{Tuple{String,String},Vector{String}}();
+                   for r in query(kb, sql, (pid,)); push!(get!(Vector{String}, d, (String(r.kind), String(r.target))), String(r.ref)); end; d)
+    tasks = citing("""SELECT DISTINCT l.kind, l.target, p.key || '-' || t.number AS ref, t.number FROM task_links l
+                      JOIN tasks t ON t.id = l.task_id JOIN projects p ON p.id = t.project_id
+                      WHERE t.project_id = ? AND t.archived_at IS NULL ORDER BY t.number""")
+    findings = citing("""SELECT DISTINCT e.kind, e.target, p.key || '-F' || f.number AS ref, f.number FROM finding_evidence e
+                         JOIN findings f ON f.id = e.finding_id JOIN projects p ON p.id = f.project_id
+                         WHERE f.project_id = ? AND f.archived_at IS NULL ORDER BY f.number""")
     code = project_codebase(kb, key)
+    documents = unique([[String(r.target) for r in items if r.kind in ("paper", "codebase")]; isempty(code) ? String[] : [code]])
+    titles = isempty(documents) ? Dict{String,String}() :
+        Dict(String(r.doc_id) => String(coalesce(r.title, r.doc_id))
+             for r in query(kb, "SELECT doc_id, title FROM papers WHERE doc_id IN ($(in_marks(length(documents))))", Tuple(documents)))
+    label(kind, target) = kind in ("paper", "codebase") ? get(titles, target, target) : source_label(kb, kind, target)
+    hidden = hidden_documents(kb, caller)
+    out = NamedTuple[]
     isempty(code) || push!(out, (; id = 0, kind = "codebase", target = code, label = label("codebase", code), why = "The project's codebase",
                                   status = "kept", added_by = "", by_agent = false, added_at = "", tasks = String[], findings = String[]))
-    for r in query(kb, """SELECT * FROM library WHERE project_id = ?
-                          ORDER BY status = 'proposed', CASE kind WHEN 'paper' THEN 0 WHEN 'notebook' THEN 1 ELSE 2 END, added_at""", (pid,))
-        r.kind == "codebase" && r.target == code && continue
-        r.kind in ("paper", "codebase") && !document_visible(kb, caller, r.target) && continue
-        c = cited(r.kind, r.target)
-        push!(out, (; id = Int(r.id), kind = String(r.kind), target = String(r.target), label = label(r.kind, r.target),
+    for r in items
+        kind, target = String(r.kind), String(r.target)
+        kind == "codebase" && target == code && continue
+        kind in ("paper", "codebase") && target in hidden && continue
+        push!(out, (; id = Int(r.id), kind, target, label = label(kind, target),
                       why = String(r.why), status = String(r.status), added_by = String(r.added_by), by_agent = r.by_agent == 1,
-                      added_at = String(r.added_at), c.tasks, c.findings))
+                      added_at = String(r.added_at), tasks = get(tasks, (kind, target), String[]),
+                      findings = get(findings, (kind, target), String[])))
     end
     return out
 end
