@@ -675,10 +675,11 @@ function visible_records(kb::KB, caller::Caller; project::AbstractString = "", s
                                EXISTS (SELECT 1 FROM parses y WHERE y.paper_id = p.id) AS read
                         FROM records x JOIN papers p ON p.id = x.paper_id
                         WHERE (? = '' OR x.source = ?) ORDER BY x.happened DESC, p.id DESC""", (source, source))
+    linked = documents_projects(kb)
     out = NamedTuple[]
     for r in rows
         r.doc_id in hidden && continue
-        projects = document_projects(kb, r.doc_id)
+        projects = get(linked, r.doc_id, String[])
         isempty(project) || uppercase(strip(project)) in projects || continue
         push!(out, (; id = String(r.doc_id), title = String(r.title), date = String(r.happened), people = json_list(r.authors),
                       label = String(r.label), source = String(r.source), url = String(r.url), access = String(r.access),

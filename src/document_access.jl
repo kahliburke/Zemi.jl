@@ -30,6 +30,19 @@ document_projects(kb::KB, id::AbstractString) = [String(r.key) for r in query(kb
           JOIN papers d ON d.id = l.paper_id WHERE d.doc_id = ?
     ORDER BY 1""", (id, id))]
 
+"[`document_projects`](@ref) for every document linked to a project, by its id."
+function documents_projects(kb::KB)
+    out = Dict{String,Vector{String}}()
+    for r in query(kb, """
+            SELECT d.doc_id, p.key FROM projects p JOIN papers d ON d.id = p.codebase_id
+            UNION SELECT d.doc_id, p.key FROM document_projects l JOIN projects p ON p.id = l.project_id
+                  JOIN papers d ON d.id = l.paper_id
+            ORDER BY 1, 2""")
+        push!(get!(Vector{String}, out, String(r.doc_id)), String(r.key))
+    end
+    return out
+end
+
 """
     link_document!(kb, id, key)
     unlink_document!(kb, id, key)
@@ -61,18 +74,29 @@ function document_visible(kb::KB, caller::Caller, id::AbstractString)
     kind = document_kind(id)
     kind !== nothing && kind.access || return true
     coalesce(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,)), "open") == "open" && return true
-    linked = document_projects(kb, id)
-    isempty(linked) && return kind.unassigned !== nothing && can(caller, kind.unassigned)
-    return any(k -> project_membership(kb, caller, k) >= VIEW, linked)
+    return closed_visible(caller, kind, document_projects(kb, id), k -> project_membership(kb, caller, k) >= VIEW)
 end
+
+"Whether `caller` sees a closed document of `kind` linked to projects `linked`, `sees(key)` saying whether they see a project."
+closed_visible(caller::Caller, kind::DocumentKind, linked, sees) =
+    isempty(linked) ? kind.unassigned !== nothing && can(caller, kind.unassigned) : any(sees, linked)
 
 "The documents (their ids) open only to the members of their projects."
 closed_documents(kb::KB) =
     Set{String}(String(r.doc_id) for r in query(kb, "SELECT doc_id FROM papers WHERE NOT ($(open_sql()))"))
 
 "The documents `caller` may not see (see [`document_visible`](@ref)), to leave out of what they are answered."
-hidden_documents(kb::KB, caller::Caller) =
-    caller.via == :local ? Set{String}() : Set{String}(id for id in closed_documents(kb) if !document_visible(kb, caller, id))
+function hidden_documents(kb::KB, caller::Caller)
+    caller.via == :local && return Set{String}()
+    linked, member = documents_projects(kb), Dict{String,Bool}()
+    sees(k) = get!(() -> project_membership(kb, caller, k) >= VIEW, member, k)
+    hidden = Set{String}()
+    for id in closed_documents(kb)
+        kind = document_kind(id)
+        kind !== nothing && kind.access && !closed_visible(caller, kind, get(linked, id, String[]), sees) && push!(hidden, id)
+    end
+    return hidden
+end
 
 "Document `id`, refused as none when `caller` may not see it."
 seen_document(kb::KB, caller::Caller, id::AbstractString) =

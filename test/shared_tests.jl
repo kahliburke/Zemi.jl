@@ -648,7 +648,7 @@ end
         @test K.document_kind("note-survey") === note && isempty(K.document_projects(kb, "note-survey"))
         @test !K.document_visible(kb, as(ada), "note-survey") && K.document_visible(kb, K.local_caller(), "note-survey")
         K.link_document!(kb, "note-survey", "RF")
-        @test K.document_projects(kb, "note-survey") == ["RF"]
+        @test K.document_projects(kb, "note-survey") == ["RF"] && K.documents_projects(kb)["note-survey"] == ["RF"]
         @test K.document_visible(kb, as(ada), "note-survey") && !K.document_visible(kb, as(bea), "note-survey")
         @test K.document_visible(kb, as(boss), "note-survey")                                    # projects.all
         @test K.hidden_documents(kb, as(bea)) == Set(["note-survey"]) && isempty(K.hidden_documents(kb, as(ada)))
