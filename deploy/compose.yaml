@@ -34,6 +34,14 @@ services:
       - data:/srv/zemi/data
       - julia:/srv/zemi/.julia
       - caddy-site:/srv/zemi/caddy
+    # Healthy once it answers: its sign-in page needs no session. A first start pulls the embedding
+    # models before the service starts.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8800/auth/sign-in"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10m
+      retries: 3
 
   qdrant:
     image: qdrant/qdrant
