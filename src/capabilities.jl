@@ -10,7 +10,8 @@ const AGENTS_AVAILABLE = Ref{Function}(function ()
     catch
         false
     end
-    return timedwait(() -> istaskdone(t), 5) == :ok && fetch(t)
+    # Looked at often, so a quick answer is taken at once: by default timedwait looks every 0.1 s.
+    return timedwait(() -> istaskdone(t), 5; pollint = 0.005) == :ok && fetch(t)
 end)
 
 "Kaimon's Qdrant, `(url, key)`, or `nothing` without Kaimon."
