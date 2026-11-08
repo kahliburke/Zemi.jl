@@ -6113,6 +6113,8 @@ end
     mkpath(dirname(conf))
     write(conf, "data_dir = \"../data\"\n[backup]\nkeep_all_hours = 2\nkeep_half_daily_days = 1\nkeep_daily_days = 3\n")
     write(joinpath(root, "conf", "a_secret"), "s3cret")
+    unreadable = joinpath(root, "conf", "someone_elses")
+    write(unreadable, "x"); Sys.isunix() && chmod(unreadable, 0o000)
     withenv("ZEMI_CONFIG" => conf) do
         c = K.validate(K.load_config())
         # Beside the data folder by default, never in it.
@@ -6131,6 +6133,8 @@ end
             @test !K.backup_due(c; at = t0 + D.Minute(30)) && K.backup_due(c; at = t0 + D.Hour(1))
             s2 = K.snapshot!(c; at = t0 + D.Hour(1))
             # An unchanged file is linked to the last snapshot's copy; a changed one copied anew.
+            # The config folder is in it, but for a file the service can't read.
+            Sys.isunix() && @test "a_secret" in K.packed_names(s1) && !("someone_elses" in K.packed_names(s1))
             @test stat(joinpath(s1, "files", "pdfs", "a.pdf")).inode == stat(joinpath(s2, "files", "pdfs", "a.pdf")).inode
             write(joinpath(c.data_dir, "pdfs", "a.pdf"), "B"^100)
             s3 = K.snapshot!(c; at = t0 + D.Hour(2))

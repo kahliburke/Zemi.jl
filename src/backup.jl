@@ -69,8 +69,16 @@ function snapshot!(c::Config; keep::AbstractString = "", at::DateTime = now(UTC)
             conf = dirname(config_path())
             if isdir(conf)
                 mkpath(joinpath(stage, "config"))
+                # A file the service can't read there (another user's) is left out, not the snapshot.
                 for f in readdir(conf)
-                    isfile(joinpath(conf, f)) && !islink(joinpath(conf, f)) && cp(joinpath(conf, f), joinpath(stage, "config", f))
+                    path = joinpath(conf, f)
+                    isfile(path) && !islink(path) || continue
+                    try
+                        cp(path, joinpath(stage, "config", f))
+                    catch e
+                        e isa Base.IOError || e isa SystemError || rethrow()
+                        @warn "The snapshot leaves out $path, which can't be read" exception = e maxlog = 1
+                    end
                 end
             end
             isdir(c.content_dir) && cp(c.content_dir, joinpath(stage, "content"))
@@ -96,6 +104,10 @@ function snapshot!(c::Config; keep::AbstractString = "", at::DateTime = now(UTC)
         return final
     end
 end
+
+"The names of the files packed in snapshot `snap`'s state (its database, config, content and records)."
+packed_names(snap::AbstractString) =
+    open(io -> [basename(rstrip(h.path, '/')) for h in Tar.list(ZstdDecompressorStream(io))], joinpath(snap, "state.tar.zst"))
 
 "Copy database `from` to `to` as of one moment, with SQLite's `VACUUM INTO`, while others write to it; then check the copy."
 function copy_database(from::AbstractString, to::AbstractString)
