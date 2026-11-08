@@ -56,7 +56,7 @@ const key = ref('')
 const board = ref<{ project: Project; milestones: Milestone[]; tasks: Task[]; codebase: Codebase | null; access: string;
                     manages_members: boolean; findings: number; records: { id: string; title: string; day: string }[];
                     agents: { tasks: { ref: string; agent: string; at: string; via: string }[]; waiting: { agent: string; since: string }[] };
-                    people_did: Action[]; changed_by_others?: Record<string, string> } | null>(null)
+                    people_did: Action[]; changed_by_others?: Record<string, { at: string; who: string }> } | null>(null)
 const open = ref<Full | null>(null)
 // Room on the board for the docked task panel: what the panel covers past the page's own margin.
 const page = ref<HTMLElement | null>(null)
@@ -740,28 +740,32 @@ onMounted(() => {
   if (SORTS.some(x => x.id === s)) sortBy.value = s as SortId
 })
 const working = computed(() => marked(t => atWork.value.has(t.ref)))
-// What a card hints at, in colour: a question waiting on your answer (or an answer to yours), a task
-// of yours, and one others changed (people, or agents, yours too): since you opened the board, or more
-// faintly within the hours chosen, as this browser was left.
-const CHANGED_HOURS = 'zemi-board-changed-hours'
-const CHANGED_CHOICES = [[1, '1 hour'], [4, '4 hours'], [24, 'a day'], [72, '3 days'], [168, 'a week'], [0, 'off']] as const
+// What a card hints at: in colour, a question waiting on your answer (or an answer to yours) and a task
+// of yours; with a dot, one others changed (people, or agents, yours too), filled since you opened the
+// board, else hollow within the hours chosen, as this browser was left.
+const CHANGED_HOURS = 'zemi-board-changed-hours', CHANGED_OFF = 'zemi-board-changed-off'
+const CHANGED_CHOICES = [[1, '1 hour'], [4, '4 hours'], [24, 'a day'], [72, '3 days'], [168, 'a week']] as const
+const changedOn = ref(true)
 const changedHours = ref(4)
+watch(changedOn, on => on ? localStorage.removeItem(CHANGED_OFF) : localStorage.setItem(CHANGED_OFF, '1'))
 watch(changedHours, h => h === 4 ? localStorage.removeItem(CHANGED_HOURS) : localStorage.setItem(CHANGED_HOURS, String(h)))
 onMounted(() => {
+  changedOn.value = localStorage.getItem(CHANGED_OFF) !== '1'
   const h = Number(localStorage.getItem(CHANGED_HOURS) ?? NaN)
   if (CHANGED_CHOICES.some(([x]) => x === h)) changedHours.value = h
 })
 const openedAt = ref(Date.now())
+const changeOf = (t: Task) => board.value?.changed_by_others?.[t.ref]
+const changeTitle = (t: Task) => { const c = changeOf(t); return c ? `Changed by ${c.who}, ${when(c.at)}` : '' }
 watch(key, () => { openedAt.value = Date.now() })
 const askingMe = computed(() => new Set(waiting.value.questions.map(q => q.ref)))
 const answeredMe = computed(() => new Set(waiting.value.answered.map(q => q.ref)))
 function hints(t: Task) {
-  const at = board.value?.changed_by_others?.[t.ref]
-  const when = at ? Date.parse(at) : 0
-  const fresh = !!changedHours.value && when > openedAt.value
+  const when = changeOf(t) ? Date.parse(changeOf(t)!.at) : 0
+  const fresh = changedOn.value && when > openedAt.value
   return { mine: !!myPersonId.value && t.assignee === myPersonId.value, asking: askingMe.value.has(t.ref),
            answered: answeredMe.value.has(t.ref), fresh,
-           recent: !fresh && !!changedHours.value && clock.value - when < changedHours.value * 3_600_000 }
+           recent: !fresh && changedOn.value && clock.value - when < changedHours.value * 3_600_000 }
 }
 // A milestone's place: dated ones by when they are due, then undated ones as the board lists them,
 // then no milestone.
@@ -1413,10 +1417,10 @@ function keepRecordsOpen(open: boolean) {
                 :title="`Sort each column: ${SORTS.find(x => x.id === sortBy)!.help.toLowerCase()}${sorted ? '. Dragging moves a card between columns; reorder by hand in Your order' : ''}`">
           <option v-for="x in SORTS" :key="x.id" :value="x.id">Sort: {{ x.label }}</option></select>
         <label class="kbp-check"><input v-model="subtasks" type="checkbox" /> Subtasks</label>
-        <label class="kbp-changed" title="Cards others changed (people, or agents) are tinted: more strongly since you opened the board">
-          <span class="kbp-changed-swatch"></span>Changed by others in
-          <select v-model.number="changedHours" class="kbp-select" aria-label="Show what others changed within">
-            <option v-for="[h, label] in CHANGED_CHOICES" :key="h" :value="h">{{ label }}</option></select></label>
+        <span class="kbp-changed" title="Tint the cards others changed (people, or agents): more strongly since you opened the board">
+          <label class="kbp-check"><input v-model="changedOn" type="checkbox" /> Changed by others in</label>
+          <select v-model.number="changedHours" class="kbp-select" :disabled="!changedOn" aria-label="Show what others changed within">
+            <option v-for="[h, label] in CHANGED_CHOICES" :key="h" :value="h">{{ label }}</option></select></span>
       </div>
       <div v-if="board" class="kbp-board">
         <section v-for="s in statuses" :key="s.id" class="kbp-col" :class="[s.id, { over: over === s.id }]"
@@ -1443,7 +1447,9 @@ function keepRecordsOpen(open: boolean) {
               <span v-if="approvedAlone(t)" class="kbp-tag alone" :title="`Approved on its own: ${t.parent} is still proposed`">approved alone</span>
               <span v-if="t.sent_back" class="kbp-tag sent" title="Sent back from review: being reworked">sent back</span>
               <span v-if="askingMe.has(t.ref)" class="kbp-tag asking" title="A question here waits on your answer">your answer</span>
-              <span v-else-if="answeredMe.has(t.ref)" class="kbp-tag answered" title="Your question here has an answer">answered</span></div>
+              <span v-else-if="answeredMe.has(t.ref)" class="kbp-tag answered" title="Your question here has an answer">answered</span>
+              <span v-if="hints(t).fresh || hints(t).recent" class="kbp-changed-dot" :class="{ fresh: hints(t).fresh }" :title="changeTitle(t)"
+                    :aria-label="changeTitle(t)" role="img"></span></div>
             <div class="kbp-title">{{ t.title }}</div>
             <div class="kbp-meta">
               <span v-if="t.milestone">{{ t.milestone }}</span>
@@ -1864,15 +1870,15 @@ function keepRecordsOpen(open: boolean) {
   overflow-wrap: anywhere; }
 .kbp-card:hover, .kbp-card.open { border-color: var(--vp-c-brand-1); }
 /* Hints: an edge for what is yours (the colour of you elsewhere on the board) or waits on you, a blue
-   wash for what others changed lately. */
-.kbp-card.recent { background: color-mix(in srgb, var(--vp-c-indigo-1) 10%, var(--vp-c-bg)); }
-.kbp-card.fresh { background: color-mix(in srgb, var(--vp-c-indigo-1) 20%, var(--vp-c-bg)); }
+   dot (.kbp-changed-dot) for what others changed lately. */
+.kbp-changed-dot { flex: none; margin-left: auto; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--vp-c-indigo-1); }
+.kbp-changed-dot.fresh { background: var(--vp-c-indigo-1); }
 .kbp-card.mine { box-shadow: inset 3px 0 0 var(--vp-c-brand-1); }
 .kbp-card.answered { box-shadow: inset 3px 0 0 var(--vp-c-purple-1); }
 .kbp-card.asking { box-shadow: inset 3px 0 0 var(--vp-c-warning-1); }
 .kbp-changed { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--vp-c-text-2); }
-.kbp-changed-swatch { width: 0.8rem; height: 0.8rem; border-radius: 3px; border: 1px solid var(--vp-c-divider);
-                      background: color-mix(in srgb, var(--vp-c-indigo-1) 20%, var(--vp-c-bg)); }
+.kbp-changed input[type=checkbox] { accent-color: var(--vp-c-indigo-1); }
+.kbp-changed select:disabled { opacity: 0.5; }
 .kbp-tag.asking { background: var(--vp-c-warning-soft); color: var(--vp-c-warning-1); }
 .kbp-tag.answered { background: var(--vp-c-purple-soft); color: var(--vp-c-purple-1); }
 /* An update pulses three times over six seconds: noticeable, then gone. */

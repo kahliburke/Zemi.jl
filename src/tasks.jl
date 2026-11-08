@@ -704,16 +704,18 @@ function archive_done!(kb::KB, key::AbstractString; by::Actor)
 end
 
 """
-    changed_by_others(kb, key, me; days = 7) -> Dict{String,String}
+    changed_by_others(kb, key, me; days = 7) -> Dict{String,NamedTuple}
 
-When each of project `key`'s tasks was last changed by someone other than person `me` in the last
-`days`, by its reference: by another person, or by an agent (one working for `me` too).
+The last change to each of project `key`'s tasks by someone other than person `me` in the last
+`days`, by its reference: `(; at, who)`, made by another person, or by an agent (one working for `me`
+too).
 """
 function changed_by_others(kb::KB, key::AbstractString, me::AbstractString; days::Real = 7)
     since = iso(now(UTC) - Second(round(Int, days * 86400)))
-    rows = query(kb, """SELECT p.key || '-' || t.number AS ref, max(e.at) AS at FROM task_events e
+    # (SQLite takes `who` from the row with the latest `at`.)
+    rows = query(kb, """SELECT p.key || '-' || t.number AS ref, max(e.at) AS at, e.who FROM task_events e
                         JOIN tasks t ON t.id = e.task_id JOIN projects p ON p.id = t.project_id
                         WHERE e.at > ? AND p.key = ? AND NOT (e.by_agent = 0 AND e.by_person = ?) GROUP BY e.task_id""",
                  (since, uppercase(strip(key)), me))
-    return Dict{String,String}(String(r.ref) => String(r.at) for r in rows)
+    return Dict{String,NamedTuple}(String(r.ref) => (; at = String(r.at), who = String(r.who)) for r in rows)
 end

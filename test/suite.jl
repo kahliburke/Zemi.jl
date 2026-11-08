@@ -6199,6 +6199,7 @@ end
     K.note_task!(kb, helped, "Started."; kind = "progress", by = helper)
     # For Ada: what Bea and Ada's own agent changed, not what Ada did.
     @test sort(collect(keys(K.changed_by_others(kb, "WE", "Ada")))) == sort([beas, helped])
+    @test K.changed_by_others(kb, "WE", "Ada")[beas].who == "Bea" && K.changed_by_others(kb, "WE", "Ada")[helped].who == "Claude for Ada"
     @test sort(collect(keys(K.changed_by_others(kb, "WE", "Bea")))) == sort([mine, beas, helped])
     # Only within the days asked for.
     K.execute!(kb, "UPDATE task_events SET at = '2020-01-01T00:00:00Z'")

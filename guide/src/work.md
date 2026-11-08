@@ -18,9 +18,9 @@ moves a card between columns or under another task; reordering by hand needs the
 
 A card's colours hint at what concerns you: an amber edge and **your answer** where a question waits
 on you, a purple edge and **answered** where your question has an answer, an edge in the board's
-accent on your own tasks, and a blue wash on tasks others changed (people, or agents, yours too):
-stronger for a change since you opened the board, fainter for one within the hours chosen beside the
-board's sort (4 by default, kept by the browser).
+accent on your own tasks. A blue dot marks a task others changed (people, or agents, yours too):
+filled for a change since you opened the board, hollow for one within the hours chosen beside the
+board's sort (4 by default, kept by the browser). Pointing at the dot says who changed it, and when.
 
 ```@raw html
 <figure class="shot">

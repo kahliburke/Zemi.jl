@@ -102,7 +102,7 @@ route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
          "records" => [Dict("id" => r.id, "title" => r.title, "day" => record_day(r.date)) for r in visible_records(kb, c.caller; project = key)],
          "milestones" => [Dict(pairs(m)) for m in milestones(kb, key)],
          "tasks" => Any[task_json(t) for t in tasks(kb; project = key, limit = 5000)],
-         "changed_by_others" => changed_by_others(kb, key, my_name(c)))
+         "changed_by_others" => Dict(r => Dict(pairs(x)) for (r, x) in changed_by_others(kb, key, my_name(c))))
 end
 
 route!("POST", "/api/projects/:key"; need = "tasks.edit", project = MAINTAIN) do c

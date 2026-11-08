@@ -30,14 +30,23 @@ test('cards hint at what waits on you, what is yours and what others changed lat
     assert.doesNotMatch(await card('BR-2').getAttribute('class'), /\b(mine|asking)\b/)
     // Tinted when others changed them (an agent planned BR-6), not for what you did yourself (BR-2).
     assert.match(await card('BR-6').getAttribute('class'), /\brecent\b/)
+    assert.match(await card('BR-6').locator('.kbp-changed-dot').getAttribute('title'), /^Changed by Claude/)
     assert.doesNotMatch(await card('BR-2').getAttribute('class'), /\b(recent|fresh)\b/)
+    assert.equal(await card('BR-2').locator('.kbp-changed-dot').count(), 0)
     if (process.env.ZEMI_SHOT) await page.screenshot({ path: process.env.ZEMI_SHOT })
-    // Turned off, and kept so on the next visit.
-    await page.getByLabel('Show what others changed within').selectOption('0')
+    // The window is chosen, and the tint turned off; both kept on the next visit.
+    const within = page.getByLabel('Show what others changed within')
+    await within.click()
+    await within.selectOption('24')
+    await page.getByLabel('Changed by others in').uncheck()
     assert.doesNotMatch(await card('BR-6').getAttribute('class'), /\brecent\b/)
+    assert.ok(await within.isDisabled())
     await page.reload()
     await card('BR-1').locator('.kbp-tag.asking').waitFor()
     assert.doesNotMatch(await card('BR-6').getAttribute('class'), /\brecent\b/)
+    assert.equal(await within.inputValue(), '24')
+    await page.getByLabel('Changed by others in').check()
+    assert.match(await card('BR-6').getAttribute('class'), /\brecent\b/)
     assert.deepEqual(errors, [])
     await close()
   } finally {
