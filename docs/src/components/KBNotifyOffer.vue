@@ -9,9 +9,8 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
 import { me, can } from './kbApi'
-import { pushSupported, needsHomeScreen, currentSubscription, turnOn, loadPush, sendTest } from './kbPush'
+import { pushSupported, needsHomeScreen, currentSubscription, turnOn, loadPush, sendTest, OFFERED, markOffered } from './kbPush'
 
-const KEY = 'zemi-notify-offer'
 const shown = ref<'' | 'offer' | 'home' | 'done'>('')
 const busy = ref(false)
 const error = ref('')
@@ -24,12 +23,12 @@ let decided = false
 watch(me, async m => {
   if (!m || decided) return
   decided = true
-  if (localStorage.getItem(KEY) || m.via !== 'session' || !can('tasks.edit')) return
+  if (localStorage.getItem(OFFERED) || m.via !== 'session' || !can('tasks.edit')) return
   if (location.pathname.includes('/service/account')) return            // the page has its own
   const show = needsHomeScreen() ? 'home' :
-    pushSupported() && Notification.permission === 'default' && !(await currentSubscription()) ? 'offer' : ''
+    pushSupported() && Notification.permission !== 'denied' && !(await currentSubscription()) ? 'offer' : ''
   if (!show) return
-  localStorage.setItem(KEY, 'shown')
+  markOffered('shown')
   shown.value = show
 }, { immediate: true })
 

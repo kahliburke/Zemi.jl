@@ -6,7 +6,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { day } from './kbFormat'
-import { type PushSettings, pushSupported, needsHomeScreen, currentSubscription, turnOn, turnOff, loadPush, saveSections, sendTest, forget } from './kbPush'
+import { type PushSettings, pushSupported, needsHomeScreen, currentSubscription, turnOn, turnOff, loadPush, saveSections, sendTest, forget, markOffered } from './kbPush'
 
 const settings = ref<PushSettings | null>(null)
 const here = ref('')             // this browser's subscription's endpoint, when it has one
@@ -33,10 +33,11 @@ async function act(f: () => Promise<unknown>, done = '') {
 }
 // Turning them on sends one, so the person sees at once that they arrive.
 const on = () => act(async () => {
+  markOffered('account')
   const endpoint = await turnOn(settings.value!)
   if (!(await sendTest(endpoint)).sent) throw new Error('On, but the browser’s push service did not take the first notification.')
 }, 'On in this browser: one is on its way to show how they look.')
-const off = () => act(turnOff, 'Off in this browser.')
+const off = () => act(async () => { markOffered('account'); await turnOff() }, 'Off in this browser.')
 function toggle(id: string, want: boolean) {
   const s = settings.value!
   const next = want ? [...s.sections, id] : s.sections.filter(x => x !== id)

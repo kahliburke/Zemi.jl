@@ -7,6 +7,11 @@ import { api, getJSON, post } from './kbApi'
 export type PushSettings = { key: string; sections: string[]; all_sections: { id: string; label: string }[];
                              devices: { id: number; label: string; created_at: string; last_sent: string; endpoint: string }[] }
 
+// Set in a browser once its person has been offered notifications or chose on the Account page, so
+// they are not offered again there (see KBNotifyOffer.vue).
+export const OFFERED = 'zemi-notify-offer'
+export const markOffered = (how: string) => { try { localStorage.setItem(OFFERED, how) } catch {} }
+
 const sameOrigin = () => typeof location !== 'undefined' && new URL(api.value || location.origin, location.href).origin === location.origin
 
 // Whether this browser can be sent notifications here.
