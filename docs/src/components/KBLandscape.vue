@@ -12,7 +12,10 @@ import { siteJSON } from './kbApi'
 type Area = { name: string; description: string }
 type Cluster = { id: number; name: string; description: string; named: boolean; size: number; x: number; y: number;
                  scores: number[]; relevance: number }
-type Paper = { id: string; title: string; kind: string; category: string; page: string; date: string; x: number; y: number;
+// A paper's dates: `published` (a year, month or day, as known) and `added` (when the group first had
+// it); a landscape built before they were kept has `date`, the one or the other.
+type Paper = { id: string; title: string; kind: string; category: string; page: string; published?: string; added?: string; date?: string;
+               x: number; y: number;
                cluster: number; scores: number[]; relevance: number; area: number; llm_relevance: number | null;
                one_line: string | null }
 type Landscape = { built_at: string; layer: string; named_by: string; focus_areas: Area[]; clusters: Cluster[]; papers: Paper[] }
@@ -97,12 +100,17 @@ const labelY = (c: Cluster) => Math.min(Math.max(my(c.y) - 2 * dotSize.value, PA
 // Drawn faded first, so the papers in view sit on top.
 const drawn = computed(() => [...papers.value].sort((a, b) => Number(faded(b)) - Number(faded(a)) || a.relevance - b.relevance))
 
-// Over time: date against relevance. A few old papers would squeeze the rest into the last years, so
-// the axis starts at a chosen year (by default the one that leaves out the oldest twentieth), and
-// papers before it are drawn hollow at its left edge.
-const dated = computed(() => papers.value.filter(p => /^\d{4}/.test(p.date)))
-const time = (d: string) => new Date(d.length === 4 ? `${d}-07-01` : d).getTime()
-const yearOf = (p: Paper) => parseInt(p.date.slice(0, 4))
+// Over time: date against relevance, by when papers were published or when the group had them. A few
+// old papers would squeeze the rest into the last years, so the axis starts at a chosen year (by
+// default the one that leaves out the oldest twentieth), and papers before it are drawn hollow at its
+// left edge.
+const by = ref<'published' | 'added'>('published')
+const dateOf = (p: Paper) => (by.value === 'published' ? p.published : p.added) ?? p.date ?? ''
+const dated = computed(() => papers.value.filter(p => /^\d{4}/.test(dateOf(p))))
+const undated = computed(() => papers.value.length - dated.value.length)
+// A year is placed at its middle, a month at its middle.
+const time = (d: string) => new Date(d.length === 4 ? `${d}-07-01` : d.length === 7 ? `${d}-15` : d).getTime()
+const yearOf = (p: Paper) => parseInt(dateOf(p).slice(0, 4))
 const allYears = computed(() => [...new Set(dated.value.map(yearOf))].sort((a, b) => a - b))
 const defaultFrom = computed(() => {
   const ys = dated.value.map(yearOf).sort((a, b) => a - b)
@@ -112,18 +120,42 @@ const fromYear = ref<number | null>(null)
 const from = computed(() => fromYear.value ?? defaultFrom.value)
 const earlier = (p: Paper) => yearOf(p) < from.value
 const earlierCount = computed(() => dated.value.filter(earlier).length)
+const DAY = 864e5
 const span = computed(() => {
-  const t = dated.value.filter(p => !earlier(p)).map(p => time(p.date))
-  return t.length ? [Math.min(time(`${from.value}-01-01`), ...t), Math.max(...t)] : [0, 1]
+  const t = dated.value.filter(p => !earlier(p)).map(p => time(dateOf(p)))
+  if (!t.length) return [0, 1]
+  // From the chosen year's start when earlier papers are drawn at its edge; else from the first paper.
+  const [a, b] = [Math.min(earlierCount.value ? time(`${from.value}-01-01`) : Infinity, ...t), Math.max(...t)]
+  return b - a < 2 * DAY ? [a - DAY, b + DAY] : [a, b]
 })
-const tx = (d: string) => PAD + 40 + Math.max(0, time(d) - span.value[0]) / Math.max(span.value[1] - span.value[0], 1) * (W - 2 * PAD - 40)
+const tx = (d: string) => tt(time(d))
+const tt = (t: number) => PAD + 40 + Math.max(0, t - span.value[0]) / Math.max(span.value[1] - span.value[0], 1) * (W - 2 * PAD - 40)
 const ty = (r: number) => PAD + (1 - level(r)) * (H - 2 * PAD - 20)
-const years = computed(() => {
-  const [a, b] = span.value.map(t => new Date(t).getFullYear())
-  const step = Math.max(1, Math.ceil((b - a + 1) / 12))
-  const out: number[] = []
-  for (let y = a; y <= b + 1; y += step) out.push(y)
-  return out.filter(y => { const t = new Date(`${y}-01-01`).getTime(); return t >= span.value[0] && t <= span.value[1] })
+// The axis's ticks, about a dozen at most: years over a few years, months over a few months, else days.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const ticks = computed(() => {
+  const [lo, hi] = span.value, days = (hi - lo) / DAY
+  const out: { t: number; label: string }[] = []
+  const first = new Date(lo)
+  if (days > 3 * 365) {
+    const [a, b] = [first.getUTCFullYear(), new Date(hi).getUTCFullYear()]
+    const step = Math.max(1, Math.ceil((b - a + 1) / 12))
+    for (let y = a; y <= b + 1; y += step) out.push({ t: Date.UTC(y, 0, 1), label: `${y}` })
+  } else if (days > 60) {
+    const step = Math.max(1, Math.ceil(days / 30 / 12))
+    for (let m = first.getUTCFullYear() * 12 + first.getUTCMonth(); ; m += step) {
+      const t = Date.UTC(Math.floor(m / 12), m % 12, 1)
+      if (t > hi) break
+      out.push({ t, label: m % 12 === 0 || !out.length ? `${MONTHS[m % 12]} ${Math.floor(m / 12)}` : MONTHS[m % 12] })
+    }
+  } else {
+    const step = Math.max(1, Math.ceil(days / 12))
+    for (let t = Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), first.getUTCDate()); t <= hi; t += step * DAY) {
+      const d = new Date(t)
+      out.push({ t, label: `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}` })
+    }
+  }
+  return out.filter(x => x.t >= lo && x.t <= hi)
 })
 
 // Clusters, most relevant first, each with its papers most relevant first.
@@ -164,12 +196,19 @@ const nearestCount = (a: number) => papers.value.filter(p => p.area === a + 1).l
             </select>
           </label>
           <input v-model="find" type="search" class="kbl-input" placeholder="Find titles…" />
+          <label v-if="tab === 'time'">by
+            <select v-model="by" class="kbl-select" @change="fromYear = null">
+              <option value="published">when published</option>
+              <option value="added">when the group had it</option>
+            </select>
+          </label>
           <label v-if="tab === 'time'">from
             <select :value="from" class="kbl-select" @change="fromYear = Number(($event.target as HTMLSelectElement).value)">
               <option v-for="y in allYears" :key="y" :value="y">{{ y }}</option>
             </select>
           </label>
           <span v-if="tab === 'time' && earlierCount" class="kbl-dim">{{ earlierCount }} earlier (hollow)</span>
+          <span v-if="tab === 'time' && undated" class="kbl-dim">{{ undated }} without a date, not shown</span>
           <button v-if="picked !== null" type="button" class="kb-link kbl-link" @click="picked = null">all clusters</button>
         </div>
         <div class="kbl-plot">
@@ -183,17 +222,18 @@ const nearestCount = (a: number) => papers.value.filter(p => p.area === a + 1).l
           <svg v-else :viewBox="`0 0 ${W} ${H}`" class="kbl-svg">
             <line :x1="PAD + 40" :x2="W - PAD" :y1="H - PAD - 20" :y2="H - PAD - 20" class="kbl-axis" />
             <line :x1="PAD + 40" :x2="PAD + 40" :y1="PAD" :y2="H - PAD - 20" class="kbl-axis" />
-            <text v-for="y in years" :key="y" :x="tx(`${y}-01-01`)" :y="H - PAD + 2" class="kbl-tick">{{ y }}</text>
+            <text v-for="k in ticks" :key="k.t" :x="tt(k.t)" :y="H - PAD + 2" class="kbl-tick">{{ k.label }}</text>
             <text :x="PAD" :y="PAD + 6" class="kbl-tick start">more relevant</text>
             <text :x="PAD" :y="H - PAD - 24" class="kbl-tick start">less relevant</text>
             <a v-for="p in dated" :key="p.id" :href="link(p)" :aria-label="p.title" @focus="show($event, p)" @blur="hover = null">
-              <circle :cx="tx(p.date)" :cy="ty(p.relevance)" :r="0.8 * dotSize" :fill="colour(p)"
+              <circle :cx="tx(dateOf(p))" :cy="ty(p.relevance)" :r="0.8 * dotSize" :fill="colour(p)"
                       :style="earlier(p) ? { fill: 'none', stroke: colour(p), strokeWidth: 1.5 } : undefined"
                       :class="['kbl-dot', { faded: faded(p) }]" @mouseenter="show($event, p)" @mouseleave="hover = null" /></a>
           </svg>
           <div v-if="hover" class="kbl-tip" :style="tipStyle">
             <div class="kbl-tip-title">{{ hover.p.title }}</div>
-            <div class="kbl-dim">{{ hover.p.date }} · {{ hover.p.category }}</div>
+            <div class="kbl-dim">{{ hover.p.published ?? hover.p.date }}<template v-if="hover.p.added"> · added {{ hover.p.added }}</template>
+              · {{ hover.p.category }}</div>
             <div>{{ cluster(hover.p)?.name }}</div>
             <div class="kbl-dim">{{ areas[hover.p.area - 1]?.name }} {{ hover.p.relevance.toFixed(2) }}<span
               v-if="hover.p.llm_relevance !== null"> · judged {{ RELEVANCE[hover.p.llm_relevance] }}</span></div>
@@ -231,7 +271,7 @@ const nearestCount = (a: number) => papers.value.filter(p => p.area === a + 1).l
             <li v-for="p in (expanded[c.id] ? membersOf(c) : membersOf(c).slice(0, 6))" :key="p.id">
               <span class="kbl-bar-track small"><span :style="{ width: `${Math.round(100 * level(p.relevance))}%`, background: heat(level(p.relevance)) }"></span></span>
               <a :href="link(p)">{{ p.title }}</a>
-              <span class="kbl-dim"> · {{ p.date }}</span>
+              <span v-if="p.published ?? p.date" class="kbl-dim"> · {{ p.published ?? p.date }}</span>
               <span v-if="p.llm_relevance !== null" class="kbl-chip">{{ RELEVANCE[p.llm_relevance] }}</span>
             </li>
           </ol>

@@ -2438,6 +2438,9 @@ end
         relevance(topic) = maximum(p["relevance"] for p in d["papers"] if topic_of[p["id"]] == topic)
         @test relevance("kelp") < relevance("coral")
         @test all(0 <= p["x"] <= 1 && 0 <= p["y"] <= 1 for p in d["papers"])
+        # Each paper is dated by when it was published, and when the group first had it.
+        p11 = only(p for p in d["papers"] if p["id"] == "2609.00011")
+        @test p11["published"] == "2025-01-01" && p11["added"] == first(K.now_iso(), 10)
         # Unchanged vectors: nothing is rebuilt. Rebuilt anyway, the clusters keep their names unasked.
         @test !landscape!(kb).changed && asked[] == 1
         again = landscape!(kb; force = true)

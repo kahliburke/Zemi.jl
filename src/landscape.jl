@@ -4,7 +4,7 @@
 # out so that neighbours on the map are neighbours in meaning. The result is a JSON file the site
 # draws from, published with the dataset, so seeing it needs neither Qdrant nor a model.
 
-const LANDSCAPE_VERSION = 1
+const LANDSCAPE_VERSION = 2
 
 landscape_path(c::Config) = joinpath(c.data_dir, "landscape.json")
 
@@ -32,7 +32,7 @@ function landscape!(kb::KB; force::Bool = false, progress = msg -> nothing, canc
     isempty(c.landscape_layer) && isempty(record_layers(c)) && return nothing
     l = landscape_layer(c)
     rows = [r for r in query(kb, """
-        SELECT p.doc_id AS id, p.title, p.kind, p.published, p.primary_category AS category, e.point_id, e.text_sha,
+        SELECT p.doc_id AS id, p.title, p.kind, p.published, p.added_at, p.primary_category AS category, e.point_id, e.text_sha,
                (SELECT min(posted_at) FROM mentions m WHERE m.paper_id = p.id) AS posted,
                (SELECT data FROM classifications k WHERE k.paper_id = p.id) AS classification
         FROM embeddings e JOIN papers p ON p.id = e.paper_id
@@ -83,7 +83,10 @@ function landscape!(kb::KB; force::Bool = false, progress = msg -> nothing, canc
 
     mean(v) = isempty(v) ? 0.0 : sum(v) / length(v)
     r3(x) = round(x; digits = 4)
-    date(r) = !ismissing(r.posted) ? Dates.format(unix2datetime(r.posted), "yyyy-mm-dd") : coalesce(r.published, "")
+    # When a paper was published (a year, a month or a day, as known), and when the group first had it:
+    # first mentioned, or else added.
+    published(r) = (d = strip(coalesce(r.published, "")); occursin(r"^\d{4}(-\d{2}){0,2}", d) ? match(r"^\d{4}(-\d{2}){0,2}", d).match : "")
+    added(r) = !ismissing(r.posted) ? Dates.format(unix2datetime(r.posted), "yyyy-mm-dd") : first(r.added_at, 10)
     function llm(r)
         ismissing(r.classification) && return (nothing, nothing)
         d = JSON.parse(r.classification)
@@ -93,7 +96,7 @@ function landscape!(kb::KB; force::Bool = false, progress = msg -> nothing, canc
         rel, line = llm(r)
         Dict("id" => r.id, "title" => titles[i], "kind" => r.kind, "category" => coalesce(r.category, ""),
              "page" => document_page(r.id),
-             "date" => date(r), "x" => r3(Y[i, 1]), "y" => r3(Y[i, 2]), "cluster" => assign[i],
+             "published" => published(r), "added" => added(r), "x" => r3(Y[i, 1]), "y" => r3(Y[i, 2]), "cluster" => assign[i],
              "scores" => r3.(scores[i, :]), "relevance" => r3(relevance[i]), "area" => nearest[i],
              "llm_relevance" => rel, "one_line" => line)
     end
