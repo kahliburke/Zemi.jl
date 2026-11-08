@@ -127,7 +127,7 @@ function upgrade_landscape(kb::KB)
     last = read_landscape(c)
     (last === nothing || get(last, "version", 1) >= LANDSCAPE_VERSION) && return nothing
     isempty(cannot_run(kb, "landscape", String[])) || return nothing
-    return start_job("landscape") do job
+    return start_job("landscape"; changes = changes_stamp(c)) do job
         landscape!(kb; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
     end
 end

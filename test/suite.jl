@@ -2449,7 +2449,9 @@ end
         # One saved in an older format is rebuilt when the service starts; a current one is left.
         @test K.upgrade_landscape(kb) === nothing
         write(K.landscape_path(c), JSON.json(Dict("papers" => [], "clusters" => [])))
+        rm(K.changes_stamp(c); force = true)
         @test wait(K.upgrade_landscape(kb)).status == :done && read_landscape(c)["version"] == K.LANDSCAPE_VERSION && asked[] == 1
+        @test isfile(K.changes_stamp(c))          # (the site served is refreshed with it)
         # Classifying a paper shows its relevance on the landscape.
         K.execute!(kb, "INSERT INTO classifications VALUES (?, 'namer', 'm', '{\"relevance\": 3, \"one_line\": \"Corals.\"}', ?)",
                    (K.paper_id(kb, "2609.00011"), K.now_iso()))
