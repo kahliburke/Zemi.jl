@@ -253,29 +253,29 @@ remove_push_device!(kb::KB, uid::Integer, endpoint::AbstractString) =
 
 push_uid(c) = (c.caller.user_id === nothing && error("Notifications are for people signed in to the shared service"); c.caller.user_id)
 
-route!("GET", "/api/push"; need = "tasks.view") do c
+route!("GET", "/api/push") do c
     uid = push_uid(c)
     st = notify_state(c.kb, uid)
     Dict("key" => push_public_key(c.kb.config), "sections" => st.sections,
          "all_sections" => [Dict("id" => k, "label" => l) for (k, l) in NOTIFY_SECTIONS],
          "devices" => [Dict(pairs(d)) for d in push_devices(c.kb, uid)])
 end
-route!("POST", "/api/push/devices"; need = "tasks.view") do c
+route!("POST", "/api/push/devices") do c
     d = json_body(c)
     keys = get(d, "keys", Dict())
     add_push_device!(c.kb, push_uid(c); endpoint = string(get(d, "endpoint", "")), p256dh = string(get(keys, "p256dh", "")),
                      auth = string(get(keys, "auth", "")), label = string(get(d, "label", "")))
     Dict("ok" => true)
 end
-route!("POST", "/api/push/devices/remove"; need = "tasks.view") do c
+route!("POST", "/api/push/devices/remove") do c
     remove_push_device!(c.kb, push_uid(c), string(get(json_body(c), "endpoint", "")))
     Dict("ok" => true)
 end
-route!("POST", "/api/push/sections"; need = "tasks.view") do c
+route!("POST", "/api/push/sections") do c
     set_notify_sections!(c.kb, push_uid(c), get(json_body(c), "sections", String[]))
     Dict("ok" => true)
 end
-route!("POST", "/api/push/test"; need = "tasks.view") do c
+route!("POST", "/api/push/test") do c
     uid = push_uid(c)
     # To the device just turned on, when it is named.
     n = push_to_person!(c.kb, uid, Dict("title" => "Notifications are on",

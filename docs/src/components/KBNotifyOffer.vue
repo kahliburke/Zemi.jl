@@ -1,13 +1,13 @@
 <!--
-  The offer of notifications (see KBNotifications.vue), once in each browser, to a person who sees
-  the projects: a browser asks its permission only from a click on the page, so the page asks first.
+  The offer of notifications (see KBNotifications.vue), once in each browser, to each person
+  signed in: a browser asks its permission only from a click on the page, so the page asks first.
   It is never offered again in the browser once shown, whatever the answer, or none, and it must be
   answered to go on. On an iPhone or iPad outside the Home Screen it says how to add the site there; the Home Screen's
   copy keeps its own storage, so it is offered there again, where it can be turned on.
 -->
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
-import { me, can } from './kbApi'
+import { me } from './kbApi'
 import { pushSupported, needsHomeScreen, currentSubscription, turnOn, loadPush, sendTest, OFFERED, markOffered } from './kbPush'
 
 const shown = ref<'' | 'offer' | 'home' | 'done'>('')
@@ -29,7 +29,7 @@ let decided = false
 watch(me, async m => {
   if (!m || decided) return
   decided = true
-  if (localStorage.getItem(OFFERED) || m.via !== 'session' || !can('tasks.view')) return
+  if (localStorage.getItem(OFFERED) || m.via !== 'session') return
   if (location.pathname.includes('/service/account')) return            // the page has its own
   const show = needsHomeScreen() ? 'home' :
     pushSupported() && Notification.permission !== 'denied' && !(await subscribed()) ? 'offer' : ''
