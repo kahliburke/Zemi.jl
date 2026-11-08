@@ -157,6 +157,29 @@ test('searching finds a task and opens it', async () => {
   await close()
 })
 
+test('the tasks\' search shows that it is running until its answer comes', async () => {
+  const held = []
+  const prepare = page => page.route(u => new URL(u).pathname.endsWith('/api/tasks/search'), r => { held.push(r) })
+  const { page, errors, close } = await open('/projects#BR', '.kbp-card', { prepare })
+  const spinner = page.locator('.kbts-spinner')
+  await page.locator('input[placeholder^="Search tasks"]').fill('patches')
+  await spinner.waitFor({ timeout: 100 })                                  // at once, before the pause in typing ends
+  await page.waitForTimeout(400)
+  assert.ok(held.length > 0 && await spinner.isVisible())
+  await Promise.all(held.splice(0).map(r => r.continue()))
+  await page.locator('.kbts-panel li[role="option"]').first().waitFor()
+  await spinner.waitFor({ state: 'detached' })
+  // Typed on: what the last query found is dimmed until the answer to this one comes.
+  await page.locator('input[placeholder^="Search tasks"]').fill('patches reef')
+  await page.locator('.kbts-panel.stale').waitFor({ timeout: 100 })
+  await page.waitForTimeout(400)
+  await Promise.all(held.splice(0).map(r => r.continue()))
+  await spinner.waitFor({ state: 'detached' })
+  assert.equal(await page.locator('.kbts-panel.stale').count(), 0)
+  assert.deepEqual(errors, [])
+  await close()
+})
+
 test('the review dashboard opens', async () => {
   const { page, errors, close } = await open('/projects#BR', '.kbp-card')
   await page.locator('nav[aria-label="The project\'s views"]').getByRole('button', { name: 'Review' }).click()

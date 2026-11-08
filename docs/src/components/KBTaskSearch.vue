@@ -25,6 +25,8 @@ const hits = ref<Hit[]>([])
 const chosen = ref(0)
 const shown = ref(false)
 const help = ref(false)
+// From the keystroke until the answer to the last query typed comes.
+const busy = ref(false)
 const field = ref<HTMLInputElement | null>(null)
 let timer: ReturnType<typeof setTimeout> | undefined
 let asked = 0
@@ -85,9 +87,10 @@ async function nameOnly(v: string, found: Hit[]) {
 watch(q, v => {
   clearTimeout(timer)
   help.value = false                        // typing is searching: the guide gives way to the results
-  if (!v.trim()) { hits.value = []; people.value = []; absent.value = ''; return }
+  if (!v.trim()) { ++asked; busy.value = false; hits.value = []; people.value = []; absent.value = ''; return }
+  busy.value = true
   timer = setTimeout(async () => {
-    if (await suggestPeople(v)) return
+    if (await suggestPeople(v)) { busy.value = false; return }
     const n = ++asked
     try {
       const found: Hit[] = await getJSON(`/api/tasks/search?project=${encodeURIComponent(props.project)}&q=${encodeURIComponent(v)}`)
@@ -95,6 +98,7 @@ watch(q, v => {
       hits.value = found; chosen.value = 0; shown.value = true
       nameOnly(v, found)
     } catch { /* a query being typed may not parse yet */ }
+    if (n === asked) busy.value = false
   }, 140)
 })
 
@@ -144,8 +148,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onSlash, true))
 
 <template>
   <div class="kbts">
-    <input ref="field" v-model="q" class="kb-field kbts-field" type="search" placeholder="Search tasks  /" aria-label="Search tasks"
-           @keydown="onKey" @focus="shown = !!hits.length" @blur="hideSoon" />
+    <span class="kbts-box">
+      <input ref="field" v-model="q" class="kb-field kbts-field" type="search" placeholder="Search tasks  /" aria-label="Search tasks"
+             :aria-busy="busy" @keydown="onKey" @focus="shown = !!hits.length" @blur="hideSoon" />
+      <span v-if="busy" class="kbts-spinner" role="status" aria-label="Searching"></span>
+    </span>
     <button class="kbts-help" type="button" title="How to search" aria-label="How to search" @click="help = !help">?</button>
     <div v-if="help" class="kbts-panel kbts-guide" @mousedown.prevent>
       <p>Titles, plans and notes. Filters:</p>
@@ -159,9 +166,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onSlash, true))
         <span class="kbts-title">{{ p.label }}</span> <span v-if="p.detail" class="kbts-status">{{ p.detail }}</span>
       </li>
     </ul>
-    <ul v-else-if="shown && q.trim()" class="kbts-panel" role="listbox">
-      <li v-if="absent" class="kbts-none">{{ absent }} took part in no task in {{ project }}.</li>
-      <li v-if="!hits.length && !absent" class="kbts-none">Nothing matches.</li>
+    <ul v-else-if="shown && q.trim()" class="kbts-panel" :class="{ stale: busy }" role="listbox">
+      <li v-if="absent && !busy" class="kbts-none">{{ absent }} took part in no task in {{ project }}.</li>
+      <li v-if="!hits.length && !absent" class="kbts-none">{{ busy ? 'Searching…' : 'Nothing matches.' }}</li>
       <li v-for="(h, i) in hits" :key="h.ref" :class="{ on: i === chosen }" role="option" :aria-selected="i === chosen"
           @mousedown.prevent="choose(h)" @mouseenter="chosen = i">
         <div class="kbts-head"><span class="kbts-ref">{{ h.ref }}</span> <span class="kbts-title">{{ h.title }}</span>
@@ -177,7 +184,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onSlash, true))
 
 <style scoped>
 .kbts { position: relative; display: inline-flex; align-items: center; gap: 0.3rem; flex: 1; max-width: 32rem; }
-.kbts-field { flex: 1; min-width: 10rem; padding: 0.3rem 0.6rem; }
+.kbts-box { position: relative; display: flex; flex: 1; }
+.kbts-field { flex: 1; min-width: 10rem; padding: 0.3rem 2rem 0.3rem 0.6rem; }
+.kbts-spinner { position: absolute; right: 0.55rem; top: 50%; width: 0.85rem; height: 0.85rem; margin-top: -0.425rem; box-sizing: border-box;
+  border: 2px solid var(--vp-c-divider); border-top-color: var(--vp-c-brand-1); border-radius: 50%;
+  animation: kbts-spin 0.7s linear infinite; pointer-events: none; }
+@keyframes kbts-spin { to { transform: rotate(360deg); } }
+.kbts-panel.stale li:not(.kbts-none) { opacity: 0.5; }
 .kbts-field:focus { outline: none; border-color: var(--vp-c-brand-1); }
 .kbts-help { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--vp-c-divider); background: none; color: var(--vp-c-text-2);
   font: inherit; font-size: 0.75rem; cursor: pointer; }
