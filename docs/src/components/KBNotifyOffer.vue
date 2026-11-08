@@ -1,9 +1,8 @@
 <!--
-  The offer of notifications (see KBNotifications.vue), once in each browser, to a person who works
-  on tasks: a browser asks its permission only from a click on the page, so the page asks first. It
-  is never offered again in the browser once shown, whatever the answer, or none, and it must be
-  answered to go on. On
-  an iPhone or iPad outside the Home Screen it says how to add the site there; the Home Screen's
+  The offer of notifications (see KBNotifications.vue), once in each browser, to a person who sees
+  the projects: a browser asks its permission only from a click on the page, so the page asks first.
+  It is never offered again in the browser once shown, whatever the answer, or none, and it must be
+  answered to go on. On an iPhone or iPad outside the Home Screen it says how to add the site there; the Home Screen's
   copy keeps its own storage, so it is offered there again, where it can be turned on.
 -->
 <script setup lang="ts">
@@ -30,7 +29,7 @@ let decided = false
 watch(me, async m => {
   if (!m || decided) return
   decided = true
-  if (localStorage.getItem(OFFERED) || m.via !== 'session' || !can('tasks.edit')) return
+  if (localStorage.getItem(OFFERED) || m.via !== 'session' || !can('tasks.view')) return
   if (location.pathname.includes('/service/account')) return            // the page has its own
   const show = needsHomeScreen() ? 'home' :
     pushSupported() && Notification.permission !== 'denied' && !(await subscribed()) ? 'offer' : ''
