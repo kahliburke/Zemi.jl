@@ -86,9 +86,10 @@ function runSearch(q: string, delay = 350) {
   error.value = ''
   if (!q.trim()) { searching.cancel(); keywords.cancel(); busy.value = false; partial.value = false; hits.value = []; found.value = []; seconds.value = null; return }
   if (mode.value === 'static') { hits.value = searchStatic(q); return }
+  // Busy from the keystroke, not from when the pause in typing ends.
+  busy.value = true
+  partial.value = false
   timer = setTimeout(async () => {
-    busy.value = true
-    partial.value = false
     const c = current.value
     const kinds = kind.value ? `&kinds=${kind.value}` : ''
     const url = (layers: string, keyword: boolean) =>
@@ -134,7 +135,10 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
 
 <template>
   <div class="kb-search">
-    <input v-model="query" type="search" class="kb-field kb-input" placeholder="Search…" autofocus />
+    <div class="kb-box">
+      <input v-model="query" type="search" class="kb-field kb-input" placeholder="Search…" autofocus :aria-busy="busy" />
+      <span v-if="busy" class="kb-spinner" role="status" aria-label="Searching"></span>
+    </div>
     <div class="kb-note">
       <span :class="['kb-mode', mode]">{{ mode === 'live' ? 'live' : mode === 'static' ? 'offline' : '…' }}</span>
       {{ note }}<button type="button" v-if="mode === 'static'" class="kb-link kb-retry" @click="start(true)">retry</button>
@@ -144,7 +148,7 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
       </span>
     </div>
     <p v-if="error" class="kb-error">{{ error }}</p>
-    <div class="kb-results" :class="{ 'id-first': idFirst }">
+    <div class="kb-results" :class="{ 'id-first': idFirst, stale: busy && !partial }">
     <div v-if="found.length" class="kb-findings">
       <div class="kb-findings-head">Findings</div>
       <a v-for="f in found" :key="f.ref" class="kb-finding" :href="findingHref(f.ref)">
@@ -197,8 +201,15 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
 
 <style scoped>
 .kb-search { margin: 1rem 0 2rem; }
-.kb-input { width: 100%; box-sizing: border-box; padding: 0.7rem 1rem; font-size: 1.05rem; border-radius: 8px; }
+.kb-box { position: relative; }
+.kb-input { width: 100%; box-sizing: border-box; padding: 0.7rem 2.6rem 0.7rem 1rem; font-size: 1.05rem; border-radius: 8px; }
 .kb-input:focus { outline: none; border-color: var(--vp-c-brand-1); }
+.kb-spinner { position: absolute; right: 0.9rem; top: 50%; width: 1rem; height: 1rem; margin-top: -0.5rem; box-sizing: border-box;
+  border: 2px solid var(--vp-c-divider); border-top-color: var(--vp-c-brand-1); border-radius: 50%;
+  animation: kb-spin 0.7s linear infinite; pointer-events: none; }
+@keyframes kb-spin { to { transform: rotate(360deg); } }
+.kb-results { transition: opacity 0.15s; }
+.kb-results.stale { opacity: 0.5; }
 .kb-note { margin-top: 0.5rem; font-size: 0.85rem; color: var(--vp-c-text-2); }
 .kb-mode { display: inline-block; padding: 0 0.45rem; margin-right: 0.35rem; border-radius: 4px; font-size: 0.75rem;
   text-transform: uppercase; letter-spacing: 0.04em; background: var(--vp-c-default-soft); }
