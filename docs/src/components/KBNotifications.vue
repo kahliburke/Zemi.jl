@@ -50,7 +50,7 @@ const others = computed(() => (settings.value?.devices ?? []).filter(d => d.endp
   <section v-if="settings" class="kbn">
     <h2>Notifications</h2>
     <p class="kb-dim">On your phone or computer, of what newly waits on you: questions asked of you, answers to yours, tasks
-      assigned to you, and plans and work to review that are yours. Not while you have a board in view.</p>
+      assigned to you, and plans and work to review that are yours. Not while you are looking at a board.</p>
     <p v-if="homeScreen" class="kbn-hint">On an iPhone or iPad, add this site to the Home Screen first (Share, then
       <em>Add to Home Screen</em>), open it from there, and turn notifications on here.</p>
     <p v-else-if="!supported" class="kb-dim">This browser cannot show them.</p>

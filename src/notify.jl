@@ -1,21 +1,25 @@
 # Notifications of what newly waits on people: what their Waiting on you shows (see `waiting`),
 # pushed to the devices they turned notifications on for (see webpush.jl). Each round compares what
-# waits on each person with what it saw last, and what is new is held a minute, so a burst of changes
-# makes one notification. Nothing is pushed of what the person did themselves, or while they have a
-# board in view, where Waiting on you shows it.
+# waits on each person with what it saw last, and what is new is held a few seconds, so a burst of
+# changes makes one notification. Nothing is pushed of what the person did themselves, or while they
+# are looking at a board, where Waiting on you shows it.
 
 "The parts of Waiting on you that are pushed, as the board names them. Findings to accept are not."
 const NOTIFY_SECTIONS = ["proposed" => "to approve", "questions" => "to answer", "answered" => "answered",
                          "review" => "to review", "mine" => "yours"]
 
 "How long the first of a burst of changes waits for the rest, in seconds."
-const NOTIFY_HOLD = Ref(60.0)
+const NOTIFY_HOLD = Ref(15.0)
 
 "How often what waits on people is looked at, in seconds."
-const NOTIFY_EVERY = 30
+const NOTIFY_EVERY = 10
 
-"How long after a board in view last asked for changes its person still counts as looking at it, in seconds."
-const BOARD_SEEN_SECONDS = 60
+"""
+How long after a board in view last asked for changes its person still counts as looking at it, in
+seconds: longer than a board's request for changes waits (see `wait_tasks_changed`), so a board that
+stopped asking (its page closed) stops counting soon after.
+"""
+const BOARD_SEEN_SECONDS = 40
 
 "A device is dropped after this many sends in a row failed."
 const PUSH_FAILURES = 20
@@ -23,9 +27,13 @@ const PUSH_FAILURES = 20
 const BOARD_SEEN = Dict{Int,Float64}()
 const BOARD_SEEN_LOCK = ReentrantLock()
 
-"Record that `caller` has a board in view (its page is visible, asking for changes)."
+"Record that `caller` is looking at a board (its page is visible and focused, asking for changes)."
 board_seen!(caller::Caller; at::Float64 = time()) =
     caller.user_id === nothing || lock(() -> (BOARD_SEEN[caller.user_id] = at), BOARD_SEEN_LOCK)
+
+"Record that `caller` stopped looking at the board: its page lost the focus, or was hidden or closed."
+board_left!(caller::Caller) =
+    caller.user_id === nothing || lock(() -> delete!(BOARD_SEEN, caller.user_id), BOARD_SEEN_LOCK)
 
 "Whether person `uid` has had a board in view within `BOARD_SEEN_SECONDS`."
 board_in_view(uid::Integer; at::Float64 = time()) =

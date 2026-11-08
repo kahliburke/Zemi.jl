@@ -1874,6 +1874,11 @@ end
     call(ada, "POST", "/api/tasks/PU-1/notes", Dict("kind" => "question", "text" => "Which pressure?", "to" => "Bea"))
     round(401); round(500)
     @test length(to("bea")) == 2
+    # A board they stop looking at stops counting at once.
+    K.board_seen!(as(bea))
+    @test K.board_in_view(bea)
+    @test call(bea, "POST", "/api/tasks/away")[1] == 200
+    @test !K.board_in_view(bea)
     # Only the parts of Waiting on you they chose.
     @test call(bea, "POST", "/api/push/sections", Dict("sections" => ["answered"]))[1] == 200
     @test call(bea, "POST", "/api/push/sections", Dict("sections" => ["everything"]))[1] == 400

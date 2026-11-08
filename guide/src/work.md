@@ -94,9 +94,9 @@ turned on later under **Notifications** on the account page, once on each device
 - **to approve** and **to review**: plans and work that concern you. These are tasks you created,
   tasks planned for you by an agent, tasks assigned to you, and tasks an agent working for you worked on.
 
-You choose which of these come. What you did yourself never comes. Nothing comes while you have a
-board in view, since its Waiting on you shows it. Changes a minute apart come together as one
-notification, and clicking it opens the task.
+You choose which of these come. What you did yourself never comes. Nothing comes while you are looking
+at a board (its window in front), since its Waiting on you shows it. Each comes within half a
+minute; changes moments apart come together as one notification, and clicking it opens the task.
 
 - **Android, and Chrome, Edge, Firefox or Safari on a computer:** **Turn on in this browser**.
 - **iPhone or iPad:** add the site to the Home Screen (Share, then *Add to Home Screen*) and open it

@@ -7,7 +7,7 @@
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { getJSON, post, can, me, shared, latest, isStale, onLive } from './kbApi'
+import { api, getJSON, post, can, me, shared, latest, isStale, onLive } from './kbApi'
 import KBDock from './KBDock.vue'
 import KBDialog from './KBDialog.vue'
 import KBIcon from './KBIcon.vue'
@@ -627,10 +627,19 @@ const shownWaiting = computed(() => {
 })
 const count = (w: typeof waiting.value) => WAITING.reduce((n, x) => n + w[x.id].length, 0)
 const waitingCount = () => count(shownWaiting.value)
+// Whether the person is looking at the board: its page visible and focused. The service pushes them
+// nothing meanwhile (see src/notify.jl), and is told at once when they stop.
+const lookedAt = () => document.visibilityState === 'visible' && document.hasFocus()
+function lookedAway() {
+  if (!lookedAt()) fetch(`${api.value}/api/tasks/away`, { method: 'POST', body: '{}', keepalive: true,
+                                                         headers: { 'Content-Type': 'application/json', 'X-Zemi': '1' } }).catch(() => {})
+}
+onMounted(() => { window.addEventListener('blur', lookedAway); document.addEventListener('visibilitychange', lookedAway) })
+onBeforeUnmount(() => { window.removeEventListener('blur', lookedAway); document.removeEventListener('visibilitychange', lookedAway) })
 async function follow() {
   while (following) {
     try {
-      const r = await getJSON(`/api/tasks/changes?since=${version}${document.visibilityState === 'visible' ? '&visible=1' : ''}`)
+      const r = await getJSON(`/api/tasks/changes?since=${version}${lookedAt() ? '&visible=1' : ''}`)
       live.value = true
       if (r.version !== version) { const first = version === -1; version = r.version; if (!first) await applyUpdate() }
     } catch {
