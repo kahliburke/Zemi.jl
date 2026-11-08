@@ -1342,7 +1342,7 @@ function keepRecordsOpen(open: boolean) {
 
       <div v-if="WAITING.some(w => shownWaiting[w.id].length)" class="kbp-waiting" :class="{ pulse }">
         <span class="kbp-waiting-label">Waiting on you</span>
-        <button v-for="w in WAITING" :key="w.id" v-show="shownWaiting[w.id].length" class="kbp-ms" :class="{ on: waitingOpen === w.id, pulse: pulsing.has(w.id) }"
+        <button v-for="w in WAITING" :key="w.id" v-show="shownWaiting[w.id].length" class="kbp-ms" :class="[`w-${w.id}`, { on: waitingOpen === w.id, pulse: pulsing.has(w.id) }]"
                 @click="waitingOpen = waitingOpen === w.id ? '' : w.id"><strong class="kbp-n">{{ shownWaiting[w.id].length }}</strong> {{ w.label }}</button>
         <ul v-if="waitingOpen" class="kbp-waiting-list">
           <li v-for="t in shownWaiting[waitingOpen as Section]" :key="`${t.ref}:${t.note ?? ''}`"
@@ -1836,8 +1836,17 @@ function keepRecordsOpen(open: boolean) {
   border-radius: 10px; border-left: 4px solid var(--vp-c-brand-1);
   background: color-mix(in srgb, var(--vp-c-brand-1) 9%, var(--vp-c-bg-soft)); }
 .kbp-waiting > .kbp-waiting-label { color: var(--vp-c-brand-1); font-weight: 700; }
-.kbp-waiting > .kbp-ms { border-color: color-mix(in srgb, var(--vp-c-brand-1) 55%, var(--vp-c-divider)); }
-.kbp-waiting > .kbp-ms:hover { border-color: var(--vp-c-brand-1); }
+/* A section whose tasks' cards are marked in a colour has its pill and count in that colour: questions
+   to answer amber, answers to yours purple, your own tasks the accent (see `hints`). */
+.kbp-waiting > .kbp-ms { border-color: var(--vp-c-divider); }
+.kbp-waiting > .kbp-ms:hover { border-color: var(--vp-c-text-3); }
+.kbp-waiting > .kbp-ms.w-questions { border-color: var(--vp-c-warning-1); }
+.kbp-waiting > .kbp-ms.w-answered { border-color: var(--vp-c-purple-1); }
+.kbp-waiting > .kbp-ms.w-mine { border-color: var(--vp-c-brand-1); }
+.kbp-waiting > .kbp-ms .kbp-n { color: var(--vp-c-text-1); }
+.kbp-waiting > .kbp-ms.w-questions .kbp-n { color: var(--vp-c-warning-1); }
+.kbp-waiting > .kbp-ms.w-answered .kbp-n { color: var(--vp-c-purple-1); }
+.kbp-waiting > .kbp-ms.w-mine .kbp-n { color: var(--vp-c-brand-1); }
 .kbp-n { color: var(--vp-c-brand-1); font-weight: 700; }
 .kbp-waiting-label { font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--vp-c-text-2); margin-right: 0.3rem; }
 .kbp-waiting-list { flex-basis: 100%; list-style: none; margin: 0.3rem 0 0; padding: 0; }
