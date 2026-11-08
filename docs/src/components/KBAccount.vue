@@ -6,9 +6,10 @@
   person there are no accounts, and it has the pages alone.
 -->
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { mode, connect, me, can, shared, post, signOut } from './kbApi'
 import { pageLink } from './kbLinks'
+import { offerInstall } from './kbPush'
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
@@ -25,6 +26,8 @@ const pages = computed(() => [
 
 function away(e: MouseEvent) { if (root.value && !root.value.contains(e.target as Node)) open.value = false }
 onMounted(() => { connect(); document.addEventListener('click', away) })
+// Signed in to the service, the site can be installed: an iPhone shows notifications only so.
+watch([mode, shared], () => { if (mode.value === 'live' && shared.value) offerInstall() }, { immediate: true })
 onBeforeUnmount(() => document.removeEventListener('click', away))
 
 async function stopViewing() {

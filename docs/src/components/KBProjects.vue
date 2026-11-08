@@ -630,7 +630,7 @@ const waitingCount = () => count(shownWaiting.value)
 async function follow() {
   while (following) {
     try {
-      const r = await getJSON(`/api/tasks/changes?since=${version}`)
+      const r = await getJSON(`/api/tasks/changes?since=${version}${document.visibilityState === 'visible' ? '&visible=1' : ''}`)
       live.value = true
       if (r.version !== version) { const first = version === -1; version = r.version; if (!first) await applyUpdate() }
     } catch {

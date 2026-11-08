@@ -105,6 +105,16 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             end
         elseif req.method != "GET"
             HTTP.Response(405)
+        elseif uri.path == "/zemi-sw.js"
+            # The service worker that shows pushed notifications (see notify.jl), at the root so it
+            # covers the whole site, and looked at again on every visit.
+            r = file_response(SERVICE_WORKER; req)
+            HTTP.setheader(r, "Cache-Control" => "no-cache")
+            r
+        elseif uri.path == "/manifest.webmanifest"
+            # What a phone installs the site as, which on an iPhone notifications need. To anyone,
+            # like the icons it names: browsers ask for it without signing in.
+            HTTP.Response(200, ["Content-Type" => "application/manifest+json"], JSON.json(web_manifest(kb.config)))
         elseif !isempty(DEV_URL[])
             # Under `zemi dev` the pages come from the development server.
             redirect(DEV_URL[] * req.target)
@@ -398,6 +408,7 @@ function run_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool = 
     follow_dataset!(db)
     start_watch!(db)
     follow_backups(db)
+    follow_notifications(db)
     # Ctrl-C or a service manager's SIGTERM ends the process, and the cleanup runs on the way out.
     # Catching the interrupt instead does not work: it is thrown into whichever task is running at
     # the time, often one of the HTTP server's, which swallows it.

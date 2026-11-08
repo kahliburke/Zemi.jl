@@ -1774,3 +1774,112 @@ end
     @test !any(x -> x[2] == "Anyone free Friday?", asked(bea))
     close(kb)
 end
+
+@zset "notifications of what waits on people" begin
+    HTTP, JSON = K.HTTP, K.JSON
+    # Web Push's encryption, against RFC 8291's example.
+    u = K.unb64url
+    sender = K.private_key(u("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"),
+                           u("BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8"))
+    @test K.push_encrypt(u("V2hlbiBJIGdyb3cgdXAsIEkgd2FudCB0byBiZSBhIHdhdGVybWVsb24"),
+                         u("BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4"),
+                         u("BTBZMqHH6r4Tts7J_aSIgg"); sender, salt = u("DGv6ra1nlYgDCS1FRnbzlw")) ==
+          u("DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN")
+    # The VAPID header: a JWT for the push service's origin, signed with the service's key.
+    key = K.p256_key()
+    h = K.vapid(key, "https://fcm.googleapis.com/fcm/send/abc"; subject = "mailto:zemi@localhost", at = 1000)
+    m = match(r"^vapid t=([^.]+)\.([^.]+)\.([^,]+), k=(.+)$", h)
+    @test JSON.parse(String(u(m[2]))) == Dict("aud" => "https://fcm.googleapis.com", "exp" => 1000 + 12 * 3600, "sub" => "mailto:zemi@localhost")
+    @test u(m[4]) == K.public_point(key)
+    der(v) = (v = v[findfirst(!=(0x00), v):end]; v[1] >= 0x80 ? [0x02; UInt8(length(v) + 1); 0x00; v] : [0x02; UInt8(length(v)); v])
+    raw = u(m[3])
+    sig = (b = [der(raw[1:32]); der(raw[33:64])]; [0x30; UInt8(length(b)); b])
+    signed = Vector{UInt8}("$(m[1]).$(m[2])")
+    md = ccall((:EVP_MD_CTX_new, K.libcrypto), Ptr{Cvoid}, ())
+    pub = K.public_key(K.public_point(key))
+    @test ccall((:EVP_DigestVerifyInit, K.libcrypto), Cint, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}),
+                md, C_NULL, ccall((:EVP_sha256, K.libcrypto), Ptr{Cvoid}, ()), C_NULL, pub.ptr) == 1
+    @test ccall((:EVP_DigestVerify, K.libcrypto), Cint, (Ptr{Cvoid}, Ptr{UInt8}, Csize_t, Ptr{UInt8}, Csize_t),
+                md, sig, length(sig), signed, length(signed)) == 1
+    ccall((:EVP_MD_CTX_free, K.libcrypto), Cvoid, (Ptr{Cvoid},), md)
+    # Only a known push service's address is sent to.
+    @test K.push_endpoint_problem("https://web.push.apple.com/abc") === nothing
+    @test K.push_endpoint_problem("http://fcm.googleapis.com/x") == "not https"
+    @test K.push_endpoint_problem("https://127.0.0.1:6333/collections") !== nothing
+
+    kb = open_kb(temp_config())
+    K.ensure_roles!(kb)
+    sh = shared_config(sign_up = :open, default_role = "Reader")
+    account(email, name) = (uid = K.sign_in!(kb, sh, "Campus", email; email, name, verified = true); K.set_roles!(kb, uid, ["Curator"]); uid)
+    as(uid) = K.session_caller(kb, K.start_session!(kb, uid, sh))
+    call(uid, method, target, body = nothing) = (r = K.handle(kb, HTTP.Request(method, target, ["Content-Type" => "application/json"],
+                                                                                body === nothing ? UInt8[] : JSON.json(body)), as(uid));
+                                                  (r.status, JSON.parse(String(r.body))))
+    ada, bea, cy = account("ada@x.org", "Ada"), account("bea@x.org", "Bea"), account("cy@x.org", "Cy")
+    call(ada, "POST", "/api/projects", Dict("name" => "Pumps", "key" => "PU"))
+    K.set_member!(kb, "PU", "bea@x.org", "contributor")
+    K.set_member!(kb, "PU", "cy@x.org", "contributor")
+    call(ada, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Test the seals"))
+
+    # A browser's subscription, as it hands it over.
+    device(name) = Dict("endpoint" => "https://fcm.googleapis.com/fcm/send/$name", "label" => "Chrome on Mac",
+                        "keys" => Dict("p256dh" => K.b64url(K.public_point(K.p256_key())), "auth" => K.b64url(rand(UInt8, 16))))
+    @test call(bea, "POST", "/api/push/devices", device("bea"))[1] == 200
+    @test call(ada, "POST", "/api/push/devices", device("ada"))[1] == 200
+    @test call(cy, "POST", "/api/push/devices", merge(device("cy"), Dict("endpoint" => "https://example.org/push")))[1] == 400
+    settings = call(bea, "GET", "/api/push")[2]
+    @test K.unb64url(settings["key"]) == K.public_point(K.push_key(kb.config)) && length(settings["devices"]) == 1
+    @test settings["sections"] == ["proposed", "questions", "answered", "review", "mine"]
+
+    sent = Tuple{String,Dict}[]
+    status = Ref(201)
+    send(c, d, payload) = (push!(sent, (d.endpoint, JSON.parse(payload))); status[])
+    to(name) = [m for (e, m) in sent if endswith(e, "/$name")]
+    t0 = time()
+    round(dt) = K.notify_round!(kb; at = t0 + dt, send)
+    # The first look notes what already waits; nothing is sent of it.
+    round(0)
+    @test isempty(sent)
+    # What newly waits is held a minute, then sent as one notification.
+    call(ada, "POST", "/api/tasks/PU-1", Dict("assignee" => "bea@x.org"))
+    call(ada, "POST", "/api/tasks/PU-1/notes", Dict("kind" => "question", "text" => "Which gasket?", "to" => "Bea"))
+    round(1)
+    @test isempty(sent)
+    round(70)
+    @test length(to("bea")) == 1 && isempty(to("ada"))
+    n = only(to("bea"))
+    @test n["title"] == "2 things wait on you" && occursin("PU-1 assigned to you", n["body"]) && occursin("Ada: Which gasket?", n["body"])
+    round(140)
+    @test length(to("bea")) == 1                                   # sent once
+    # One thing alone says what it is, and opens its task.
+    call(ada, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Order spares", "assignee" => "bea@x.org"))
+    round(200); round(270)
+    @test to("bea")[end]["title"] == "Assigned to you · PU-2" && to("bea")[end]["body"] == "Order spares" &&
+          to("bea")[end]["url"] == "/projects.html#PU-2"
+    # What they did themselves is not pushed to them.
+    call(bea, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Clean the filter", "assignee" => "bea@x.org"))
+    round(300); round(370)
+    @test length(to("bea")) == 2
+    # Nor anything while they have a board in view: the board shows it.
+    K.board_seen!(as(bea); at = t0 + 400)
+    call(ada, "POST", "/api/tasks/PU-1/notes", Dict("kind" => "question", "text" => "Which pressure?", "to" => "Bea"))
+    round(401); round(500)
+    @test length(to("bea")) == 2
+    # Only the parts of Waiting on you they chose.
+    @test call(bea, "POST", "/api/push/sections", Dict("sections" => ["answered"]))[1] == 200
+    @test call(bea, "POST", "/api/push/sections", Dict("sections" => ["everything"]))[1] == 400
+    call(ada, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Check the valves", "assignee" => "bea@x.org"))
+    round(600); round(670)
+    @test length(to("bea")) == 2
+    # Work to review goes to whom it concerns: Ada made the task; Cy, also on the project, is not told.
+    call(cy, "POST", "/api/push/devices", device("cy"))
+    round(700)
+    call(bea, "POST", "/api/tasks/PU-1", Dict("status" => "review"))
+    round(701); round(770)
+    @test to("ada")[end]["title"] == "To review · PU-1" && isempty(to("cy"))
+    # A device its push service says is gone is dropped.
+    status[] = 410
+    @test call(ada, "POST", "/api/push/test")[2]["sent"] == 0
+    @test isempty(call(ada, "GET", "/api/push")[2]["devices"])
+    close(kb)
+end

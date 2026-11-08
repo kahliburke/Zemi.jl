@@ -11,7 +11,7 @@
 # cloned codebases, Kaimon's index and the vectors.
 
 "The data folder's own files and folders a snapshot's state holds, besides the database and the content."
-const BACKUP_STATE_ITEMS = ("records", "landscape.json", "dataset-profile.json", "local_key")
+const BACKUP_STATE_ITEMS = ("records", "landscape.json", "dataset-profile.json", "local_key", "push_key")
 
 "The data folder's folders of files a snapshot copies: uploads always; with `[backup] files`, PDFs and figures too."
 backup_file_dirs(c::Config) = c.backup.files ? ["media", "pdfs", "figures", "daily"] : ["media"]

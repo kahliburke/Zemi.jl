@@ -6,6 +6,7 @@
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
+import KBNotifications from './KBNotifications.vue'
 import KBPermissionPicker, { type PermissionGroup } from './KBPermissionPicker.vue'
 import { ref, computed, onMounted } from 'vue'
 import { mode, connect, getJSON, post } from './kbApi'
@@ -98,6 +99,8 @@ const live = computed(() => (acct.value?.tokens ?? []).filter(t => !t.revoked))
         <details class="kbac-perms"><summary>Permissions ({{ acct.permissions.length }})</summary>
           <code v-for="p in acct.permissions" :key="p">{{ p }}</code>
         </details>
+
+        <KBNotifications />
 
         <h2>Tokens</h2>
         <p class="kb-dim">Keep secret.</p>

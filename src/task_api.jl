@@ -226,8 +226,12 @@ route!("GET", "/api/tasks/references"; need = "tasks.view") do c
     Any[Dict(pairs(r)) for r in found if r.kind in ("task", "finding") ? sees(c, r.target) : r.kind != "person" || r.target in findable]
 end
 
-# Long polling: answered when projects or tasks change, or after a while without.
-route!(c -> Dict("version" => wait_tasks_changed(int_param(c.params, "since", -1))), "GET", "/api/tasks/changes"; need = "tasks.view", waits = true)
+# Long polling: answered when projects or tasks change, or after a while without. A board in view
+# says so (`visible=1`), and nothing is pushed to its person meanwhile (see notify.jl).
+route!("GET", "/api/tasks/changes"; need = "tasks.view", waits = true) do c
+    get(c.params, "visible", "") == "1" && board_seen!(c.caller)
+    Dict("version" => wait_tasks_changed(int_param(c.params, "since", -1)))
+end
 
 # What waits on the caller. Findings, and questions to anyone, wait on those who may contribute.
 route!("GET", "/api/tasks/waiting"; need = "tasks.view") do c

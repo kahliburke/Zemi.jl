@@ -108,5 +108,21 @@ function down_page(c::Config)
     return isempty(c.group.restarting) ? page : replace(page, "Back in a moment" => html_escape(c.group.restarting))
 end
 
+"The service worker that shows pushed notifications (see notify.jl)."
+const SERVICE_WORKER = joinpath(pkgdir(@__MODULE__), "docs", "src", "assets", "zemi-sw.js")
+
+"""
+    web_manifest(c) -> Dict
+
+What a phone or computer installs the site as: the group's name, opening at the front page, in a
+window of its own, with the site's logo as its icon.
+"""
+function web_manifest(c::Config)
+    name = isempty(c.group.name) ? "Zemi" : c.group.name
+    return Dict("name" => name, "short_name" => first(name, 12), "start_url" => "/", "scope" => "/", "display" => "standalone",
+                "background_color" => "#1b1b1f", "theme_color" => "#1b1b1f",
+                "icons" => [Dict("src" => "/android-chrome-512x512.png", "sizes" => "256x256", "type" => "image/png", "purpose" => "any")])
+end
+
 "The head line naming the site's icon, for the service's own pages."
 const ICON_LINK = """<link rel="icon" type="image/png" href="/favicon.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">"""

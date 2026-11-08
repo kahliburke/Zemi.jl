@@ -25,6 +25,7 @@ using HTTP
 using JSON
 using PNGFiles
 import libwebp_jll
+using OpenSSL_jll: libcrypto
 using SQLite
 using Tables
 import TimeZones
@@ -43,6 +44,7 @@ include("schema.jl")
 include("accounts.jl")
 include("tasks.jl")
 include("questions.jl")
+include("webpush.jl")
 include("projects.jl")
 include("milestones.jl")
 include("auth.jl")
@@ -129,6 +131,7 @@ include("finding_comments.jl")
 include("library.jl")
 include("project_map.jl")
 include("task_api.jl")
+include("notify.jl")
 include("mcp.jl")
 include("confine.jl")
 include("activity.jl")

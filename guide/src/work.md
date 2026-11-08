@@ -82,6 +82,31 @@ else to the task's assignee, else to anyone. Agents see the questions asked of t
 next task, each with its note number, and answer with `task_note(ref, text; kind="comment",
 reply_to=note)`.
 
+### Notifications
+
+In the shared service, what newly waits on you can come to your phone or computer as a
+notification. Turn them on under **Notifications** on your account page, once on each device. They
+come for:
+
+- **to answer**: a question asked of you by name. A question to anyone stays on the board.
+- **answered**: an answer to your question.
+- **yours**: a task assigned to you.
+- **to approve** and **to review**: plans and work that concern you. These are tasks you created,
+  tasks planned for you by an agent, tasks assigned to you, and tasks an agent working for you worked on.
+
+You choose which of these come. What you did yourself never comes. Nothing comes while you have a
+board in view, since its Waiting on you shows it. Changes a minute apart come together as one
+notification, and clicking it opens the task.
+
+- **Android, and Chrome, Edge, Firefox or Safari on a computer:** **Turn on in this browser**.
+- **iPhone or iPad:** add the site to the Home Screen (Share, then *Add to Home Screen*) and open it
+  from there. Then turn them on.
+- **Quiet hours:** a phone's or computer's Do Not Disturb or Focus applies to these notifications too.
+
+The browser's push service (Google's, Mozilla's, Apple's or Microsoft's) delivers each notification,
+encrypted so only that browser can read it. The service signs what it sends with a key of its own,
+kept in the data folder as `push_key`.
+
 A project's **library** holds the papers, notebooks and codebases it works from, each with why it
 matters. An agent's addition is proposed until a person keeps it.
 
