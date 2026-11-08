@@ -58,6 +58,34 @@ notebooks/    Slate notebooks; a paper's under papers/<paper>/
 assets/       logo, front page images (hero-light.svg, hero-dark.svg), images pages use
 ```
 
+## Backups
+
+The knowledge base snapshots itself every hour, into `backups` beside the data folder (the data
+folder's path with `.backups` added, `~/.local/share/zemi.backups` by default). A snapshot holds the
+database, the config folder, the content and the records, packed, and a copy of the uploads, PDFs
+and figures. A file unchanged since the last snapshot is hard-linked to that snapshot's copy, so it
+takes no more space. The site, cloned codebases, Kaimon's index and the vectors are left out: they
+are rebuilt. The folder is readable only by its owner, since the config holds secrets.
+
+```toml
+[backup]
+enabled = true                 # on by default
+dir = "/mnt/backups/zemi"      # another disk, or a mounted share, survives losing this one
+every_hours = 1
+keep_all_hours = 24            # every snapshot of the last day
+keep_half_daily_days = 3       # then one per 12 hours
+keep_daily_days = 14           # then one a day; none older
+files = true                   # false: the uploads only, not the PDFs and figures
+min_free_gb = 5                # no snapshot when the disk has less free
+max_gb = 0                     # past this, the oldest go first; 0 for no limit
+```
+
+`dir` must be outside the data folder. A small group's knowledge base takes a few MB a snapshot
+packed, and its files once: about 45 snapshots under 1 GB. Before the database is migrated to a new
+schema, the snapshot `before-schema-<n>` is taken and kept until deleted. The Status page shows the
+last snapshot and the backups' size, with **Back up now**; [Deployment](deployment.md#backups) covers
+restoring.
+
 ## Notebooks
 
 [Kaimon Slate](https://github.com/kahliburke/KaimonSlate.jl) notebooks, rendered through the local

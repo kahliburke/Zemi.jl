@@ -12,6 +12,10 @@ import { when, bytes } from './kbFormat'
 
 type Agent = { id: string; status: string; model: string; turn: number; doing: string | null; purpose: string; mine: boolean;
                usage: Record<string, number>; last_activity: number | null }
+// The backups (src/backup.jl): what they last did, and the snapshots, listed when asked for.
+type Backups = { enabled: boolean; dir: string; every_hours: number; ok_at: string; seconds: number; error: string; error_at: string;
+                 latest: string; count: number; kept: number; bytes: number }
+type Snapshot = { name: string; kept: boolean; at: string; schema: number; state_bytes: number }
 type Person = { email: string; name: string; what: string; via: string; last: string; active: boolean; open: boolean; requests: number }
 type Ops = {
   activity?: { quiet: boolean; running: string[]; people: Person[]; active_minutes: number }
@@ -19,7 +23,7 @@ type Ops = {
             memory: { process_bytes: number; free_bytes: number; total_bytes: number }; disk: { free_bytes: number } | null
             mcp: { up: boolean; port: number } | null; missing: Record<string, string>
             site: { building: boolean; started: string | null; queued: boolean; build: string | null; finished: string | null; error: string | null }
-            last: { watch: string | null; publish: string | null } }
+            last: { watch: string | null; publish: string | null }; backup: Backups }
   jobs: Job[]
   metrics: { route: string; count: number; errors: number; waits: boolean; mean_ms: number | null; p95_ms: number | null;
              max_ms: number | null }[]
@@ -34,6 +38,15 @@ const agents = ref<Agent[]>([])
 const agentError = ref('')
 const error = ref('')
 const note = ref('')
+const snapshots = ref<Snapshot[] | null>(null)
+async function listSnapshots() {
+  try { snapshots.value = (await getJSON('/api/ops/backups')).backups } catch (e: any) { error.value = e.message }
+}
+async function backUp() { await act('/api/ops/backup', 'Backing up: it shows under Jobs.'); }
+async function deleteSnapshot(name: string) {
+  await act(`/api/ops/backups/${encodeURIComponent(name)}/delete`, `Deleted ${name}.`, `Delete the snapshot ${name}?`)
+  await listSnapshots()
+}
 
 async function load() {
   try { ops.value = await getJSON('/api/ops'); error.value = '' } catch (e: any) { error.value = e.message }
@@ -121,6 +134,33 @@ const tokens = (u: Record<string, number>) => {
           <button class="kb-primary kbo-button" @click="act('/api/ops/rebuild', 'Rebuilding.')">Rebuild site</button>
           <button class="kb-primary kbo-button kbo-plain" @click="act('/api/ops/reload', 'Config reloaded.')">Reload config</button>
         </div>
+
+        <h3>Backups</h3>
+        <p class="kbo-dim">
+          <template v-if="ops.health.backup.latest">Last snapshot {{ agoIso(ops.health.backup.latest) }}</template>
+          <template v-else>No snapshot yet</template>
+          · {{ ops.health.backup.count }} kept by age, {{ ops.health.backup.kept }} by name · {{ bytes(ops.health.backup.bytes) }}
+          in <code>{{ ops.health.backup.dir }}</code>
+          · {{ ops.health.backup.enabled ? `every ${ops.health.backup.every_hours} h` : 'off in the config' }}
+        </p>
+        <p v-if="ops.health.backup.error" class="kb-error">The last backup failed {{ agoIso(ops.health.backup.error_at) }}: {{ ops.health.backup.error }}</p>
+        <div class="kbo-actions">
+          <button v-if="can('server.control')" class="kb-primary kbo-button" @click="backUp">Back up now</button>
+          <button class="kb-primary kbo-button kbo-plain" @click="snapshots ? (snapshots = null) : listSnapshots()">
+            {{ snapshots ? 'Hide the snapshots' : 'The snapshots' }}</button>
+        </div>
+        <table v-if="snapshots?.length" class="kbo-table kbo-snapshots">
+          <thead><tr><th>Snapshot</th><th>Taken</th><th>Schema</th><th>Packed</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="b in snapshots" :key="b.name">
+              <td><code>{{ b.name }}</code> <span v-if="b.kept" class="kbo-badge">kept</span></td>
+              <td class="kbo-s">{{ when(b.at) }}</td><td class="kbo-s">{{ b.schema }}</td><td class="kbo-s">{{ bytes(b.state_bytes) }}</td>
+              <td><button v-if="b.kept && can('server.control')" class="kb-link kbo-link" @click="deleteSnapshot(b.name)">delete</button></td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else-if="snapshots" class="kbo-dim">No snapshots.</p>
+        <p v-if="snapshots" class="kbo-dim">Restoring one is done with the service stopped: <code>zemi restore NAME</code>.</p>
 
         <h2>Jobs</h2>
         <table v-if="ops.jobs.length" class="kbo-table">

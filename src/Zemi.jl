@@ -8,7 +8,7 @@ module Zemi
 
 using Base64
 using CodecZlib
-using CodecZstd: ZstdCompressor, ZstdDecompressor
+using CodecZstd: ZstdCompressor, ZstdDecompressor, ZstdCompressorStream, ZstdDecompressorStream
 using Dates
 using LinearAlgebra: diagind, dot, norm, svd
 import Random
@@ -75,6 +75,7 @@ include("bibliography.jl")
 include("authors.jl")
 include("study.jl")
 include("jobs.jl")
+include("backup.jl")
 include("records.jl")
 include("resources.jl")
 include("tools.jl")

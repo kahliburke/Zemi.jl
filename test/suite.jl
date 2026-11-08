@@ -3545,7 +3545,7 @@ end
     @test all(in(keys), joinpath.(home, "keys", ["embed", "oidc", "app.pem"]))          # from the file and its settings
     policy = K.confine_policy(c, joinpath(home, "kaimon-cache"); path = cfg)
     denied = Set(chopprefix(l, "deny ") for l in split(policy, '\n') if startswith(l, "deny "))
-    @test dirname(cfg) in denied && c.data_dir in denied && K.agents_dir() in denied
+    @test dirname(cfg) in denied && c.data_dir in denied && K.backup_dir(c) in denied && K.agents_dir() in denied
     @test joinpath(home, "kaimon-cache") in denied && joinpath(home, "keys", "oidc") in denied
     @test joinpath(homedir(), ".ssh") in denied
     @test isempty(K.confinement_env(K.Config(; shared = K.SharedConfig(; confine_agents = false)), nothing))
@@ -5091,13 +5091,19 @@ end
     K.delete_task!(kb, plan; by = me)
     # A knowledge base open in this process is brought up to the code's schema (as when code is
     # applied in a running service).
+    # A snapshot of the database is kept first.
     push!(K.MIGRATIONS, ["CREATE TABLE migrate_open_check (x INTEGER)"])            # a migration that arrives with code
     K._KB[] = kb
+    was = kb.config
+    kb.config = K.with_config(kb.config; backup = K.BackupConfig(dir = mktempdir()))
     try
         K.migrate_open!()
         @test K.scalar(kb, "SELECT value FROM kv WHERE key = 'schema_version'") == string(K.schema_version())
         @test !isempty(K.query(kb, "SELECT name FROM sqlite_master WHERE name = 'migrate_open_check'"))
+        kept = only(K.backups(kb.config))
+        @test kept.kept && kept.name == "before-schema-$(K.schema_version())" && kept.schema == K.schema_version() - 1
     finally
+        kb.config = was
         K._KB[] = nothing
         pop!(K.MIGRATIONS)
         K.execute!(kb, "DROP TABLE migrate_open_check")
@@ -6098,4 +6104,78 @@ end
     tw = K.theme_figures(wsrc)
     @test tw == (; light = wsrc, dark = joinpath(dir, "fig-w-dark.webp")) && K.image_size(tw.dark) == (160, 120)
     @test near(K.load_image(tw.dark)[1, 1], K.THEME_COLORS.dark.bg) && near(K.load_image(tw.dark)[12, 30], K.THEME_COLORS.dark.fg)
+end
+
+@zset "backups" begin
+    D = K.Dates
+    root = mktempdir()
+    conf = joinpath(root, "conf", "config.toml")
+    mkpath(dirname(conf))
+    write(conf, "data_dir = \"../data\"\n[backup]\nkeep_all_hours = 2\nkeep_half_daily_days = 1\nkeep_daily_days = 3\n")
+    write(joinpath(root, "conf", "a_secret"), "s3cret")
+    withenv("ZEMI_CONFIG" => conf) do
+        c = K.validate(K.load_config())
+        # Beside the data folder by default, never in it.
+        @test K.backup_dir(c) == joinpath(root, "data.backups")
+        @test_throws "in the data folder" K.validate(K.with_config(c; backup = K.BackupConfig(dir = joinpath(c.data_dir, "b"))))
+        @test_throws "every_hours" K.validate(K.with_config(c; backup = K.BackupConfig(every_hours = 0)))
+        kb = K.open_kb(c)
+        try
+            mkpath(joinpath(c.data_dir, "pdfs")); write(joinpath(c.data_dir, "pdfs", "a.pdf"), "A"^100)
+            mkpath(joinpath(c.data_dir, "media", "m")); write(joinpath(c.data_dir, "media", "m", "up.png"), "png")
+            mkpath(c.content_dir); write(joinpath(c.content_dir, "page.md"), "# Page")
+            K.execute!(kb, "INSERT INTO kv VALUES ('probe', 'then')")
+            t0 = D.DateTime(2026, 3, 1)
+            @test K.backup_due(c; at = t0)
+            s1 = K.snapshot!(c; at = t0)
+            @test !K.backup_due(c; at = t0 + D.Minute(30)) && K.backup_due(c; at = t0 + D.Hour(1))
+            s2 = K.snapshot!(c; at = t0 + D.Hour(1))
+            # An unchanged file is linked to the last snapshot's copy; a changed one copied anew.
+            @test stat(joinpath(s1, "files", "pdfs", "a.pdf")).inode == stat(joinpath(s2, "files", "pdfs", "a.pdf")).inode
+            write(joinpath(c.data_dir, "pdfs", "a.pdf"), "B"^100)
+            s3 = K.snapshot!(c; at = t0 + D.Hour(2))
+            @test read(joinpath(s3, "files", "pdfs", "a.pdf"), String) == "B"^100 && read(joinpath(s2, "files", "pdfs", "a.pdf"), String) == "A"^100
+            # The backups are for their owner alone: the config's secrets are in them.
+            Sys.isunix() && @test filemode(K.backup_dir(c)) & 0o077 == 0
+            # Without the files, only uploads are copied.
+            s4 = K.snapshot!(K.with_config(c; backup = K.BackupConfig(files = false)); keep = "uploads-only")
+            @test readdir(joinpath(s4, "files")) == ["media"]
+            @test_throws "already" K.snapshot!(c; keep = "uploads-only")
+            @test_throws "min_free_gb" K.snapshot!(K.with_config(c; backup = K.BackupConfig(min_free_gb = 1e9)); keep = "full")
+            # Thinning, as of four days on: two hours of every snapshot, a day of one per 12 hours, three of one a day.
+            for h in 3:4*24
+                K.snapshot!(c; at = t0 + D.Hour(h))
+            end
+            gone = K.thin_backups!(c; at = t0 + D.Hour(4*24))
+            left = sort([b.at for b in K.backups(c) if !b.kept])
+            @test length(gone) == 4*24 + 1 - length(left)
+            @test count(t -> t0 + D.Hour(4*24) - t < D.Hour(2), left) == 2                    # every one of the last two hours
+            @test all(t -> t0 + D.Hour(4*24) - t < D.Day(3), left)                             # none older than three days
+            @test count(t -> D.Hour(2) <= t0 + D.Hour(4*24) - t < D.Day(1), left) <= 3          # one per 12 hours within a day
+            @test any(b -> b.kept, K.backups(c))                                           # kept ones stay
+            # Past max_gb the oldest go, all but the latest.
+            K.thin_backups!(K.with_config(c; backup = K.BackupConfig(max_gb = 1e-9)); at = t0 + D.Hour(4*24))
+            @test length([b for b in K.backups(c) if !b.kept]) == 1
+            # Restoring puts back the database, the content and the files, keeping what was there first.
+            K.snapshot!(c; keep = "before-change")
+            K.execute!(kb, "UPDATE kv SET value = 'now' WHERE key = 'probe'")
+            rm(joinpath(c.content_dir, "page.md"))
+            write(joinpath(c.data_dir, "media", "m", "later.png"), "later")
+            close(kb)
+            before = K.restore_backup!(c, "before-change")
+            @test startswith(before, "before-restore-")
+            kb = K.open_kb(c)
+            @test K.scalar(kb, "SELECT value FROM kv WHERE key = 'probe'") == "then"
+            @test read(joinpath(c.content_dir, "page.md"), String) == "# Page"
+            @test readdir(joinpath(c.data_dir, "media", "m")) == ["up.png"]
+            @test read(joinpath(c.data_dir, "pdfs", "a.pdf"), String) == "B"^100
+            @test_throws "No snapshot" K.restore_backup!(c, "nothing-by-this-name")
+            K.delete_backup!(c, "uploads-only")
+            @test !any(b -> b.name == "uploads-only", K.backups(c))
+            st = K.backup_json(c)
+            @test st["enabled"] && st["dir"] == K.backup_dir(c) && st["kept"] == length([b for b in K.backups(c) if b.kept])
+        finally
+            close(kb)
+        end
+    end
 end

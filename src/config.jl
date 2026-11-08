@@ -206,6 +206,40 @@ store_config(t::AbstractDict; path = expanduser) = StoreConfig(; store = store_p
     credentials = (c = get(t, "credentials", ""); isempty(c) ? c : path(c)))
 
 """
+    BackupConfig
+
+Snapshots of the knowledge base (see backup.jl), `[backup]` in the config: `enabled` (on by default),
+taken every `every_hours` into `dir`, by default `backups` beside the data folder (the data folder's
+path with `.backups` added), outside it so that losing the data leaves them. A snapshot is the
+database, the config folder, the content and the records; with `files`, also a copy of the PDFs,
+figures and uploads, hard-linked to the last snapshot's where unchanged. Kept: every snapshot for
+`keep_all_hours`, one per 12 hours for `keep_half_daily_days`, one a day for `keep_daily_days`. None is
+taken when the disk has less than `min_free_gb` free, and past `max_gb` (0 for no limit) the oldest go
+first.
+"""
+Base.@kwdef struct BackupConfig
+    enabled::Bool = true
+    dir::String = ""
+    every_hours::Float64 = 1.0
+    keep_all_hours::Float64 = 24.0
+    keep_half_daily_days::Float64 = 3.0
+    keep_daily_days::Float64 = 14.0
+    files::Bool = true
+    min_free_gb::Float64 = 5.0
+    max_gb::Float64 = 0.0
+end
+
+function backup_config(t::AbstractDict; path = expanduser)
+    d = BackupConfig()
+    num(k) = Float64(get(t, k, getfield(d, Symbol(k))))
+    dir = String(get(t, "dir", ""))
+    return BackupConfig(; enabled = Bool(get(t, "enabled", d.enabled)), dir = isempty(dir) ? dir : path(dir),
+        every_hours = num("every_hours"), keep_all_hours = num("keep_all_hours"), keep_half_daily_days = num("keep_half_daily_days"),
+        keep_daily_days = num("keep_daily_days"), files = Bool(get(t, "files", d.files)), min_free_gb = num("min_free_gb"),
+        max_gb = num("max_gb"))
+end
+
+"""
 A way to sign in to the shared service (see [`SharedConfig`](@ref)): `kind` `:oidc`, an OpenID
 Connect provider whose endpoints come from `issuer`'s discovery document, or `:github`, which signs
 in with OAuth 2 and gives the account through GitHub's API. `client_secret` is a key as layers'
@@ -556,6 +590,7 @@ Base.@kwdef struct Config
     media_max_mb::Int = 200
     # A private copy of every attached file (`[media.backup]`, see media.jl).
     media_backup::StoreConfig = StoreConfig()
+    backup::BackupConfig = BackupConfig()
     dataset::DatasetConfig = DatasetConfig()
     shared::SharedConfig = SharedConfig()
     sources::Dict{String,Any} = Dict{String,Any}()
@@ -609,6 +644,11 @@ changes_stamp(c::Config) = joinpath(c.data_dir, "changed")
 "A file touched to have the site built anew: its title, front page or questions changed with the settings."
 build_stamp(c::Config) = joinpath(c.data_dir, "rebuild")
 pdf_dir(c::Config) = joinpath(c.data_dir, "pdfs")
+"Where the knowledge base's snapshots go (see [`BackupConfig`](@ref)): `[backup] dir`, or the data folder's path with `.backups` added."
+backup_dir(c::Config) = isempty(c.backup.dir) ? rstrip(normpath(abspath(c.data_dir)), ['/', '\\']) * ".backups" : c.backup.dir
+"Whether `path` is `dir` or in it."
+within_dir(path::AbstractString, dir::AbstractString) =
+    (p = rstrip(normpath(abspath(path)), ['/', '\\']); d = rstrip(normpath(abspath(dir)), ['/', '\\']); p == d || startswith(p, d * Base.Filesystem.path_separator))
 
 """
     settings_path(path = config_path()) -> String
@@ -702,6 +742,7 @@ function load_config(path::AbstractString = config_path())
         slate_port = Int(get(get(t, "notebooks", Dict()), "slate_port", d.slate_port)),
         media_max_mb = Int(get(get(t, "media", Dict()), "max_mb", d.media_max_mb)),
         media_backup = store_config(get(get(t, "media", Dict()), "backup", Dict()); path = here),
+        backup = backup_config(get(t, "backup", Dict()); path = here),
         dataset = dataset_config(get(t, "dataset", Dict()); path = here),
         shared = shared_config(get(t, "shared", Dict()); path = here),
         sources = Dict{String,Any}(String(k) => v for (k, v) in get(t, "sources", Dict()) if v isa AbstractDict),
@@ -794,6 +835,13 @@ function validate(c::Config)
         i = findfirst(s -> s.name == name, c.summarizers)
         i === nothing && error("$role: no summarizer named $name")
     end
+    b = c.backup
+    b.every_hours > 0 || error("[backup] every_hours must be more than 0, got $(b.every_hours)")
+    for (k, v) in ("keep_all_hours" => b.keep_all_hours, "keep_half_daily_days" => b.keep_half_daily_days,
+                   "keep_daily_days" => b.keep_daily_days, "min_free_gb" => b.min_free_gb, "max_gb" => b.max_gb)
+        v >= 0 || error("[backup] $k can't be negative, got $v")
+    end
+    within_dir(backup_dir(c), c.data_dir) && error("[backup] dir $(backup_dir(c)) is in the data folder, so losing the data would lose the backups")
     sh = c.shared
     sh.sign_up in (:invite, :open) || error("[shared] sign_up must be \"invite\" or \"open\", got \"$(sh.sign_up)\"")
     sh.kaimon in (:embedded, :external) || error("[shared] kaimon must be \"embedded\" or \"external\", got \"$(sh.kaimon)\"")

@@ -348,7 +348,8 @@ function health_json(kb::KB)
          "site" => Dict("building" => site.building, "queued" => site.again, "error" => site.error, "build" => site.id,
                         "started" => site.started === nothing ? nothing : string(site.started),
                         "finished" => site.finished === nothing ? nothing : string(site.finished)),
-         "last" => Dict("watch" => kv("watch_checked_at"), "publish" => kv("dataset_published_at"), "pull" => kv("dataset_pulled")))
+         "last" => Dict("watch" => kv("watch_checked_at"), "publish" => kv("dataset_published_at"), "pull" => kv("dataset_pulled")),
+         "backup" => backup_json(c))
 end
 
 """
@@ -547,6 +548,18 @@ for act in ("interrupt", "close")
 end
 
 route!(c -> (rebuild_site!(c.kb); ok_json()), "POST", "/api/ops/rebuild"; need = "server.control")
+
+# The backups (see backup.jl): the snapshots, one taken now, and deleting one kept by name.
+route!("GET", "/api/ops/backups"; need = "server.view") do c
+    Dict("backups" => Any[Dict("name" => b.name, "kept" => b.kept, "at" => string(b.at) * "Z", "schema" => b.schema,
+                               "state_bytes" => b.state_bytes) for b in backups(c.kb.config)],
+         "status" => backup_json(c.kb.config))
+end
+route!("POST", "/api/ops/backup"; need = "server.control") do c
+    config = c.kb.config
+    job_json(start_job(job -> (report!(job, "Backing up"); basename(backup!(config))), "backup"))
+end
+route!(c -> (delete_backup!(c.kb.config, c[:name]); ok_json()), "POST", "/api/ops/backups/:name/delete"; need = "server.control")
 
 route!("POST", "/api/ops/reload"; need = "server.control") do c
     config = validate(load_config())

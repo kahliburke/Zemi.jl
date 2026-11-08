@@ -310,6 +310,7 @@ function run_local(; manual::Bool = false)
     follow_dataset!(db)
     server = serve_local(; kb = db, sources = !manual)
     start_watch!(db)
+    follow_backups(db)
     follow_task_vectors(db)
     follow_commits(db)
     follow_media(db)
@@ -395,6 +396,7 @@ function run_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool = 
     db.config.dataset.role == :none || start_import(db)
     follow_dataset!(db)
     start_watch!(db)
+    follow_backups(db)
     # Ctrl-C or a service manager's SIGTERM ends the process, and the cleanup runs on the way out.
     # Catching the interrupt instead does not work: it is thrown into whichever task is running at
     # the time, often one of the HTTP server's, which swallows it.

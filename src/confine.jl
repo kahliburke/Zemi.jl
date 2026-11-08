@@ -34,12 +34,12 @@ end
 
 The policy the service's agents are confined by, in the form Kaimon's launcher reads: denied, the
 configuration's folder (its settings, and the service's environment file beside them), the data
-directory (the database, the papers, the service's Kaimon), the agents' folders (each agent is given
+directory (the database, the papers, the service's Kaimon), the backups (see [`backup_dir`](@ref)), the agents' folders (each agent is given
 its own), the service Kaimon's cache, the key files ([`key_files`](@ref)) and the usual places of
 credentials.
 """
 function confine_policy(c::Config, kaimon_cache::AbstractString; path::AbstractString = config_path())
-    deny = [dirname(abspath(path)); c.data_dir; agents_dir(); kaimon_cache; key_files(c; path);
+    deny = [dirname(abspath(path)); c.data_dir; backup_dir(c); agents_dir(); kaimon_cache; key_files(c; path);
             [joinpath(homedir(), p) for p in CREDENTIAL_PLACES]]
     return "# What the service's agents and notebooks' workers may not read (written by zemi --shared).\n" *
            join("deny $p\n" for p in unique(deny))

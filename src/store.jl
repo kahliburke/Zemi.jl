@@ -229,12 +229,19 @@ schema_version() = length(MIGRATIONS)
 "Bring the knowledge base this process opened (see [`kb`](@ref)), if it has, up to the code's schema."
 migrate_open!() = (k = _KB[]; k === nothing || migrate!(k); nothing)
 
+"The schema version the database has: how many migrations it has applied."
+function stored_schema(kb::KB)
+    has_kv = !isempty(query(kb, "SELECT name FROM sqlite_master WHERE name = 'kv'"))
+    return has_kv ? parse(Int, coalesce(scalar(kb, "SELECT value FROM kv WHERE key = 'schema_version'"), "0")) : 0
+end
+
+"Bring the database up to the code's schema, keeping a snapshot of it first (see [`backup_before_migrating`](@ref))."
 function migrate!(kb::KB)
     isempty(EARLY_MIGRATIONS) || error("Migration $(length(MIGRATIONS) + 1) is missing, before $(join(sort!(collect(keys(EARLY_MIGRATIONS))), ", "))")
     latest = schema_version()
+    backup_before_migrating(kb, stored_schema(kb), latest)
     transaction(kb) do
-        has_kv = !isempty(query(kb, "SELECT name FROM sqlite_master WHERE name = 'kv'"))
-        version = has_kv ? parse(Int, coalesce(scalar(kb, "SELECT value FROM kv WHERE key = 'schema_version'"), "0")) : 0
+        version = stored_schema(kb)
         version > latest && error("Database schema v$version is newer than this code (v$latest)")
         for v in version+1:latest
             foreach(sql -> execute!(kb, sql), MIGRATIONS[v])

@@ -27,7 +27,7 @@ RUN set -e; \
 # compose.yaml mounts volumes on are made here, so the volumes start out the user's.
 RUN useradd --uid 10001 --create-home --home-dir /srv/zemi --shell /usr/sbin/nologin zemi \
  && install -d -o zemi -g zemi /opt/julia-depot /srv/zemi/.julia /srv/zemi/.config /srv/zemi/.config/zemi \
-        /srv/zemi/data /srv/zemi/caddy
+        /srv/zemi/data /srv/zemi/data.backups /srv/zemi/caddy
 COPY --chown=zemi:zemi . /srv/zemi/Zemi.jl
 USER zemi
 WORKDIR /srv/zemi/Zemi.jl

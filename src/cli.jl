@@ -26,6 +26,13 @@ const CLI_HELP = """
     zemi token revoke NAME               take NAME's key back
     zemi token add FILE                  install a key you were sent, and share the dataset it opens
     zemi token issuer                    save the Cloudflare API token that issues keys (asked for, not echoed)
+    zemi backup [--keep NAME]            take a snapshot now ([backup] in the config), kept by NAME until deleted
+    zemi backups                         the snapshots, the latest first
+    zemi restore SNAPSHOT [--config] [--force]
+                                         put a snapshot back, with the service stopped: the database, content,
+                                         records and files (the config folder's files too with --config);
+                                         what was there is kept first as a snapshot. --force restores even
+                                         though something answers on the service's port
 
     ZEMI_PORT=<port> serves on another port than 8000 (ZEMI_DEV_PORT, the development server's, than
     5173); ZEMI_CONFIG=<file> reads another config.
@@ -67,6 +74,15 @@ function progress_line()
     return report, finish
 end
 
+"The port of this knowledge base's service, the shared one's or `zemi`'s, if something answers on it."
+function serving_port(c::Config)
+    for port in unique([c.shared.port, parse(Int, get(ENV, "ZEMI_PORT", "8000"))])
+        answers = try close(connect(ip"127.0.0.1", port)); true catch; false end
+        answers && return port
+    end
+    return nothing
+end
+
 """
     cli(args) -> Int
 
@@ -101,6 +117,25 @@ function cli(args::AbstractVector{<:AbstractString})
                 write(expanduser(rest[1]), text)
                 println("Wrote $(count(startswith("@"), split(text, '\n'))) entries to $(rest[1])")
             end
+        elseif cmd == "backup"
+            c = validate(load_config())
+            path = backup!(c; keep = something(option(rest, "--keep"), ""))
+            println("Backed up to $path ($(round(filesize(joinpath(path, "state.tar.zst")) / 1e6; digits = 1)) MB packed, and the files)")
+        elseif cmd == "backups"
+            c = validate(load_config())
+            all = backups(c)
+            isempty(all) && println("No snapshots in $(backup_dir(c)).")
+            for b in all
+                println(rpad(b.name, 34), b.kept ? "kept  " : "      ", Dates.format(b.at, "yyyy-mm-dd HH:MM"), " UTC  schema ", b.schema,
+                        "  ", round(b.state_bytes / 1e6; digits = 1), " MB")
+            end
+        elseif cmd == "restore" && length(rest) >= 1
+            c = validate(load_config())
+            port = serving_port(c)
+            port === nothing || "--force" in rest ||
+                error("something answers on port $port, the service's: stop it first (or pass --force if it is not this knowledge base)")
+            before = restore_backup!(c, rest[1]; config_files = "--config" in rest)
+            println("Restored $(rest[1]) into $(c.data_dir).", isempty(before) ? "" : " What was there is kept as the snapshot $before.")
         elseif cmd == "token"
             c = load_config()
             sub = get(rest, 1, "")

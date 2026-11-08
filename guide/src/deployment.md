@@ -131,6 +131,29 @@ be running).
 - `MemoryMax` is 80% of RAM. Site builds use up to a 12 GB Node heap: 32 GB of RAM is comfortable,
   16 GB can stop a large build. Lower `MemoryMax` when several services share a machine.
 
+## Backups
+
+The service snapshots itself every hour into `/srv/zemi/data.backups` (see
+[Configuration](configuration.md#backups)); its agents can't read them. A `[backup] dir` elsewhere
+needs adding to `ReadWritePaths` in the service's unit.
+
+```sh
+sudo -u zemi env ZEMI_CONFIG=/srv/zemi/.config/zemi/config.toml /srv/zemi/Zemi.jl/zemi backups
+sudo -u zemi env ZEMI_CONFIG=/srv/zemi/.config/zemi/config.toml /srv/zemi/Zemi.jl/zemi backup --keep before-upgrade
+```
+
+To restore one, stop the service, restore, and start it:
+
+```sh
+sudo systemctl stop zemi
+sudo -u zemi env ZEMI_CONFIG=/srv/zemi/.config/zemi/config.toml /srv/zemi/Zemi.jl/zemi restore 20261108T010000Z
+sudo systemctl start zemi
+```
+
+Restoring puts back the database, the content, the records and the files, as they were. What was
+there is first kept as the snapshot `before-restore-<time>`, so a restore can be undone the same way.
+`--config` puts back the config folder's files too.
+
 ## In containers
 
 `deploy/compose.yaml` runs the service with Qdrant, Ollama and Caddy, in place of `install.sh`. From
@@ -151,8 +174,8 @@ Code, Codex, OpenCode): a group whose summarizers or tutor run as agents builds 
 that installs them, with their tokens in `service.env`.
 
 - Logs: `docker compose -f deploy/compose.yaml logs -f zemi`.
-- Update: `git pull`, then the same `up -d --build`. The data, Julia's later installs, Qdrant's
-  vectors and Ollama's models are volumes, kept across rebuilds.
+- Update: `git pull`, then the same `up -d --build`. The data, its backups, Julia's later installs,
+  Qdrant's vectors and Ollama's models are volumes, kept across rebuilds.
 - An NVIDIA GPU for Ollama: uncomment its `deploy` lines in `compose.yaml`.
 
 To try it on one machine, without a domain or Caddy, add `deploy/compose.local.yaml`: the service is
