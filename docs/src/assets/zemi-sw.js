@@ -8,8 +8,8 @@ self.addEventListener('push', e => {
   let m = {}
   try { m = e.data ? e.data.json() : {} } catch { m = { body: e.data ? e.data.text() : '' } }
   e.waitUntil(self.registration.showNotification(m.title || 'Zemi', {
-    body: m.body || '', tag: m.tag || 'zemi', renotify: true, icon: '/android-chrome-192x192.png',
-    data: { url: m.url || '/' },
+    body: m.body || '', icon: '/android-chrome-192x192.png', data: { url: m.url || '/' },
+    ...(m.tag ? { tag: m.tag, renotify: true } : {}),
   }))
 })
 

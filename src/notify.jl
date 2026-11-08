@@ -94,7 +94,8 @@ page_path(path::AbstractString) = (i = findfirst('#', path); i === nothing ? "/$
     notification(c, items) -> Dict
 
 What a push says of `items` (see [`waiting_items`](@ref)): a `title`, a `body`, the `url` to open
-(the task, for one) and a `tag`, so a newer notification replaces one not yet looked at.
+(the task, for one). Each has no tag of its own, so none replaces another: a replaced one does not
+show on a Mac's screen, only in its Notification Center.
 """
 function notification(c::Config, items)
     heads = Dict("proposed" => "To approve", "questions" => "Question for you", "answered" => "Your question answered",
@@ -102,13 +103,13 @@ function notification(c::Config, items)
     if length(items) == 1
         i = only(items)
         return Dict("title" => "$(heads[i["section"]]) · $(i["ref"])", "body" => clip_line(i["text"], 240),
-                    "url" => page_path("projects#" * i["ref"]), "tag" => "zemi-waiting")
+                    "url" => page_path("projects#" * i["ref"]))
     end
     lines = ["$(i["ref"]) $(lowercase(heads[i["section"]])): $(clip_line(i["text"], 90))" for i in items]
     more = length(lines) > 4 ? "\n… and $(length(lines) - 4) more" : ""
     key = first(split(items[1]["ref"], '-'))
     return Dict("title" => "$(length(items)) things wait on you", "body" => join(first(lines, 4), "\n") * more,
-                "url" => page_path("projects#" * key), "tag" => "zemi-waiting")
+                "url" => page_path("projects#" * key))
 end
 
 "Person `uid`'s notification state: the sections they want, what was seen last (`nothing` before the first look), what is held."
@@ -275,6 +276,6 @@ end
 route!("POST", "/api/push/test"; need = "tasks.view") do c
     uid = push_uid(c)
     n = push_to_person!(c.kb, uid, Dict("title" => "Notifications are on", "body" => "This is how what waits on you will show.",
-                                        "url" => page_path("projects"), "tag" => "zemi-test"))
+                                        "url" => page_path("projects")))
     Dict("sent" => n)
 end
