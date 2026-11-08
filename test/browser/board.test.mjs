@@ -29,7 +29,7 @@ test('cards hint at what waits on you, what is yours and what changed lately', a
     assert.match(await card('BR-5').getAttribute('class'), /\bmine\b/)
     assert.doesNotMatch(await card('BR-2').getAttribute('class'), /\b(mine|asking)\b/)
     assert.match(await card('BR-2').getAttribute('class'), /\bfresh\b/)        // made just now
-    if (process.env.ZEMI_SHOT) await page.locator('.kbp-board').screenshot({ path: process.env.ZEMI_SHOT })
+    if (process.env.ZEMI_SHOT) await page.screenshot({ path: process.env.ZEMI_SHOT })
     assert.deepEqual(errors, [])
     await close()
   } finally {

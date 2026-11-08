@@ -1252,16 +1252,6 @@ function keepRecordsOpen(open: boolean) {
         <div v-if="pen" class="kbp-ink-catch" @pointermove="inkMove" @pointerdown.prevent="inkDown" @pointerup="inkUp" @pointerleave="inkUp" @wheel="inkWheel"></div>
         <canvas v-show="inSession" ref="inkCanvas" class="kbp-ink"></canvas>
       </Teleport>
-      <div v-if="key" class="kbp-filters">
-        <KBTaskSearch :project="key" @open="openFromSearch" />
-        <select v-if="board" v-model="only" class="kbp-select" aria-label="Show tasks in a status"
-                title="Show the tasks in a status, and those with a subtask in it">
-          <option value="">Every status</option><option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.label }}</option></select>
-        <select v-if="board" v-model="sortBy" class="kbp-select" aria-label="Sort each column"
-                :title="`Sort each column: ${SORTS.find(x => x.id === sortBy)!.help.toLowerCase()}${sorted ? '. Dragging moves a card between columns; reorder by hand in Your order' : ''}`">
-          <option v-for="x in SORTS" :key="x.id" :value="x.id">Sort: {{ x.label }}</option></select>
-        <label class="kbp-check"><input v-model="subtasks" type="checkbox" /> Subtasks</label>
-      </div>
       <form v-if="newProject" class="kbp-form" @submit.prevent="addProject">
         <input v-model="newProject.name" placeholder="Name" required />
         <input v-model="newProject.key" placeholder="Key (KB)" required class="kbp-short" />
@@ -1400,6 +1390,17 @@ function keepRecordsOpen(open: boolean) {
         </ul>
       </div>
 
+      <!-- What the columns show, and in what order: just above them. -->
+      <div v-if="key" class="kbp-filters">
+        <KBTaskSearch :project="key" @open="openFromSearch" />
+        <select v-if="board" v-model="only" class="kbp-select" aria-label="Show tasks in a status"
+                title="Show the tasks in a status, and those with a subtask in it">
+          <option value="">Every status</option><option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.label }}</option></select>
+        <select v-if="board" v-model="sortBy" class="kbp-select" aria-label="Sort each column"
+                :title="`Sort each column: ${SORTS.find(x => x.id === sortBy)!.help.toLowerCase()}${sorted ? '. Dragging moves a card between columns; reorder by hand in Your order' : ''}`">
+          <option v-for="x in SORTS" :key="x.id" :value="x.id">Sort: {{ x.label }}</option></select>
+        <label class="kbp-check"><input v-model="subtasks" type="checkbox" /> Subtasks</label>
+      </div>
       <div v-if="board" class="kbp-board">
         <section v-for="s in statuses" :key="s.id" class="kbp-col" :class="[s.id, { over: over === s.id }]"
                  @dragover.prevent="over = s.id" @dragleave="over = ''" @drop.prevent="drop(s.id)">
