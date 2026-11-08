@@ -102,8 +102,6 @@ notification, and clicking it opens the task.
 - **iPhone or iPad:** add the site to the Home Screen (Share, then *Add to Home Screen*) and open it
   from there. Then turn them on.
 - **Quiet hours:** a phone's or computer's Do Not Disturb or Focus applies to these notifications too.
-- **On a Mac,** one that comes while the browser is the app in front goes to Notification Center
-  without showing on screen.
 
 The browser's push service (Google's, Mozilla's, Apple's or Microsoft's) delivers each notification,
 encrypted so only that browser can read it. The service signs what it sends with a key of its own,

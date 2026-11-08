@@ -35,7 +35,7 @@ async function act(f: () => Promise<unknown>, done = '') {
 const on = () => act(async () => {
   await turnOn(settings.value!)
   if (!(await sendTest()).sent) throw new Error('On, but the browser’s push service did not take the first notification.')
-}, 'On in this browser: one is on its way to show how they look. On a Mac, while this browser is in front, it goes to Notification Center.')
+}, 'On in this browser: one is on its way to show how they look.')
 const off = () => act(turnOff, 'Off in this browser.')
 function toggle(id: string, want: boolean) {
   const s = settings.value!
