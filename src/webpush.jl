@@ -251,5 +251,7 @@ function web_push(c::Config, device, payload::AbstractString; ttl::Integer = 864
     headers = ["Authorization" => vapid(push_key(c), device.endpoint; subject = push_subject(c)), "TTL" => string(ttl),
                "Content-Encoding" => "aes128gcm", "Content-Type" => "application/octet-stream", "Urgency" => urgency]
     r = post(device.endpoint, headers, body; status_exception = false, retry = false, request_timeout = 30, connect_timeout = 10)
+    r.status in (200, 201, 202) ||
+        @warn "Push service refused a notification" host = HTTP.URI(device.endpoint).host status = r.status reply = first(String(copy(r.body)), 300) maxlog = 20
     return Int(r.status)
 end
