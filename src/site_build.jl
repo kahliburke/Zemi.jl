@@ -32,14 +32,16 @@ by default, `docs/make.jl` in a Julia process of its own.
 """
 function build_site!(c::Config; build = default_site_build)
     # Named by the second it starts, after any build of the same second: what it leaves is its own.
+    # By its real path: VitePress resolves links through it, and a folder reached through a link
+    # (macOS's /tmp) gives every page a path climbing out of the site.
+    builds = realpath(mkpath(builds_dir(c)))
     id, out = "", ""
     while true
         id = Dates.format(now(UTC), dateformat"yyyymmddTHHMMSS")
-        out = joinpath(builds_dir(c), id)
+        out = joinpath(builds, id)
         ispath(out) || ispath(out * ".log") || break
         sleep(0.2)
     end
-    mkpath(builds_dir(c))
     log = out * ".log"
     t0 = time()
     @info "[site] Building $id (log: $log)"
