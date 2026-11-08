@@ -18,6 +18,13 @@ const error = ref('')
 // Each step's main button takes the focus, so Enter answers it.
 watch(shown, async v => { if (v) { await nextTick(); document.querySelector<HTMLButtonElement>('.kbno-yes')?.focus() } })
 
+// Whether notifications are on here: the browser subscribed, and the service has the subscription
+// (a device removed from another one's Account page keeps its browser's).
+async function subscribed() {
+  const sub = await currentSubscription()
+  return !!sub && (await loadPush()).devices.some(d => d.endpoint === sub.endpoint)
+}
+
 // Decided once, when the page knows who is signed in.
 let decided = false
 watch(me, async m => {
@@ -26,7 +33,7 @@ watch(me, async m => {
   if (localStorage.getItem(OFFERED) || m.via !== 'session' || !can('tasks.edit')) return
   if (location.pathname.includes('/service/account')) return            // the page has its own
   const show = needsHomeScreen() ? 'home' :
-    pushSupported() && Notification.permission !== 'denied' && !(await currentSubscription()) ? 'offer' : ''
+    pushSupported() && Notification.permission !== 'denied' && !(await subscribed()) ? 'offer' : ''
   if (!show) return
   markOffered('shown')
   shown.value = show
