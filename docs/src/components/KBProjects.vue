@@ -740,6 +740,16 @@ onMounted(() => {
   if (SORTS.some(x => x.id === s)) sortBy.value = s as SortId
 })
 const working = computed(() => marked(t => atWork.value.has(t.ref)))
+// What a card hints at, in colour: a question waiting on your answer (or an answer to yours), a task
+// of yours, one changed in the last hour or the last day.
+const RECENT_HOURS = 24, FRESH_HOURS = 1
+const askingMe = computed(() => new Set(waiting.value.questions.map(q => q.ref)))
+const answeredMe = computed(() => new Set(waiting.value.answered.map(q => q.ref)))
+function hints(t: Task) {
+  const hours = (clock.value - Date.parse(t.updated_at)) / 3_600_000
+  return { mine: !!myPersonId.value && t.assignee === myPersonId.value, asking: askingMe.value.has(t.ref),
+           answered: answeredMe.value.has(t.ref), fresh: hours < FRESH_HOURS, recent: hours >= FRESH_HOURS && hours < RECENT_HOURS }
+}
 // A milestone's place: dated ones by when they are due, then undated ones as the board lists them,
 // then no milestone.
 const milestoneRank = computed(() => {
@@ -1401,7 +1411,7 @@ function keepRecordsOpen(open: boolean) {
             {{ draggedStatus !== s.id ? `Move to ${s.label}` : sorted ? 'Out of its task' : 'To the top' }}</div>
           <article v-for="t in column(s.id)" :key="t.ref" class="kbp-card" :data-ref="t.ref"
                    :data-pointer="pointedBy?.ref === t.ref ? initials(pointedBy.name) : undefined"
-                   :class="{ pointed: pointedBy?.ref === t.ref, open: open?.ref === t.ref, agent: t.by_agent, flash: flashed.has(t.ref), saving: busy(`task:${t.ref}`), 'drop-before': target?.ref === t.ref && target.zone === 'before',
+                   :class="{ ...hints(t), pointed: pointedBy?.ref === t.ref, open: open?.ref === t.ref, agent: t.by_agent, flash: flashed.has(t.ref), saving: busy(`task:${t.ref}`), 'drop-before': target?.ref === t.ref && target.zone === 'before',
                              'drop-into': target?.ref === t.ref && target.zone === 'into' }"
                    :draggable="editable" @dragstart="startDrag(t.ref)" @dragend="dragEnded"
                    @dragover.prevent.stop="aim($event, t)" @dragleave="target = null" @drop.prevent.stop="drop(s.id, t)" @click="show(t)">
@@ -1413,7 +1423,9 @@ function keepRecordsOpen(open: boolean) {
               <span v-if="t.blocked" class="kbp-tag blocked" :title="t.blocked">blocked</span>
               <span v-if="t.by_agent" class="kbp-tag" title="Planned by an agent">agent</span>
               <span v-if="approvedAlone(t)" class="kbp-tag alone" :title="`Approved on its own: ${t.parent} is still proposed`">approved alone</span>
-              <span v-if="t.sent_back" class="kbp-tag sent" title="Sent back from review: being reworked">sent back</span></div>
+              <span v-if="t.sent_back" class="kbp-tag sent" title="Sent back from review: being reworked">sent back</span>
+              <span v-if="askingMe.has(t.ref)" class="kbp-tag asking" title="A question here waits on your answer">your answer</span>
+              <span v-else-if="answeredMe.has(t.ref)" class="kbp-tag answered" title="Your question here has an answer">answered</span></div>
             <div class="kbp-title">{{ t.title }}</div>
             <div class="kbp-meta">
               <span v-if="t.milestone">{{ t.milestone }}</span>
@@ -1833,6 +1845,15 @@ function keepRecordsOpen(open: boolean) {
 .kbp-card { background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); border-radius: 8px; padding: 0.45rem 0.55rem; margin-bottom: 0.45rem; cursor: pointer;
   overflow-wrap: anywhere; }
 .kbp-card:hover, .kbp-card.open { border-color: var(--vp-c-brand-1); }
+/* Hints: an edge for what is yours (the colour of you elsewhere on the board) or waits on you, a blue
+   wash for what changed lately. */
+.kbp-card.recent { background: color-mix(in srgb, var(--vp-c-indigo-1) 5%, var(--vp-c-bg)); }
+.kbp-card.fresh { background: color-mix(in srgb, var(--vp-c-indigo-1) 11%, var(--vp-c-bg)); }
+.kbp-card.mine { box-shadow: inset 3px 0 0 var(--vp-c-brand-1); }
+.kbp-card.answered { box-shadow: inset 3px 0 0 var(--vp-c-purple-1); }
+.kbp-card.asking { box-shadow: inset 3px 0 0 var(--vp-c-warning-1); }
+.kbp-tag.asking { background: var(--vp-c-warning-soft); color: var(--vp-c-warning-1); }
+.kbp-tag.answered { background: var(--vp-c-purple-soft); color: var(--vp-c-purple-1); }
 /* An update pulses three times over six seconds: noticeable, then gone. */
 .kbp-card.flash { animation: kbp-flash 2s ease-in-out 3; }
 /* On its way to the service: see `sending`. */

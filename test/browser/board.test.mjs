@@ -18,6 +18,25 @@ test('the columns, with their cards, and nothing failing', async () => {
   await close()
 })
 
+test('cards hint at what waits on you, what is yours and what changed lately', async () => {
+  const me = await api('/api/me')
+  await api('/api/tasks/BR-5', { assignee: me.id })
+  try {
+    const { page, errors, close } = await open('/projects#BR', '.kbp-card')
+    const card = r => page.locator(`.kbp-card:has(.kbp-ref:text-is("${r}"))`)
+    await card('BR-1').locator('.kbp-tag.asking').waitFor()                 // the agent's question waits on its answer
+    assert.match(await card('BR-1').getAttribute('class'), /\basking\b/)
+    assert.match(await card('BR-5').getAttribute('class'), /\bmine\b/)
+    assert.doesNotMatch(await card('BR-2').getAttribute('class'), /\b(mine|asking)\b/)
+    assert.match(await card('BR-2').getAttribute('class'), /\bfresh\b/)        // made just now
+    if (process.env.ZEMI_SHOT) await page.locator('.kbp-board').screenshot({ path: process.env.ZEMI_SHOT })
+    assert.deepEqual(errors, [])
+    await close()
+  } finally {
+    await api('/api/tasks/BR-5', { assignee: '' })
+  }
+})
+
 test('a card opens in the panel, its plan rendered', async () => {
   const { page, errors, close } = await open('/projects#BR', '.kbp-card')
   await page.locator('.kbp-card:has(.kbp-ref:text-is("BR-1"))').click()

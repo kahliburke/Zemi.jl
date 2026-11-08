@@ -16,6 +16,10 @@ the milestone is due, by assignee (yours first), by when tasks last changed, or 
 ranked alike keep the dragged order. The browser keeps the choice. Sorted otherwise, dragging still
 moves a card between columns or under another task; reordering by hand needs the dragged order.
 
+A card's colours hint at what concerns you: an amber edge and **your answer** where a question waits
+on you, a purple edge and **answered** where your question has an answer, an edge in the board's
+accent on your own tasks, and a blue wash on tasks changed in the last day, stronger in the last hour.
+
 ```@raw html
 <figure class="shot">
   <img class="light-only" src="./assets/screenshots/board-light.png" alt="A project board">
