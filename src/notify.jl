@@ -143,15 +143,17 @@ function set_notify_sections!(kb::KB, uid::Integer, sections)
 end
 
 """
-    push_to_person!(kb, uid, message; send = web_push) -> Int
+    push_to_person!(kb, uid, message; send = web_push, endpoint = "") -> Int
 
-Send `message` (see [`notification`](@ref)) to every device of person `uid`, returning how many took
-it. A device its push service says is gone is dropped, as is one that failed `PUSH_FAILURES` times in a row.
+Send `message` (see [`notification`](@ref)) to every device of person `uid`, or only the one at
+`endpoint`, returning how many took it. A device its push service says is gone is dropped, as is one that failed `PUSH_FAILURES` times in a row.
 """
-function push_to_person!(kb::KB, uid::Integer, message::AbstractDict; send = web_push)
+function push_to_person!(kb::KB, uid::Integer, message::AbstractDict; send = web_push, endpoint::AbstractString = "")
     payload = JSON.json(message)
     sent = 0
-    for d in query(kb, "SELECT * FROM push_devices WHERE user_id = ?", (uid,))
+    devices = isempty(endpoint) ? query(kb, "SELECT * FROM push_devices WHERE user_id = ?", (uid,)) :
+              query(kb, "SELECT * FROM push_devices WHERE user_id = ? AND endpoint = ?", (uid, endpoint))
+    for d in devices
         status = try
             send(kb.config, d, payload)
         catch e
@@ -275,7 +277,9 @@ route!("POST", "/api/push/sections"; need = "tasks.view") do c
 end
 route!("POST", "/api/push/test"; need = "tasks.view") do c
     uid = push_uid(c)
-    n = push_to_person!(c.kb, uid, Dict("title" => "Notifications are on", "body" => "This is how what waits on you will show.",
-                                        "url" => page_path("projects")))
+    # To the device just turned on, when it is named.
+    n = push_to_person!(c.kb, uid, Dict("title" => "Notifications are on",
+                                        "body" => "Questions for you, answers to yours, plans and work to review, and tasks assigned to you will show here.",
+                                        "url" => page_path("projects")); endpoint = string(get(json_body(c), "endpoint", "")))
     Dict("sent" => n)
 end

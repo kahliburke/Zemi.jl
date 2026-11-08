@@ -1884,9 +1884,15 @@ end
     call(bea, "POST", "/api/tasks/PU-1", Dict("status" => "review"))
     round(701); round(770)
     @test to("ada")[end]["title"] == "To review · PU-1" && isempty(to("cy"))
+    # The first notification goes to the device just turned on, not to the person's others.
+    call(ada, "POST", "/api/push/devices", device("ada-phone"))
+    before = length(sent)
+    @test K.push_to_person!(kb, ada, Dict("title" => "On"); send, endpoint = "https://fcm.googleapis.com/fcm/send/ada-phone") == 1
+    @test length(sent) == before + 1 && endswith(last(sent)[1], "/ada-phone")
     # A device its push service says is gone is dropped.
     status[] = 410
-    @test call(ada, "POST", "/api/push/test")[2]["sent"] == 0
+    @test K.push_to_person!(kb, ada, Dict("title" => "On"); send) == 0
     @test isempty(call(ada, "GET", "/api/push")[2]["devices"])
+    @test call(ada, "POST", "/api/push/test", Dict("endpoint" => "https://fcm.googleapis.com/fcm/send/ada"))[2]["sent"] == 0
     close(kb)
 end

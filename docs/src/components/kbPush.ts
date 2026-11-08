@@ -46,8 +46,9 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
   return r ? r.pushManager.getSubscription() : null
 }
 
-// Turn notifications on in this browser: asks its permission (so call it from a click).
-export async function turnOn(settings: PushSettings) {
+// Turn notifications on in this browser, returning its subscription's endpoint: asks its permission
+// (so call it from a click).
+export async function turnOn(settings: PushSettings): Promise<string> {
   if ((await Notification.requestPermission()) !== 'granted') throw new Error('Notifications are blocked in this browser’s settings for this site.')
   const reg = await registration()
   await navigator.serviceWorker.ready
@@ -59,6 +60,7 @@ export async function turnOn(settings: PushSettings) {
   if (sub && !same) { await sub.unsubscribe(); sub = null }
   sub ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
   await post('/api/push/devices', JSON.stringify({ ...sub.toJSON(), label: deviceLabel() }))
+  return sub.endpoint
 }
 
 // Turn them off in this browser.
@@ -71,5 +73,5 @@ export async function turnOff() {
 
 export const loadPush = (): Promise<PushSettings> => getJSON('/api/push')
 export const saveSections = (sections: string[]) => post('/api/push/sections', JSON.stringify({ sections }))
-export const sendTest = (): Promise<{ sent: number }> => post('/api/push/test')
+export const sendTest = (endpoint: string): Promise<{ sent: number }> => post('/api/push/test', JSON.stringify({ endpoint }))
 export const forget = (endpoint: string) => post('/api/push/devices/remove', JSON.stringify({ endpoint }))

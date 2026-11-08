@@ -33,8 +33,8 @@ async function act(f: () => Promise<unknown>, done = '') {
 }
 // Turning them on sends one, so the person sees at once that they arrive.
 const on = () => act(async () => {
-  await turnOn(settings.value!)
-  if (!(await sendTest()).sent) throw new Error('On, but the browser’s push service did not take the first notification.')
+  const endpoint = await turnOn(settings.value!)
+  if (!(await sendTest(endpoint)).sent) throw new Error('On, but the browser’s push service did not take the first notification.')
 }, 'On in this browser: one is on its way to show how they look.')
 const off = () => act(turnOff, 'Off in this browser.')
 function toggle(id: string, want: boolean) {
