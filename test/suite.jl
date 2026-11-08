@@ -6186,3 +6186,22 @@ end
         end
     end
 end
+
+@zset "what others changed on a board" begin
+    kb = open_kb(temp_config())
+    ada, bea = K.person("Ada"), K.person("Bea")
+    helper = K.agent("Claude for Ada"; id = "Ada")
+    K.create_project!(kb, "Wetlands"; key = "WE", owner = nothing, by = ada)
+    mine = K.create_task!(kb, "WE", "Ada's own"; status = "ready", by = ada)
+    beas = K.create_task!(kb, "WE", "Bea's"; status = "ready", by = ada)
+    K.update_task!(kb, beas; title = "Bea's, retitled", by = bea)
+    helped = K.create_task!(kb, "WE", "Helped"; status = "ready", by = ada)
+    K.note_task!(kb, helped, "Started."; kind = "progress", by = helper)
+    # For Ada: what Bea and Ada's own agent changed, not what Ada did.
+    @test sort(collect(keys(K.changed_by_others(kb, "WE", "Ada")))) == sort([beas, helped])
+    @test sort(collect(keys(K.changed_by_others(kb, "WE", "Bea")))) == sort([mine, beas, helped])
+    # Only within the days asked for.
+    K.execute!(kb, "UPDATE task_events SET at = '2020-01-01T00:00:00Z'")
+    @test isempty(K.changed_by_others(kb, "WE", "Ada"))
+    close(kb)
+end

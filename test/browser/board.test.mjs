@@ -18,7 +18,7 @@ test('the columns, with their cards, and nothing failing', async () => {
   await close()
 })
 
-test('cards hint at what waits on you, what is yours and what changed lately', async () => {
+test('cards hint at what waits on you, what is yours and what others changed lately', async () => {
   const me = await api('/api/me')
   await api('/api/tasks/BR-5', { assignee: me.id })
   try {
@@ -28,8 +28,16 @@ test('cards hint at what waits on you, what is yours and what changed lately', a
     assert.match(await card('BR-1').getAttribute('class'), /\basking\b/)
     assert.match(await card('BR-5').getAttribute('class'), /\bmine\b/)
     assert.doesNotMatch(await card('BR-2').getAttribute('class'), /\b(mine|asking)\b/)
-    assert.match(await card('BR-2').getAttribute('class'), /\bfresh\b/)        // made just now
+    // Tinted when others changed them (an agent planned BR-6), not for what you did yourself (BR-2).
+    assert.match(await card('BR-6').getAttribute('class'), /\brecent\b/)
+    assert.doesNotMatch(await card('BR-2').getAttribute('class'), /\b(recent|fresh)\b/)
     if (process.env.ZEMI_SHOT) await page.screenshot({ path: process.env.ZEMI_SHOT })
+    // Turned off, and kept so on the next visit.
+    await page.getByLabel('Show what others changed within').selectOption('0')
+    assert.doesNotMatch(await card('BR-6').getAttribute('class'), /\brecent\b/)
+    await page.reload()
+    await card('BR-1').locator('.kbp-tag.asking').waitFor()
+    assert.doesNotMatch(await card('BR-6').getAttribute('class'), /\brecent\b/)
     assert.deepEqual(errors, [])
     await close()
   } finally {

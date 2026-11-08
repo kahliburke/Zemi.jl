@@ -56,7 +56,7 @@ const key = ref('')
 const board = ref<{ project: Project; milestones: Milestone[]; tasks: Task[]; codebase: Codebase | null; access: string;
                     manages_members: boolean; findings: number; records: { id: string; title: string; day: string }[];
                     agents: { tasks: { ref: string; agent: string; at: string; via: string }[]; waiting: { agent: string; since: string }[] };
-                    people_did: Action[] } | null>(null)
+                    people_did: Action[]; changed_by_others?: Record<string, string> } | null>(null)
 const open = ref<Full | null>(null)
 // Room on the board for the docked task panel: what the panel covers past the page's own margin.
 const page = ref<HTMLElement | null>(null)
@@ -741,14 +741,27 @@ onMounted(() => {
 })
 const working = computed(() => marked(t => atWork.value.has(t.ref)))
 // What a card hints at, in colour: a question waiting on your answer (or an answer to yours), a task
-// of yours, one changed in the last hour or the last day.
-const RECENT_HOURS = 24, FRESH_HOURS = 1
+// of yours, and one others changed (people, or agents, yours too): since you opened the board, or more
+// faintly within the hours chosen, as this browser was left.
+const CHANGED_HOURS = 'zemi-board-changed-hours'
+const CHANGED_CHOICES = [[1, '1 hour'], [4, '4 hours'], [24, 'a day'], [72, '3 days'], [168, 'a week'], [0, 'off']] as const
+const changedHours = ref(4)
+watch(changedHours, h => h === 4 ? localStorage.removeItem(CHANGED_HOURS) : localStorage.setItem(CHANGED_HOURS, String(h)))
+onMounted(() => {
+  const h = Number(localStorage.getItem(CHANGED_HOURS) ?? NaN)
+  if (CHANGED_CHOICES.some(([x]) => x === h)) changedHours.value = h
+})
+const openedAt = ref(Date.now())
+watch(key, () => { openedAt.value = Date.now() })
 const askingMe = computed(() => new Set(waiting.value.questions.map(q => q.ref)))
 const answeredMe = computed(() => new Set(waiting.value.answered.map(q => q.ref)))
 function hints(t: Task) {
-  const hours = (clock.value - Date.parse(t.updated_at)) / 3_600_000
+  const at = board.value?.changed_by_others?.[t.ref]
+  const when = at ? Date.parse(at) : 0
+  const fresh = !!changedHours.value && when > openedAt.value
   return { mine: !!myPersonId.value && t.assignee === myPersonId.value, asking: askingMe.value.has(t.ref),
-           answered: answeredMe.value.has(t.ref), fresh: hours < FRESH_HOURS, recent: hours >= FRESH_HOURS && hours < RECENT_HOURS }
+           answered: answeredMe.value.has(t.ref), fresh,
+           recent: !fresh && !!changedHours.value && clock.value - when < changedHours.value * 3_600_000 }
 }
 // A milestone's place: dated ones by when they are due, then undated ones as the board lists them,
 // then no milestone.
@@ -1400,6 +1413,10 @@ function keepRecordsOpen(open: boolean) {
                 :title="`Sort each column: ${SORTS.find(x => x.id === sortBy)!.help.toLowerCase()}${sorted ? '. Dragging moves a card between columns; reorder by hand in Your order' : ''}`">
           <option v-for="x in SORTS" :key="x.id" :value="x.id">Sort: {{ x.label }}</option></select>
         <label class="kbp-check"><input v-model="subtasks" type="checkbox" /> Subtasks</label>
+        <label class="kbp-changed" title="Cards others changed (people, or agents) are tinted: more strongly since you opened the board">
+          <span class="kbp-changed-swatch"></span>Changed by others in
+          <select v-model.number="changedHours" class="kbp-select" aria-label="Show what others changed within">
+            <option v-for="[h, label] in CHANGED_CHOICES" :key="h" :value="h">{{ label }}</option></select></label>
       </div>
       <div v-if="board" class="kbp-board">
         <section v-for="s in statuses" :key="s.id" class="kbp-col" :class="[s.id, { over: over === s.id }]"
@@ -1847,12 +1864,15 @@ function keepRecordsOpen(open: boolean) {
   overflow-wrap: anywhere; }
 .kbp-card:hover, .kbp-card.open { border-color: var(--vp-c-brand-1); }
 /* Hints: an edge for what is yours (the colour of you elsewhere on the board) or waits on you, a blue
-   wash for what changed lately. */
-.kbp-card.recent { background: color-mix(in srgb, var(--vp-c-indigo-1) 5%, var(--vp-c-bg)); }
-.kbp-card.fresh { background: color-mix(in srgb, var(--vp-c-indigo-1) 11%, var(--vp-c-bg)); }
+   wash for what others changed lately. */
+.kbp-card.recent { background: color-mix(in srgb, var(--vp-c-indigo-1) 10%, var(--vp-c-bg)); }
+.kbp-card.fresh { background: color-mix(in srgb, var(--vp-c-indigo-1) 20%, var(--vp-c-bg)); }
 .kbp-card.mine { box-shadow: inset 3px 0 0 var(--vp-c-brand-1); }
 .kbp-card.answered { box-shadow: inset 3px 0 0 var(--vp-c-purple-1); }
 .kbp-card.asking { box-shadow: inset 3px 0 0 var(--vp-c-warning-1); }
+.kbp-changed { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--vp-c-text-2); }
+.kbp-changed-swatch { width: 0.8rem; height: 0.8rem; border-radius: 3px; border: 1px solid var(--vp-c-divider);
+                      background: color-mix(in srgb, var(--vp-c-indigo-1) 20%, var(--vp-c-bg)); }
 .kbp-tag.asking { background: var(--vp-c-warning-soft); color: var(--vp-c-warning-1); }
 .kbp-tag.answered { background: var(--vp-c-purple-soft); color: var(--vp-c-purple-1); }
 /* An update pulses three times over six seconds: noticeable, then gone. */

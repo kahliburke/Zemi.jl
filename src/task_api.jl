@@ -87,7 +87,8 @@ route!("POST", "/api/projects"; need = "tasks.edit") do c
 end
 
 # A project's board: its tasks, milestones, codebase, the records linked to it that the caller sees,
-# agents at work, what people did lately (who is there is /api/presence), and how far the caller reaches it.
+# agents at work, what people did lately (who is there is /api/presence), how far the caller reaches it, and
+# when others last changed each task.
 route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
     kb, key = c.kb, uppercase(c[:key])
     i = findfirst(x -> x.key == key, projects(kb))
@@ -100,7 +101,8 @@ route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
          "findings" => Int(scalar(kb, "SELECT count(*) FROM findings WHERE project_id = ? AND archived_at IS NULL", (project_id(kb, key),))),
          "records" => [Dict("id" => r.id, "title" => r.title, "day" => record_day(r.date)) for r in visible_records(kb, c.caller; project = key)],
          "milestones" => [Dict(pairs(m)) for m in milestones(kb, key)],
-         "tasks" => Any[task_json(t) for t in tasks(kb; project = key, limit = 5000)])
+         "tasks" => Any[task_json(t) for t in tasks(kb; project = key, limit = 5000)],
+         "changed_by_others" => changed_by_others(kb, key, my_name(c)))
 end
 
 route!("POST", "/api/projects/:key"; need = "tasks.edit", project = MAINTAIN) do c
