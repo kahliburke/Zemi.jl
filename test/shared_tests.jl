@@ -976,6 +976,13 @@ end
     @test_throws ErrorException K.build_site!(c; build = half)
     failed_id = chop(last(sort(filter(endswith(".log"), readdir(K.builds_dir(c))))); tail = 4)
     @test !isdir(joinpath(K.builds_dir(c), failed_id)) && isfile(joinpath(K.builds_dir(c), failed_id * ".log"))
+    # The site is built under its folder's real path, the data folder reached through a link or not.
+    linked = mktempdir()
+    real = mkpath(joinpath(linked, "real", "data"))
+    symlink(dirname(real), joinpath(linked, "link"))
+    lc = K.Config(; data_dir = joinpath(linked, "link", "data"))
+    @test K.builds_dir(lc) == joinpath(realpath(real), "site", "builds")
+    @test K.real_path(joinpath(linked, "link", "nothing", "here")) == joinpath(realpath(linked), "real", "nothing", "here")
 
     # Requests while a build runs make one more build, not one each.
     gate = Channel{Nothing}(1)

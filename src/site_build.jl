@@ -2,8 +2,16 @@
 # site served never goes down while it builds; pages opened before a switch still find the old
 # build's assets.
 
-"Where the shared service keeps its builds of the site, and the `current` link to the one it serves."
-site_root(c::Config) = joinpath(c.data_dir, "site")
+"""
+Where the shared service keeps its builds of the site, and the `current` link to the one it serves:
+by its real path (see [`real_path`](@ref)), since VitePress takes each page's address relative to
+the folder it builds in after resolving the page's file through links.
+"""
+site_root(c::Config) = real_path(joinpath(c.data_dir, "site"))
+
+"`path` with its links resolved, as far as it exists."
+real_path(path::AbstractString) = ispath(path) ? realpath(path) :
+    (d = dirname(path); d == path ? path : joinpath(real_path(d), basename(path)))
 builds_dir(c::Config) = joinpath(site_root(c), "builds")
 current_link(c::Config) = joinpath(site_root(c), "current")
 
@@ -32,9 +40,7 @@ by default, `docs/make.jl` in a Julia process of its own.
 """
 function build_site!(c::Config; build = default_site_build)
     # Named by the second it starts, after any build of the same second: what it leaves is its own.
-    # By its real path: VitePress resolves links through it, and a folder reached through a link
-    # (macOS's /tmp) gives every page a path climbing out of the site.
-    builds = realpath(mkpath(builds_dir(c)))
+    builds = mkpath(builds_dir(c))
     id, out = "", ""
     while true
         id = Dates.format(now(UTC), dateformat"yyyymmddTHHMMSS")
