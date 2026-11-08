@@ -316,6 +316,7 @@ function run_local(; manual::Bool = false)
     follow_media(db)
     load_plugins!(db.config)
     follow_sources(db)
+    upgrade_landscape(db)
     start_figure_sweep(db)
     manual && @async while !eof(stdin)
         readline(stdin)
@@ -391,8 +392,8 @@ function run_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool = 
         end
     end
     # The sources start once the service's Kaimon is up, since what they bring in is read by its agents.
-    ready === nothing ? (STARTING[] = false; follow_sources(db)) :
-        @async (try wait(ready) catch end; STARTING[] = false; follow_sources(db))
+    ready === nothing ? (STARTING[] = false; follow_sources(db); upgrade_landscape(db)) :
+        @async (try wait(ready) catch end; STARTING[] = false; follow_sources(db); upgrade_landscape(db))
     db.config.dataset.role == :none || start_import(db)
     follow_dataset!(db)
     start_watch!(db)

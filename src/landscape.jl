@@ -115,6 +115,23 @@ function landscape!(kb::KB; force::Bool = false, progress = msg -> nothing, canc
     return (; data, changed = true)
 end
 
+"""
+    upgrade_landscape(kb) -> Union{Job,Nothing}
+
+Rebuild, as a job, a landscape saved in an older format than [`LANDSCAPE_VERSION`](@ref), so the site
+draws it as this version does without waiting for a sync. A consumer's comes with the dataset.
+"""
+function upgrade_landscape(kb::KB)
+    c = kb.config
+    c.dataset.role == :consume && return nothing
+    last = read_landscape(c)
+    (last === nothing || get(last, "version", 1) >= LANDSCAPE_VERSION) && return nothing
+    isempty(cannot_run(kb, "landscape", String[])) || return nothing
+    return start_job("landscape") do job
+        landscape!(kb; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
+    end
+end
+
 unit_columns(X) = X ./ max.(sqrt.(sum(abs2, X; dims = 1)), eps())
 
 # ── Naming the clusters ───────────────────────────────────────────────────────────────────────────

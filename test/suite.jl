@@ -2446,6 +2446,10 @@ end
         again = landscape!(kb; force = true)
         @test again.changed && asked[] == 1 && sort([cl["name"] for cl in again.data["clusters"]]) == sort([cl["name"] for cl in d["clusters"]])
         @test read_landscape(c)["input_sha"] == d["input_sha"]
+        # One saved in an older format is rebuilt when the service starts; a current one is left.
+        @test K.upgrade_landscape(kb) === nothing
+        write(K.landscape_path(c), JSON.json(Dict("papers" => [], "clusters" => [])))
+        @test wait(K.upgrade_landscape(kb)).status == :done && read_landscape(c)["version"] == K.LANDSCAPE_VERSION && asked[] == 1
         # Classifying a paper shows its relevance on the landscape.
         K.execute!(kb, "INSERT INTO classifications VALUES (?, 'namer', 'm', '{\"relevance\": 3, \"one_line\": \"Corals.\"}', ?)",
                    (K.paper_id(kb, "2609.00011"), K.now_iso()))
