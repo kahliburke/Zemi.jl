@@ -10,6 +10,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { mode, connect, me, can, shared, post, signOut } from './kbApi'
 import { pageLink } from './kbLinks'
 import { offerInstall } from './kbPush'
+import KBNotifyOffer from './KBNotifyOffer.vue'
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
@@ -56,6 +57,7 @@ async function stopViewing() {
       <button v-if="me.admin" class="kba-item" @click="stopViewing">Back to {{ me.admin }}</button>
       <button v-if="shared" class="kba-item kba-out" @click="signOut">Sign out</button>
     </div>
+    <KBNotifyOffer v-if="shared" />
   </div>
 </template>
 

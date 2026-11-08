@@ -85,8 +85,8 @@ reply_to=note)`.
 ### Notifications
 
 In the shared service, what newly waits on you can come to your phone or computer as a
-notification. Turn them on under **Notifications** on your account page, once on each device. They
-come for:
+notification. The site offers them once in each browser, to those who work on tasks; they can be
+turned on later under **Notifications** on the account page, once on each device. They come for:
 
 - **to answer**: a question asked of you by name. A question to anyone stays on the board.
 - **answered**: an answer to your question.
