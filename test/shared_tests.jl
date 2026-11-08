@@ -1798,6 +1798,8 @@ end
     m = match(r"^vapid t=([^.]+)\.([^.]+)\.([^,]+), k=(.+)$", h)
     @test JSON.parse(String(u(m[2]))) == Dict("aud" => "https://fcm.googleapis.com", "exp" => 1000 + 12 * 3600, "sub" => "mailto:zemi@localhost")
     @test u(m[4]) == K.public_point(key)
+    # The contact the push services are given: the group's, where the service has no https address.
+    @test K.push_subject(K.Config(; contact = "ops@example.org")) == "mailto:ops@example.org"
     der(v) = (v = v[findfirst(!=(0x00), v):end]; v[1] >= 0x80 ? [0x02; UInt8(length(v) + 1); 0x00; v] : [0x02; UInt8(length(v)); v])
     raw = u(m[3])
     sig = (b = [der(raw[1:32]); der(raw[33:64])]; [0x30; UInt8(length(b)); b])

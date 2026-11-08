@@ -235,8 +235,15 @@ function push_endpoint_problem(endpoint::AbstractString)
     return nothing
 end
 
-"Whom push services may contact about the service's pushes: its address, when it is https."
-push_subject(c::Config) = (u = site_base(c); startswith(u, "https://") ? u : "mailto:zemi@localhost")
+"""
+Whom push services may contact about the service's pushes: its address when it is https, else the
+group's contact. Apple's refuses a push whose contact is neither a real address nor a site.
+"""
+function push_subject(c::Config)
+    u = site_base(c)
+    startswith(u, "https://") && return u
+    return isempty(c.contact) ? "mailto:zemi@localhost" : "mailto:" * c.contact
+end
 
 """
     web_push(c, device, payload; ttl = 86400, urgency = "normal", post = HTTP.post) -> Int
