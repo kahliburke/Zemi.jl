@@ -49,7 +49,9 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
 // Turn notifications on in this browser, returning its subscription's endpoint: asks its permission
 // (so call it from a click).
 export async function turnOn(settings: PushSettings): Promise<string> {
-  if ((await Notification.requestPermission()) !== 'granted') throw new Error('Notifications are blocked in this browser’s settings for this site.')
+  const allowed = await Notification.requestPermission()
+  if (allowed === 'default') throw new Error('The browser did not allow notifications: try again, and choose Allow.')
+  if (allowed !== 'granted') throw new Error('This browser does not allow notifications from this site. Its settings for the site (in Safari, Settings → Websites → Notifications) can allow them.')
   const reg = await registration()
   await navigator.serviceWorker.ready
   let sub = await reg.pushManager.getSubscription()
