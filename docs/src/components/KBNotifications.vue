@@ -31,12 +31,12 @@ async function act(f: () => Promise<unknown>, done = '') {
   try { await f(); await load(); said.value = done } catch (e: any) { error.value = e.message ?? String(e) }
   busy.value = false
 }
-const on = () => act(() => turnOn(settings.value!), 'On in this browser.')
+// Turning them on sends one, so the person sees at once that they arrive.
+const on = () => act(async () => {
+  await turnOn(settings.value!)
+  if (!(await sendTest()).sent) throw new Error('On, but the browser’s push service did not take the first notification.')
+}, 'On in this browser: one is on its way to show how they look. On a Mac, while this browser is in front, it goes to Notification Center.')
 const off = () => act(turnOff, 'Off in this browser.')
-const test = () => act(async () => {
-  const r = await sendTest()
-  if (!r.sent) throw new Error('No device took it.')
-}, 'Sent: it should show in a moment.')
 function toggle(id: string, want: boolean) {
   const s = settings.value!
   const next = want ? [...s.sections, id] : s.sections.filter(x => x !== id)
@@ -57,7 +57,6 @@ const others = computed(() => (settings.value?.devices ?? []).filter(d => d.endp
       <button v-if="!here" class="kb-primary" :disabled="busy" @click="on">Turn on in this browser</button>
       <template v-else>
         <span class="kbn-on">On in this browser</span>
-        <button class="kb-link" :disabled="busy" @click="test">send a test</button>
         <button class="kb-link" :disabled="busy" @click="off">turn off</button>
       </template>
     </div>
