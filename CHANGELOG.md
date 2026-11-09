@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.0 (2026-11-09)
+
+- **Notifications**: what newly waits on a person (questions for them, answers to theirs, plans and
+  work to review, tasks assigned to them) comes to their phone or computer through the browsers' Web
+  Push, encrypted and signed by the service itself. Offered once in each browser; on an iPhone, from
+  the site added to the Home Screen.
+- **Questions** on a task are asked of the agents, a person or anyone, and answered with a reply. An
+  agent's question asked back goes to the person it works for.
+- **The board** sorts its columns, hints in colour at what concerns you, marks cards others changed,
+  and searches with a spinner while it runs. Who may edit an agent's note: the person it works for,
+  and the project's maintainers.
+- **Resources**: data sets, portals, laws and works cited without a copy to read, with pages, types,
+  citations and a list. A **Cite** button on papers, resources, records, findings and tasks.
+- **Zotero**: a group's library kept in step, each item sorted by the summarizer as a paper, resource
+  or codebase, and works that are one merged.
+- **Documents** are dropped from one page, and kept out of every source.
+- **The service** backs itself up on a schedule, runs in containers (with Qdrant, Ollama and Caddy),
+  installs on Ubuntu 26.04, and answers requests side by side. A privacy page; people may change the
+  name they are shown by.
+- **The landscape** places papers by when they were published or when the group had them, and is
+  rebuilt when its format changes.
+
 ## 0.1.0 (2026-11-05)
 
 The first release.
