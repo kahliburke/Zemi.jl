@@ -18,12 +18,12 @@ self.addEventListener('notificationclick', e => {
   const url = new URL(e.notification.data?.url || '/', self.location.origin).href
   e.waitUntil((async () => {
     const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-    const win = open.find(w => w.url === url) ?? open.find(w => new URL(w.url).origin === self.location.origin)
-    if (win) {
-      await win.focus()
-      if (win.url !== url && 'navigate' in win) await win.navigate(url)
-      return
-    }
-    await self.clients.openWindow(url)
+    const path = u => new URL(u).pathname.replace(/\.html$/, '')
+    const win = open.find(w => path(w.url) === path(url)) ?? open[0]
+    if (!win) return self.clients.openWindow(url)
+    // The page opens what the notification is about itself (see kbPush.ts): moving a window from
+    // here works only for one this worker controls, and not to the address it is already at.
+    try { await win.focus() } catch {}
+    win.postMessage({ zemi: 'open', url })
   })())
 })

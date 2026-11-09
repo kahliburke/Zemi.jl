@@ -82,3 +82,19 @@ export const loadPush = (): Promise<PushSettings> => getJSON('/api/push')
 export const saveSections = (sections: string[]) => post('/api/push/sections', JSON.stringify({ sections }))
 export const sendTest = (endpoint: string): Promise<{ sent: number }> => post('/api/push/test', JSON.stringify({ endpoint }))
 export const forget = (endpoint: string) => post('/api/push/devices/remove', JSON.stringify({ endpoint }))
+
+// Open what a clicked notification is about (see zemi-sw.js): this page's own task by its address,
+// even the one already open, or another page.
+export function followNotificationClicks() {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data?.zemi !== 'open') return
+    const to = new URL(e.data.url, location.href)
+    if (to.origin !== location.origin) return
+    const page = (u: URL | Location) => u.pathname.replace(/\.html$/, '')
+    if (page(to) !== page(location)) return location.assign(to.href)
+    if (location.hash !== to.hash) location.hash = to.hash
+    else window.dispatchEvent(new HashChangeEvent('hashchange'))
+  })
+  navigator.serviceWorker.startMessages()
+}
