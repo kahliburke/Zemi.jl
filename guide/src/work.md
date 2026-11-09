@@ -22,6 +22,12 @@ accent on your own tasks. A blue dot marks a task others changed (people, or age
 filled for a change since you opened the board, hollow for one within the hours chosen beside the
 board's sort (4 by default, kept by the browser). Pointing at the dot says who changed it, and when.
 
+**Focus** shows only your part of the project, in one column: the project's About, questions for
+you to answer, answers to yours, your tasks by where they stand, plans and reviews that concern you
+(yours, or made by your agents), and your questions still waiting for an answer. The rest of what
+waits in the project is counted at the end. The browser keeps it on for each project you turn it on
+in. It suits someone new to a project, or anyone with a few tasks in a large one.
+
 ```@raw html
 <figure class="shot">
   <img class="light-only" src="./assets/screenshots/board-light.png" alt="A project board">

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Focus** on a board shows only your part of the project: questions for you and answers to yours,
+  your tasks, the plans and reviews that concern you, and your questions still waiting.
+
 ## 0.2.0 (2026-11-09)
 
 - **Notifications**: what newly waits on a person (questions for them, answers to theirs, plans and

@@ -42,18 +42,6 @@ board_in_view(uid::Integer; at::Float64 = time()) =
 clip_line(s::AbstractString, n::Integer = 160) =
     (t = strip(replace(s, r"\s+" => " ")); length(t) > n ? first(t, n - 1) * "…" : t)
 
-"""
-    concerns(kb, task_id, me) -> Bool
-
-Whether task `task_id` is person `me`'s business: assigned to them, created by them or for them by
-an agent, or worked on by an agent working for them. Plans to approve and tasks to review are pushed
-only to those they concern; the board shows them to everyone.
-"""
-concerns(kb::KB, task_id::Integer, me::AbstractString) = !isempty(query(kb, """
-    SELECT 1 FROM tasks t WHERE t.id = ? AND (t.assignee = ? OR EXISTS (
-        SELECT 1 FROM task_events e WHERE e.task_id = t.id AND e.by_person = ? AND (e.kind = 'created' OR e.by_agent = 1)))""",
-    (task_id, me, me)))
-
 "Whether person `me` made the latest change to task `task_id` themselves."
 changed_by(kb::KB, task_id::Integer, me::AbstractString) = !isempty(query(kb, """
     SELECT 1 FROM task_events e WHERE e.id = (SELECT max(id) FROM task_events WHERE task_id = ?) AND e.by_agent = 0 AND e.by_person = ?""",
@@ -63,9 +51,9 @@ changed_by(kb::KB, task_id::Integer, me::AbstractString) = !isempty(query(kb, ""
     waiting_items(kb, caller) -> Vector{NamedTuple}
 
 What waits on `caller` that may be pushed, each `(; key, section, ref, title, text, theirs)`: plans
-to approve and tasks to review that concern them (see [`concerns`](@ref)), questions asked of them
-by name, answers to theirs, and their open tasks, in the projects they see. `theirs` is whether they
-made the change that put it there.
+to approve and tasks to review that concern them (see [`concerns`](@ref); the board shows them all),
+questions asked of them by name, answers to theirs, and their open tasks, in the projects they see.
+`theirs` is whether they made the change that put it there.
 """
 function waiting_items(kb::KB, caller::Caller)
     me = person_id(caller)
@@ -76,10 +64,10 @@ function waiting_items(kb::KB, caller::Caller)
     out = NamedTuple[]
     item(section, key, t, text; theirs = false) = push!(out, (; key, section, ref = String(t.ref), title = String(t.title), text, theirs))
     for t in w.proposed
-        sees(t.ref) && concerns(kb, task_ref(kb, t.ref), me) && item("proposed", "proposed:$(t.ref)", t, t.title; theirs = changed_by(kb, task_ref(kb, t.ref), me))
+        sees(t.ref) && t.concerns && item("proposed", "proposed:$(t.ref)", t, t.title; theirs = changed_by(kb, task_ref(kb, t.ref), me))
     end
     for t in w.review
-        sees(t.ref) && concerns(kb, task_ref(kb, t.ref), me) && item("review", "review:$(t.ref)", t, t.title; theirs = changed_by(kb, task_ref(kb, t.ref), me))
+        sees(t.ref) && t.concerns && item("review", "review:$(t.ref)", t, t.title; theirs = changed_by(kb, task_ref(kb, t.ref), me))
     end
     for t in w.mine
         sees(t.ref) && item("mine", "mine:$(t.ref)", t, t.title; theirs = changed_by(kb, task_ref(kb, t.ref), me))

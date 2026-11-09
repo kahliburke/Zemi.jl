@@ -1744,6 +1744,9 @@ end
     q = last_note()
     @test (q.to_whom, q.to_person, q.to_label, q.by_person, q.state) == ("person", "bea@x.org", "Bea", "ada@x.org", "open")
     @test asked(bea) == [("PU-1", "Which gasket?", "Ada")] && isempty(asked(ada)) && isempty(asked(cy))
+    # Ada's question waits on Bea, and Ada sees it among hers waiting for an answer.
+    waits_on_others(uid) = [(q["question"], q["to_whom"], q["to_person"]) for q in call(uid, "GET", "/api/tasks/waiting")[2]["asked"]]
+    @test waits_on_others(ada) == [("Which gasket?", "person", "bea@x.org")] && isempty(waits_on_others(bea))
     @test note(ada, Dict("kind" => "question", "text" => "Who?", "to" => "nobody@x.org"))[1] == 400
     # Asked back, the question goes to whoever asked; answered, the first waits on Bea again.
     note(bea, Dict("kind" => "question", "text" => "For the inlet or the outlet?", "reply_to" => q.id))
@@ -1753,7 +1756,7 @@ end
     note(ada, Dict("text" => "The inlet.", "reply_to" => back.id))
     @test asked(bea) == [("PU-1", "Which gasket?", "Ada")] && isempty(asked(ada))
     note(bea, Dict("text" => "The neoprene one.", "reply_to" => q.id))
-    @test isempty(asked(bea))
+    @test isempty(asked(bea)) && !any(x -> x[1] == "Which gasket?", waits_on_others(ada))
     answered = call(ada, "GET", "/api/tasks/waiting")[2]["answered"]
     @test [(a["question"], a["answer"], a["answerer"]) for a in answered] == [("Which gasket?", "The neoprene one.", "Bea")]
     # An agent's question goes to the assignee; asked back about a person's question, to that person.
@@ -1779,6 +1782,11 @@ end
     friday = last_note().id
     @test call(bea, "POST", "/api/tasks/PU-1/resolve", Dict("note" => friday))[1] == 200
     @test !any(x -> x[2] == "Anyone free Friday?", asked(bea))
+    # A task in review concerns whoever it is assigned to or made it, not everyone who sees it.
+    call(bea, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Fit the seals"))
+    call(bea, "POST", "/api/tasks/PU-2", Dict("status" => "review"))
+    concerned(uid) = Dict(t["ref"] => t["concerns"] for t in call(uid, "GET", "/api/tasks/waiting")[2]["review"])
+    @test concerned(bea)["PU-2"] && !concerned(ada)["PU-2"] && !concerned(cy)["PU-2"]
     close(kb)
 end
 

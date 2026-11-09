@@ -100,9 +100,11 @@ async function loadBoard() {
   } catch (e: any) { if (k === key.value) error.value = e.message }
 }
 // What waits on the person: plans to approve, tasks in Review, findings agents drafted, and their own open tasks.
-type Asked = Task & { question?: string; note?: number; asker?: string; answer?: string; answerer?: string; claim?: string; recheck?: string[] }
+// With them, the questions the person asked that still wait on someone (`asked`), which only Focus shows.
+type Asked = Task & { question?: string; note?: number; asker?: string; answer?: string; answerer?: string; claim?: string; recheck?: string[];
+                      concerns?: boolean; to_whom?: string; to_person?: string }
 type Section = 'proposed' | 'questions' | 'answered' | 'review' | 'findings' | 'mine'
-const waiting = ref<Record<Section, Asked[]>>({ proposed: [], questions: [], answered: [], review: [], findings: [], mine: [] })
+const waiting = ref<Record<Section | 'asked', Asked[]>>({ proposed: [], questions: [], answered: [], review: [], findings: [], mine: [], asked: [] })
 const waitingOpen = ref('')
 const WAITING = [{ id: 'proposed', label: 'to approve' }, { id: 'questions', label: 'to answer' }, { id: 'answered', label: 'answered' },
                  { id: 'review', label: 'to review' }, { id: 'findings', label: 'to accept' }, { id: 'mine', label: 'yours' }] as const
@@ -119,13 +121,43 @@ async function resolve(r: string, note = 0) {
   })
 }
 // A question waiting on you opens its task ready for your reply.
-async function openWaiting(t: Asked) {
-  const section = waitingOpen.value
+async function openWaiting(t: Asked, section = waitingOpen.value) {
   await show(t)
   const e = section === 'questions' && t.note ? open.value?.activity.find(x => x.id === t.note) : undefined
   if (e) startReply(e)
 }
 async function loadWaiting() { try { waiting.value = await getJSON('/api/tasks/waiting') } catch { /* the board still shows */ } }
+// Focus: what waits on the person in the project, and nothing else of the board, for someone who
+// comes to a project to do their part. Their questions to answer, the answers to theirs, their tasks
+// by where they stand, the plans and reviews that concern them, and the questions they asked still
+// waiting; the rest of what waits in the project, counted. Remembered for each project in this browser.
+const FOCUS = 'zemi-board-focus'
+const focusKeys = ref<string[]>([])
+const focus = computed(() => !!key.value && focusKeys.value.includes(key.value))
+function toggleFocus() {
+  const k = key.value
+  focusKeys.value = focus.value ? focusKeys.value.filter(x => x !== k) : [...focusKeys.value, k]
+  focusKeys.value.length ? localStorage.setItem(FOCUS, JSON.stringify(focusKeys.value)) : localStorage.removeItem(FOCUS)
+}
+onMounted(() => { try { const v = JSON.parse(localStorage.getItem(FOCUS) ?? '[]'); if (Array.isArray(v)) focusKeys.value = v } catch { /* none kept */ } })
+const FOCUS_ORDER = ['in_progress', 'ready', 'backlog', 'review', 'proposed']
+const focused = computed(() => {
+  const here = (xs: Asked[]) => xs.filter(t => t.ref.startsWith(`${key.value}-`))
+  const w = waiting.value, mine = here(w.mine), mineRefs = new Set(mine.map(t => t.ref))
+  const decide = (xs: Asked[]) => editable.value ? here(xs).filter(t => t.concerns && !mineRefs.has(t.ref)) : []
+  const rest = (xs: Asked[]) => editable.value ? here(xs).filter(t => !t.concerns && !mineRefs.has(t.ref)).length : 0
+  const findings = editable.value ? here(w.findings).length : 0
+  return {
+    questions: here(w.questions), answered: here(w.answered), asked: here(w.asked),
+    tasks: FOCUS_ORDER.map(id => ({ id, tasks: mine.filter(t => t.status === id) })).filter(g => g.tasks.length),
+    approve: decide(w.proposed), review: decide(w.review),
+    rest: [[rest(w.proposed), 'plan', 'to approve'], [rest(w.review), 'task', 'to review'], [findings, 'finding', 'to accept']]
+      .filter(([n]) => n).map(([n, one, what]) => `${n} ${one}${n === 1 ? '' : 's'} ${what}`),
+  }
+})
+const focusEmpty = computed(() => { const f = focused.value
+  return !f.questions.length && !f.answered.length && !f.asked.length && !f.tasks.length && !f.approve.length && !f.review.length })
+const askedOf = (t: Asked) => t.to_whom === 'agents' ? 'the agents' : t.to_whom === 'anyone' ? 'anyone on the project' : personLabel(t.to_person ?? '')
 // The project's codebase: where its code is, which agents working there find it by, and whose
 // commits are recorded against its tasks. A person links it, or changes it.
 const codebases = ref<{ id: string; title: string }[] | null>(null)
@@ -1204,10 +1236,12 @@ function keepRecordsOpen(open: boolean) {
                 :aria-label="live ? 'Following changes' : 'Reconnecting'"></span>
         </div>
         <nav v-if="board" class="kbp-views" aria-label="The project's views">
+          <button class="kbp-view" :class="{ on: focus }" :aria-pressed="focus" title="Only what waits on you in the project" @click="toggleFocus">
+            <KBIcon name="focus" :size="16" />Focus</button>
           <button class="kbp-view" @click="reviewing = true"><KBIcon name="chart" :size="16" />Review</button>
           <a class="kbp-view" :href="findingHref(key)"><KBIcon name="finding" :size="16" />Findings<span v-if="board.findings" class="kbp-view-n">{{ board.findings }}</span></a>
           <button class="kbp-view" @click="library = true"><KBIcon name="library" :size="16" />Library</button>
-          <button class="kbp-view" :class="{ on: declined }" :aria-pressed="!!declined" @click="toggleDeclined"><KBIcon name="block" :size="16" />Declined</button>
+          <button v-if="!focus" class="kbp-view" :class="{ on: declined }" :aria-pressed="!!declined" @click="toggleDeclined"><KBIcon name="block" :size="16" />Declined</button>
         </nav>
         <span class="kbp-spacer"></span>
         <div v-if="(shared && board) || peopleDid.length" class="kbp-pop">
@@ -1293,7 +1327,7 @@ function keepRecordsOpen(open: boolean) {
       </form>
       <p v-if="error" class="kb-error kbp-error">{{ error }}</p>
 
-      <div v-if="board && (board.project.description || manages || shared)" class="kbp-context" :class="{ empty: !board.project.description && !editingContext }">
+      <div v-if="board && !focus && (board.project.description || manages || shared)" class="kbp-context" :class="{ empty: !board.project.description && !editingContext }">
         <template v-if="editingContext">
           <KBRefText :project="key" v-model="contextDraft" multiline :rows="6" :draft="`project:${key}:context`" send="save"
                      placeholder="Context for the project's work" @submit="saveContext" />
@@ -1351,7 +1385,7 @@ function keepRecordsOpen(open: boolean) {
         <KBMembers v-if="shared" :project="key" :manages="!!board.manages_members" />
       </div>
 
-      <div v-if="WAITING.some(w => shownWaiting[w.id].length)" class="kbp-waiting" :class="{ pulse }">
+      <div v-if="!focus && WAITING.some(w => shownWaiting[w.id].length)" class="kbp-waiting" :class="{ pulse }">
         <span class="kbp-waiting-label">Waiting on you</span>
         <button v-for="w in WAITING" :key="w.id" v-show="shownWaiting[w.id].length" class="kbp-ms" :class="[`w-${w.id}`, { on: waitingOpen === w.id, pulse: pulsing.has(w.id) }]"
                 @click="waitingOpen = waitingOpen === w.id ? '' : w.id"><strong class="kbp-n">{{ shownWaiting[w.id].length }}</strong> {{ w.label }}</button>
@@ -1376,7 +1410,7 @@ function keepRecordsOpen(open: boolean) {
         </ul>
       </div>
 
-      <div v-if="openMilestones.length" class="kbp-milestones">
+      <div v-if="!focus && openMilestones.length" class="kbp-milestones">
         <button v-for="m in openMilestones" :key="m.name" class="kbp-ms" :class="{ on: milestone === m.name, closed: m.closed, active: m.active, aimed: msAimed === m.name }"
                 :title="(milestone === m.name ? 'Showing only this milestone; click to show all' : 'Show only this milestone, and work in it') +
                         (m.active ? ' · active: new tasks go here' : '')"
@@ -1407,7 +1441,7 @@ function keepRecordsOpen(open: boolean) {
       <KBLibrary v-if="library" :project="key" :editable="editable" @close="library = false"
                  @open="r => { library = false; openRef(r) }" />
 
-      <div v-if="declined" class="kbp-archive">
+      <div v-if="declined && !focus" class="kbp-archive">
         <h3>Declined <span class="kb-dim kbp-dim">{{ declined.length }}</span></h3>
         <p v-if="!declined.length" class="kb-dim kbp-dim">Nothing declined.</p>
         <ul class="kbp-waiting-list">
@@ -1418,8 +1452,78 @@ function keepRecordsOpen(open: boolean) {
         </ul>
       </div>
 
+      <section v-if="board && focus" class="kbp-focus" aria-label="What waits on you in the project">
+        <div v-if="board.project.description" class="kbp-focus-about">
+          <div class="kbp-context-head"><span class="kbp-waiting-label">About {{ board.project.key }}</span>
+            <button v-if="longContext" class="kb-link kbp-link kbp-context-toggle" @click="contextOpen = !contextOpen">{{ contextOpen ? 'less' : 'more' }}</button></div>
+          <div class="kbp-note kbp-context-text kb-md" :class="{ clipped: longContext && !contextOpen }" v-html="render(board.project.description)"></div>
+        </div>
+        <p v-if="focusEmpty" class="kbp-focus-none">Nothing waits on you in {{ key }}.</p>
+        <template v-if="focused.questions.length">
+          <h3 class="kbp-focus-head asking">For you to answer</h3>
+          <ul class="kbp-focus-list">
+            <li v-for="t in focused.questions" :key="`q${t.note}`">
+              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ t.title }}</div>
+              <div class="kbp-question-line"><b v-if="t.asker">{{ t.asker }}:</b> {{ t.question }}</div>
+              <button v-if="editable" class="kbp-small" @click="openWaiting(t, 'questions')">Answer</button>
+            </li>
+          </ul>
+        </template>
+        <template v-if="focused.answered.length">
+          <h3 class="kbp-focus-head answered">Answers to your questions</h3>
+          <ul class="kbp-focus-list">
+            <li v-for="t in focused.answered" :key="`a${t.note}`">
+              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ t.title }}</div>
+              <div class="kbp-question-line">{{ t.question }}</div>
+              <div class="kbp-question-line kbp-answer-line"><b v-if="t.answerer">{{ t.answerer }}:</b> {{ plainLine(t.answer ?? '') }}</div>
+              <button class="kbp-small" :disabled="busy(`resolve:${t.ref}:${t.note}`)" title="Answered to your satisfaction"
+                      @click="resolve(t.ref, t.note)"><KBIcon name="check" :size="15" />Resolved</button>
+            </li>
+          </ul>
+        </template>
+        <template v-if="focused.tasks.length">
+          <h3 class="kbp-focus-head mine">Your tasks</h3>
+          <div v-for="g in focused.tasks" :key="g.id" class="kbp-focus-group">
+            <div class="kbp-waiting-label">{{ label(g.id) }}</div>
+            <ul class="kbp-focus-list">
+              <li v-for="t in g.tasks" :key="t.ref" class="kbp-focus-card" @click="show(t)">
+                <div class="kbp-focus-task"><span class="kbp-ref">{{ t.ref }}</span>
+                  <span v-if="t.priority === 0" class="kbp-tag asap">ASAP</span><span v-else-if="t.priority === 1" class="kbp-tag high">high</span>
+                  <span v-if="t.blocked" class="kbp-tag blocked" :title="t.blocked">blocked</span>
+                  <span v-if="t.sent_back" class="kbp-tag sent">sent back</span>
+                  <span v-if="askingMe.has(t.ref)" class="kbp-tag asking" title="A question here waits on your answer">your answer</span> {{ t.title }}</div>
+                <div class="kbp-meta"><span v-if="t.milestone">{{ t.milestone }}</span>
+                  <span v-if="t.subtasks">{{ t.subtasks_done }}/{{ t.subtasks }} subtasks</span><span v-if="t.parent">in {{ t.parent }}</span></div>
+              </li>
+            </ul>
+          </div>
+        </template>
+        <template v-if="focused.approve.length || focused.review.length">
+          <h3 class="kbp-focus-head">Waiting on your decision</h3>
+          <ul class="kbp-focus-list">
+            <li v-for="t in [...focused.approve, ...focused.review]" :key="`d${t.ref}`" class="kbp-focus-card" @click="show(t)">
+              <div class="kbp-focus-task"><span class="kbp-ref">{{ t.ref }}</span> {{ t.title }}</div>
+              <div class="kbp-meta"><span>{{ t.status === 'proposed' ? 'to approve' : 'to review' }}</span>
+                <span>by {{ t.created_by }}{{ t.by_agent ? ' (agent)' : '' }}</span></div>
+            </li>
+          </ul>
+        </template>
+        <template v-if="focused.asked.length">
+          <h3 class="kbp-focus-head">Your questions, waiting for an answer</h3>
+          <ul class="kbp-focus-list">
+            <li v-for="t in focused.asked" :key="`w${t.note}`">
+              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ t.title }}</div>
+              <div class="kbp-question-line">{{ t.question }} <span class="kb-dim kbp-dim">· asked of {{ askedOf(t) }}</span></div>
+            </li>
+          </ul>
+        </template>
+        <p class="kb-dim kbp-dim kbp-focus-rest">
+          <template v-if="focused.rest.length">Also waiting in {{ key }}: {{ focused.rest.join(', ') }}. </template>
+          <button class="kb-link kbp-link" @click="toggleFocus">Show the whole board</button></p>
+      </section>
+
       <!-- What the columns show, and in what order: just above them. -->
-      <div v-if="key" class="kbp-filters">
+      <div v-if="key && !focus" class="kbp-filters">
         <KBTaskSearch :project="key" @open="openFromSearch" />
         <select v-if="board" v-model="only" class="kbp-select" aria-label="Show tasks in a status"
                 title="Show the tasks in a status, and those with a subtask in it">
@@ -1433,7 +1537,7 @@ function keepRecordsOpen(open: boolean) {
           <select v-model.number="changedHours" class="kbp-select" :disabled="!changedOn" aria-label="Show what others changed within">
             <option v-for="[h, label] in CHANGED_CHOICES" :key="h" :value="h">{{ label }}</option></select></span>
       </div>
-      <div v-if="board" class="kbp-board">
+      <div v-if="board && !focus" class="kbp-board">
         <section v-for="s in statuses" :key="s.id" class="kbp-col" :class="[s.id, { over: over === s.id }]"
                  @dragover.prevent="over = s.id" @dragleave="over = ''" @drop.prevent="drop(s.id)">
           <h3>{{ s.label }} <span class="kb-dim kbp-dim">{{ column(s.id).length }}</span>
@@ -1488,7 +1592,7 @@ function keepRecordsOpen(open: boolean) {
           </form>
         </section>
       </div>
-      <p v-else-if="!list.length" class="kb-dim kbp-dim">{{ can('projects.all') ? 'No projects yet.' : 'No projects. Ask an administrator to add you to one.' }}</p>
+      <p v-else-if="!board && !list.length" class="kb-dim kbp-dim">{{ can('projects.all') ? 'No projects yet.' : 'No projects. Ask an administrator to add you to one.' }}</p>
 
       <KBDock v-if="open" name="task" @close="open = null" @space="makeRoom">
         <template #head>
@@ -2054,6 +2158,26 @@ form.kbp-add { position: relative; }
 .kbp-col-action { float: right; width: 22px; height: 22px; margin-top: -0.2rem; }
 .kbp-archive { margin: 0.4rem 0 0.8rem; padding: 0.5rem 0.8rem; border-radius: 10px; background: var(--vp-c-bg-soft); }
 .kbp-archive h3 { margin: 0 0 0.3rem; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--vp-c-text-2); border: none; padding: 0; }
+/* Focus: one calm column of what waits on the person, each kind under a heading in its board colour. */
+.kbp-focus { max-width: 46rem; margin: 0.6rem auto 2rem; }
+.kbp-focus-about { margin-bottom: 1.2rem; padding: 0.6rem 0.9rem; border-radius: 10px; background: var(--vp-c-bg-soft); }
+.kbp-focus-none { margin: 2.5rem 0; text-align: center; font-size: 1.05rem; color: var(--vp-c-text-2); }
+.kbp-focus-head { margin: 1.4rem 0 0.5rem; padding: 0 0 0 0.6rem; border: none; border-left: 3px solid var(--vp-c-divider);
+                  font-size: 0.95rem; font-weight: 600; }
+.kbp-focus-head.asking { border-left-color: var(--vp-c-warning-1); }
+.kbp-focus-head.answered { border-left-color: var(--vp-c-purple-1); }
+.kbp-focus-head.mine { border-left-color: var(--vp-c-brand-1); }
+.kbp-focus-group { margin: 0.4rem 0 0.7rem; }
+.kbp-focus-group > .kbp-waiting-label { display: block; margin: 0 0 0.25rem; font-size: 0.72rem; }
+.kbp-focus-list { list-style: none; margin: 0; padding: 0; }
+.kbp-focus-list li { margin: 0 0 0.45rem; padding: 0.5rem 0.7rem; border: 1px solid var(--vp-c-divider); border-radius: 8px;
+                     background: var(--vp-c-bg); overflow-wrap: anywhere; }
+.kbp-focus-list li .kbp-question-line { margin-left: 0; }
+.kbp-focus-list li > .kbp-small { margin-top: 0.15rem; }
+.kbp-focus-card { cursor: pointer; }
+.kbp-focus-card:hover { border-color: var(--vp-c-text-3); }
+.kbp-focus-task { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; margin-bottom: 0.15rem; }
+.kbp-focus-rest { margin-top: 1.6rem; text-align: center; }
 .kbp-note { margin-top: 0.2rem; }
 .kbp-question { margin-top: 0.3rem; padding: 0.3rem 0.6rem; border-left: 3px solid var(--vp-c-divider); }
 .kbp-question.open { border-left-color: var(--vp-c-warning-1); background: var(--vp-c-warning-soft); border-radius: 0 6px 6px 0; }

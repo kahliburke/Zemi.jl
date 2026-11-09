@@ -118,6 +118,17 @@ asked_of(q, me::AbstractString) =
     q.to_whom == "person" ? q.to_person == me : q.to_whom == "anyone" && (isempty(me) || q.by_person != me)
 
 """
+    concerns(kb, task_id, me) -> Bool
+
+Whether task `task_id` is person `me`'s business: assigned to them, created by them or for them by
+an agent, or worked on by an agent working for them.
+"""
+concerns(kb::KB, task_id::Integer, me::AbstractString) = !isempty(me) && !isempty(query(kb, """
+    SELECT 1 FROM tasks t WHERE t.id = ? AND (t.assignee = ? OR EXISTS (
+        SELECT 1 FROM task_events e WHERE e.task_id = t.id AND e.by_person = ? AND (e.kind = 'created' OR e.by_agent = 1)))""",
+    (task_id, me, me)))
+
+"""
     waiting(kb; me = "") -> NamedTuple
 
 What waits on person `me` (an email in the shared service, a name run for one person), across
@@ -126,20 +137,28 @@ task already approved); `questions`, the questions asked of them or of anyone (s
 on tasks not done, each task with the `question`, its `note` and `asker`; `review`, tasks in Review;
 `mine`, the open tasks assigned to them; `findings`, the findings agents drafted, to accept, and
 those whose evidence changed, to look at again (see [`check_findings!`](@ref)); and `answered`, the
-answers to their questions (see [`answered_questions`](@ref)).
+answers to their questions (see [`answered_questions`](@ref)). Plans and tasks in review say whether
+they `concerns` the person (see [`concerns`](@ref)). With them, `asked`: the questions the person
+asked, themselves or through an agent working for them, still waiting on whoever they asked, each
+task with the `question`, its `note`, `to_whom` and `to_person`.
 """
 function waiting(kb::KB; me::AbstractString = "")
     find(where, args = ()) = NamedTuple[task_row(r) for r in query(kb, TASK_SELECT * " WHERE t.archived_at IS NULL AND (" * where * ") ORDER BY p.key, t.priority, t.position", args)]
-    asked = [q for q in waiting_questions(kb) if q.status != "done" && asked_of(q, me)]
-    rows = isempty(asked) ? Dict{Int,NamedTuple}() :
-        Dict(Int(r.id) => task_row(r) for r in query(kb, TASK_SELECT * " WHERE t.id IN ($(join(unique(q.task_id for q in asked), ',')))"))
-    questions = NamedTuple[merge(rows[q.task_id], (; question = q.text, note = q.note, asker = q.asker)) for q in asked]
-    return (; proposed = find("t.status = 'proposed' AND (t.parent_id IS NULL OR pt.status != 'proposed')"),
-              questions,
-              review = find("t.status = 'review'"),
+    marked(ts) = NamedTuple[merge(t, (; concerns = concerns(kb, task_ref(kb, t.ref), me))) for t in ts]
+    open_questions = [q for q in waiting_questions(kb) if q.status != "done"]
+    for_me = [q for q in open_questions if asked_of(q, me)]
+    by_me = isempty(me) ? eltype(open_questions)[] : [q for q in open_questions if q.by_person == me]
+    ids = unique(q.task_id for q in [for_me; by_me])
+    rows = isempty(ids) ? Dict{Int,NamedTuple}() :
+        Dict(Int(r.id) => task_row(r) for r in query(kb, TASK_SELECT * " WHERE t.id IN ($(join(ids, ',')))"))
+    return (; proposed = marked(find("t.status = 'proposed' AND (t.parent_id IS NULL OR pt.status != 'proposed')")),
+              questions = NamedTuple[merge(rows[q.task_id], (; question = q.text, note = q.note, asker = q.asker)) for q in for_me],
+              review = marked(find("t.status = 'review'")),
               mine = isempty(me) ? NamedTuple[] : find("t.assignee = ? AND t.status != 'done'", (me,)),
               findings = filter(f -> (f.by_agent && f.status == "draft") || !isempty(f.recheck), findings(kb)),
-              answered = isempty(me) ? NamedTuple[] : answered_questions(kb, me))
+              answered = isempty(me) ? NamedTuple[] : answered_questions(kb, me),
+              asked = NamedTuple[merge(rows[q.task_id], (; question = q.text, note = q.note, to_whom = q.to_whom, to_person = q.to_person))
+                                 for q in by_me])
 end
 
 """
