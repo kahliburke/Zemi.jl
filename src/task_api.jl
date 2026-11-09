@@ -300,7 +300,8 @@ route!("POST", "/api/tasks/:task/notes"; need = "tasks.edit", project = CONTRIBU
 end
 
 route!("POST", "/api/tasks/:task/notes/:note"; need = "tasks.edit", project = CONTRIBUTE) do c
-    edit_note!(c.kb, c[:task], something(tryparse(Int, c[:note]), 0), get(json_body(c), "text", ""); by = person_of(c))
+    edit_note!(c.kb, c[:task], something(tryparse(Int, c[:note]), 0), get(json_body(c), "text", ""); by = person_of(c),
+               maintainer = project_access(c.kb, c.caller, something(ref_project(c[:task]), "")) >= MAINTAIN)
     task_reply(c, c[:task])
 end
 

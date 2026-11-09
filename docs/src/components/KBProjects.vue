@@ -1141,7 +1141,9 @@ const label = (s: string) => statuses.value.find(x => x.id === s)?.label ?? s
 // Editing a note in place: people edit their own and agents' notes (see edit_note!). An edited note
 // shows its earlier texts on request.
 const NOTE_KINDS = ['comment', 'progress', 'question']
-const canEditNote = (e: TaskEvent) => editable.value && NOTE_KINDS.includes(e.kind) && (e.by_agent || e.who === me.value?.name)
+// A person edits their own notes and those of agents working for them; a maintainer, any agent's.
+const canEditNote = (e: TaskEvent) => editable.value && NOTE_KINDS.includes(e.kind) &&
+  (e.by_agent ? e.by_person === myPersonId.value || board.value?.access === 'maintainer' : e.who === me.value?.name)
 const editingNote = ref<{ id: number; text: string } | null>(null)
 const noteHistory = ref<{ id: number; rows: { at: string; who: string; by_agent: boolean; text: string }[] } | null>(null)
 async function saveNote() {

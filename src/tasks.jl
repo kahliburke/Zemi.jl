@@ -374,23 +374,25 @@ function note_task!(kb::KB, ref::AbstractString, text::AbstractString; kind::Abs
 end
 
 """
-    edit_note!(kb, ref, note, text; by)
+    edit_note!(kb, ref, note, text; by, maintainer = false)
 
 Give note `note` (its number in task `ref`'s activity: a comment, progress report or question) the
 new `text`, keeping the text it replaces (see [`note_history`](@ref)). People edit their own notes
-and those agents wrote; an agent edits only its own. The note keeps its place, kind and state (a
-question stays open or answered); its references are linked, and search follows the new text.
+and those of agents working for them, and a project's maintainers (`maintainer`) any agent's; an
+agent edits only its own. The note keeps its place, kind and state (a question stays open or
+answered); its references are linked, and search follows the new text.
 """
-function edit_note!(kb::KB, ref::AbstractString, note::Integer, text::AbstractString; by::Actor)
+function edit_note!(kb::KB, ref::AbstractString, note::Integer, text::AbstractString; by::Actor, maintainer::Bool = false)
     id = task_ref(kb, ref)
     use_media!(kb, something(ref_project(ref)), text)
-    rows = query(kb, "SELECT who, by_agent, kind, text FROM task_events WHERE id = ? AND task_id = ?", (note, id))
+    rows = query(kb, "SELECT who, by_agent, by_person, kind, text FROM task_events WHERE id = ? AND task_id = ?", (note, id))
     isempty(rows) && not_found("No note $note on $(uppercase(strip(ref)))")
     e = first(rows)
     e.kind in SEARCHED_NOTES || error("Only comments, progress notes and questions are edited")
     mine = e.who == by.name && (e.by_agent == 1) == by.agent
-    mine || (!by.agent && e.by_agent == 1) ||
-        error(by.agent ? "An agent edits only its own notes" : "A person edits their own notes and agents' notes")
+    their_agent = !by.agent && e.by_agent == 1 && (maintainer || (!isempty(by.id) && e.by_person == by.id))
+    mine || their_agent || error(by.agent ? "An agent edits only its own notes" :
+        "A person edits their own notes and those of agents working for them; a project's maintainers, any agent's")
     text = strip(text)
     isempty(text) && error("A note needs text")
     text == e.text && return note

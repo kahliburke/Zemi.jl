@@ -4991,8 +4991,14 @@ end
     nomeaning(kb, text) = Tuple{Int,String}[]
     @test any(t -> t.ref == "NE-2", K.search_tasks(kb, "deterministic"; meaning = nomeaning)) &&
           !any(t -> t.ref == "NE-2", K.search_tasks(kb, "stochastic"; meaning = nomeaning))
-    K.edit_note!(kb, "NE-2", note, "Checked the deterministic runs"; by = me)   # a person corrects an agent's note
+    K.edit_note!(kb, "NE-2", note, "Checked the deterministic runs"; by = me, maintainer = true)   # a maintainer corrects any agent's
     @test length(K.note_history(kb, note)) == 2
+    # A person corrects the notes of agents working for them; another's, only as a maintainer.
+    rowans = K.note_task!(kb, "NE-2", "Ran the deterministic case"; kind = "progress", by = K.agent("Claude for Rowan"; id = "Rowan"))
+    @test K.edit_note!(kb, "NE-2", rowans, "Ran the deterministic case twice"; by = me) == rowans
+    @test_throws "agents working for them" K.edit_note!(kb, "NE-2", rowans, "Changed"; by = K.person("Bea"))
+    @test_throws "agents working for them" K.edit_note!(kb, "NE-2", note, "Changed"; by = me)
+    @test K.edit_note!(kb, "NE-2", rowans, "Ran the deterministic case, twice"; by = K.person("Bea"), maintainer = true) == rowans
     @test occursin("[note $note, edited]: reported: Checked the deterministic runs", K.format_task(K.task(kb, "NE-2")))
     mine = K.note_task!(kb, "NE-2", "My own words"; by = me)
     @test_throws "An agent edits only its own" K.edit_note!(kb, "NE-2", mine, "Changed"; by = bot)

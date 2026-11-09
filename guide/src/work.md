@@ -82,6 +82,10 @@ else to the task's assignee, else to anyone. Agents see the questions asked of t
 next task, each with its note number, and answer with `task_note(ref, text; kind="comment",
 reply_to=note)`.
 
+A note can be edited (the pencil beside it) by whoever wrote it, by the person an agent wrote it
+for, and, for any agent's note, by the project's maintainers. Nobody edits another person's notes.
+Each edit keeps the text it replaced, under the note's **edited** mark.
+
 ### Notifications
 
 In the shared service, what newly waits on you can come to your phone or computer as a
