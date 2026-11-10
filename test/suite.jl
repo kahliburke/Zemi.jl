@@ -3350,14 +3350,16 @@ end
     @test !(e isa K.Refusal) && K.failure_message(e) == "Summarizer s answered HTTP 401: expired"
     @test K.error_status(e) == 502 && K.reason(e) == "Summarizer s answered HTTP 401: expired"
     @test K.failure_message(ErrorException("plain")) == "plain"
-    # OpenCode's key: its login where there is one, else OPENCODE_API_KEY (a container's).
+    # OpenCode's key: one typed on the setup page, else its login, else OPENCODE_API_KEY (a container's).
     data = mktempdir()
-    withenv("XDG_DATA_HOME" => data, "OPENCODE_API_KEY" => nothing) do
+    withenv("XDG_DATA_HOME" => data, "OPENCODE_API_KEY" => nothing, "ZEMI_CONFIG" => joinpath(data, "config", "config.toml")) do
         @test_throws "no OPENCODE_API_KEY set" K.resolve_key("opencode", "t")
         withenv(() -> (@test K.resolve_key("opencode", "t") == "from-env"), "OPENCODE_API_KEY" => "from-env")
         mkpath(joinpath(data, "opencode"))
         write(joinpath(data, "opencode", "auth.json"), K.JSON.json(Dict("opencode" => Dict("key" => "from-login"))))
         withenv(() -> (@test K.resolve_key("opencode", "t") == "from-login"), "OPENCODE_API_KEY" => "from-env")
+        K.write_private(joinpath(data, "config", "opencode_key"), "typed\n")
+        @test K.resolve_key("opencode", "t") == "typed"
     end
 
     seen = Dict{String,Any}()
@@ -6302,4 +6304,50 @@ end
         K.HOST_BUILD[] = was[3]
         K.STOPPING[] = false
     end
+end
+
+@zset "joining the Kaimon installed here" begin
+    JSON = K.JSON
+    dir = mktempdir()
+    kdir, cdir = joinpath(dir, "kaimon"), joinpath(dir, "cache")
+    # Copies of Zemi as Pkg installs them, one for each version, and a checkout.
+    copy(at) = (mkpath(at); write(joinpath(at, "Project.toml"), "name = \"Zemi\"\n"); at)
+    v1, v2 = copy(joinpath(dir, "depot", "packages", "Zemi", "AbCd1")), copy(joinpath(dir, "depot", "packages", "Zemi", "EfGh2"))
+    checkout = copy(joinpath(dir, "devel", "Zemi.jl"))
+    entries() = JSON.parsefile(joinpath(kdir, "extensions.json"))["extensions"]
+    withenv("KAIMON_CONFIG_DIR" => kdir, "KAIMON_CACHE_DIR" => cdir) do
+        @test K.register_extension(; project_path = v1) == :no_kaimon && !K.kaimon_runs_zemi()
+        mkpath(kdir)
+        write(joinpath(kdir, "extensions.json"), JSON.json(Dict("extensions" => [Dict("project_path" => "/elsewhere/Other", "enabled" => true, "auto_start" => true)])))
+        @test K.register_extension(; project_path = v1) == :added
+        @test length(entries()) == 2 && K.zemi_extension()["project_path"] == v1 && K.kaimon_runs_zemi()
+        @test K.register_extension(; project_path = v1) == :already
+        # An update moves the install: its entry is repointed, keeping whether it starts with Kaimon.
+        es = entries(); es[2]["auto_start"] = false
+        write(joinpath(kdir, "extensions.json"), JSON.json(Dict("extensions" => es)))
+        @test K.register_extension(; project_path = v2) == :repointed
+        @test K.zemi_extension()["project_path"] == v2 && K.zemi_extension()["auto_start"] == false && !K.kaimon_runs_zemi()
+        @test any(e -> e["project_path"] == "/elsewhere/Other", entries())                  # the others kept
+        # A checkout registered is another copy, left as it is unless forced.
+        @test K.register_extension(; project_path = checkout, force = true) == :repointed
+        @test K.register_extension(; project_path = v2) == :other && K.zemi_extension()["project_path"] == checkout
+        @test !K.stale_entry(checkout, v2) && K.stale_entry(v1, v2) && K.stale_entry(joinpath(dir, "gone"), v2)
+        write(joinpath(kdir, "extensions.json"), "{ not json")
+        @test_throws "does not parse" K.register_extension(; project_path = v1)
+        # Kaimon's Qdrant, from the record it keeps of itself while its process lives.
+        @test K.kaimon_qdrant() === nothing
+        mkpath(joinpath(cdir, "qdrant"))
+        record(pid) = write(joinpath(cdir, "qdrant", "server.json"),
+                           JSON.json(Dict("host" => gethostname(), "pid" => pid, "port" => 6399, "key" => "k1", "heartbeat" => time())))
+        record(getpid())
+        @test K.kaimon_qdrant() == ("http://127.0.0.1:6399", "k1")
+        record(0)
+        @test K.kaimon_qdrant() === nothing
+        write(joinpath(kdir, "search.json"), JSON.json(Dict("qdrant" => Dict("url" => "https://q.example/", "api_key" => "k2"))))
+        @test K.kaimon_qdrant() == ("https://q.example", "k2")
+    end
+    # The messages, plain where the output is not a terminal.
+    io = IOBuffer()
+    K.say(:ok, "Done", "run `zemi open`", ("The site", "http://localhost:8000", "a note"); io)
+    @test String(take!(io)) == "✓ Done\n  run zemi open\n  The site    http://localhost:8000   a note\n"
 end

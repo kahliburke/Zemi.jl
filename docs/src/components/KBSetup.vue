@@ -15,7 +15,7 @@ const props = defineProps<{ prompt?: boolean }>()
 type Area = { name: string; description: string }
 type Setup = { needed: boolean; group: { name: string; field: string; description: string; focus_areas: Area[] };
                watch: string[]; contact: string; categories: { id: string; title: string }[];
-               choice: ModelInfo; machine: Record<string, string>; stream: string }
+               choice: ModelInfo; hosted: boolean; machine: Record<string, string>; stream: string }
 const setup = ref<Setup | null>(null)
 // The front page's line: whether setup is needed, and the summarizer that keeps failing.
 const prompted = ref<{ needed: boolean; failing: ModelInfo['failing'] } | null>(null)
@@ -118,6 +118,8 @@ const job = computed(() => jobs.value.find(j => j.id === done.value?.job))
     <KBNeedsService permission="config.edit">
       <div v-if="done" class="kbsu-done">
         <p><strong>Done.</strong> The site will rebuild in a moment.</p>
+        <p v-if="setup?.hosted" class="kb-dim">Kaimon runs this knowledge base: it starts with Kaimon and restarts if it stops,
+          so nothing needs to be run by hand. Its panel is in Kaimon's Extensions tab.</p>
         <p v-if="job" class="kb-dim">Importing the dataset: {{ job.status === 'running' ? job.message || 'starting' : job.result ?? job.error }}</p>
         <p><a :href="`${kbPage('status')}#add-documents`">Add papers</a> · <a :href="pageLink('/service/configuration')">Configuration</a></p>
       </div>

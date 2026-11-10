@@ -1,5 +1,18 @@
 # Development
 
+## From a checkout
+
+```sh
+git clone https://github.com/kahliburke/Zemi.jl.git
+cd Zemi.jl
+./zemi
+```
+
+`./zemi` takes the same commands as the `zemi` app, run from the checkout in the environment in
+`app/`: with Revise, so a running service follows edits to the code, and with Kaimon loaded in the
+same process, as the shared service runs. The first run installs its dependencies. `./zemi kaimon`
+has Kaimon run the checkout as its extension, in place of an installed Zemi.
+
 ## Tests
 
 ```sh

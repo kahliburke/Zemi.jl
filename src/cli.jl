@@ -4,8 +4,9 @@ const CLI_HELP = """
     zemi [serve]                         serve the site and the API at http://localhost:8000, rebuilding the
                                          site when pages, notebooks, the package or the knowledge base change
     zemi open                            open it in the browser, with the key that keeps other accounts out
-    zemi kaimon [--force]                have the Kaimon on this machine run it, as its extension: Kaimon
-                                         starts it and serves its tools, and its panel there sets how it runs
+    zemi kaimon [--force]                have the Kaimon installed here run it, as its extension: Kaimon
+                                         starts it with itself and serves its tools, and its panel there sets
+                                         how it runs; zemi then says Kaimon runs it (--here runs it anyway)
     zemi dev [--shared [--kaimon]]       for developing it: the site from VitePress's development server at
                                          http://localhost:5173, components updated as they are edited, nothing
                                          bundled; with --shared, the shared service the same way
@@ -48,10 +49,10 @@ base's tools (as `zemi.*`) to the Kaimon on this machine, for its Claude session
 otherwise it is unlisted.
 """
 function agent_session(; tools::Bool = false)
-    KAIMON[] === nothing && return @warn "Kaimon is not loaded: agent summarizers will not run"
+    kaimon_running() || @warn "No Kaimon is running on this machine: agent summarizers will not run"
     ensure_qdrant(kb().config; patience = 30) || @warn "Qdrant is not answering at $(Qdrant.url()): searching by meaning and embedding will fail"
     try
-        Gate = kaimon().KaimonGate
+        Gate = KaimonGate
         tools ? Gate.serve(; tools = create_tools(Gate.GateTool), namespace = MCP_NAMESPACE, force = true,
                            allow_mirror = false, allow_restart = false) :
                 Gate.serve(; force = true, discoverable = false)
@@ -78,8 +79,7 @@ end
 "The port of this knowledge base's service, the shared one's or `zemi`'s, if something answers on it."
 function serving_port(c::Config)
     for port in unique([c.shared.port, parse(Int, get(ENV, "ZEMI_PORT", "8000"))])
-        answers = try close(connect(ip"127.0.0.1", port)); true catch; false end
-        answers && return port
+        port_taken(port) && return port
     end
     return nothing
 end
@@ -98,7 +98,7 @@ function cli(args::AbstractVector{<:AbstractString})
         if cmd == "open"
             open_local()
         elseif cmd == "kaimon"
-            println(register_extension(; force = "--force" in rest))
+            say_registered(register_extension(; force = "--force" in rest))
         elseif cmd == "sync"
             agent_session()
             println(format_sync(sync!(kb(); unread = "--unread" in rest, resummarize = "--resummarize" in rest, progress = say)))

@@ -35,16 +35,18 @@ after the ゼミ (*zemi*), a Japanese university research seminar.
 
 ## Quick start
 
-Julia 1.12+, plus Ollama (`qwen3-embedding:4b`), Qdrant and `mutool` to read papers
-([requirements](https://kahliburke.github.io/Zemi.jl/installation)).
+Julia 1.12+, and `mutool` to read papers
+([requirements](https://kahliburke.github.io/Zemi.jl/installation)). With
+[Kaimon](https://github.com/kahliburke/Kaimon.jl), which runs it for you along with Qdrant and the
+agents:
 
-```sh
-git clone https://github.com/kahliburke/Zemi.jl.git
-cd Zemi.jl
-./zemi
+```
+pkg> app add Kaimon
+pkg> app add Zemi
 ```
 
-The site is served at http://localhost:8000; its front page leads to Setup.
+then `kaimon` once, and `zemi kaimon`. Without Kaimon, `zemi` serves it, with an Ollama and Qdrant of
+your own. The site is at http://localhost:8000; its front page leads to Setup.
 
 ```julia
 using Zemi

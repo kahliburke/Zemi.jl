@@ -315,7 +315,7 @@ session_owner(sid::AbstractString) = (s = lock(() -> get(MCP_CALLERS, sid, nothi
 
 "The person an agent's tool call is for, as a caller, when it came through `/mcp`: whose token opened its session."
 function mcp_caller()
-    sid = KAIMON[] === nothing ? nothing : KAIMON[].KaimonGate.current_caller()
+    sid = KaimonGate.current_caller()
     sid === nothing && return nothing
     return session_owner(sid)
 end
@@ -335,9 +335,7 @@ The person the agent making the current tool call works for, when the service op
 configs it writes for its own agents carry, which the `/mcp` proxy never passes on.
 """
 function agent_caller()
-    G = KAIMON[] === nothing ? nothing : KAIMON[].KaimonGate
-    (G === nothing || !isdefined(G, :current_agent_id)) && return nothing
-    id = G.current_agent_id()
+    id = KaimonGate.current_agent_id()
     return id === nothing ? nothing : lock(() -> get(AGENT_CALLERS, id, nothing), AGENT_CALLERS_LOCK)
 end
 

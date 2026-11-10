@@ -61,10 +61,12 @@ change. Serves its tools to the local
 ## In Kaimon
 
 [Kaimon](https://github.com/kahliburke/Kaimon.jl) can run the knowledge base as one of its
-extensions, so nothing has to be started or watched by hand. `zemi kaimon` registers it (or add the
-checkout in Kaimon's Extensions tab). Kaimon then starts it with itself, restarts it if it fails,
-serves its tools to the Claude sessions and notebooks it hosts, and runs its agents and Qdrant. Its
-log is `~/.cache/kaimon/extensions/zemi.log`.
+extensions, so nothing has to be started or watched by hand. `zemi kaimon` registers it (see
+[Installation](installation.md#With-Kaimon)). Kaimon then starts it with itself, restarts it if it
+fails, serves its tools to the Claude sessions and notebooks it hosts, and runs its agents and
+Qdrant. `zemi` need not be run any more: run, it says that Kaimon runs the knowledge base and where,
+and serves nothing (`zemi --here` serves it anyway, for when Kaimon is not running). Its log is
+`~/.cache/kaimon/extensions/zemi.log`.
 
 It serves as `[service]` in the config says (see [Configuration](configuration.md#Other-keys)): for
 you alone on `port`, as `zemi` does, or as the shared service. With `dev`, the site comes from

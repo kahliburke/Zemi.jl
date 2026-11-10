@@ -5,10 +5,10 @@
 # user's is in reach.
 
 """
-Kaimon, once it is loaded: the agents that write summaries, tutor and make notebooks, and the gate the
-`zemi` tools are served through. The extension that loads with it sets this
-(`ext/ZemiKaimonExt.jl`); without it everything else works, and what needs agents
-says so.
+Kaimon, where it is loaded in this process: run by Kaimon as its extension, or the shared service's
+own (see [`start_embedded!`](@ref)). The extension that loads with it sets this
+(`ext/ZemiKaimonExt.jl`). Elsewhere Zemi reaches the Kaimon running on this machine through
+KaimonGate (see kaimon_link.jl).
 """
 const KAIMON = Ref{Union{Module,Nothing}}(nothing)
 
@@ -20,7 +20,7 @@ end
 
 # How a Kaimon server tool is called: through the Kaimon session this code runs in. Tests swap in a
 # stand-in for the agent tools.
-const AGENT_CALL = Ref{Function}((name, args) -> kaimon().KaimonGate.call_tool(name, args))
+const AGENT_CALL = Ref{Function}((name, args) -> KaimonGate.call_tool(name, args))
 
 "A Kaimon server tool's reply, parsed from JSON when it is JSON."
 function kaimon_tool(name::Symbol, args::Dict{String,Any})
@@ -114,8 +114,7 @@ end
 Where the Kaimon this process's agents run in keeps its logs: the service's own (`KAIMON_CACHE_DIR`,
 see [`start_embedded!`](@ref)) in shared mode, as Kaimon finds it.
 """
-kaimon_cache() = KAIMON[] !== nothing ? kaimon().kaimon_cache_dir() :
-    (d = get(ENV, "KAIMON_CACHE_DIR", ""); isempty(d) ? joinpath(xdg_home("XDG_CACHE_HOME", ".cache"), "kaimon") : d)
+kaimon_cache() = kaimon_cache_dir()
 
 "The events Kaimon has logged of agent `id`'s work: each a `Dict` with its `kind`, `turn` and `data`."
 function agent_events(id::AbstractString)

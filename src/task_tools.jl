@@ -96,7 +96,7 @@ function with_images(text::AbstractString, images)
     isempty(images) && return String(text)
     blocks = Any[Dict("type" => "text", "text" => text)]
     append!(blocks, [Dict("type" => "image", "data" => base64encode(i.bytes), "mimeType" => i.type) for i in images])
-    return kaimon().KaimonGate.MCP_CONTENT_SENTINEL * JSON.json(Dict("content" => blocks))
+    return KaimonGate.MCP_CONTENT_SENTINEL * JSON.json(Dict("content" => blocks))
 end
 
 # A tool applies the code's changes first, where Revise is loaded (tool calls come through the gate,
@@ -592,7 +592,7 @@ function task_wait_tool(project::String; minutes::Float64 = 10.0)::String
                 events = people_events(kb(), key, since)
                 isempty(events) || return "In $key:\n" * people_events_text(events) * "\n\nCall next_task to see what to do now."
                 # Progress keeps the call from being taken for a stalled one.
-                KAIMON[] === nothing || KAIMON[].KaimonGate.progress("Waiting for people on $key")
+                KaimonGate.progress("Waiting for people on $key")
             end
             "Nothing from people on $key in $(round(minutes; digits = 1)) minutes. Wait again, or stop."
         finally

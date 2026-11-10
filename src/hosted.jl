@@ -182,32 +182,3 @@ function start_panel_feed!()
         sleep(2)
     end
 end
-
-# ── Registering ───────────────────────────────────────────────────────────────────────────────────
-
-"""
-    register_extension(; project_path = pkgdir(Zemi), force = false) -> String
-
-`zemi kaimon`: add Zemi to the extensions the Kaimon on this machine starts (its `extensions.json`),
-so that Kaimon runs the knowledge base and serves its tools. A Zemi registered from elsewhere is left
-as it is unless `force`. Says what it did.
-"""
-function register_extension(; project_path::AbstractString = pkgdir(@__MODULE__), force::Bool = false)
-    K = kaimon()
-    file = K.get_extensions_config_path()
-    # One that does not parse reads as empty, and writing would lose the others in it.
-    isfile(file) && try JSON.parsefile(file) catch; error("Kaimon's $file does not parse: fix or remove it first") end
-    path = abspath(project_path)
-    entries = K.load_extensions_config()
-    ours(e) = try K.parse_extension_manifest(e.project_path).namespace == MCP_NAMESPACE catch; false end
-    i = findfirst(ours, entries)
-    if i !== nothing
-        entries[i].project_path == path && return "Zemi is already among Kaimon's extensions, from $path."
-        force || return "Kaimon runs Zemi from $(entries[i].project_path): `zemi kaimon --force` runs it from $path instead."
-        deleteat!(entries, i)
-    end
-    push!(entries, K.ExtensionEntry(path, true, true))
-    K.save_extensions_config(entries)
-    return "Zemi is among Kaimon's extensions, from $path. Kaimon starts it (at once, if it is running), " *
-           "and [u] on it in Kaimon's Extensions tab opens its panel."
-end

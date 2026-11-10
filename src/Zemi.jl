@@ -29,6 +29,7 @@ using OpenSSL_jll: libcrypto
 using SQLite
 using Tables
 import TimeZones
+import KaimonGate
 
 include("locked_dict.jl")
 include("refusal.jl")
@@ -60,6 +61,7 @@ include("ingest.jl")
 include("dropped.jl")
 include("search.jl")
 include("summaries.jl")
+include("kaimon_link.jl")
 include("agents.jl")
 include("evaluation.jl")
 include("design.jl")
@@ -137,8 +139,10 @@ include("mcp.jl")
 include("confine.jl")
 include("activity.jl")
 include("oauth.jl")
+include("terminal.jl")
 include("cli.jl")
 include("hosted.jl")
+include("main.jl")
 
 export Config, Layer, KB, load_config, open_kb, kb
 export parse_arxiv_id, parse_pdf, chunk_paper

@@ -230,6 +230,9 @@ function warm_up(kb::KB; shared::Bool = false)
     return length(targets)
 end
 
+"Whether something answers on `port` on this machine."
+port_taken(port::Integer) = try close(connect(ip"127.0.0.1", port)); true catch; false end
+
 "Where this process serves the knowledge base for one person (see [`serve_local`](@ref)), empty if it does not."
 const SERVED_AT = Ref("")
 
@@ -243,6 +246,8 @@ knowledge base or, with `sources`, what the site is built from changes) and the 
 function serve_local(; kb::KB = kb(), port::Integer = parse(Int, get(ENV, "ZEMI_PORT", "8000")),
                      sources::Bool = true, build = default_site_build, site::Bool = true)
     c = kb.config
+    port_taken(port) && error("Port $port is in use, perhaps by another zemi: stop that, or serve on another port " *
+                              "([service] port in the config, or ZEMI_PORT)")
     STARTED[] = now()
     if site
         reap_stale_build!(c)
@@ -251,8 +256,13 @@ function serve_local(; kb::KB = kb(), port::Integer = parse(Int, get(ENV, "ZEMI_
     end
     SERVED_AT[] = "http://localhost:$port"
     LOCAL_PORT[] = port
-    @info "Knowledge base at http://localhost:$port" * (sources ? "" : " (rebuilt when a job changes it)") *
-          "; a browser new to it opens $(local_link(c, port)), or run zemi open"
+    if stderr isa Base.TTY
+        say(:ok, "The knowledge base is at http://localhost:$port", ("A browser new to it", local_link(c, port), "or zemi open"),
+            "Ctrl-C stops it.")
+    else
+        @info "Knowledge base at http://localhost:$port" * (sources ? "" : " (rebuilt when a job changes it)") *
+              "; a browser new to it opens $(local_link(c, port)), or run zemi open"
+    end
     SETUP_ANNOUNCED[] = (kb, local_link(c, port, "/service/setup.html"))
     if site && setup_needed(kb)
         current_site(c) === nothing ? @info("Not set up yet: Setup opens in the browser once the site is built, in a few minutes") :
@@ -412,11 +422,9 @@ function start_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool 
     push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db))
     load_plugins!(db.config)
     start_figure_sweep(db)
-    if KAIMON[] === nothing
-        @warn "Kaimon is not loaded: agents (summaries, the tutor, notebooks) cannot run"
-    elseif which != :hosted
+    if which != :hosted
         try
-            Gate = kaimon().KaimonGate
+            Gate = KaimonGate
             embedded = which == :embedded && db.config.shared.kaimon_port > 0
             if embedded && !kaimon_embeddable()
                 @warn "This Kaimon cannot run as the service's own: /mcp is off, and agents use the Kaimon of whoever runs the service"
@@ -483,7 +491,7 @@ function stop!(r::Running; seconds::Real = 15)
     for stop in r.stops
         try stop() catch e; @warn "Stopping part of the knowledge base failed" exception = e end
     end
-    r.hosted || KAIMON[] === nothing || try kaimon().KaimonGate.stop() catch end
+    r.hosted || try KaimonGate.stop() catch end
     stop_embedded!()
     deadline = time() + seconds
     for t in r.tasks

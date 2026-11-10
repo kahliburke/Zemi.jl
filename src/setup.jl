@@ -22,7 +22,7 @@ questions_json(g::Group) = [Dict("id" => q.id, "text" => q.text, "options" => q.
 function setup_json(kb::KB)
     c = kb.config
     lacking = unavailable(kb; fresh = true)
-    Dict("needed" => setup_needed(kb),
+    Dict("needed" => setup_needed(kb), "hosted" => hosted(),
          "group" => Dict("name" => c.group.name, "field" => c.group.field, "description" => c.group.description,
                          "focus_areas" => focus_json(c.group)),
          "watch" => c.watch_categories, "contact" => c.contact,

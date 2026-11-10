@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Zemi from a checkout, through the zemi app (app/), which `pkg> app develop ./app` installs as `zemi`.
+# Zemi from a checkout, in the environment in app/ (with Revise, and Kaimon in the same process). The
+# `zemi` app itself is Zemi's: `pkg> app add Zemi`.
 # `./zemi` serves it at http://localhost:8000, `./zemi --shared` serves it to the people signed in
 # to it, and `./zemi help` lists the commands.
 set -euo pipefail

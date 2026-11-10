@@ -2,11 +2,14 @@
 # writing summaries needs a summarizer; a knowledge base imported from the shared dataset may have
 # none of them. The site greys out what cannot run here and says why, and the API refuses it.
 
-"Whether Kaimon's agent tools answer, within a few seconds (a stale Kaimon socket would block for minutes)."
+"""
+Whether the agent tools of the Kaimon running on this machine answer, within a few seconds (a stale
+Kaimon socket would block for minutes).
+"""
 const AGENTS_AVAILABLE = Ref{Function}(function ()
-    KAIMON[] === nothing && return false
+    kaimon_running() || return false
     t = Threads.@spawn try
-        any(t -> string(t.name) == "agent_open", kaimon().KaimonGate.list_tools())
+        any(t -> string(t.name) == "agent_open", KaimonGate.list_tools())
     catch
         false
     end
@@ -14,8 +17,6 @@ const AGENTS_AVAILABLE = Ref{Function}(function ()
     return timedwait(() -> istaskdone(t), 5; pollint = 0.005) == :ok && fetch(t)
 end)
 
-"Kaimon's Qdrant, `(url, key)`, or `nothing` without Kaimon."
-kaimon_qdrant() = KAIMON[] === nothing ? nothing : Base.invokelatest(kaimon().qdrant_endpoint)
 
 same_qdrant(a::AbstractString, b::AbstractString) =
     replace(rstrip(a, '/'), "//localhost:" => "//127.0.0.1:") == replace(rstrip(b, '/'), "//localhost:" => "//127.0.0.1:")
@@ -55,13 +56,20 @@ function ensure_qdrant(c::Config; patience::Real = 0)
         end
         return false
     end
-    return try
-        started = Base.invokelatest(kaimon().ensure_qdrant!) === true
-        Qdrant.use!(() -> qdrant_endpoint(c))         # its key and port are new
-        started && Qdrant.ping()
+    # Kaimon keeps its Qdrant running: started here when Kaimon is loaded in this process, else
+    # waited for, as its record says where it is now (see `kaimon_qdrant`).
+    started = KAIMON[] === nothing ? false : try
+        Base.invokelatest(kaimon().ensure_qdrant!) === true
     catch e
         @warn "Kaimon could not start Qdrant" exception = e
         false
+    end
+    until = time() + patience
+    while true
+        Qdrant.use!(() -> qdrant_endpoint(c))         # its key and port may be new
+        Qdrant.ping() && return true
+        (started || time() >= until) && return false
+        sleep(2)
     end
 end
 

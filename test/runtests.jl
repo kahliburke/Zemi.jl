@@ -6,6 +6,10 @@ using Zemi: Span, TextLine, RawBlock, parse_blocks, keyword_query, point_id,
     parse_arxiv_feed, split_long, CHUNK_MAX, query, scalar, compose_accents
 
 const K = Zemi
+# Nothing of the person running the tests is read: their config, its settings and the keys saved
+# beside it, or the Kaimon they run. Testsets that need a config or Kaimon's folders set their own.
+ENV["ZEMI_CONFIG"] = joinpath(mktempdir(), "config.toml")
+ENV["KAIMON_CONFIG_DIR"] = joinpath(mktempdir(), "kaimon")
 # Uploads are not looked up in OpenAlex here; the look-up is tested with a stand-in.
 K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
 K.DOI_COPIES[] = (doi; contact = "") -> (; arxiv = nothing, pdfs = String[])
