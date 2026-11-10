@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-10)
 
 - **Installing**: `pkg> app add Zemi` installs `zemi`, which no longer carries Kaimon: it reaches the
   Kaimon running on this machine for its agents and Qdrant.
@@ -11,8 +11,8 @@
   rebuilding on Enter are gone.
 - **The model that reads papers** is chosen by where it runs, with what each choice needs on this
   machine, tries on a section of a paper to compare, a choice among OpenCode Zen's models, and a local
-  model pulled from the page (the disk's room checked first). The same choice is on the Configuration page, and the front page says when summaries keep
-  failing.
+  model pulled from the page (the disk's room checked first). The same choice is on the
+  Configuration page, and the front page says when summaries keep failing.
 - **A section** opens on the paper's own pages, where it starts, with the rest of the pages dimmed;
   in the dark theme they are recolored for it, or shown as printed. Its extracted text is a click
   away.
