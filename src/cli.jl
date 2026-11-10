@@ -3,7 +3,6 @@
 const CLI_HELP = """
     zemi [serve]                         serve the site and the API at http://localhost:8000, rebuilding the
                                          site when pages, notebooks, the package or the knowledge base change
-    zemi manual                          the same, rebuilding on Enter (or when a job changes the knowledge base)
     zemi open                            open it in the browser, with the key that keeps other accounts out
     zemi dev [--shared [--kaimon]]       for developing it: the site from VitePress's development server at
                                          http://localhost:5173, components updated as they are edited, nothing

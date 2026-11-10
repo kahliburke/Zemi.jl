@@ -215,10 +215,9 @@ dev_server_port() = parse(Int, get(ENV, "ZEMI_DEV_PORT", "5173"))
 
 For a server already answering the API at `api`: write the pages, start the development server on
 `dev_port`, and write again the pages the knowledge base changes when it does, or every page when
-the settings change the site's look, docs/make.jl or the checkout's own pages change, or Enter is
-pressed in the terminal. When the package's code changes, the pages it changes are written again,
-with the code as Revise applies it here and a page writer started afresh. Returns a function that
-stops the development server.
+the settings change the site's look or docs/make.jl or the checkout's own pages change. When the
+package's code changes, the pages it changes are written again, with the code as Revise applies it
+here and a page writer started afresh. Returns a function that stops the development server.
 """
 function start_dev!(kb::KB; api::AbstractString, dev_port::Integer = dev_server_port())
     c = kb.config
@@ -228,7 +227,7 @@ function start_dev!(kb::KB; api::AbstractString, dev_port::Integer = dev_server_
     start_dev_server!(c; port = dev_port)
     @info "Knowledge base for development at $(DEV_URL[]) (the API at $api; the server's log: $(joinpath(dev_dir(c), "server.log")))"
     # One writing at a time, the development server serving throughout: the changed pages when the
-    # knowledge base changes, every page when Enter is pressed.
+    # knowledge base changes, every page when what the whole site is written from changes.
     again = Channel{Nothing}(1)
     full, recode = Ref(false), Ref(false)
     ask(every = false; code = false) = (full[] |= every; recode[] |= code; isready(again) || put!(again, nothing))
@@ -245,9 +244,6 @@ function start_dev!(kb::KB; api::AbstractString, dev_port::Integer = dev_server_
         mtime(stamp) != seen[] && (seen[] = mtime(stamp); ask())
         (t = sources.site()) != site_at[] && (site_at[] = t; ask(true))
         (t = sources.code()) != code_at[] && (code_at[] = t; ask(; code = true))
-    end
-    @async while !eof(stdin)
-        readline(stdin); ask(true)
     end
     @async for _ in again
         every, code = full[], recode[]

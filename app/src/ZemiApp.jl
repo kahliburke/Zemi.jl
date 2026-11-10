@@ -4,7 +4,6 @@ agents, the gate its tools are served through, the Qdrant it manages) and Revise
 while it runs). `./zemi` runs it from a checkout; `pkg> app develop ./app` installs it as `zemi`.
 
     zemi                serve the knowledge base for whoever runs it, at http://localhost:8000
-    zemi manual         the same, rebuilding the site on Enter rather than as its sources change
     zemi dev            for developing it: the site from VitePress's development server, components
                         updated as they are edited
     zemi --shared       serve it to the people signed in to it ([shared] in the config); with
@@ -49,9 +48,9 @@ local_sign_in(args) = "--local-sign-in" in args || get(ENV, "ZEMI_LOCAL_SIGN_IN"
 function (@main)(args::Vector{String})
     flush_output()
     cmd = isempty(args) ? "serve" : args[1]
-    if cmd in ("serve", "manual")
+    if cmd == "serve"
         track_code()
-        Zemi.run_local(; manual = cmd == "manual")
+        Zemi.run_local()
     elseif cmd == "dev"
         track_code()
         "--shared" in args ? Zemi.run_shared(; kaimon_mode = "--kaimon" in args ? :external : nothing, dev = true,

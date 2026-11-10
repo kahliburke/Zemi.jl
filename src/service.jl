@@ -251,7 +251,7 @@ function serve_local(; kb::KB = kb(), port::Integer = parse(Int, get(ENV, "ZEMI_
     end
     SERVED_AT[] = "http://localhost:$port"
     LOCAL_PORT[] = port
-    @info "Knowledge base at http://localhost:$port" * (sources ? "" : " (rebuilt on Enter, or when a job changes it)") *
+    @info "Knowledge base at http://localhost:$port" * (sources ? "" : " (rebuilt when a job changes it)") *
           "; a browser new to it opens $(local_link(c, port)), or run zemi open"
     SETUP_ANNOUNCED[] = (kb, local_link(c, port, "/service/setup.html"))
     if site && setup_needed(kb)
@@ -299,14 +299,13 @@ function announce_setup(io::IO = stderr)
 end
 
 """
-    run_local(; manual = false)
+    run_local()
 
 `zemi`: serve the knowledge base for whoever runs it (see [`serve_local`](@ref)), with Kaimon's
 agents, the arXiv watch, and the plugins and record sources (see [`load_plugins!`](@ref) and
-[`follow_sources`](@ref)), until the process is stopped. With `manual`, edits to what the site is
-built from wait for Enter in the terminal.
+[`follow_sources`](@ref)), until the process is stopped.
 """
-function run_local(; manual::Bool = false)
+function run_local()
     db = kb()
     # The knowledge base's tools reach the Claude sessions and notebooks on this machine through its Kaimon.
     agent_session(; tools = true)
@@ -318,7 +317,7 @@ function run_local(; manual::Bool = false)
         Threads.@spawn (wait(job); Threads.atomic_sub!(IMPORTS, 1))
     end
     follow_dataset!(db)
-    server = serve_local(; kb = db, sources = !manual)
+    server = serve_local(; kb = db)
     start_watch!(db)
     follow_backups(db)
     follow_task_vectors(db)
@@ -328,11 +327,6 @@ function run_local(; manual::Bool = false)
     follow_sources(db)
     upgrade_landscape(db)
     start_figure_sweep(db)
-    manual && @async while !eof(stdin)
-        readline(stdin)
-        @info "Rebuilding the site"
-        request_build!(db.config)
-    end
     atexit(() -> stop_shared(server, db))
     Base.exit_on_sigint(true)
     wait(server)

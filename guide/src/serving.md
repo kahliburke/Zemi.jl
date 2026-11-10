@@ -48,7 +48,7 @@ shows *offline*. The demo is a static copy.
 
 One person, no sign-in, `http://localhost:8000`, opened once from the address it prints or with
 `zemi open` (see [Installation](installation.md)). Rebuilds the site when papers, pages or notebooks
-change (`zemi manual`: edits to pages and notebooks wait for Enter). Serves its tools to the local
+change. Serves its tools to the local
 [Kaimon](https://github.com/kahliburke/Kaimon.jl) (see [Agents and MCP](agents.md)).
 
 ```@raw html

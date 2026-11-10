@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Zemi from a checkout, through the zemi app (app/), which `pkg> app develop ./app` installs as `zemi`.
-# `./zemi` serves it at http://localhost:8000, `./zemi manual` rebuilds the site only on Enter,
-# `./zemi --shared` serves it to the people signed in to it, and `./zemi help` lists the commands.
+# `./zemi` serves it at http://localhost:8000, `./zemi --shared` serves it to the people signed in
+# to it, and `./zemi help` lists the commands.
 set -euo pipefail
 # The checkout, by absolute path: the commands' file arguments are read from where it is run.
 dir=$(cd "$(dirname "$0")" && pwd)
