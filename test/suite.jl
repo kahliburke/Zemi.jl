@@ -1929,6 +1929,7 @@ end
         call(method, target, body = nothing) = (r = K.handle(kb, HTTP.Request(method, target, ["Content-Type" => "application/json"],
                                                                               body === nothing ? UInt8[] : JSON.json(body)), K.local_caller());
                                                 (r.status, JSON.parse(String(r.body))))
+        empty!(K.SUMMARY_FAILURES)                              # (summaries other testsets failed)
         s, setup = call("GET", "/api/config/setup")
         @test s == 200 && setup["needed"] && any(c -> c["id"] == "q-bio.PE", setup["categories"]) && !isempty(setup["choice"]["models"])
         @test call("GET", "/api/config/setup?needed=1") == (200, Dict("needed" => true, "failing" => nothing))   # the front page's questions alone
@@ -2192,7 +2193,7 @@ end
             admin_credentials = "$(joinpath(dir, "cloudflare_admin"))"
             """)
         out = joinpath(dir, "bob.toml")
-        printed = withenv("XDG_CONFIG_HOME" => dir) do
+        printed = withenv("ZEMI_CONFIG" => joinpath(cfg, "config.toml")) do
             mktemp() do path, io
                 status = redirect_stdout(() -> K.cli(["token", "create", "bob", "--out", out]), io)
                 close(io)
