@@ -155,11 +155,12 @@ end
     model_json(kb) -> Dict
 
 What the model choice starts from: the places and choices, what this machine has (see
-[`model_machine`](@ref)), the choice made now, and whether summaries keep failing.
+[`model_machine`](@ref)), the choice made now, whether summaries keep failing, and the passage a
+choice is tried on.
 """
 model_json(kb::KB) = Dict{String,Any}("places" => [Dict(pairs(p)) for p in MODEL_PLACES], "models" => model_choices_json(kb.config),
                                       "machine" => model_machine(kb.config), "model" => current_choice(kb.config),
-                                      "failing" => summaries_failing(kb.config))
+                                      "failing" => summaries_failing(kb.config), "passage" => TRY_PASSAGE)
 
 """
     choice_summarizer(c, m) -> (summarizer, key)
@@ -273,6 +274,9 @@ closely at the upper plots and hardly at all at the lower ones, where it stayed 
 authors read this as water limiting growth only above a threshold elevation, and note that one
 season cannot separate this from differences in soil depth along the same slope."""
 
+"The most of a passage pasted to try a model on that is sent, in characters."
+const TRY_CHARS = 12_000
+
 "How long trying a model may take, in seconds: an agent starts first, and a local model loads."
 const TRY_SECONDS = 300
 
@@ -297,14 +301,16 @@ end
 """
     try_model(kb, m) -> Dict
 
-Have the choice `m` summarize a short passage, as it would a section, before it is chosen: `ok`,
+Have the choice `m` summarize its `passage` (or [`TRY_PASSAGE`](@ref)), as it would a section, before it is chosen: `ok`,
 the `text` it wrote and the `seconds` it took, or the `error` in plain words (see [`plain_failure`](@ref)).
 """
 function try_model(kb::KB, m::AbstractDict)
     s, key = try choice_summarizer(kb.config, m) catch e; return Dict("ok" => false, "error" => failure_message(e)) end
     s.kind == :agent && !AGENTS_AVAILABLE[]() &&
         return Dict("ok" => false, "error" => "Kaimon's agents are not running here: start Kaimon, signed in to Claude Code.")
-    prompt = "Summarize this passage from a paper in two sentences, for a researcher deciding whether to read it.\n\n" * TRY_PASSAGE
+    passage = strip(String(get(m, "passage", "")))
+    passage = isempty(passage) ? TRY_PASSAGE : first(passage, TRY_CHARS)
+    prompt = "Summarize this passage from a paper in two sentences, for a researcher deciding whether to read it.\n\n" * passage
     t = time()
     task = Threads.@spawn s.kind == :api ?
         first(complete(s, summary_system(kb.config), prompt; key = isempty(key) ? api_key(s) : key)) :

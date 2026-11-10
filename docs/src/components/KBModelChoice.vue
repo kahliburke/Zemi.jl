@@ -19,6 +19,7 @@ export type ModelInfo = {
                              pulled: boolean; recommended: boolean }[] }
   model: { id: string; model: string; url: string }
   failing: { summarizer: string; count: number; why: string; error: string } | null
+  passage: string
 }
 export type Choice = { id: string; model: string; url: string; key: string }
 
@@ -55,26 +56,36 @@ const cost = (x: ModelInfo['models'][number]) =>
 // Another key offered at once when the key in use is the one refused.
 const replaceKey = ref(/key/i.test(props.info.failing?.why ?? ''))
 
-// Trying the choice: forgotten when the choice changes.
-const trying = ref(false)
-const tried = ref<{ ok: boolean; text?: string; seconds?: number; error?: string } | null>(null)
-watch(choice, () => { tried.value = null }, { deep: true })
 // A local model starts from the first Ollama has; another key is offered again for each choice.
 watch(() => choice.value.id, id => {
   replaceKey.value = false
   if (id === 'ollama' && !choice.value.model) choice.value.model = props.info.machine.ollama.models[0]?.name ?? ''
 })
+
+// Trying choices on one passage, the service's or one pasted, each answer kept beside the others to
+// compare: the latest first, one for each model.
+type Tried = { name: string; ok: boolean; text?: string; seconds?: number; error?: string }
+const passage = ref(props.info.passage)
+const editingPassage = ref(false)
+const trying = ref(false)
+const tries = ref<Tried[]>([])
+// The model a choice runs, as a try names it: a local or other model by its own name.
+const choiceName = (c: Choice) => (props.info.models.find(x => x.id === c.id)?.label ?? c.id) +
+  (c.id === 'ollama' || c.id === 'custom' ? `: ${c.model}` : '')
 async function tryIt() {
-  trying.value = true; tried.value = null
+  trying.value = true
+  const name = choiceName(choice.value)
+  let r: Tried
   try {
-    tried.value = await post('/api/config/model/try', JSON.stringify(choice.value))
+    r = { name, ...(await post('/api/config/model/try', JSON.stringify({ ...choice.value, passage: passage.value }))) }
     // A key refused: offer to enter another in its place.
-    if (!tried.value!.ok && /key/i.test(tried.value!.error ?? '') && keyFor.value) replaceKey.value = true
-  }
-  catch (e: any) { tried.value = { ok: false, error: e.message } }
+    if (!r.ok && /key/i.test(r.error ?? '') && keyFor.value) replaceKey.value = true
+  } catch (e: any) { r = { name, ok: false, error: e.message } }
   finally { trying.value = false }
+  tries.value = [r!, ...tries.value.filter(t => t.name !== name)]
 }
-defineExpose({ tried })
+// A new passage makes the answers to the old one beside the point.
+watch(passage, () => { tries.value = [] })
 
 // Pulling a local model: followed as a job, the choice made when it is done.
 const pullName = ref('')
@@ -187,15 +198,28 @@ const keyFor = computed(() => chosen.value?.needs === 'opencode' ? 'OpenCode' : 
     </section>
 
     <div v-if="editable" class="kbmc-try">
-      <button type="button" class="kbmc-try-button" :disabled="!canTry || trying" @click="tryIt">
-        {{ trying ? 'Trying…' : 'Try it' }}</button>
-      <span class="kbmc-help">{{ trying ? (chosen?.agent ? 'An agent starts first: this can take a minute.' : 'Summarizing a short passage.') :
-        'Has the model summarize a short passage, to see that it works and how it writes.' }}</span>
-      <div v-if="tried?.ok" class="kbmc-tried">
-        <p>{{ tried.text }}</p>
-        <span class="kbmc-help">Written in {{ tried.seconds }} s.</span>
+      <div class="kbmc-passage">
+        <span class="kbmc-passage-head">The passage it summarizes
+          <button type="button" class="kb-link kbmc-link" @click="editingPassage = !editingPassage">
+            {{ editingPassage ? 'done' : 'paste another' }}</button>
+          <button v-if="passage !== info.passage" type="button" class="kb-link kbmc-link" @click="passage = info.passage">the sample</button>
+        </span>
+        <textarea v-if="editingPassage" v-model="passage" rows="8" placeholder="A passage from a paper in your field"></textarea>
+        <blockquote v-else>{{ passage }}</blockquote>
       </div>
-      <p v-else-if="tried" class="kbmc-warn-line">{{ tried.error }}</p>
+      <button type="button" class="kbmc-try-button" :disabled="!canTry || trying || !passage.trim()" @click="tryIt">
+        {{ trying ? 'Trying…' : `Try ${choiceName(choice)}` }}</button>
+      <span class="kbmc-help">{{ trying ? (chosen?.agent ? 'An agent starts first: this can take a minute.' : 'Summarizing the passage.') :
+        'Try several to compare them: each answer stays below.' }}</span>
+      <div v-if="tries.length" class="kbmc-tries">
+        <div v-for="t in tries" :key="t.name" class="kbmc-tried" :class="{ failed: !t.ok }">
+          <span class="kbmc-tried-head"><strong>{{ t.name }}</strong>
+            <span v-if="t.ok" class="kbmc-tag kbmc-dim">{{ t.seconds }} s</span>
+            <button type="button" class="kbmc-x" :title="`Remove ${t.name}'s answer`" @click="tries = tries.filter(x => x !== t)">×</button></span>
+          <p v-if="t.ok">{{ t.text }}</p>
+          <p v-else class="kbmc-warn-line">{{ t.error }}</p>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -229,7 +253,17 @@ const keyFor = computed(() => chosen.value?.needs === 'opencode' ? 'OpenCode' : 
   background: none; font-size: 0.88rem; cursor: pointer; margin-bottom: 0.3rem; }
 .kbmc-try-button:disabled { opacity: 0.5; cursor: default; }
 .kbmc-try { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--vp-c-divider); }
-.kbmc-tried { margin-top: 0.5rem; padding: 0.5rem 0.8rem; border-radius: 8px; background: var(--vp-c-bg-soft); font-size: 0.9rem; }
-.kbmc-tried p { margin: 0 0 0.3rem; }
+.kbmc-passage { margin: 0 0 0.7rem; }
+.kbmc-passage-head { display: flex; gap: 0.8rem; align-items: baseline; font-size: 0.85rem; color: var(--vp-c-text-2); }
+.kbmc-passage blockquote { margin: 0.3rem 0 0; padding: 0.4rem 0.8rem; border-left: 3px solid var(--vp-c-divider); font-size: 0.86rem;
+  line-height: 1.55; color: var(--vp-c-text-2); }
+.kbmc-passage textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 0.3rem; padding: 0.4rem 0.6rem; border-radius: 6px;
+  border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg-soft); color: var(--vp-c-text-1); font: inherit; font-size: 0.86rem; }
+.kbmc-tries { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 0.7rem; margin-top: 0.7rem; }
+.kbmc-tried { padding: 0.5rem 0.8rem; border-radius: 8px; background: var(--vp-c-bg-soft); font-size: 0.88rem; line-height: 1.55; }
+.kbmc-tried.failed { background: var(--vp-c-warning-soft); }
+.kbmc-tried-head { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.85rem; }
+.kbmc-tried p { margin: 0.3rem 0 0; }
+.kbmc-x { margin-left: auto; background: none; border: none; color: var(--vp-c-text-3); cursor: pointer; font-size: 1rem; padding: 0; }
 .kbmc-failing { padding: 0.5rem 0.8rem; border-radius: 8px; background: var(--vp-c-warning-soft); font-size: 0.9rem; }
 </style>
