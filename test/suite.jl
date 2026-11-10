@@ -6218,3 +6218,46 @@ end
     @test isempty(K.changed_by_others(kb, "WE", "Ada"))
     close(kb)
 end
+
+@zset "hosted by Kaimon" begin
+    HTTP, Sockets = K.HTTP, K.Sockets
+    free_port(from) = ((p, s) = Sockets.listenany(Sockets.IPv4("127.0.0.1"), from); close(s); Int(p))
+    dir = mktempdir()
+    first_port = free_port(20000)
+    second_port = free_port(first_port + 1)
+    write(joinpath(dir, "config.toml"), "data_dir = \"$dir/data\"\ncollection_prefix = \"zemi_test\"\n[service]\nport = $first_port\n")
+    @test K.load_config(joinpath(dir, "config.toml")).service == K.ServiceConfig(; port = first_port)
+    @test_throws ErrorException K.service_config(Dict("mode" => "everyone"))
+    was = (get(ENV, "ZEMI_CONFIG", nothing), get(ENV, "KAIMON_EXTENSION", nothing), K.HOST_BUILD[])
+    serving(port) = try HTTP.get("http://127.0.0.1:$port/api/status"; status_exception = false, readtimeout = 120).status == 401 catch; false end
+    try
+        K.shutdown()
+        ENV["ZEMI_CONFIG"] = joinpath(dir, "config.toml"); ENV["KAIMON_EXTENSION"] = "zemi"
+        K.HOST_BUILD[] = (out, log) -> (mkpath(joinpath(out, "1")); write(joinpath(out, "1", "index.html"), "<p>built</p>"))
+        @test K.hosted()
+        # Hosted, the knowledge base serves on [service] port, for one person (its key asked for).
+        wait(K.host!())
+        @test K.HOST_STATE[] == "running" && K.HOST[].url == "http://localhost:$first_port" && serving(first_port)
+        # The panel's settings are checked before they are written, then apply when it restarts.
+        @test_throws ErrorException K.set_machine_setting!("service.mode", "everyone")
+        @test_throws ErrorException K.set_machine_setting!("service.port", "eighty")
+        @test_throws ErrorException K.set_machine_setting!("judge", "x")
+        @test K.set_machine_setting!("service.port", string(second_port)).service.port == second_port
+        @test K.HOST[].url == "http://localhost:$first_port"
+        wait(K.restart!())
+        @test serving(second_port) && !serving(first_port)
+        st = K.hosted_status()
+        @test st["state"] == "running" && st["url"] == "http://localhost:$second_port"
+        @test Dict(s["key"] => s["value"] for s in st["settings"])["service.port"] == second_port
+        # Stopping it ends its loops and frees its port.
+        K.stop_hosting()
+        @test K.HOST_STATE[] == "stopped" && !serving(second_port)
+    finally
+        K.stop_hosting()
+        for (k, v) in zip(("ZEMI_CONFIG", "KAIMON_EXTENSION"), was[1:2])
+            v === nothing ? delete!(ENV, k) : (ENV[k] = v)
+        end
+        K.HOST_BUILD[] = was[3]
+        K.STOPPING[] = false
+    end
+end

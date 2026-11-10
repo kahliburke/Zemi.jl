@@ -58,6 +58,24 @@ change. Serves its tools to the local
 </figure>
 ```
 
+## In Kaimon
+
+[Kaimon](https://github.com/kahliburke/Kaimon.jl) can run the knowledge base as one of its
+extensions, so nothing has to be started or watched by hand. `zemi kaimon` registers it (or add the
+checkout in Kaimon's Extensions tab). Kaimon then starts it with itself, restarts it if it fails,
+serves its tools to the Claude sessions and notebooks it hosts, and runs its agents and Qdrant. Its
+log is `~/.cache/kaimon/extensions/zemi.log`.
+
+It serves as `[service]` in the config says (see [Configuration](configuration.md#Other-keys)): for
+you alone on `port`, as `zemi` does, or as the shared service. With `dev`, the site comes from
+VitePress's development server on `dev_port`, its components updated as they are edited.
+
+`[u]` on it in the Extensions tab opens its panel. It shows whether it is running, where, and
+whether the site is building. Its keys open the site in the browser (`o`), build it again (`b`) and
+restart it (`r`). It changes the settings the site's Configuration page does not: how it serves, the
+ports, the data and content folders, Ollama, Qdrant and `mutool`. A change is checked as a whole
+configuration and written to `config.settings.toml`; `r` restarts the knowledge base with it.
+
 ## `zemi --shared`
 
 A group, signing in through GitHub or any OpenID Connect provider. Adds roles, invitations, API

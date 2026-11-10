@@ -156,12 +156,12 @@ end
     follow_task_vectors(kb)
 
 For a running service: embed the tasks and findings now, and again a few seconds after they change,
-for as long as the process runs. A failure (the embedding service or Qdrant away) is logged once and retried
+until the service stops (see [`stop!`](@ref)). A failure (the embedding service or Qdrant away) is logged once and retried
 with the next change.
 """
 function follow_task_vectors(kb::KB)
     task_layer(kb.config) === nothing && return nothing
-    Threads.@spawn begin
+    return Threads.@spawn begin
         warned = false
         while !STOPPING[]
             try
@@ -177,5 +177,4 @@ function follow_task_vectors(kb::KB)
             pause(3)                                   # changes come in bursts
         end
     end
-    return nothing
 end

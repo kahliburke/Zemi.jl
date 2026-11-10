@@ -4,6 +4,8 @@ const CLI_HELP = """
     zemi [serve]                         serve the site and the API at http://localhost:8000, rebuilding the
                                          site when pages, notebooks, the package or the knowledge base change
     zemi open                            open it in the browser, with the key that keeps other accounts out
+    zemi kaimon [--force]                have the Kaimon on this machine run it, as its extension: Kaimon
+                                         starts it and serves its tools, and its panel there sets how it runs
     zemi dev [--shared [--kaimon]]       for developing it: the site from VitePress's development server at
                                          http://localhost:5173, components updated as they are edited, nothing
                                          bundled; with --shared, the shared service the same way
@@ -33,8 +35,8 @@ const CLI_HELP = """
                                          what was there is kept first as a snapshot. --force restores even
                                          though something answers on the service's port
 
-    ZEMI_PORT=<port> serves on another port than 8000 (ZEMI_DEV_PORT, the development server's, than
-    5173); ZEMI_CONFIG=<file> reads another config.
+    ZEMI_PORT=<port> serves on another port than [service] port, 8000 by default (ZEMI_DEV_PORT, the
+    development server's, than [service] dev_port, 5173); ZEMI_CONFIG=<file> reads another config.
     """
 
 """
@@ -95,6 +97,8 @@ function cli(args::AbstractVector{<:AbstractString})
     try
         if cmd == "open"
             open_local()
+        elseif cmd == "kaimon"
+            println(register_extension(; force = "--force" in rest))
         elseif cmd == "sync"
             agent_session()
             println(format_sync(sync!(kb(); unread = "--unread" in rest, resummarize = "--resummarize" in rest, progress = say)))

@@ -268,6 +268,27 @@ Base.@kwdef struct GitHubApp
 end
 
 """
+How Kaimon runs the knowledge base when it hosts it as its extension (`[service]`, see hosted.jl):
+for one person (`mode = "solo"`, on `port`) or for the people signed in to it (`"shared"`, on
+`[shared] port`), the site built (`dev = false`) or from VitePress's development server on
+`dev_port`, its components updated as they are edited.
+"""
+Base.@kwdef struct ServiceConfig
+    mode::Symbol = :solo
+    dev::Bool = false
+    port::Int = 8000
+    dev_port::Int = 5173
+end
+
+function service_config(t::AbstractDict)
+    d = ServiceConfig()
+    mode = Symbol(get(t, "mode", "solo"))
+    mode in (:solo, :shared) || error("[service] mode is solo or shared, not $mode")
+    return ServiceConfig(; mode, dev = Bool(get(t, "dev", d.dev)), port = Int(get(t, "port", d.port)),
+                         dev_port = Int(get(t, "dev_port", d.dev_port)))
+end
+
+"""
 The shared service, `zemi --shared` (read only in that mode): where people reach it (`base_url`), the
 address and port it listens on (localhost behind a proxy; all addresses, `0.0.0.0`, in a container)
 and which Kaimon serves its tools and hosts its agents (`kaimon`: `:embedded`, one of its own on
@@ -593,6 +614,7 @@ Base.@kwdef struct Config
     backup::BackupConfig = BackupConfig()
     dataset::DatasetConfig = DatasetConfig()
     shared::SharedConfig = SharedConfig()
+    service::ServiceConfig = ServiceConfig()
     sources::Dict{String,Any} = Dict{String,Any}()
     plugins::PluginConfig = PluginConfig()
 end
@@ -745,6 +767,7 @@ function load_config(path::AbstractString = config_path())
         backup = backup_config(get(t, "backup", Dict()); path = here),
         dataset = dataset_config(get(t, "dataset", Dict()); path = here),
         shared = shared_config(get(t, "shared", Dict()); path = here),
+        service = service_config(get(t, "service", Dict())),
         sources = Dict{String,Any}(String(k) => v for (k, v) in get(t, "sources", Dict()) if v isa AbstractDict),
         plugins = (p = get(t, "plugins", Dict());
                    PluginConfig(; env = (e = get(p, "env", ""); isempty(e) ? e : here(e)), load = String.(get(p, "load", String[])))))

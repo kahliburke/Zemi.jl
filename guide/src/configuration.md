@@ -108,3 +108,4 @@ Slate hub, or the one on `[notebooks] slate_port`. `ZEMI_SITE_NOTEBOOKS=0` leave
 | `[landscape] layer` | the first paper layer searched | the layer papers are placed by |
 | `[media] max_mb` | `200` | the largest file people and agents may attach |
 | `[media.backup]` | none | a copy of every attached file, as `[dataset]` names a store |
+| `[service] mode`, `dev`, `port`, `dev_port` | `"solo"`, `false`, `8000`, `5173` | how Kaimon serves it as its extension (see [Serving modes](serving.md#In-Kaimon)): for one person or `"shared"`, built or from VitePress's development server; `port` and `dev_port` are `zemi`'s and `zemi dev`'s too, under `ZEMI_PORT` and `ZEMI_DEV_PORT` |

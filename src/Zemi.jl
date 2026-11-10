@@ -137,6 +137,7 @@ include("confine.jl")
 include("activity.jl")
 include("oauth.jl")
 include("cli.jl")
+include("hosted.jl")
 
 export Config, Layer, KB, load_config, open_kb, kb
 export parse_arxiv_id, parse_pdf, chunk_paper

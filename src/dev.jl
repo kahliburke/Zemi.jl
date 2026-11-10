@@ -207,11 +207,11 @@ dev_sources(docs::AbstractString) =
                          keep = f -> endswith(f, ".md") && !occursin("$(Base.Filesystem.path_separator)generated", f)),
      code = () -> newest([joinpath(dirname(docs), "src")]; keep = endswith(".jl")))
 
-"The port VitePress's development server takes for `zemi dev`: `ZEMI_DEV_PORT`, else 5173."
-dev_server_port() = parse(Int, get(ENV, "ZEMI_DEV_PORT", "5173"))
+"The port VitePress's development server takes for `zemi dev`: `ZEMI_DEV_PORT`, else `[service] dev_port`."
+dev_server_port(c::Config) = parse(Int, get(ENV, "ZEMI_DEV_PORT", string(c.service.dev_port)))
 
 """
-    start_dev!(kb; api, dev_port = dev_server_port()) -> stop
+    start_dev!(kb; api, dev_port = dev_server_port(kb.config)) -> stop
 
 For a server already answering the API at `api`: write the pages, start the development server on
 `dev_port`, and write again the pages the knowledge base changes when it does, or every page when
@@ -219,7 +219,7 @@ the settings change the site's look or docs/make.jl or the checkout's own pages 
 package's code changes, the pages it changes are written again, with the code as Revise applies it
 here and a page writer started afresh. Returns a function that stops the development server.
 """
-function start_dev!(kb::KB; api::AbstractString, dev_port::Integer = dev_server_port())
+function start_dev!(kb::KB; api::AbstractString, dev_port::Integer = dev_server_port(kb.config))
     c = kb.config
     DEV_URL[] = "http://localhost:$dev_port"
     @info "[dev] Writing the pages, without bundling"
@@ -265,30 +265,4 @@ function start_dev!(kb::KB; api::AbstractString, dev_port::Integer = dev_server_
         w = PAGE_WRITER[]
         w === nothing || process_exited(w) || terminate(getpid(w); group = true, what = "The page writer", seconds = 5)
     end
-end
-
-"""
-    run_dev(; port = 8000)
-
-`zemi dev`: serve the knowledge base for developing it (see `dev.jl`), run for one person: the API on
-`port`, and the site from VitePress's development server. `zemi dev --shared` is the shared service
-the same way (see [`run_shared`](@ref)).
-"""
-function run_dev(; port::Integer = parse(Int, get(ENV, "ZEMI_PORT", "8000")))
-    db = kb()
-    agent_session(; tools = true)
-    DEV_URL[] = "http://localhost:$(dev_server_port())"
-    server = serve_local(; kb = db, port, site = false)
-    follow_task_vectors(db)
-    follow_commits(db)
-    follow_media(db)
-    load_plugins!(db.config)
-    follow_sources(db)
-    start_figure_sweep(db)
-    stop_dev = start_dev!(db; api = "http://127.0.0.1:$port")
-    SETUP_ANNOUNCED[] = (db, local_link(db.config, port, "/service/setup.html"))
-    announce_setup()
-    atexit(() -> (stop_dev(); stop_shared(server, db)))
-    Base.exit_on_sigint(true)
-    wait(server)
 end

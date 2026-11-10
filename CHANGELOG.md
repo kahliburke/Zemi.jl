@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **In Kaimon**: Kaimon can run the knowledge base as its extension (`zemi kaimon` registers it),
+  starting it with itself and serving it as `[service]` says: for one person or shared, built or
+  for development. Its panel in Kaimon's Extensions tab shows how it is going and changes how it
+  runs. `zemi manual` and rebuilding on Enter are gone.
 - **Focus** on a board shows only your part of the project: questions for you and answers to yours,
   your tasks, the plans and reviews that concern you, and your questions still waiting.
 

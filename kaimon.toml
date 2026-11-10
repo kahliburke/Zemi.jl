@@ -2,5 +2,6 @@
 namespace = "zemi"
 module = "Zemi"
 tools_function = "create_tools"
-shutdown_function = "shutdown"
+shutdown_function = "stop_hosting"
+tui_file = "src/tui_panel.jl"
 description = "A research group's knowledge base: papers read in full and searchable by meaning, findings, studies, a tutor, and projects agents work on"

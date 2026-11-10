@@ -48,12 +48,15 @@ const AUTOSYNC_STARTED = Threads.Atomic{Bool}(false)
     create_tools(GateTool) -> Vector
 
 The knowledge base's tools (see [`tool!`](@ref)), built with the `GateTool` type of whichever
-KaimonGate is serving them. A dataset publisher's timer is started too, once in a process (see
-[`start_autosync!`](@ref)), unless `AUTOSYNC[]` is false.
+KaimonGate is serving them. Where Kaimon runs the process as Zemi's extension, the knowledge base
+starts serving too (see [`host!`](@ref)); elsewhere a dataset publisher's timer is started, once in
+a process (see [`start_autosync!`](@ref)), unless `AUTOSYNC[]` is false.
 """
 function create_tools(GateTool::Type)
     GATE[] = parentmodule(GateTool)
-    if AUTOSYNC[] && !Threads.atomic_xchg!(AUTOSYNC_STARTED, true)
+    if hosted()
+        host!()
+    elseif AUTOSYNC[] && !Threads.atomic_xchg!(AUTOSYNC_STARTED, true)
         Threads.@spawn try
             start_autosync!(kb())
         catch e

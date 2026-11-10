@@ -293,7 +293,8 @@ function start_chat_reaper!(kb::KB)
 end
 
 function start_reaper!(kb::KB)
-    CHAT_REAPER[] === nothing || return CHAT_REAPER[]
+    # One ended with the service it ran under (see `stop!`) is started again with the next.
+    CHAT_REAPER[] === nothing || istaskdone(CHAT_REAPER[]) || return CHAT_REAPER[]
     CHAT_REAPER[] = Threads.@spawn while !STOPPING[]
         pause(300)
         try

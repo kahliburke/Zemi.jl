@@ -298,52 +298,95 @@ function announce_setup(io::IO = stderr)
     printstyled(io, "  ╰", "─"^width, "╯\n\n"; color = :green, bold = true)
 end
 
-"""
-    run_local()
+# ── Running ───────────────────────────────────────────────────────────────────────────────────────
 
-`zemi`: serve the knowledge base for whoever runs it (see [`serve_local`](@ref)), with Kaimon's
-agents, the arXiv watch, and the plugins and record sources (see [`load_plugins!`](@ref) and
-[`follow_sources`](@ref)), until the process is stopped.
 """
-function run_local()
+A knowledge base this process serves: how (`mode`: `:local`, `:dev` or `:shared`), where people open
+it (`url`) and where its API is (`api`), its server, the loops started with it (`tasks`, waited for as
+it stops), what else stops with it (`stops`), and whether Kaimon runs the process as its extension
+(`hosted`, see hosted.jl). See [`stop!`](@ref).
+"""
+mutable struct Running
+    mode::Symbol
+    url::String
+    api::String
+    server::Any
+    tasks::Vector{Any}
+    stops::Vector{Function}
+    hosted::Bool
+end
+
+"The port the knowledge base is served on for one person: `ZEMI_PORT`, else `[service] port`."
+local_port(c::Config) = parse(Int, get(ENV, "ZEMI_PORT", string(c.service.port)))
+
+"""
+    start_local(; port, dev = false, dev_port, hosted = false, build = default_site_build) -> Running
+
+Serve the knowledge base for whoever runs it (see [`serve_local`](@ref)), with Kaimon's agents, the
+arXiv watch, and the plugins and record sources (see [`load_plugins!`](@ref) and
+[`follow_sources`](@ref)). With `dev`, for developing it: the site from VitePress's development server
+on `dev_port` (see dev.jl), without the dataset, the arXiv watch and backups. With `hosted`, Kaimon
+runs this process as its extension and serves the tools itself. `build` builds the site (see
+[`build_site!`](@ref)).
+"""
+function start_local(; port::Integer = local_port(kb().config), dev::Bool = false,
+                     dev_port::Integer = dev_server_port(kb().config), hosted::Bool = false, build = default_site_build)
+    STOPPING[] = false
     db = kb()
     # The knowledge base's tools reach the Claude sessions and notebooks on this machine through its Kaimon.
-    agent_session(; tools = true)
-    if db.config.dataset.role != :none
+    hosted ? ensure_qdrant(db.config; patience = 30) || @warn("Qdrant is not answering at $(Qdrant.url()): searching by meaning and embedding will fail") :
+             agent_session(; tools = true)
+    if !dev && db.config.dataset.role != :none
         # The site is first built once this import is done (see `IMPORTS`), not from a knowledge base
         # half imported; the build is asked for as soon as the site is served.
         Threads.atomic_add!(IMPORTS, 1)
         job = start_import(db)
         Threads.@spawn (wait(job); Threads.atomic_sub!(IMPORTS, 1))
     end
-    follow_dataset!(db)
-    server = serve_local(; kb = db)
-    start_watch!(db)
-    follow_backups(db)
-    follow_task_vectors(db)
-    follow_commits(db)
-    follow_media(db)
+    dev && (DEV_URL[] = "http://localhost:$dev_port")
+    server = serve_local(; kb = db, port, site = !dev, build)
+    api = "http://localhost:$port"
+    r = Running(dev ? :dev : :local, dev ? DEV_URL[] : api, api, server, Any[], Function[], hosted)
+    dev || push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db))
+    push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db))
     load_plugins!(db.config)
-    follow_sources(db)
-    upgrade_landscape(db)
+    push!(r.tasks, follow_sources(db))
+    dev || upgrade_landscape(db)
     start_figure_sweep(db)
-    atexit(() -> stop_shared(server, db))
-    Base.exit_on_sigint(true)
-    wait(server)
+    hosted && push!(r.tasks, start_autosync!(db))
+    if dev
+        push!(r.stops, start_dev!(db; api = "http://127.0.0.1:$port", dev_port))
+        SETUP_ANNOUNCED[] = (db, local_link(db.config, port, "/service/setup.html"))
+        announce_setup()
+    end
+    return r
 end
 
 """
-    run_shared(; kaimon_mode = nothing)
+    run_local()
 
-`zemi --shared`: run the knowledge base as a service for the people signed in to it, with the arXiv
-watch, the plugins and record sources, and the dataset followed by a consumer, until the process is stopped. With `local_sign_in`
-(`--local-sign-in`, or `ZEMI_LOCAL_SIGN_IN=1`), people sign in on this machine without a provider
-(see [`local_sign_in`](@ref)). `kaimon_mode`
-(`:embedded` or `:external`, from `--kaimon`) overrides `[shared] kaimon` for this run. With `dev` (`zemi dev
---shared`), the site comes from VitePress's development server, as under [`run_dev`](@ref).
+`zemi`: serve the knowledge base for whoever runs it (see [`start_local`](@ref)) until the process
+is stopped.
 """
-function run_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool = false,
-                    local_sign_in::Bool = get(ENV, "ZEMI_LOCAL_SIGN_IN", "") == "1")
+run_local() = run_until_stopped(start_local())
+
+"`zemi dev`: serve the knowledge base for developing it, run for one person (see [`start_local`](@ref))."
+run_dev(; port::Integer = local_port(kb().config)) = run_until_stopped(start_local(; port, dev = true))
+
+"""
+    start_shared(; kaimon_mode = nothing, dev = false, local_sign_in = false, hosted = false) -> Running
+
+Run the knowledge base as a service for the people signed in to it, with the arXiv watch, the
+plugins and record sources, and the dataset followed by a consumer. With `local_sign_in`
+(`--local-sign-in`, or `ZEMI_LOCAL_SIGN_IN=1`), people sign in on this machine without a provider
+(see [`local_sign_in`](@ref)). `kaimon_mode` (`:embedded` or `:external`, from `--kaimon`) overrides
+`[shared] kaimon`; with `hosted`, Kaimon runs this process as its extension, serves the tools and
+hosts the agents. With `dev`, the site comes from VitePress's development server, as under
+[`start_local`](@ref).
+"""
+function start_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool = false, hosted::Bool = false,
+                      local_sign_in::Bool = get(ENV, "ZEMI_LOCAL_SIGN_IN", "") == "1")
+    STOPPING[] = false
     db = kb()
     if local_sign_in
         # Tried on this machine, the service needs no [shared] table: it is at localhost on its port
@@ -356,21 +399,22 @@ function run_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool = 
                     "  invited, or an admin", isempty(db.config.shared.admins) ? " (with none named, the first to sign in is one)" : "", ".\n\n";
                     color = :yellow, bold = true)
     end
-    which = something(kaimon_mode, db.config.shared.kaimon)
-    dev && (DEV_URL[] = "http://localhost:$(dev_server_port())")
+    which = hosted ? :hosted : something(kaimon_mode, db.config.shared.kaimon)
+    dev_port = dev_server_port(db.config)
+    dev && (DEV_URL[] = "http://localhost:$dev_port")
     # Pages are served before Qdrant and Kaimon are up, and say they are starting until then.
     STARTING[] = true
     ready = nothing
     server = serve_shared(; kb = db, site = !dev)
+    r = Running(:shared, dev ? DEV_URL[] : db.config.shared.base_url, "http://127.0.0.1:$(db.config.shared.port)", server,
+                Any[], Function[], hosted)
     ensure_qdrant(db.config; patience = 30) || @warn "Qdrant is not answering at $(Qdrant.url()): searching by meaning and embedding will fail"
-    follow_task_vectors(db)
-    follow_commits(db)
-    follow_media(db)
+    push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db))
     load_plugins!(db.config)
     start_figure_sweep(db)
     if KAIMON[] === nothing
         @warn "Kaimon is not loaded: agents (summaries, the tutor, notebooks) cannot run"
-    else
+    elseif which != :hosted
         try
             Gate = kaimon().KaimonGate
             embedded = which == :embedded && db.config.shared.kaimon_port > 0
@@ -396,36 +440,59 @@ function run_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool = 
         end
     end
     # The sources start once the service's Kaimon is up, since what they bring in is read by its agents.
-    ready === nothing ? (STARTING[] = false; follow_sources(db); upgrade_landscape(db)) :
-        @async (try wait(ready) catch end; STARTING[] = false; follow_sources(db); upgrade_landscape(db))
+    begin_sources() = (STARTING[] = false; push!(r.tasks, follow_sources(db)); upgrade_landscape(db))
+    ready === nothing ? begin_sources() : @async (try wait(ready) catch end; begin_sources())
     db.config.dataset.role == :none || start_import(db)
-    follow_dataset!(db)
-    start_watch!(db)
-    follow_backups(db)
-    follow_notifications(db)
-    # Ctrl-C or a service manager's SIGTERM ends the process, and the cleanup runs on the way out.
-    # Catching the interrupt instead does not work: it is thrown into whichever task is running at
-    # the time, often one of the HTTP server's, which swallows it.
-    stop_dev = dev ? start_dev!(db; api = "http://127.0.0.1:$(db.config.shared.port)") : () -> nothing
-    atexit(() -> (stop_dev(); stop_shared(server, db)))
+    push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db), follow_notifications(db))
+    hosted && push!(r.tasks, start_autosync!(db))
+    dev && push!(r.stops, start_dev!(db; api = "http://127.0.0.1:$(db.config.shared.port)", dev_port))
+    return r
+end
+
+"`zemi --shared`: run the knowledge base for the people signed in to it (see [`start_shared`](@ref)) until the process is stopped."
+run_shared(; kw...) = run_until_stopped(start_shared(; kw...))
+
+"""
+Wait on the knowledge base `r` serves until the process is stopped. Ctrl-C or a service manager's
+SIGTERM ends the process, and `r` is stopped on the way out (see [`stop!`](@ref)).
+"""
+function run_until_stopped(r::Running)
+    # Catching the interrupt instead does not work: it is thrown into whichever task is running at the
+    # time, often one of the HTTP server's, which swallows it.
+    atexit(() -> (stop!(r); shutdown()))
     Base.exit_on_sigint(true)
-    wait(server)
+    wait(r.server)
 end
 
 """
-    stop_shared(server, kb)
+    stop!(r; seconds = 15)
 
-Stop the shared service: no more requests, no more rebuilds (one running is stopped, and the build
-served is left as it is), the Kaimon session closed, the database closed.
+Stop the knowledge base `r` serves: no more requests, no more rebuilds (one running is stopped, and
+the build served is left as it is), the development server and the service's own Kaimon stopped,
+and its loops waited for, up to `seconds`. The knowledge base stays open; a process Kaimon does not
+host closes its Kaimon session.
 """
-function stop_shared(server, db::KB)
+function stop!(r::Running; seconds::Real = 15)
     @info "Stopping the knowledge base"
     STOPPING[] = true
-    try close(server) catch end
-    WATCHER[] === nothing || close(WATCHER[])
+    tasks_changed!()                                   # wakes the loop waiting for tasks to change
+    try close(r.server) catch end
+    WATCHER[] === nothing || (close(WATCHER[]); WATCHER[] = nothing)
     p = BUILD_PROCESS[]
     p === nothing || process_exited(p) || terminate(getpid(p); group = true, what = "The site build", seconds = 10)
-    KAIMON[] === nothing || try kaimon().KaimonGate.stop() catch end
+    for stop in r.stops
+        try stop() catch e; @warn "Stopping part of the knowledge base failed" exception = e end
+    end
+    r.hosted || KAIMON[] === nothing || try kaimon().KaimonGate.stop() catch end
     stop_embedded!()
-    try close(db) catch end
+    deadline = time() + seconds
+    for t in r.tasks
+        t isa Task || continue
+        while !istaskdone(t) && time() < deadline
+            sleep(0.1)
+        end
+    end
+    SERVED_AT[] = DEV_URL[] = ""
+    SHARED_MODE[] = LOCAL_SIGN_IN[] = STARTING[] = false
+    return r
 end

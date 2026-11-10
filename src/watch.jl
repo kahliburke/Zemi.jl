@@ -214,7 +214,7 @@ function start_watch!(kb::KB)
             end
             if !isempty(cannot_run(kb, "embed", String[]))
                 @info "Not watching arXiv here: papers cannot be embedded on this machine"
-                sleep(period)
+                pause(period)
                 continue
             end
             # A check that fails leaves the time of the last one; it is tried again soon, not a period later.
@@ -222,11 +222,11 @@ function start_watch!(kb::KB)
             while job.finished === nothing && !STOPPING[]
                 sleep(10)
             end
-            job.status == :done || sleep(min(WATCH_RETRY, period))
+            job.status == :done || pause(min(WATCH_RETRY, period))
         catch e
             (e isa InterruptException || STOPPING[]) && break
             @warn "Watching arXiv failed; trying again later" exception = e
-            sleep(period)
+            pause(period)
         end
     end
 end
