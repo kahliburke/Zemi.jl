@@ -6389,11 +6389,14 @@ end
         @test_throws "does not parse" K.register_extension(; project_path = v1)
         # Kaimon's Qdrant, from the record it keeps of itself while its process lives.
         @test K.kaimon_qdrant() === nothing
+        # With no Qdrant of its own, a knowledge base uses Kaimon's, to start where it does not run yet.
+        @test K.uses_kaimons_qdrant(K.Config()) && !K.uses_kaimons_qdrant(K.Config(; qdrant_url = "http://127.0.0.1:6399"))
+        @test !withenv(() -> K.uses_kaimons_qdrant(K.Config()), "KAIMON_CONFIG_DIR" => joinpath(dir, "no-kaimon"))
         mkpath(joinpath(cdir, "qdrant"))
         record(pid) = write(joinpath(cdir, "qdrant", "server.json"),
                            JSON.json(Dict("host" => gethostname(), "pid" => pid, "port" => 6399, "key" => "k1", "heartbeat" => time())))
         record(getpid())
-        @test K.kaimon_qdrant() == ("http://127.0.0.1:6399", "k1")
+        @test K.kaimon_qdrant() == ("http://127.0.0.1:6399", "k1") && K.uses_kaimons_qdrant(K.Config(; qdrant_url = "http://localhost:6399/"))
         # Kept on it once pinned, though the process moves to a cache folder of its own (the service's Kaimon's).
         withenv("KAIMON_QDRANT_STORAGE" => nothing) do
             @test withenv(K.kaimon_qdrant, "KAIMON_CACHE_DIR" => mktempdir()) === nothing

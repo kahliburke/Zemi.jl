@@ -36,8 +36,16 @@ function qdrant_endpoint(c::Config)
     return String(url), String(key)
 end
 
-"Whether the knowledge base uses the Qdrant Kaimon runs, which Kaimon can start."
-uses_kaimons_qdrant(c::Config) = (t = kaimon_qdrant(); t !== nothing && same_qdrant(t[1], first(qdrant_endpoint(c))))
+"""
+Whether the knowledge base uses the Qdrant Kaimon runs, which Kaimon can start: with no Qdrant of its
+own (`qdrant_url`) where Kaimon is installed, whether or not that Qdrant runs yet, or with its
+`qdrant_url` where Kaimon's runs.
+"""
+function uses_kaimons_qdrant(c::Config)
+    isempty(c.qdrant_url) && return kaimon_installed()
+    t = kaimon_qdrant()
+    return t !== nothing && same_qdrant(t[1], c.qdrant_url)
+end
 
 """
     ensure_qdrant(c; patience = 0) -> Bool
