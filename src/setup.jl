@@ -3,9 +3,16 @@
 # joins a group's dataset with a key someone issued, or starts one. Written to the settings file, as
 # the Configuration page writes (see admin.jl).
 
-"Whether this knowledge base is still to be set up: no config file, no settings, and never set up from the site."
-setup_needed(kb::KB; path::AbstractString = config_path()) =
-    !isfile(path) && !isfile(settings_path(path)) && ismissing(scalar(kb, "SELECT value FROM kv WHERE key = 'setup_done'"))
+"""
+Whether this knowledge base is still to be set up: no config file, no settings but how it is served
+(which Kaimon's panel sets before anything else), and never set up from the site.
+"""
+function setup_needed(kb::KB; path::AbstractString = config_path())
+    isfile(path) && return false
+    file = settings_path(path)
+    isfile(file) && !isempty(setdiff(keys(TOML.parsefile(file)), ("service",))) && return false
+    return ismissing(scalar(kb, "SELECT value FROM kv WHERE key = 'setup_done'"))
+end
 
 focus_json(g::Group) = [Dict("name" => a.name, "description" => a.description) for a in g.focus_areas]
 panels_json(g::Group) = [Dict("title" => p.title, "text" => p.text, "link" => p.link) for p in g.panels]
