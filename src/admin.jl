@@ -613,6 +613,7 @@ route!(c -> haskey(c.params, "needed") ? Dict("needed" => setup_needed(c.kb), "f
 # choice, choosing it, and pulling a local model.
 route!(c -> model_json(c.kb), "GET", "/api/config/model"; need = "config.view")
 route!(c -> try_model(c.kb, json_body(c)), "POST", "/api/config/model/try"; need = "config.edit")
+route!(c -> Dict(pairs(try_section(c.kb, get(c.params, "key", "sample")))), "GET", "/api/config/model/section"; need = "config.edit")
 route!(c -> choose_model!(c.kb, json_body(c)), "POST", "/api/config/model"; need = "config.edit")
 route!(c -> Dict("job" => pull_model!(c.kb, String(get(json_body(c), "model", ""))).id), "POST", "/api/config/model/pull";
        need = "config.edit")

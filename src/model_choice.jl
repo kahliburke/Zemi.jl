@@ -16,15 +16,12 @@ const MODEL_PLACES = [
 The summarizers setup offers, as `(; id, place, label, detail, speed, papers, code, needs)`: `place`
 one of [`MODEL_PLACES`](@ref), `papers` the summarizer that reads papers and `code` the one for
 codebases, and `needs` what it needs here (`opencode`, `openai`, `agents`, `ollama` or `custom`).
-`ollama` and `custom` are made from what is chosen with them (see [`model_choice`](@ref)).
+`opencode`, `ollama` and `custom` are made from the model chosen with them (see [`model_choice`](@ref)).
 """
 const MODEL_CHOICES = [
-    (id = "deepseek-v4.1-flash", place = "service", label = "DeepSeek V4.1 Flash, through OpenCode Zen",
-     detail = "Reads each section's text and summarizes it. A good default.", speed = "fast",
-     papers = "deepseek-v4.1-flash", code = "deepseek-v4.1-flash", needs = "opencode"),
-    (id = "deepseek-flash", place = "service", label = "DeepSeek V4 Flash, through OpenCode Zen",
-     detail = "The least expensive; summaries a little plainer.", speed = "fast",
-     papers = "deepseek-flash", code = "deepseek-flash", needs = "opencode"),
+    (id = "opencode", place = "service", label = "A model through OpenCode Zen",
+     detail = "Zen's models (DeepSeek, GLM, Kimi, Qwen, Claude, GPT and others), paid from its credit. DeepSeek V4.1 Flash summarizes well for little.",
+     speed = "fast", papers = "", code = "", needs = "opencode"),
     (id = "gpt-5.4-mini", place = "service", label = "GPT-5.4 mini, through OpenAI", detail = "Reads each section's text.",
      speed = "fast", papers = "gpt-5.4-mini", code = "gpt-5.4-mini", needs = "openai"),
     (id = "custom", place = "service", label = "Another OpenAI-compatible API",
@@ -56,6 +53,42 @@ const LOCAL_MODELS = [
 
 "Room kept free on the disk after a pull, in bytes: the knowledge base and the machine need some too."
 const PULL_MARGIN = 5 * 1024^3
+
+"""
+    zen_models(c) -> Union{Vector,Nothing}
+
+The chat models OpenCode Zen offers to the OpenCode key here, as `(; id, name, description, url,
+price_in, price_out)` (dollars per million tokens), the least costly first; `nothing` without a key
+or an answer. Asked again after an hour.
+"""
+function zen_models(c::Config)
+    cached = ZEN_MODELS[]
+    cached !== nothing && time() - cached.at < 3600 && return cached.models
+    key = try resolve_key("opencode", "OpenCode Zen") catch; return nothing end
+    models = try
+        r = HTTP.get("$ZEN_URL/models", ["Authorization" => "Bearer $key"]; connect_timeout = 5, request_timeout = 15, retry = false)
+        price(m, way) = Float64(something(get(get(get(get(m, "cost", Dict()), "text", Dict()), way, Dict()), "price", nothing), 0.0))
+        chat(m) = get(get(m, "api", Dict()), "chat-completions", nothing)
+        sort!([(; id = String(m["id"]), name = String(something(get(m, "name", nothing), m["id"])),
+                description = String(something(get(m, "description", nothing), "")),
+                url = String(something(get(chat(m), "base_url", nothing), ZEN_URL)), price_in = price(m, "input"), price_out = price(m, "output"))
+               for m in get(JSON.parse(String(r.body)), "data", []) if get(m, "type", "chat") == "chat" && chat(m) !== nothing];
+              by = m -> (40_000 * m.price_in + 8_000 * m.price_out, m.id))
+    catch e
+        @debug "OpenCode Zen's models did not come" exception = e
+        return nothing
+    end
+    ZEN_MODELS[] = (; at = time(), models)
+    return models
+end
+const ZEN_MODELS = Ref{Any}(nothing)
+
+"The summarizer the config has for Zen's model `model`, if any: the one named for it keeps its summaries."
+zen_summarizer(c::Config, model::AbstractString) =
+    (i = findfirst(s -> s.kind == :api && s.key == "opencode" && s.model == model, c.summarizers); i === nothing ? nothing : c.summarizers[i])
+
+"The Zen model chosen when none is: one that summarizes well for little."
+const ZEN_DEFAULT = "deepseek-v4.1-flash"
 
 "The summarizer named `name` in `c`, or `nothing`."
 maybe_summarizer(c::Config, name::AbstractString) = (i = findfirst(s -> s.name == name, c.summarizers); i === nothing ? nothing : c.summarizers[i])
@@ -155,12 +188,17 @@ end
     model_json(kb) -> Dict
 
 What the model choice starts from: the places and choices, what this machine has (see
-[`model_machine`](@ref)), the choice made now, whether summaries keep failing, and the passage a
-choice is tried on.
+[`model_machine`](@ref)), OpenCode Zen's models with their cost per paper, the choice made now,
+whether summaries keep failing, and the sections a choice can be tried on (see [`try_sections`](@ref)).
 """
-model_json(kb::KB) = Dict{String,Any}("places" => [Dict(pairs(p)) for p in MODEL_PLACES], "models" => model_choices_json(kb.config),
-                                      "machine" => model_machine(kb.config), "model" => current_choice(kb.config),
-                                      "failing" => summaries_failing(kb.config), "passage" => TRY_PASSAGE)
+model_json(kb::KB) = Dict{String,Any}(
+    "places" => [Dict(pairs(p)) for p in MODEL_PLACES], "models" => model_choices_json(kb.config),
+    "opencode_models" => [Dict("id" => m.id, "name" => m.name, "description" => m.description,
+                               "cost" => round((40_000 * m.price_in + 8_000 * m.price_out) / 1e6; digits = 3))
+                          for m in something(zen_models(kb.config), [])],
+    "opencode_default" => ZEN_DEFAULT,
+    "machine" => model_machine(kb.config), "model" => current_choice(kb.config), "failing" => summaries_failing(kb.config),
+    "sections" => try_sections(kb))
 
 """
     choice_summarizer(c, m) -> (summarizer, key)
@@ -180,6 +218,16 @@ function choice_summarizer(c::Config, m::AbstractDict)
         url, model = (strip(String(get(m, k, ""))) for k in ("url", "model"))
         (isempty(url) || isempty(model)) && error("Another API needs its address and model")
         return Summarizer(; name = replace(lowercase(model), r"[^a-z0-9.]+" => "-"), url, model), typed
+    elseif id == "opencode"
+        model = strip(String(get(m, "model", "")))
+        isempty(model) && (model = ZEN_DEFAULT)
+        have = zen_summarizer(c, model)
+        have === nothing || return have, typed
+        z = something(zen_models(c), [])
+        i = findfirst(x -> x.id == model, z)
+        i === nothing && !isempty(z) && error("OpenCode Zen has no model $model")
+        url, price_in, price_out = i === nothing ? (ZEN_URL, 0.0, 0.0) : (z[i].url, z[i].price_in, z[i].price_out)
+        return Summarizer(; name = "zen-" * replace(model, r"[^A-Za-z0-9.]+" => "-"), url, model, key = "opencode", price_in, price_out), typed
     end
     i = findfirst(x -> x.id == id, MODEL_CHOICES)
     i === nothing && error("Unknown model choice $id")
@@ -208,12 +256,15 @@ function model_choice(c::Config, m::AbstractDict; config_dir::AbstractString)
         t = Dict{String,Any}("name" => s.name, "url" => s.url, "model" => s.model, "key" => isempty(key) ? "" : save_key_file(s.name, key))
         return (; summarizer = s.name, code = s.name, summarizers = [t])
     end
+    if id == "opencode"
+        isempty(key) || write_private(joinpath(config_dir, "opencode_key"), key * "\n")
+        added = maybe_summarizer(c, s.name) === nothing ?
+            [Dict{String,Any}("name" => s.name, "url" => s.url, "model" => s.model, "key" => "opencode",
+                              "price_in" => s.price_in, "price_out" => s.price_out)] : Dict{String,Any}[]
+        return (; summarizer = s.name, code = s.name, summarizers = added)
+    end
     choice = MODEL_CHOICES[findfirst(x -> x.id == id, MODEL_CHOICES)]
     isempty(key) && return (; summarizer = choice.papers, code = choice.code, summarizers = Dict{String,Any}[])
-    if s.key == "opencode"
-        write_private(joinpath(config_dir, "opencode_key"), key * "\n")
-        return (; summarizer = choice.papers, code = choice.code, summarizers = Dict{String,Any}[])
-    end
     t = Dict{String,Any}("name" => s.name, "url" => s.url, "model" => s.model, "key" => save_key_file(s.name, key),
                          "request" => s.request, "price_in" => s.price_in, "price_out" => s.price_out)
     return (; summarizer = choice.papers, code = choice.code, summarizers = [t])
@@ -260,22 +311,92 @@ function current_choice(c::Config)
     s === nothing && return Dict("id" => "", "model" => "", "url" => "")
     i = findfirst(m -> m.papers == s.name, MODEL_CHOICES)
     i === nothing || return Dict("id" => MODEL_CHOICES[i].id, "model" => "", "url" => "")
+    s.kind == :api && s.key == "opencode" && return Dict("id" => "opencode", "model" => s.model, "url" => "")
     s.kind == :api && startswith(s.url, rstrip(c.ollama_url, '/')) && return Dict("id" => "ollama", "model" => s.model, "url" => "")
     return Dict("id" => "custom", "model" => s.model, "url" => s.url)
 end
 
 # ── Trying a choice ───────────────────────────────────────────────────────────────────────────────
 
-const TRY_PASSAGE = """
-Plots were laid out along a slope at five elevations, and soil moisture was measured weekly over one
-growing season. Moisture fell with elevation at every visit, but the difference between the lowest
-and highest plots narrowed after heavy rain and widened in dry weeks. Plant cover followed moisture
-closely at the upper plots and hardly at all at the lower ones, where it stayed high throughout. The
-authors read this as water limiting growth only above a threshold elevation, and note that one
-season cannot separate this from differences in soil depth along the same slope."""
+"""
+A section to try a model on before the knowledge base has papers of its own: a results section, of a
+paper made up for it, as the reading would extract it from a PDF.
+"""
+const SAMPLE_SECTION = (title = "Soil moisture thresholds for plant cover along a hillslope gradient",
+                        path = "4 Results › 4.2 Moisture and cover along the slope", text = """
+Across the 22 weekly visits, volumetric soil moisture at 10 cm declined with elevation at all five plot
+levels (Table 2). Mean moisture was 31.4% at the lowest plots (E1) and 17.9% at the highest (E5), a
+difference that was significant in a mixed model with visit as a random effect (F(4, 85) = 46.2,
+p < 0.001). The decline was not linear: moisture fell by less than 2 percentage points between E1 and
+E3, and by 9.6 points between E3 and E5.
 
-"The most of a passage pasted to try a model on that is sent, in characters."
-const TRY_CHARS = 12_000
+The difference between E1 and E5 changed with rainfall. In the 6 visits that followed more than 20 mm
+of rain in the preceding three days, it averaged 7.2 points; in the 9 visits after dry spells of a week
+or more, it averaged 18.3 points. Figure 4 shows the moisture at each level against the rain of the
+preceding days. Upper plots dried within four to five days of rain, while E1 and E2 stayed above 28%
+for the whole season.
+
+Plant cover followed a different pattern. At E4 and E5, cover tracked moisture closely: the correlation
+between a plot's moisture and its cover a week later was r = 0.71 at E5 and r = 0.58 at E4. At E1 to E3
+the correlation was weak (r between 0.09 and 0.17), and cover stayed between 78% and 91% throughout the
+season. Fitting a segmented regression of cover on moisture across all plots placed a breakpoint at
+24.6% moisture (95% CI 22.8 to 26.1%); below it cover rose by 3.1 points per point of moisture, above
+it by 0.2.
+
+C = β0 + β1 θ + β2 (θ − θ*) I(θ > θ*) + ε (3)
+
+where C is cover, θ is moisture and θ* the breakpoint. Species composition shifted along the same
+gradient: the share of cover from drought-tolerant grasses rose from 12% at E1 to 47% at E5, while
+broad-leaved herbs fell from 38% to 9%.
+
+Soil depth also declined with elevation, from 64 cm on average at E1 to 23 cm at E5 (Table 3), and
+was correlated with mean moisture across plots (r = 0.82). Adding soil depth to the segmented model
+reduced the breakpoint's estimated effect by about a third but did not remove it (likelihood ratio
+test, p = 0.03). With one season of data, the two cannot be separated further: the lower plots are
+both wetter and deeper, and the threshold may reflect either, or water held in deeper soil.
+""")
+
+"""
+    try_sections(kb) -> Vector{Dict}
+
+The sections a model can be tried on, as their `key`, the paper's `title`, the section's `path` and
+its length in `chars`: one from each of the most recently added papers here, the one closest to a
+typical section's length, then [`SAMPLE_SECTION`](@ref).
+"""
+function try_sections(kb::KB; papers::Integer = 8)
+    out = Dict{String,Any}[]
+    for r in query(kb, """SELECT p.doc_id, p.title FROM papers p JOIN parses x ON x.paper_id = p.id
+                          WHERE p.kind = 'paper' ORDER BY p.added_at DESC LIMIT ?""", (papers,))
+        secs = filter(t -> !occursin(r"abstract|introduction|acknowledg|conclusion"i, t.path), section_texts(kb, r.doc_id))
+        isempty(secs) && continue
+        t = argmin(t -> abs(length(t.text) - 4000), secs)
+        push!(out, Dict{String,Any}("key" => "$(r.doc_id)#$(t.ord)", "title" => coalesce(r.title, r.doc_id), "path" => t.path,
+                                    "chars" => length(t.text)))
+    end
+    push!(out, Dict{String,Any}("key" => "sample", "title" => SAMPLE_SECTION.title, "path" => SAMPLE_SECTION.path,
+                                "chars" => length(SAMPLE_SECTION.text)))
+    return out
+end
+
+"""
+    try_section(kb, key) -> (; title, path, text)
+
+The section `key` names (see [`try_sections`](@ref)): a paper's here, or the sample.
+"""
+function try_section(kb::KB, key::AbstractString)
+    key == "sample" && return SAMPLE_SECTION
+    m = match(r"^(.+)#(\d+)$", key)
+    m === nothing && error("No section $key")
+    id, ord = m[1], parse(Int, m[2])
+    ismissing(paper_id(kb, id)) && not_found("No paper $id.")
+    i = findfirst(t -> t.ord == ord, section_texts(kb, id))
+    i === nothing && not_found("$id has no section $ord to summarize")
+    t = section_texts(kb, id)[i]
+    return (; title = coalesce(paper_row(kb, id).title, id), t.path, t.text)
+end
+
+"The most of a pasted passage sent when trying a model, in characters."
+const TRY_CHARS = 24_000
 
 "How long trying a model may take, in seconds: an agent starts first, and a local model loads."
 const TRY_SECONDS = 300
@@ -301,24 +422,28 @@ end
 """
     try_model(kb, m) -> Dict
 
-Have the choice `m` summarize its `passage` (or [`TRY_PASSAGE`](@ref)), as it would a section, before it is chosen: `ok`,
-the `text` it wrote and the `seconds` it took, or the `error` in plain words (see [`plain_failure`](@ref)).
+Have the choice `m` summarize a section as it would one of a paper's (see [`section_prompt`](@ref)),
+before it is chosen: the section `m["section"]` names (see [`try_sections`](@ref)), or the `passage`
+pasted. Returns `ok`, the `text` it wrote, the `seconds` it took and the words in and out, or the
+`error` in plain words (see [`plain_failure`](@ref)).
 """
 function try_model(kb::KB, m::AbstractDict)
     s, key = try choice_summarizer(kb.config, m) catch e; return Dict("ok" => false, "error" => failure_message(e)) end
     s.kind == :agent && !AGENTS_AVAILABLE[]() &&
         return Dict("ok" => false, "error" => "Kaimon's agents are not running here: start Kaimon, signed in to Claude Code.")
-    passage = strip(String(get(m, "passage", "")))
-    passage = isempty(passage) ? TRY_PASSAGE : first(passage, TRY_CHARS)
-    prompt = "Summarize this passage from a paper in two sentences, for a researcher deciding whether to read it.\n\n" * passage
+    pasted = strip(String(get(m, "passage", "")))
+    sec = isempty(pasted) ? try_section(kb, String(get(m, "section", "sample"))) : (; title = "A pasted passage", path = "", text = first(pasted, TRY_CHARS))
+    prompt = section_prompt(sec.title, isempty(sec.path) ? "(not given)" : sec.path, first(sec.text, s.max_input_chars))
     t = time()
     task = Threads.@spawn s.kind == :api ?
         first(complete(s, summary_system(kb.config), prompt; key = isempty(key) ? api_key(s) : key)) :
         ask(Summarizer(; (f => getfield(s, f) for f in fieldnames(Summarizer))..., timeout = Float64(TRY_SECONDS)),
             summary_system(kb.config), prompt)
     timedwait(() -> istaskdone(task), TRY_SECONDS) == :ok || return Dict("ok" => false, "error" => "No answer within $(TRY_SECONDS ÷ 60) minutes.")
+    words(x) = count(r"\S+", x)
     return try
-        Dict("ok" => true, "text" => strip(fetch(task)), "seconds" => round(time() - t; digits = 1))
+        text = strip(fetch(task))
+        Dict("ok" => true, "text" => text, "seconds" => round(time() - t; digits = 1), "words" => words(text), "words_in" => words(sec.text))
     catch e
         Dict("ok" => false, "error" => plain_failure(e isa TaskFailedException ? e.task.exception : e, s))
     end

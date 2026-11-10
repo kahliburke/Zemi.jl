@@ -1,13 +1,14 @@
 <!--
   Choosing the model that reads papers, for setup and the Configuration page: the choices grouped by
   where the model runs, each with its cost, speed and what it needs here (a key, Kaimon's agents,
-  Ollama and a model), trying the one chosen on a short passage, and pulling a local model into
+  Ollama and a model), trying the one chosen on a section as papers are summarized, and pulling a local model into
   Ollama with the disk's room checked first. `info` is the API's `/api/config/model`; the choice is
   the v-model, with a key typed for it.
 -->
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { post, followJobs, jobs } from './kbApi'
+import { ref, shallowRef, computed, watch, onMounted } from 'vue'
+import { post, getJSON, followJobs, jobs } from './kbApi'
+import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 
 export type ModelInfo = {
   places: { id: string; label: string; detail: string }[]
@@ -19,7 +20,9 @@ export type ModelInfo = {
                              pulled: boolean; recommended: boolean }[] }
   model: { id: string; model: string; url: string }
   failing: { summarizer: string; count: number; why: string; error: string } | null
-  passage: string
+  opencode_models: { id: string; name: string; description: string; cost: number }[]
+  opencode_default: string
+  sections: { key: string; title: string; path: string; chars: number }[]
 }
 export type Choice = { id: string; model: string; url: string; key: string }
 
@@ -50,8 +53,11 @@ function readiness(x: ModelInfo['models'][number]): { text: string; ready: boole
     default: return { text: '', ready: true }
   }
 }
+const perPaper = (c: number | null) => c === null ? '' : c ? `≈ $${c < 0.01 ? c.toFixed(3) : c.toFixed(2)} a paper` : 'free'
+const zen = computed(() => props.info.opencode_models.find(z => z.id === choice.value.model))
 const cost = (x: ModelInfo['models'][number]) =>
-  x.agent ? 'your Claude plan' : x.cost === null ? '' : x.cost ? `≈ $${x.cost.toFixed(2)} a paper` : 'free'
+  x.agent ? 'your Claude plan' : x.needs === 'opencode' ? (choice.value.id === x.id && zen.value ? perPaper(zen.value.cost) : '') :
+  perPaper(x.cost)
 
 // Another key offered at once when the key in use is the one refused.
 const replaceKey = ref(/key/i.test(props.info.failing?.why ?? ''))
@@ -60,32 +66,44 @@ const replaceKey = ref(/key/i.test(props.info.failing?.why ?? ''))
 watch(() => choice.value.id, id => {
   replaceKey.value = false
   if (id === 'ollama' && !choice.value.model) choice.value.model = props.info.machine.ollama.models[0]?.name ?? ''
-})
+  if (id === 'opencode' && !props.info.opencode_models.some(z => z.id === choice.value.model)) choice.value.model = props.info.opencode_default
+}, { immediate: true })
 
-// Trying choices on one passage, the service's or one pasted, each answer kept beside the others to
-// compare: the latest first, one for each model.
-type Tried = { name: string; ok: boolean; text?: string; seconds?: number; error?: string }
-const passage = ref(props.info.passage)
-const editingPassage = ref(false)
+// Trying choices on one section, as the knowledge base summarizes each section of a paper: one of
+// its papers', the sample, or a passage pasted. Each answer is kept beside the others to compare, the
+// latest first, one for each model.
+type Tried = { name: string; ok: boolean; text?: string; seconds?: number; words?: number; words_in?: number; error?: string }
+const sectionKey = ref(props.info.sections[0]?.key ?? 'sample')
+const section = ref<{ title: string; path: string; text: string } | null>(null)
+const pasted = ref('')
+const pasting = ref(false)
 const trying = ref(false)
 const tries = ref<Tried[]>([])
+// Answers as the paper pages show summaries: Markdown, with their mathematics typeset.
+const render = shallowRef<Render>(escapeText)
+onMounted(async () => { render.value = await loadMarkdown() })
+watch(sectionKey, async key => {
+  section.value = null
+  try { section.value = await getJSON(`/api/config/model/section?key=${encodeURIComponent(key)}`) } catch {}
+}, { immediate: true })
+// A different text makes the answers to the old one beside the point.
+watch([sectionKey, pasting, pasted], () => { tries.value = [] })
 // The model a choice runs, as a try names it: a local or other model by its own name.
-const choiceName = (c: Choice) => (props.info.models.find(x => x.id === c.id)?.label ?? c.id) +
-  (c.id === 'ollama' || c.id === 'custom' ? `: ${c.model}` : '')
+const choiceName = (c: Choice) => c.id === 'opencode' ? (props.info.opencode_models.find(z => z.id === c.model)?.name ?? c.model) :
+  (props.info.models.find(x => x.id === c.id)?.label ?? c.id) + (c.id === 'ollama' || c.id === 'custom' ? `: ${c.model}` : '')
 async function tryIt() {
   trying.value = true
   const name = choiceName(choice.value)
   let r: Tried
   try {
-    r = { name, ...(await post('/api/config/model/try', JSON.stringify({ ...choice.value, passage: passage.value }))) }
+    const text = pasting.value ? { passage: pasted.value } : { section: sectionKey.value }
+    r = { name, ...(await post('/api/config/model/try', JSON.stringify({ ...choice.value, ...text }))) }
     // A key refused: offer to enter another in its place.
     if (!r.ok && /key/i.test(r.error ?? '') && keyFor.value) replaceKey.value = true
   } catch (e: any) { r = { name, ok: false, error: e.message } }
   finally { trying.value = false }
   tries.value = [r!, ...tries.value.filter(t => t.name !== name)]
 }
-// A new passage makes the answers to the old one beside the point.
-watch(passage, () => { tries.value = [] })
 
 // Pulling a local model: followed as a job, the choice made when it is done.
 const pullName = ref('')
@@ -107,7 +125,7 @@ watch(() => pullJob.value?.status, s => {
   pulling.value = null
   emit('refresh')
 })
-const canTry = computed(() => choice.value.id !== '' && (choice.value.id !== 'ollama' || choice.value.model !== '') &&
+const canTry = computed(() => choice.value.id !== '' && (!pasting.value || pasted.value.trim() !== '') && (choice.value.id !== 'ollama' || choice.value.model !== '') &&
   (choice.value.id !== 'custom' || (choice.value.url.trim() !== '' && choice.value.model.trim() !== '')))
 // Whether a key can be typed for the choice: one it needs, or another in place of the one here.
 const keyFor = computed(() => chosen.value?.needs === 'opencode' ? 'OpenCode' : chosen.value?.needs === 'openai' ? 'OpenAI' : '')
@@ -143,6 +161,16 @@ const keyFor = computed(() => chosen.value?.needs === 'opencode' ? 'OpenCode' : 
                 <a v-else href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">Get a key from OpenAI</a></span>
             </span>
             <button v-else-if="keyFor && editable" type="button" class="kb-link kbmc-link" @click="replaceKey = true">enter another key</button>
+
+            <span v-if="x.needs === 'opencode' && info.opencode_models.length" class="kbmc-sub">
+              <select v-model="choice.model" :disabled="!editable">
+                <option v-for="z in info.opencode_models" :key="z.id" :value="z.id">{{ z.name }} · {{ perPaper(z.cost) }}</option>
+              </select>
+              <span v-if="zen" class="kbmc-help">{{ zen.description }}</span>
+            </span>
+            <span v-else-if="x.needs === 'opencode' && readiness(x).ready" class="kbmc-sub kbmc-help">
+              Zen's models are listed once it answers with the key here; {{ info.opencode_default }} is used until then.
+            </span>
 
             <span v-if="x.needs === 'agents' && !m.agents" class="kbmc-sub kbmc-help">
               Run the knowledge base in Kaimon (<code>zemi kaimon</code>), with Claude Code signed in on this machine.
@@ -199,24 +227,31 @@ const keyFor = computed(() => chosen.value?.needs === 'opencode' ? 'OpenCode' : 
 
     <div v-if="editable" class="kbmc-try">
       <div class="kbmc-passage">
-        <span class="kbmc-passage-head">The passage it summarizes
-          <button type="button" class="kb-link kbmc-link" @click="editingPassage = !editingPassage">
-            {{ editingPassage ? 'done' : 'paste another' }}</button>
-          <button v-if="passage !== info.passage" type="button" class="kb-link kbmc-link" @click="passage = info.passage">the sample</button>
+        <span class="kbmc-passage-head">Tried on
+          <select v-if="!pasting" v-model="sectionKey">
+            <option v-for="t in info.sections" :key="t.key" :value="t.key">
+              {{ t.key === 'sample' ? 'A sample section' : t.title }} · {{ t.path }} ({{ Math.round(t.chars / 100) / 10 }}k characters)</option>
+          </select>
+          <span v-else>a passage of your own</span>
+          <button type="button" class="kb-link kbmc-link" @click="pasting = !pasting">{{ pasting ? 'a section instead' : 'paste a passage' }}</button>
         </span>
-        <textarea v-if="editingPassage" v-model="passage" rows="8" placeholder="A passage from a paper in your field"></textarea>
-        <blockquote v-else>{{ passage }}</blockquote>
+        <span class="kbmc-help">Summarized as each section of a paper is: in 3 to 6 sentences, for a researcher deciding whether to read it.</span>
+        <textarea v-if="pasting" v-model="pasted" rows="10" placeholder="A section of a paper in your field"></textarea>
+        <details v-else-if="section" class="kbmc-section">
+          <summary>{{ section.title }} · {{ section.path }}</summary>
+          <div class="kbmc-section-text">{{ section.text }}</div>
+        </details>
       </div>
-      <button type="button" class="kbmc-try-button" :disabled="!canTry || trying || !passage.trim()" @click="tryIt">
+      <button type="button" class="kbmc-try-button" :disabled="!canTry || trying" @click="tryIt">
         {{ trying ? 'Trying…' : `Try ${choiceName(choice)}` }}</button>
-      <span class="kbmc-help">{{ trying ? (chosen?.agent ? 'An agent starts first: this can take a minute.' : 'Summarizing the passage.') :
+      <span class="kbmc-help">{{ trying ? (chosen?.agent ? 'An agent starts first: this can take a minute.' : 'Summarizing the section.') :
         'Try several to compare them: each answer stays below.' }}</span>
       <div v-if="tries.length" class="kbmc-tries">
         <div v-for="t in tries" :key="t.name" class="kbmc-tried" :class="{ failed: !t.ok }">
           <span class="kbmc-tried-head"><strong>{{ t.name }}</strong>
-            <span v-if="t.ok" class="kbmc-tag kbmc-dim">{{ t.seconds }} s</span>
+            <span v-if="t.ok" class="kbmc-tag kbmc-dim">{{ t.words }} words from {{ t.words_in }} · {{ t.seconds }} s</span>
             <button type="button" class="kbmc-x" :title="`Remove ${t.name}'s answer`" @click="tries = tries.filter(x => x !== t)">×</button></span>
-          <p v-if="t.ok">{{ t.text }}</p>
+          <div v-if="t.ok" class="kbmc-answer" v-html="render(t.text ?? '')"></div>
           <p v-else class="kbmc-warn-line">{{ t.error }}</p>
         </div>
       </div>
@@ -254,7 +289,13 @@ const keyFor = computed(() => chosen.value?.needs === 'opencode' ? 'OpenCode' : 
 .kbmc-try-button:disabled { opacity: 0.5; cursor: default; }
 .kbmc-try { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--vp-c-divider); }
 .kbmc-passage { margin: 0 0 0.7rem; }
-.kbmc-passage-head { display: flex; gap: 0.8rem; align-items: baseline; font-size: 0.85rem; color: var(--vp-c-text-2); }
+.kbmc-passage-head { display: flex; gap: 0.8rem; align-items: baseline; font-size: 0.85rem; color: var(--vp-c-text-2); white-space: nowrap; }
+.kbmc-passage select { margin: 0; min-width: 0; flex: 0 1 auto; max-width: 100%; text-overflow: ellipsis; }
+.kbmc-answer :deep(p) { margin: 0.3rem 0 0; }
+.kbmc-section { margin: 0.4rem 0 0; font-size: 0.86rem; }
+.kbmc-section summary { cursor: pointer; color: var(--vp-c-text-2); }
+.kbmc-section-text { white-space: pre-wrap; max-height: 16rem; overflow: auto; margin-top: 0.3rem; padding: 0.4rem 0.8rem;
+  border-left: 3px solid var(--vp-c-divider); line-height: 1.55; color: var(--vp-c-text-2); }
 .kbmc-passage blockquote { margin: 0.3rem 0 0; padding: 0.4rem 0.8rem; border-left: 3px solid var(--vp-c-divider); font-size: 0.86rem;
   line-height: 1.55; color: var(--vp-c-text-2); }
 .kbmc-passage textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 0.3rem; padding: 0.4rem 0.6rem; border-radius: 6px;
