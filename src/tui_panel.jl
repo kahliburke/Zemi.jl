@@ -105,10 +105,10 @@ end
 const STATE_STYLE = Dict("running" => :success, "starting" => :warning, "stopping" => :warning, "failed" => :error, "stopped" => :text_dim)
 
 function view(p::ZemiPanel, area::Tachikoma.Rect, buf::Tachikoma.Buffer)
-    keys = " ↑↓ choose · Enter change · [o]pen · [b]uild · [r]estart · Esc close "
-    inner = Tachikoma.render(Tachikoma.Block(title = " Zemi ", title_right = keys, border_style = Tachikoma.tstyle(:border_focus)), area, buf)
+    inner = Tachikoma.render(Tachikoma.Block(title = " Zemi ", border_style = Tachikoma.tstyle(:border_focus)), area, buf)
+    Tachikoma.set_string!(buf, inner.x, Tachikoma.bottom(inner), first("↑↓ choose · Enter change · [o]pen · [b]uild · [r]estart · Esc close", inner.width), Tachikoma.tstyle(:text_dim))
     x, y, w = inner.x, inner.y, inner.width
-    line!(text, style = :text; dx = 0) = (y <= Tachikoma.bottom(inner) && Tachikoma.set_string!(buf, x + dx, y, first(text, max(w - dx, 0)), Tachikoma.tstyle(style)); y += 1)
+    line!(text, style = :text; dx = 0) = (y < Tachikoma.bottom(inner) && Tachikoma.set_string!(buf, x + dx, y, first(text, max(w - dx, 0)), Tachikoma.tstyle(style)); y += 1)
     st = p.status
     if isempty(st)
         line!("Waiting for Zemi to report…", :text_dim)
@@ -119,14 +119,20 @@ function view(p::ZemiPanel, area::Tachikoma.Rect, buf::Tachikoma.Buffer)
     line!("● " * state * (isempty(url) ? "" : " · $(get(st, "mode", "")) · $url"), get(STATE_STYLE, state, :text))
     err = get(st, "error", "")
     isempty(err) || line!(err, :error)
-    get(st, "building", false) ? line!("The site is building", :warning) :
+    if get(st, "mode", "") == "dev"
+        line!("Site: from VitePress's development server", :text_dim)
+    elseif get(st, "building", false)
+        line!("The site is building", :warning)
+    else
         line!("Site: " * (isempty(get(st, "built", "")) ? "not built yet" : "built $(st["built"])"), :text_dim)
-    line!("Config: $(get(st, "config", ""))  ·  panel's settings: $(basename(get(st, "settings_file", "")))", :text_dim)
+    end
+    line!("Config: $(get(st, "config", ""))", :text_dim)
+    line!("Settings here are kept in $(get(st, "settings_file", ""))", :text_dim)
     y += 1
     line!(p.changed ? "Settings  (changed: [r] restarts Zemi with them)" : "Settings", p.changed ? :warning : :accent)
     s = settings(p)
     for (i, item) in enumerate(s)
-        y > Tachikoma.bottom(inner) && break
+        y >= Tachikoma.bottom(inner) && break
         on = i == p.selected
         v = item["kind"] == "bool" ? (item["value"] ? "on" : "off") : string(item["value"])
         Tachikoma.set_string!(buf, x, y, on ? "›" : " ", Tachikoma.tstyle(:accent))
