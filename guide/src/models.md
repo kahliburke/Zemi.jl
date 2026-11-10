@@ -33,10 +33,18 @@ Two kinds:
 
 Built in:
 
-- `deepseek-v4.1-flash`, `deepseek-flash`: OpenCode Zen (`opencode auth login`).
+- `deepseek-v4.1-flash`, `deepseek-flash`: OpenCode Zen, with a key typed on the setup page
+  (`opencode_key` beside the config) or `opencode auth login`.
 - `gpt-5.4-mini`: OpenAI, its key in `~/.config/zemi/openai_key`.
 - `opus-agent-pdf`, `opus-agent-text`, `opus-agent-code`, `sonnet-agent-pdf`, `sonnet-agent-code`:
   Claude through a Claude subscription.
+
+Setup's Model step and the Configuration page choose among these by where the model runs, with what
+each needs here (a key, Kaimon's agents, Ollama and a model). **Try it** has the choice summarize a
+short passage, and says plainly why one fails (a key refused or expired, a model not pulled). For a
+local model, they recommend one for the machine's memory and pull it into Ollama, refusing when the
+disk would keep less than 5 GB free. When the summarizer keeps failing, the front page says so to
+those who may change it.
 
 Add others:
 

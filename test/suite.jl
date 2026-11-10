@@ -1930,8 +1930,11 @@ end
                                                                               body === nothing ? UInt8[] : JSON.json(body)), K.local_caller());
                                                 (r.status, JSON.parse(String(r.body))))
         s, setup = call("GET", "/api/config/setup")
-        @test s == 200 && setup["needed"] && any(c -> c["id"] == "q-bio.PE", setup["categories"]) && !isempty(setup["summarizers"])
-        @test call("GET", "/api/config/setup?needed=1") == (200, Dict("needed" => true))       # the front page's question alone
+        @test s == 200 && setup["needed"] && any(c -> c["id"] == "q-bio.PE", setup["categories"]) && !isempty(setup["choice"]["models"])
+        @test call("GET", "/api/config/setup?needed=1") == (200, Dict("needed" => true, "failing" => nothing))   # the front page's questions alone
+        # How it is served, set in Kaimon's panel before anything else, leaves it to be set up.
+        K.write_settings!(Dict{String,Any}("service" => Dict{String,Any}("dev" => true)); path = cfg)
+        @test K.setup_needed(kb)
         answers = Dict("group" => Dict("name" => "Reef Ecology Lab", "field" => "coral reef ecology", "description" => "Reefs after bleaching.",
                                        "focus_areas" => [Dict("name" => "Recovery", "description" => "How reefs recover"), Dict("name" => " ", "description" => "")]),
                        "watch" => ["q-bio.PE", "nowhere.XX"], "contact" => "lab@example.org", "model" => Dict("id" => "deepseek-v4.1-flash"),
@@ -1966,9 +1969,42 @@ end
         @test K.current_choice(kb.config)["id"] == "deepseek-v4.1-flash"
         @test_throws "endpoint, its name" K.apply_setup!(kb, merge(again, Dict("dataset" => Dict("mode" => "start", "store" => "s3"))))
         # The models offered, and those made from the choice: a local one, another API with its key saved privately.
-        @test any(m -> m["id"] == "opus-agent-pdf" && m["agent"] && m["cost"] === nothing, setup["models"])
-        @test any(m -> m["id"] == "deepseek-v4.1-flash" && m["cost"] > 0, setup["models"])
-        @test !any(m -> m["id"] == "opus-agent-code", setup["models"])                   # chosen with its reader
+        models = setup["choice"]["models"]
+        @test any(m -> m["id"] == "opus-agent-pdf" && m["agent"] && m["cost"] === nothing && m["place"] == "claude", models)
+        @test any(m -> m["id"] == "deepseek-v4.1-flash" && m["cost"] > 0 && m["needs"] == "opencode", models)
+        @test !any(m -> m["id"] == "opus-agent-code", models)                             # chosen with its reader
+        @test Set(p["id"] for p in setup["choice"]["places"]) == Set(m["place"] for m in models)
+        machine = setup["choice"]["machine"]
+        @test machine["memory_gb"] > 0 && length(machine["local_models"]) == length(K.LOCAL_MODELS)
+        @test count(m -> m["recommended"], machine["local_models"]) <= 1
+        # An OpenCode key typed on the page is saved where every OpenCode summarizer finds it.
+        @test K.opencode_source(cfg) == ""
+        typed = K.model_choice(c, Dict("id" => "deepseek-flash", "key" => " oc-1 "); config_dir = dirname(cfg))
+        @test typed.summarizer == "deepseek-flash" && isempty(typed.summarizers) && K.opencode_source(cfg) == "saved"
+        @test K.resolve_key("opencode", "test") == "oc-1" && filemode(K.opencode_key_file(cfg)) & 0o777 == 0o600
+        # Choosing on the Configuration page: the summarizer, judge and code summarizer, and what it adds.
+        s, chosen = call("POST", "/api/config/model", Dict("id" => "ollama", "model" => "qwen3:14b"))
+        @test s == 200 && chosen["model"] == Dict("id" => "ollama", "model" => "qwen3:14b", "url" => "")
+        @test kb.config.summarizer == kb.config.judge == kb.config.code_summarizer == "ollama-qwen3-14b"
+        @test K.maybe_summarizer(kb.config, "opus-agent-pdf") !== nothing                     # added to, not replaced
+        # Failures said plainly, and a summarizer that keeps failing noticed until it summarizes.
+        s14 = K.summarizer(kb.config, "ollama-qwen3-14b")
+        @test occursin("expired", K.plain_failure(ErrorException("Summarizer x answered HTTP 401: {\"code\":\"api_key_expired\"}"), s14))
+        @test occursin("no model qwen3:14b", K.plain_failure(ErrorException("HTTP 404: model \"qwen3:14b\" not found"), s14))
+        @test K.summaries_failing(kb.config) === nothing
+        K.note_summary!("ollama-qwen3-14b", ErrorException("HTTP 500: busy"))
+        @test K.summaries_failing(kb.config) === nothing                                  # once is not yet failing
+        foreach(_ -> K.note_summary!("ollama-qwen3-14b", ErrorException("HTTP 500: busy")), 1:2)
+        @test K.summaries_failing(kb.config)["count"] == 3
+        @test call("GET", "/api/config/setup?needed=1")[2]["failing"]["summarizer"] == "ollama-qwen3-14b"
+        K.note_summary!("ollama-qwen3-14b")
+        @test K.summaries_failing(kb.config) === nothing
+        K.note_summary!("ollama-qwen3-14b", ErrorException("HTTP 401: unauthorized"))       # a refused key, at once
+        @test K.summaries_failing(kb.config) !== nothing
+        call("POST", "/api/config/model", Dict("id" => "deepseek-v4.1-flash"))
+        @test K.summaries_failing(kb.config) === nothing && kb.config.summarizer == "deepseek-v4.1-flash"
+        # Pulling refuses a name that is not one, before asking anyone.
+        @test_throws "Not a model's name" K.pull_model!(kb, "qwen3; rm -rf")
         agent = K.model_choice(c, Dict("id" => "opus-agent-pdf"); config_dir = dir)
         @test (agent.summarizer, agent.code) == ("opus-agent-pdf", "opus-agent-code")
         local_ = K.model_choice(c, Dict("id" => "ollama", "model" => "qwen3:32b"); config_dir = dir)

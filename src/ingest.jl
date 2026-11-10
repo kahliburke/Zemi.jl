@@ -786,8 +786,10 @@ function ingest_paper!(kb::KB, id::AbstractString, layers::AbstractVector{Layer}
     for s in unique(summarizer_for(kb.config, l, id) for l in layers if !isempty(l.source))
         try
             summarized += summarize_paper!(kb, s, id; progress = msg -> step("$(s.name): $msg"))
+            note_summary!(s.name)
         catch e
             e isa InterruptException && rethrow()
+            note_summary!(s.name, e)
             push!(failed, s.name)
             push!(warnings, "summarizer $(s.name): $(failure_message(e))")
             @warn "Summarizing failed; skipping its layers" id summarizer = s.name exception = e

@@ -5,6 +5,7 @@
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
+import KBModelChoice, { type ModelInfo } from './KBModelChoice.vue'
 import { ref, computed, onMounted } from 'vue'
 import { mode, connect, getJSON, post, can, followJobs, jobs } from './kbApi'
 import { pageLink, kbPage } from './kbLinks'
@@ -14,10 +15,10 @@ const props = defineProps<{ prompt?: boolean }>()
 type Area = { name: string; description: string }
 type Setup = { needed: boolean; group: { name: string; field: string; description: string; focus_areas: Area[] };
                watch: string[]; contact: string; categories: { id: string; title: string }[];
-               models: { id: string; label: string; detail: string; problem: string; agent: boolean; cost: number | null; needs_key: boolean }[];
-               ollama_models: string[]; model: { id: string; model: string; url: string };
-               machine: Record<string, string>; stream: string }
+               choice: ModelInfo; machine: Record<string, string>; stream: string }
 const setup = ref<Setup | null>(null)
+// The front page's line: whether setup is needed, and the summarizer that keeps failing.
+const prompted = ref<{ needed: boolean; failing: ModelInfo['failing'] } | null>(null)
 const error = ref('')
 const step = ref(0)
 const steps = ['Group', 'arXiv', 'Model', 'Sharing']
@@ -29,6 +30,8 @@ const contact = ref('')
 const model = ref({ id: '', model: '', url: '', key: '' })
 // The model as set up already: sent only when changed, so a rerun leaves it, and a judge set apart, alone.
 let initialModel = ''
+// Chosen later: the model is left as it is, and papers are read without summaries until one is chosen.
+const later = ref(false)
 const share = ref({ mode: 'alone', key: '', stream: '', store: 'dir', dir: '', endpoint: '', bucket: '', prefix: 'kb',
                     access_key_id: '', secret_access_key: '' })
 
@@ -36,7 +39,7 @@ onMounted(async () => {
   await connect()
   if (mode.value !== 'live' || !can('config.view')) return
   if (props.prompt) {
-    if (can('config.edit')) try { setup.value = await getJSON('/api/config/setup?needed=1') } catch {}
+    if (can('config.edit')) try { prompted.value = await getJSON('/api/config/setup?needed=1') } catch {}
     return
   }
   try {
@@ -44,12 +47,16 @@ onMounted(async () => {
     setup.value = s
     group.value = { ...s.group, focus_areas: s.group.focus_areas.length ? s.group.focus_areas : [{ name: '', description: '' }] }
     watch.value = [...s.watch]; contact.value = s.contact
-    model.value = { ...s.model, key: '' }
-    if (s.model.id !== 'ollama') model.value.model = s.ollama_models[0] ?? ''
+    model.value = { ...s.choice.model, key: '' }
     initialModel = JSON.stringify(model.value)
     share.value.stream = s.stream
   } catch (e: any) { error.value = e.message }
 })
+// What this machine has, looked at again (Ollama started, a model pulled).
+async function reloadChoice() {
+  if (!setup.value) return
+  try { setup.value.choice = await getJSON('/api/config/model') } catch (e: any) { error.value = e.message }
+}
 
 const query = ref('')
 // A category chosen from those found: by a click, or Enter for the first.
@@ -65,8 +72,8 @@ const title = (id: string) => setup.value?.categories.find(c => c.id === id)?.ti
 const ready = computed(() => [
   group.value.name.trim() !== '',
   watch.value.length > 0,
-  model.value.id !== '' && (model.value.id !== 'ollama' || model.value.model !== '') &&
-    (model.value.id !== 'custom' || (model.value.url.trim() !== '' && model.value.model.trim() !== '')),
+  later.value || (model.value.id !== '' && (model.value.id !== 'ollama' || model.value.model !== '') &&
+    (model.value.id !== 'custom' || (model.value.url.trim() !== '' && model.value.model.trim() !== ''))),
   share.value.mode === 'alone' || (share.value.mode === 'join' ? share.value.key.trim() !== '' :
     share.value.store === 'dir' ? share.value.dir.trim() !== '' :
     !!(share.value.endpoint && share.value.bucket && share.value.access_key_id && share.value.secret_access_key)),
@@ -89,7 +96,7 @@ async function finish() {
     const r = await post('/api/config/setup', JSON.stringify({
       group: { ...group.value, focus_areas: group.value.focus_areas.filter(a => a.name.trim()) },
       watch: watch.value, contact: contact.value, dataset,
-      ...(!setup.value?.needed && JSON.stringify(model.value) === initialModel ? {} : { model: model.value }) }))
+      ...(later.value || (!setup.value?.needed && JSON.stringify(model.value) === initialModel) ? {} : { model: model.value }) }))
     done.value = { job: r.job }
     if (r.job) followJobs(r.job)
   } catch (e: any) { error.value = e.message }
@@ -99,8 +106,12 @@ const job = computed(() => jobs.value.find(j => j.id === done.value?.job))
 
 <template>
   <div v-if="props.prompt">
-    <p v-if="setup?.needed && can('config.edit')" class="kbsu-prompt">
+    <p v-if="prompted?.needed && can('config.edit')" class="kbsu-prompt">
       Not set up yet. <a :href="pageLink('/service/setup')">Set up this knowledge base</a>
+    </p>
+    <p v-else-if="prompted?.failing && can('config.edit')" class="kbsu-prompt kbsu-failing" :title="prompted.failing.error">
+      Summaries keep failing with {{ prompted.failing.summarizer }}: {{ prompted.failing.why }}
+      <a :href="`${pageLink('/service/configuration')}#model`">Choose the model</a>
     </p>
   </div>
   <div v-else class="kbsu">
@@ -152,28 +163,15 @@ const job = computed(() => jobs.value.find(j => j.id === done.value?.job))
 
         <section v-if="step === 2">
           <div class="kbsu-field">The model that reads the papers
-            <span class="kbsu-help">Summarizes, classifies and rates papers.</span>
-            <label v-for="m in setup.models" :key="m.id" class="kbsu-choice kbsu-model" :class="{ on: model.id === m.id }">
-              <input v-model="model.id" type="radio" :value="m.id" />
-              <span>
-                <strong>{{ m.label }}</strong>
-                <span class="kbsu-cost">{{ m.agent ? 'your Claude subscription' : m.cost !== null ? (m.cost ? `≈ $${m.cost.toFixed(2)} a paper` : 'free') : '' }}</span>
-                <span class="kbsu-help">{{ m.detail }}</span>
-                <span v-if="m.problem && !(m.needs_key && model.id === m.id)" class="kbsu-warn">Not ready here: {{ m.problem }}</span>
-                <span v-if="model.id === m.id && m.id === 'ollama' && setup.ollama_models.length" class="kbsu-sub">
-                  <select v-model="model.model"><option v-for="o in setup.ollama_models" :key="o" :value="o">{{ o }}</option></select>
-                </span>
-                <span v-if="model.id === m.id && m.id === 'custom'" class="kbsu-sub">
-                  <input v-model="model.url" placeholder="Address: https://api.example.com/v1" />
-                  <input v-model="model.model" placeholder="Model" />
-                  <input v-model="model.key" type="password" placeholder="API key (if it needs one)" />
-                </span>
-                <span v-if="model.id === m.id && m.needs_key" class="kbsu-sub">
-                  <input v-model="model.key" type="password" placeholder="OpenAI API key" />
-                </span>
-              </span>
-            </label>
+            <span class="kbsu-help">It summarizes papers, codebases and records, sorts what is added, and picks the paper of the day.
+              Without one, papers are still read, searched and cited, without their summaries.</span>
           </div>
+          <template v-if="!later">
+            <KBModelChoice v-model="model" :info="setup.choice" editable @refresh="reloadChoice" />
+            <button type="button" class="kb-link kbsu-link" @click="later = true">choose later</button>
+          </template>
+          <p v-else class="kbsu-later">Papers are read without summaries until a model is chosen, on the Configuration page.
+            <button type="button" class="kb-link kbsu-link" @click="later = false">choose now</button></p>
           <p v-for="(why, what) in setup.machine" :key="what" class="kbsu-warn">{{ why }}</p>
         </section>
 
@@ -217,6 +215,7 @@ const job = computed(() => jobs.value.find(j => j.id === done.value?.job))
 <style scoped>
 .kbsu-prompt { margin: 1.5rem auto 0; max-width: 40rem; padding: 0.7rem 1rem; border-radius: 10px; text-align: center;
   background: var(--vp-c-brand-soft); }
+.kbsu-failing { background: var(--vp-c-warning-soft); }
 .kbsu-help { display: block; font-size: 0.8rem; color: var(--vp-c-text-3); }
 .kbsu-warn { display: block; font-size: 0.82rem; color: var(--vp-c-warning-1); }
 .kbsu-steps { display: flex; gap: 0.4rem; list-style: none; padding: 0; margin: 1rem 0 1.4rem; }
@@ -238,11 +237,7 @@ const job = computed(() => jobs.value.find(j => j.id === done.value?.job))
 .kbsu-found button:hover, .kbsu-found button:focus-visible { background: var(--vp-c-default-soft); }
 .kbsu-choice { display: flex; gap: 0.6rem; align-items: baseline; margin: 0.4rem 0; font-size: 0.92rem; cursor: pointer; }
 .kbsu-sub { margin: 0.2rem 0 0.8rem 1.6rem; }
-.kbsu-model { padding: 0.5rem 0.7rem; border-radius: 8px; border: 1px solid transparent; }
-.kbsu-model.on { border-color: var(--vp-c-brand-1); background: var(--vp-c-bg-soft); }
-.kbsu-model .kbsu-sub { display: block; margin: 0.4rem 0 0; }
-.kbsu-model select { margin-top: 0.3rem; padding: 0.3rem; border-radius: 6px; border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg-soft); color: var(--vp-c-text-1); }
-.kbsu-cost { margin-left: 0.5rem; font-size: 0.8rem; color: var(--vp-c-brand-1); }
+.kbsu-later { font-size: 0.9rem; }
 .kbsu-actions { display: flex; gap: 1rem; align-items: center; justify-content: flex-end; margin-top: 1.4rem; }
 .kbsu-button { padding: 0.45rem 1.2rem; }
 .kbsu-button:disabled { opacity: 0.5; cursor: default; }

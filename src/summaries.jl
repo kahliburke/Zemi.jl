@@ -142,7 +142,7 @@ code_paper_prompt(title, readme, files) = """
 api_key(s::Summarizer) = resolve_key(s.key, "Summarizer $(s.name)")
 
 """
-    complete(summarizer, system, prompt; preamble = "", pdfs = String[]) -> (text, input_tokens, output_tokens)
+    complete(summarizer, system, prompt; preamble = "", pdfs = String[], key = api_key(summarizer)) -> (text, input_tokens, output_tokens)
 
 One chat completion. `pdfs` are files sent ahead of the prompt as file parts, for APIs that read
 PDFs (OpenAI's does); the model then sees the pages as typeset, not as extracted text. `preamble` is
@@ -150,7 +150,7 @@ text sent ahead of everything else, for a long part shared by many requests (suc
 that a caching API then bills at its cached rate.
 """
 function complete(s::Summarizer, system::AbstractString, prompt::AbstractString;
-                  preamble::AbstractString = "", pdfs::AbstractVector{<:AbstractString} = String[])
+                  preamble::AbstractString = "", pdfs::AbstractVector{<:AbstractString} = String[], key::AbstractString = api_key(s))
     files = [Dict("type" => "file", "file" => Dict("filename" => basename(f),
                   "file_data" => "data:application/pdf;base64," * base64encode(read(f)))) for f in pdfs]
     part(t) = Dict("type" => "text", "text" => t)
@@ -158,7 +158,7 @@ function complete(s::Summarizer, system::AbstractString, prompt::AbstractString;
               [(isempty(preamble) ? [] : [part(preamble)]); files; part(prompt)]
     body = merge(s.request, Dict("model" => s.model,
         "messages" => [Dict("role" => "system", "content" => system), Dict("role" => "user", "content" => content)]))
-    data = openai_post(s.url, "/chat/completions", api_key(s), body; what = "Summarizer $(s.name)")
+    data = openai_post(s.url, "/chat/completions", key, body; what = "Summarizer $(s.name)")
     text = strip(String(data["choices"][1]["message"]["content"]))
     isempty(text) && error("Summarizer $(s.name) returned an empty summary")
     usage = get(data, "usage", Dict())

@@ -90,8 +90,8 @@ default_summarizers() = [
     resolve_key(spec, who) -> String
 
 An API key from where `spec` says it is: `""` for none, `"env:NAME"` for an environment variable,
-`"file:PATH"` for the first line of a file that is neither blank nor a `#` comment, or `"opencode"` for the key the OpenCode CLI stored when
-you logged in, else the `OPENCODE_API_KEY` environment variable (a container's, say, where no one logs
+`"file:PATH"` for the first line of a file that is neither blank nor a `#` comment, or `"opencode"` for the key typed on the
+setup page (`opencode_key` beside the config), else the one the OpenCode CLI stored when you logged in, else the `OPENCODE_API_KEY` environment variable (a container's, say, where no one logs
 in). `who` names the layer or summarizer, for errors.
 """
 function resolve_key(spec::AbstractString, who::AbstractString)
@@ -107,6 +107,8 @@ function resolve_key(spec::AbstractString, who::AbstractString)
         isempty(lines) && error("$who: no key in $path")
         return String(first(lines))
     elseif spec == "opencode"
+        saved = joinpath(dirname(config_path()), "opencode_key")       # typed on the setup page
+        isfile(saved) && return resolve_key("file:" * saved, who)
         path = joinpath(xdg_home("XDG_DATA_HOME", ".local/share"), "opencode", "auth.json")
         isfile(path) && return String(JSON.parsefile(path)["opencode"]["key"])
         k = get(ENV, "OPENCODE_API_KEY", "")

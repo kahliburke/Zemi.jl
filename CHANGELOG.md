@@ -6,6 +6,10 @@
   starting it with itself and serving it as `[service]` says: for one person or shared, built or
   for development. Its panel in Kaimon's Extensions tab shows how it is going and changes how it
   runs. `zemi manual` and rebuilding on Enter are gone.
+- **The model that reads papers** is chosen by where it runs, with what each choice needs on this
+  machine, a try on a short passage, and a local model pulled from the page (the disk's room checked
+  first). The same choice is on the Configuration page, and the front page says when summaries keep
+  failing.
 - **Focus** on a board shows only your part of the project: questions for you and answers to yours,
   your tasks, the plans and reviews that concern you, and your questions still waiting.
 

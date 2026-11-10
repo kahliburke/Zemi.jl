@@ -30,7 +30,8 @@ The first run installs dependencies (a few minutes), then serves the site at
 `http://localhost:8000` (`ZEMI_PORT` to change). Open it from the address `zemi` prints, which
 carries a key (`?key=…`), or with `zemi open`: the browser keeps the key, and other accounts on the
 machine, without it, are kept out. The front page leads to **Setup**: the group and its focus areas, the
-watched arXiv categories and a contact email (sent to arXiv and OpenAlex), the summarizer, and
+watched arXiv categories and a contact email (sent to arXiv and OpenAlex), the model that summarizes
+(see [Models](models.md); it can be chosen later, and papers are read without summaries until then), and
 whether to read alone, join a group's dataset or start one. Setup is later in the top bar's
 menu.
 

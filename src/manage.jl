@@ -112,7 +112,13 @@ function classify!(kb::KB, id::AbstractString; summarizer = kb.config.summarizer
                               (p.id, something(shown_summarizer(kb, id), ""))), "")
     categories = sort!(unique([collect(keys(ARXIV_CATEGORIES)); [r.c for r in query(kb,
         "SELECT DISTINCT primary_category AS c FROM papers WHERE primary_category IS NOT NULL AND primary_category != ''")]]))
-    text = ask(s, CLASSIFY_SYSTEM, classify_prompt(p, first(front, 6000), summary, categories, kb.config.group.description))
+    text = try
+        ask(s, CLASSIFY_SYSTEM, classify_prompt(p, first(front, 6000), summary, categories, kb.config.group.description))
+    catch e
+        e isa InterruptException || note_summary!(s.name, e)
+        rethrow()
+    end
+    note_summary!(s.name)
     c = reply_json(text, "The classifier")
     has(x) = !ismissing(x) && !isempty(strip(string(x)))
     authors = isempty(json_list(p.authors)) ? String.(get(c, "authors", String[])) : json_list(p.authors)

@@ -604,9 +604,18 @@ route!("POST", "/api/config/layers/:name/drop"; need = "config.edit") do c
     layers_json(c.kb)
 end
 
-# `?needed`: only whether it is, for the front page, without the checks of what is available.
-route!(c -> haskey(c.params, "needed") ? Dict("needed" => setup_needed(c.kb)) : setup_json(c.kb), "GET", "/api/config/setup";
-       need = "config.view")
+# `?needed`: only whether it is, and whether summaries keep failing, for the front page, without the
+# checks of what is available.
+route!(c -> haskey(c.params, "needed") ? Dict("needed" => setup_needed(c.kb), "failing" => summaries_failing(c.kb.config)) :
+            setup_json(c.kb), "GET", "/api/config/setup"; need = "config.view")
+
+# The model that reads papers (model_choice.jl): what is offered and what this machine has, trying a
+# choice, choosing it, and pulling a local model.
+route!(c -> model_json(c.kb), "GET", "/api/config/model"; need = "config.view")
+route!(c -> try_model(c.kb, json_body(c)), "POST", "/api/config/model/try"; need = "config.edit")
+route!(c -> choose_model!(c.kb, json_body(c)), "POST", "/api/config/model"; need = "config.edit")
+route!(c -> Dict("job" => pull_model!(c.kb, String(get(json_body(c), "model", ""))).id), "POST", "/api/config/model/pull";
+       need = "config.edit")
 route!(c -> apply_setup!(c.kb, json_body(c)), "POST", "/api/config/setup"; need = "config.edit")
 
 route!(c -> brand_json(c.kb), "GET", "/api/config/brand"; need = "config.view")

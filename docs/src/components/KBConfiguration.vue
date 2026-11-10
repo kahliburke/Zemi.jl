@@ -8,6 +8,7 @@
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
+import KBModelChoice, { type ModelInfo, type Choice } from './KBModelChoice.vue'
 import { ref, computed, onMounted } from 'vue'
 import { mode, connect, getJSON, post, can, shared, api } from './kbApi'
 import { plainCopy } from './kbUtils'
@@ -96,8 +97,18 @@ async function resetBrand(which: string) {
   try { brand.value = await post(`/api/config/brand/${which}?reset=1`, ''); saved.value = 'Put back; the site is being rebuilt.' }
   catch (e: any) { error.value = e.message }
 }
+// The model that reads papers, chosen as setup chooses it, with what this machine has.
+const modelInfo = ref<ModelInfo | null>(null)
+const model = ref<Choice>({ id: '', model: '', url: '', key: '' })
+const modelChanged = computed(() => !!modelInfo.value && (model.value.key !== '' ||
+  JSON.stringify({ ...model.value, key: '' }) !== JSON.stringify({ ...modelInfo.value.model, key: '' })))
+async function loadModel(keepChoice = false) {
+  modelInfo.value = await getJSON('/api/config/model')
+  if (!keepChoice) model.value = { ...modelInfo.value!.model, key: '' }
+}
 async function load() {
   try {
+    await loadModel()
     conf.value = await getJSON('/api/config'); reset()
     conflicts.value = (await getJSON('/api/config/conflicts')).conflicts
     brand.value = await getJSON('/api/config/brand')
@@ -113,16 +124,24 @@ onMounted(async () => { await connect(); if (mode.value === 'live') await load()
 
 const changes = computed(() => Object.fromEntries((conf.value?.settings ?? [])
   .filter(s => JSON.stringify(s.value) !== JSON.stringify(draft.value[s.key])).map(s => [s.key, draft.value[s.key]])))
-const dirty = computed(() => Object.keys(changes.value).length > 0)
+const count = computed(() => Object.keys(changes.value).length + (modelChanged.value ? 1 : 0))
+const dirty = computed(() => count.value > 0)
 
+// The model first, as its own choice (which adds what it needs), then the other settings.
 async function save() {
   error.value = ''; saved.value = ''
   try {
-    conf.value = await post('/api/config', JSON.stringify({ changes: changes.value }))
+    if (modelChanged.value) {
+      modelInfo.value = await post('/api/config/model', JSON.stringify(model.value))
+      model.value = { ...modelInfo.value!.model, key: '' }
+    }
+    conf.value = Object.keys(changes.value).length ? await post('/api/config', JSON.stringify({ changes: changes.value }))
+                                                   : await getJSON('/api/config')
     reset()
     saved.value = 'Saved.'
   } catch (e: any) { error.value = e.message }
 }
+function undo() { reset(); if (modelInfo.value) model.value = { ...modelInfo.value.model, key: '' } }
 function toggle(key: string, item: string) {
   const v: string[] = draft.value[key]
   draft.value[key] = v.includes(item) ? v.filter(x => x !== item) : [...v, item]
@@ -151,6 +170,12 @@ const moveUp = (list: unknown[], i: number) => list.splice(i - 1, 0, ...list.spl
               </span>
             </div>
           </div>
+        </section>
+        <section v-if="modelInfo" id="model">
+          <h2>The model that reads papers</h2>
+          <p class="kbcf-help-line">It summarizes papers, codebases and records, sorts what is added, and picks the paper of the day.
+            Who does each of these can be set apart below.</p>
+          <KBModelChoice v-model="model" :info="modelInfo" :editable="editable" @refresh="loadModel(true)" />
         </section>
         <section v-for="g in groups" :key="g.title">
           <h2>{{ g.title }}</h2>
@@ -232,8 +257,8 @@ const moveUp = (list: unknown[], i: number) => list.splice(i - 1, 0, ...list.spl
           </div>
         </section>
         <div v-if="editable" class="kbcf-actions">
-          <button class="kb-primary kbcf-button" :disabled="!dirty" @click="save">Save{{ dirty ? ` (${Object.keys(changes).length})` : '' }}</button>
-          <button v-if="dirty" class="kb-link kbcf-link" @click="reset">undo</button>
+          <button class="kb-primary kbcf-button" :disabled="!dirty" @click="save">Save{{ dirty ? ` (${count})` : '' }}</button>
+          <button v-if="dirty" class="kb-link kbcf-link" @click="undo">undo</button>
           <span v-if="saved" class="kbcf-saved">{{ saved }}</span>
         </div>
       </template>
