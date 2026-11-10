@@ -16,6 +16,8 @@
 - **A section** opens on the paper's own pages, where it starts, with the rest of the pages dimmed;
   in the dark theme they are recolored for it, or shown as printed. Its extracted text is a click
   away.
+- **Papers** are read again on the next sync, so a display equation holds only its own lines and the
+  math labels of a figure the reading puts after it go with the figure.
 - **Focus** on a board shows only your part of the project: questions for you and answers to yours,
   your tasks, the plans and reviews that concern you, and your questions still waiting.
 

@@ -7,7 +7,7 @@
 Bump when parsing or chunking changes in a way that should re-parse (and so re-chunk and re-embed)
 papers.
 """
-const PARSER_VERSION = 4
+const PARSER_VERSION = 5
 
 struct Span
     x0::Float64
@@ -333,7 +333,7 @@ function parse_blocks(blocks::Vector{RawBlock}, sizes::Vector{<:Tuple})
         end
     end
     filter!(p -> count(isletter, p.text) >= 3 || p.kind == :equation, pieces)
-    return assign_sections(drop_figure_text(merge_equations(merge_titles(pieces))), npages)
+    return assign_sections(drop_figure_text(merge_equations(merge_titles(pieces), body)), npages)
 end
 
 block_text(b::RawBlock) = join_lines(line_text.(b.lines))
@@ -470,11 +470,17 @@ function drop_figure_text(pieces::Vector{Piece})
     return filter(p -> !(label(p) && any(r -> inside(p, r), regions)), pieces)
 end
 
-"A display equation set over several blocks becomes one piece, one line per block."
-function merge_equations(pieces)
+"""
+A display equation set over several blocks becomes one piece, one line per block: equation pieces
+next to each other in the reading, on one page, and no more than a line of body text (`body`) apart.
+Math elsewhere on the page that the reading puts next, as a figure's labels, stays apart.
+"""
+function merge_equations(pieces, body)
+    gap(a, b) = max(0.0, b[1] - a[3], a[1] - b[3], b[2] - a[4], a[2] - b[4])
     out = Piece[]
     for p in pieces
-        if p.kind == :equation && !isempty(out) && last(out).kind == :equation && last(out).page == p.page
+        if p.kind == :equation && !isempty(out) && last(out).kind == :equation && last(out).page == p.page &&
+           gap(last(out).bbox, p.bbox) <= body
             q = last(out)
             box = (min(q.bbox[1], p.bbox[1]), min(q.bbox[2], p.bbox[2]), max(q.bbox[3], p.bbox[3]), max(q.bbox[4], p.bbox[4]))
             out[end] = Piece(:equation, q.page, box, q.text * "\n" * p.text, 0, 0, isempty(p.number) ? q.number : p.number)

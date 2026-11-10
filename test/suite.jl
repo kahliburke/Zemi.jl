@@ -313,6 +313,19 @@ end
     kind(prefix) = only(x.kind for x in p.pieces if startswith(x.text, prefix))
     @test kind("Figure 2.") == kind("Fig. 3:") == kind("TABLE II.") == kind("Fig. 4") == :caption
     @test kind("Figure 2 shows") == kind("Table 3 lists") == :paragraph
+
+    # A numbered equation set over two blocks at the foot of the left column, then the math labels of
+    # a figure atop the right one, which the reading puts next: the equation is one piece in its own
+    # place, and the labels go with the figure's other text.
+    cols = [block(1, line(span(60, 100, prose)), line(span(60, 112, prose))),
+            block(1, line(span(80, 600, "a = f(x)"; font = "CMMI10"), span(220, 600, "(7)"))),
+            block(1, line(span(100, 616, "∑ exp(x)"; font = "CMMI10"))),
+            block(1, line(span(400, 160, "y"; font = "CMMI10"))),
+            block(1, line(span(330, 220, "h"; font = "CMMI10"))),
+            body(1, 300, "Figure 5: The model, with its state h and output y.")]
+    eq = only(x for x in parse_blocks(cols, [size]).pieces if x.kind == :equation)
+    @test eq.number == "7" && occursin("∑ exp(x)", eq.text) && !occursin(r"\by\b|\bh\b", eq.text)
+    @test eq.bbox[2] >= 600 && eq.bbox[3] < 300
 end
 
 @zset "an upload's published record" begin
