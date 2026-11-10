@@ -22,7 +22,7 @@ test('setup walks through the group, arXiv, the model and sharing', async () => 
   await page.locator('input[placeholder^="Find a category"]').press('Enter')
   assert.match(await page.locator('.kbsu-chips').innerText(), /q-bio\.QM/)
   await next.click()
-  assert.ok(await page.locator('.kbsu-choice input[type=radio]:checked').count() === 1)   // the summarizer configured
+  assert.equal(await page.locator('.kbmc-model input[type=radio]:checked').count(), 1)   // the summarizer configured
   await next.click()
   await page.locator('.kbsu-choice:has-text("Alone") input').check()
   await page.locator('.kbsu-button:text-is("Set up")').click()
