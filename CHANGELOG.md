@@ -7,6 +7,8 @@
   fold away until asked for. Wide tables scroll in place rather than widening the page, and small
   buttons are a finger's size on a touch screen. Where a panel is docked, a tablet's, its edge
   drags by touch.
+- **API tokens** are known by their hash alone, so those an earlier version issued under another
+  prefix keep working.
 
 ## 0.3.0 (2026-11-10)
 

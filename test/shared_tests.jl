@@ -75,7 +75,11 @@ shared_config(; kw...) = K.SharedConfig(; base_url = "http://127.0.0.1:8800", ad
     K.revoke_token!(kb, t.id; uid = student)
     @test K.token_caller(kb, t.token) === K.ANONYMOUS && only(K.tokens(kb)).revoked
     @test_throws ErrorException K.create_token!(kb, student; name = "x", permissions = ["fly"])
-    @test K.token_caller(kb, "zemi_unknown") === K.ANONYMOUS
+    @test K.token_caller(kb, "zemi_unknown") === K.ANONYMOUS && K.token_caller(kb, "") === K.ANONYMOUS
+    # A token issued under another prefix (by an earlier version, say) is found by its hash all the same.
+    K.execute!(kb, "INSERT INTO api_tokens (user_id, name, token_hash, prefix, permissions, created_at) VALUES (?, 'old', ?, 'kbt_abcdef', '[\"read\"]', ?)",
+               (student, K.secret_hash("kbt_abcdef123"), K.now_iso()))
+    @test K.token_caller(kb, "kbt_abcdef123").user_id == student && K.token_caller(kb, "kbt_abcdef124") === K.ANONYMOUS
 
     # Roles can be changed and added; Admin stays.
     K.save_role!(kb, "Visitor"; description = "Looks", permissions = ["read"], quotas = Dict("tutor" => 2))

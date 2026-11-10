@@ -385,11 +385,12 @@ end
     token_caller(kb, token; mcp = false) -> Caller
 
 Who an API token acts for, with its permissions as far as its owner still has them, or `ANONYMOUS`
-for a token unknown, revoked or expired. A token an MCP client got by OAuth acts only at `/mcp`
+for a token unknown, revoked or expired. A token is known by its hash alone, whatever its prefix, so
+those issued by earlier versions still work. A token an MCP client got by OAuth acts only at `/mcp`
 (`mcp`), for its tools.
 """
 function token_caller(kb::KB, token::AbstractString; mcp::Bool = false)
-    startswith(token, "zemi_") || return ANONYMOUS
+    isempty(token) && return ANONYMOUS
     r = query(kb, "SELECT * FROM api_tokens WHERE token_hash = ?", (secret_hash(token),))
     isempty(r) && return ANONYMOUS
     t = first(r)
