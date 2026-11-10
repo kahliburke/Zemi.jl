@@ -27,6 +27,8 @@ test('setup walks through the group, arXiv, the model and sharing', async () => 
   await page.locator('.kbsu-choice:has-text("Alone") input').check()
   await page.locator('.kbsu-button:text-is("Set up")').click()
   await page.waitForSelector('.kbsu-done')
+  // Adding papers is on the Documents page.
+  assert.match(await page.locator('.kbsu-done a', { hasText: 'Add papers' }).getAttribute('href'), /\/manage(\.html)?#add-documents$/)
   const conf = await api('/api/config')
   const value = key => conf.settings.find(s => s.key === key).value
   assert.equal(value('group.name'), 'Reef Ecology Lab')

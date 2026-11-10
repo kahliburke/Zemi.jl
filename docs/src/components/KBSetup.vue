@@ -121,7 +121,7 @@ const job = computed(() => jobs.value.find(j => j.id === done.value?.job))
         <p v-if="setup?.hosted" class="kb-dim">Kaimon runs this knowledge base: it starts with Kaimon and restarts if it stops,
           so nothing needs to be run by hand. Its panel is in Kaimon's Extensions tab.</p>
         <p v-if="job" class="kb-dim">Importing the dataset: {{ job.status === 'running' ? job.message || 'starting' : job.result ?? job.error }}</p>
-        <p><a :href="`${kbPage('status')}#add-documents`">Add papers</a> · <a :href="pageLink('/service/configuration')">Configuration</a></p>
+        <p><a :href="`${kbPage('manage')}#add-documents`">Add papers</a> · <a :href="pageLink('/service/configuration')">Configuration</a></p>
       </div>
       <template v-else-if="setup">
         <p v-if="!setup.needed" class="kb-dim">Already set up. Saving replaces these settings.</p>
