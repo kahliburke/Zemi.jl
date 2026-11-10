@@ -85,9 +85,11 @@ end
 "An S3 answer's XML document, its root element, or `nothing` for a body that is not XML."
 s3_xml(r::HTTP.Response) = try EzXML.root(EzXML.parsexml(body_text(r.body))) catch; nothing end
 
-# S3 answers in its own namespace, and stores like it in none, so elements are found by name alone.
-s3_elements(node, name::AbstractString) = findall("*[local-name()='$name']", node)
-s3_text(node, name::AbstractString) = (n = findfirst("*[local-name()='$name']", node); n === nothing ? nothing : EzXML.nodecontent(n))
+# S3 answers in its own namespace, and stores like it in none, so elements are found by name alone,
+# with no namespaces given to the query (EzXML warns of a default one it is given).
+const NO_NAMESPACES = Pair{String,String}[]
+s3_elements(node, name::AbstractString) = findall("*[local-name()='$name']", node, NO_NAMESPACES)
+s3_text(node, name::AbstractString) = (n = findfirst("*[local-name()='$name']", node, NO_NAMESPACES); n === nothing ? nothing : EzXML.nodecontent(n))
 
 function read_object(s::S3Store, key::AbstractString)
     r = s3_request(s, "GET", key)

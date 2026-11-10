@@ -1544,6 +1544,7 @@ end
     listing = K.s3_xml(K.HTTP.Response(200, """<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
         <Contents><Key>docs/a&amp;b&#123;.json</Key></Contents><IsTruncated>false</IsTruncated></ListBucketResult>"""))
     @test [K.s3_text(c, "Key") for c in K.s3_elements(listing, "Contents")] == ["docs/a&b{.json"] && K.s3_text(listing, "IsTruncated") == "false"
+    @test_logs K.s3_elements(listing, "Contents")                            # and quietly, with its namespace
     @test K.s3_xml(K.HTTP.Response(200, "")) === nothing && K.s3_text(listing, "NextContinuationToken") === nothing
 
     # Objects through a stand-in S3 that keeps them in memory and checks every request's signature,
