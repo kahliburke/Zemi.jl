@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 (2026-11-10)
 
 - **On a phone** an open task takes the whole screen, closed by a back arrow; the board's columns
   swipe one at a time, its views bar scrolls on its own, and the project's About and the filters
