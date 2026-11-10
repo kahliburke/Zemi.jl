@@ -486,6 +486,9 @@ end
     @test all(==(1), fetch.([Threads.@spawn scalar(kb, "SELECT count(*) FROM papers") for _ in 1:50]))
     @test kb.opened[] <= K.max_readers()
     close(kb)
+    # Read once closed, with every connection it may open counted, it says so rather than wait.
+    kb.opened[] = K.max_readers()
+    @test !isopen(kb) && fetch(Threads.@spawn try scalar(kb, "SELECT 1") catch e e end) isa ErrorException
     # A database in memory is read on its one connection.
     mem = K.KB(Config(; data_dir = mktempdir()), K.SQLite.DB(), ReentrantLock())
     @test scalar(mem, "SELECT 2") == 2 && mem.opened[] == 0

@@ -296,7 +296,7 @@ with a site built, and when the first build finishes.
 function announce_setup(io::IO = stderr)
     SETUP_ANNOUNCED[] === nothing && return
     kb, url = SETUP_ANNOUNCED[]
-    setup_needed(kb) || return
+    (isopen(kb) && setup_needed(kb)) || return               # not one served before and since closed
     lines = ["This knowledge base is not set up yet.", "Open $url to set it up."]
     width = maximum(length, lines) + 4
     printstyled(io, "\n  ╭", "─"^width, "╮\n"; color = :green, bold = true)

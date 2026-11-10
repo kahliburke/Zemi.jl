@@ -89,6 +89,8 @@ function Base.close(kb::KB)
     end
 end
 
+Base.isopen(kb::KB) = isopen(kb.db)
+
 function Base.show(io::IO, kb::KB)
     print(io, "KB(", db_path(kb.config), ")")
 end
@@ -151,9 +153,13 @@ reads_only(sql::AbstractString) =
 "Whether other connections can open database `db`: not one in memory."
 shareable(db::SQLite.DB) = !(db.file in ("", ":memory:")) && !startswith(db.file, "file::memory:")
 
-"An idle reading connection, or a new one while fewer than [`max_readers`](@ref) are open; else the next one given back."
+"""
+An idle reading connection, or a new one while fewer than [`max_readers`](@ref) are open; else the
+next one given back. A knowledge base closed has none to give back, so reading it is an error.
+"""
 function take_reader!(kb::KB)
     isready(kb.readers) && return take!(kb.readers)
+    isopen(kb) || error("$kb is closed")
     if Threads.atomic_add!(kb.opened, 1) < max_readers()
         try
             return open_reader(kb.db.file)

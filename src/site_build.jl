@@ -316,7 +316,11 @@ function request_build!(c::Config; build = default_site_build, settle::Real = 0)
             @error "The site did not build; the last build is still served" exception = (e, catch_backtrace())
             failure_message(e)
         end
-        err === nothing && Base.invokelatest(announce_setup)
+        try
+            err === nothing && Base.invokelatest(announce_setup)
+        catch e
+            @warn "Could not say where to set the knowledge base up" exception = e
+        end
         more = lock(SITE_LOCK) do
             SITE.error = err; SITE.finished = now()
             SITE.again || (SITE.building = false; return false)
