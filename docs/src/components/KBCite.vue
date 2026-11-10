@@ -70,6 +70,7 @@ async function copy(key: string, text: string) {
   border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg); color: var(--vp-c-text-2); }
 .kbct-small:hover { color: var(--vp-c-brand-1); border-color: var(--vp-c-brand-1); }
 .kbct-small + .kbct-icon { width: 24px; height: 24px; }
+@media (pointer: coarse) { .kbct-icon, .kbct-small + .kbct-icon { width: 40px; height: 40px; } }
 .kbct-copy { width: 30px; height: 30px; }
 .kbct-icon:hover, .kbct-copy:hover { color: var(--vp-c-brand-1); border-color: var(--vp-c-brand-1); }
 .kbct-title { margin: 0 0 0.8rem; font-size: 1rem; }

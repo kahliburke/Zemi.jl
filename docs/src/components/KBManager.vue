@@ -312,6 +312,8 @@ const who = (d: Doc) => byline(d.authors)
 .kbm-unavailable { margin: 0.6rem 0 0; }
 .kbm-action.danger { color: var(--vp-c-danger-1); }
 .kbm-table { width: 100%; display: table; margin-top: 0.4rem; }
+/* On a phone it scrolls in place, as VitePress lets a table, rather than widening the page. */
+@media (max-width: 767px) { .kbm-table { display: block; overflow-x: auto; } }
 .kbm-table td, .kbm-table th { vertical-align: top; padding: 0.4rem 0.5rem; }
 .kbm-table tr.picked { background: var(--vp-c-brand-soft); }
 .kbm-state { display: inline-block; padding: 0 0.4rem; border-radius: 4px; font-size: 0.75rem; background: var(--vp-c-default-soft); }

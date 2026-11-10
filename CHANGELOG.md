@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **On a phone** an open task takes the whole screen, closed by a back arrow; the board's columns
+  swipe one at a time, its views bar scrolls on its own, and the project's About and the filters
+  fold away until asked for. Wide tables scroll in place rather than widening the page, and small
+  buttons are a finger's size on a touch screen. Where a panel is docked, a tablet's, its edge
+  drags by touch.
+
 ## 0.3.0 (2026-11-10)
 
 - **Installing**: `pkg> app add Zemi` installs `zemi`, which no longer carries Kaimon: it reaches the

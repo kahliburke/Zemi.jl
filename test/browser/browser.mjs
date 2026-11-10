@@ -44,10 +44,11 @@ async function warmUp(path, ready) {
 
 // A page at `path` on the site, waiting for `ready` (a selector), with the errors it reports:
 // uncaught exceptions and console errors. `prepare(page)` runs before it loads (to route requests, say).
-export async function open(path, ready, { width = 1500, height = 950, prepare } = {}) {
+// With `touch`, the browser is a phone's or a tablet's: a touch screen, laid out as a mobile one.
+export async function open(path, ready, { width = 1500, height = 950, prepare, touch = false } = {}) {
   warmed ??= warmUp(path, ready)
   await warmed
-  const context = await newContext({ viewport: { width, height }, colorScheme: 'dark' })
+  const context = await newContext({ viewport: { width, height }, colorScheme: 'dark', isMobile: touch, hasTouch: touch })
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', e => errors.push(String(e)))

@@ -579,6 +579,13 @@ const completing = ref<{ m: Milestone; rows: Settle[]; archived: number } | null
 const otherMilestones = computed(() => (board.value?.milestones ?? []).filter(x => !x.closed && x.name !== completing.value?.m.name))
 // The project's description: context its people give the agents working on it (see next_task).
 const editingContext = ref(false), contextDraft = ref(''), contextOpen = ref(false)
+// On a phone the project's About folds to its one line, so the board is near the top.
+const narrow = ref(false), aboutOpen = ref(false), filtersOpen = ref(false)
+onMounted(() => {
+  const mq = window.matchMedia('(max-width: 767px)')
+  narrow.value = mq.matches
+  mq.addEventListener('change', e => { narrow.value = e.matches })
+})
 // Shown whole when short; a longer one shows its first lines until opened.
 const longContext = computed(() => { const d = board.value?.project.description ?? ''; return d.length > 240 || d.split('\n').length > 3 })
 function editContext() { contextDraft.value = board.value?.project.description ?? ''; editingContext.value = true }
@@ -1330,7 +1337,8 @@ function keepRecordsOpen(open: boolean) {
       </form>
       <p v-if="error" class="kb-error kbp-error">{{ error }}</p>
 
-      <div v-if="board && !focus && (board.project.description || manages || shared)" class="kbp-context" :class="{ empty: !board.project.description && !editingContext }">
+      <div v-if="board && !focus && (board.project.description || manages || shared)" class="kbp-context"
+           :class="{ empty: !board.project.description && !editingContext, folded: narrow && !aboutOpen && !editingContext && board.project.description }">
         <template v-if="editingContext">
           <KBRefText :project="key" v-model="contextDraft" multiline :rows="6" :draft="`project:${key}:context`" send="save"
                      placeholder="Context for the project's work" @submit="saveContext" />
@@ -1343,8 +1351,9 @@ function keepRecordsOpen(open: boolean) {
           <div class="kbp-context-head"><span class="kbp-waiting-label">About {{ board.project.key }}</span>
             <button v-if="manages" class="kbp-icon" title="Edit the project's context" aria-label="Edit the project's context"
                     @click="editContext"><KBIcon name="edit" :size="15" /></button>
-            <button v-if="longContext" class="kb-link kbp-link kbp-context-toggle" @click="contextOpen = !contextOpen">{{ contextOpen ? 'less' : 'more' }}</button></div>
-          <div class="kbp-note kbp-context-text kb-md" :class="{ clipped: longContext && !contextOpen }" v-html="render(board.project.description)"></div>
+            <button v-if="narrow" class="kb-link kbp-link kbp-context-toggle" :aria-expanded="aboutOpen" @click="aboutOpen = !aboutOpen">{{ aboutOpen ? 'less' : 'more' }}</button>
+            <button v-else-if="longContext" class="kb-link kbp-link kbp-context-toggle" @click="contextOpen = !contextOpen">{{ contextOpen ? 'less' : 'more' }}</button></div>
+          <div class="kbp-note kbp-context-text kb-md" :class="{ clipped: longContext && !contextOpen && !narrow }" v-html="render(board.project.description)"></div>
         </template>
         <button v-else-if="manages" class="kb-link kbp-link" @click="editContext">+ Context</button>
         <div class="kbp-codebase">
@@ -1526,8 +1535,10 @@ function keepRecordsOpen(open: boolean) {
       </section>
 
       <!-- What the columns show, and in what order: just above them. -->
-      <div v-if="key && !focus" class="kbp-filters">
+      <div v-if="key && !focus" class="kbp-filters" :class="{ folded: narrow && !filtersOpen }">
         <KBTaskSearch :project="key" @open="openFromSearch" />
+        <button v-if="narrow && board" class="kb-primary kbp-button kbp-secondary" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen">
+          {{ filtersOpen ? 'Fewer' : 'Filters' }}{{ !filtersOpen && (only || subtasks) ? ' ·' : '' }}</button>
         <select v-if="board" v-model="only" class="kbp-select" aria-label="Show tasks in a status"
                 title="Show the tasks in a status, and those with a subtask in it">
           <option value="">Every status</option><option v-for="s in statuses" :key="s.id" :value="s.id">{{ s.label }}</option></select>
@@ -1991,6 +2002,14 @@ function keepRecordsOpen(open: boolean) {
 .kbp-drop-top.aimed { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1);
                       background: linear-gradient(var(--vp-c-brand-soft), var(--vp-c-brand-soft)), var(--vp-c-bg-soft); }
 .kbp-col.over { border-color: var(--vp-c-brand-1); }
+/* On a phone: the views bar scrolls on its own rather than widening the page, and the columns are
+   each most of the screen's width, swiped one at a time. */
+@media (max-width: 767px) {
+  .kbp-views { max-width: 100%; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .kbp-view { flex-shrink: 0; }
+  .kbp-board { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 85%; scroll-snap-type: x mandatory; }
+  .kbp-col { scroll-snap-align: start; }
+}
 .kbp-col.proposed { background: color-mix(in srgb, var(--vp-c-warning-soft) 60%, var(--vp-c-bg-soft)); }
 .kbp-col h3 { margin: 0.1rem 0.2rem 0.5rem; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--vp-c-text-2); border: none; padding: 0; }
 .kbp-card { background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); border-radius: 8px; padding: 0.45rem 0.55rem; margin-bottom: 0.45rem; cursor: pointer;
@@ -2074,6 +2093,8 @@ function keepRecordsOpen(open: boolean) {
 .kbp-settle-title { flex: 1; min-width: 0; }
 .kbp-context { margin: 0.4rem 0 0.8rem; padding: 0.55rem 0.8rem; border-radius: 10px; background: var(--vp-c-bg-soft); }
 .kbp-context.empty { background: none; padding: 0 0.2rem; }
+.kbp-context.folded > :not(.kbp-context-head) { display: none; }
+.kbp-filters.folded > :nth-child(n+3) { display: none; }
 .kbp-context-head { display: flex; gap: 0.5rem; align-items: center; }
 .kbp-context-head .kbp-waiting-label { flex: 1; }
 .kbp-context-text.clipped { max-height: 4.6em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); }
@@ -2159,6 +2180,11 @@ form.kbp-add { position: relative; }
 .kbp-icon.kbp-danger { color: var(--vp-c-text-2); }
 .kbp-icon.kbp-danger:hover { color: var(--vp-c-danger-1); background: var(--vp-c-danger-soft); }
 .kbp-col-action { float: right; width: 22px; height: 22px; margin-top: -0.2rem; }
+/* A finger's target on a touch screen. */
+@media (pointer: coarse) {
+  .kbp-icon { width: 40px; height: 40px; }
+  .kbp-col-action, .kbp-dismiss { width: 36px; height: 36px; }
+}
 .kbp-archive { margin: 0.4rem 0 0.8rem; padding: 0.5rem 0.8rem; border-radius: 10px; background: var(--vp-c-bg-soft); }
 .kbp-archive h3 { margin: 0 0 0.3rem; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--vp-c-text-2); border: none; padding: 0; }
 /* Focus: one calm column of what waits on the person, each kind under a heading in its board colour. */
