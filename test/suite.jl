@@ -6394,6 +6394,12 @@ end
                            JSON.json(Dict("host" => gethostname(), "pid" => pid, "port" => 6399, "key" => "k1", "heartbeat" => time())))
         record(getpid())
         @test K.kaimon_qdrant() == ("http://127.0.0.1:6399", "k1")
+        # Kept on it once pinned, though the process moves to a cache folder of its own (the service's Kaimon's).
+        withenv("KAIMON_QDRANT_STORAGE" => nothing) do
+            @test withenv(K.kaimon_qdrant, "KAIMON_CACHE_DIR" => mktempdir()) === nothing
+            K.pin_qdrant_storage!()
+            @test withenv(K.kaimon_qdrant, "KAIMON_CACHE_DIR" => mktempdir()) == ("http://127.0.0.1:6399", "k1")
+        end
         record(0)
         @test K.kaimon_qdrant() === nothing
         write(joinpath(kdir, "search.json"), JSON.json(Dict("qdrant" => Dict("url" => "https://q.example/", "api_key" => "k2"))))

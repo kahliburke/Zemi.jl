@@ -38,6 +38,16 @@ function kaimon_setting(section::AbstractString, key::AbstractString, env::Abstr
     return x === nothing || (x isa AbstractString && isempty(strip(x))) ? default : x
 end
 
+"Where the Kaimon here keeps the Qdrant it runs (`qdrant.storage_dir`, by default in its cache folder)."
+kaimon_qdrant_storage() =
+    abspath(expanduser(String(kaimon_setting("qdrant", "storage_dir", "KAIMON_QDRANT_STORAGE", joinpath(kaimon_cache_dir(), "qdrant")))))
+
+"""
+Keep this process on the Qdrant it found, through `KAIMON_QDRANT_STORAGE`, before it moves to a
+cache folder of its own (the service's Kaimon's, see [`start_embedded!`](@ref)), which holds none.
+"""
+pin_qdrant_storage!() = (ENV["KAIMON_QDRANT_STORAGE"] = kaimon_qdrant_storage(); nothing)
+
 "Whether process `pid` is running here."
 pid_alive(pid::Integer) = pid > 0 && (Sys.iswindows() ? true : success(pipeline(`kill -0 $pid`; stderr = devnull)))
 
@@ -52,8 +62,7 @@ function kaimon_qdrant()
     kaimon_installed() || return nothing
     url = String(kaimon_setting("qdrant", "url", "KAIMON_QDRANT_URL", ""))
     isempty(url) || return (String(rstrip(url, '/')), String(kaimon_setting("qdrant", "api_key", "KAIMON_QDRANT_API_KEY", "")))
-    root = abspath(expanduser(String(kaimon_setting("qdrant", "storage_dir", "KAIMON_QDRANT_STORAGE", joinpath(kaimon_cache_dir(), "qdrant")))))
-    r = try JSON.parsefile(joinpath(root, "server.json")) catch; return nothing end
+    r = try JSON.parsefile(joinpath(kaimon_qdrant_storage(), "server.json")) catch; return nothing end
     (get(r, "host", "") == gethostname() && pid_alive(Int(get(r, "pid", 0)))) || return nothing
     return ("http://127.0.0.1:$(r["port"])", String(get(r, "key", "")))
 end

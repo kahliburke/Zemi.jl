@@ -125,6 +125,7 @@ once it is started; [`embedded_ready`](@ref) says when it answers.
 function start_embedded!(c::Config)
     e = prepare_embedded(c)
     reap_stale_embedded!(e)
+    pin_qdrant_storage!()
     log = joinpath(e.config_dir, "kaimon.log")
     cmd = setenv(`$(Base.julia_cmd()) --startup-file=no --threads=auto --project=$(kaimon_project()) -m Kaimon --headless --port $(e.port)`,
                  merge(embedded_env(e), confinement_env(c, e)))
