@@ -9,7 +9,7 @@ meaning and running agents need Zemi's API behind it.
 | Paper of the day, with its figures | ✓ | ✓ | ✓ |
 | Status tables; the arXiv watch's last check | ✓ | ✓ | ✓ |
 | Keyword search (titles, authors, summaries, topics, ids) | ✓ | ✓ | ✓ |
-| Full section text, figure galleries | | ✓ | ✓ |
+| Sections on the paper's pages, or as text; figure galleries | | ✓ | ✓ |
 | Full-text and semantic search | | ✓ | ✓ |
 | Adding papers, sync, checking arXiv | | ✓ | ✓ |
 | Projects, tasks, findings | | ✓ | ✓ |

@@ -10,9 +10,12 @@
   runs. Once Kaimon runs it, `zemi` says so instead of serving a second copy. `zemi manual` and
   rebuilding on Enter are gone.
 - **The model that reads papers** is chosen by where it runs, with what each choice needs on this
-  machine, a try on a short passage, and a local model pulled from the page (the disk's room checked
-  first). The same choice is on the Configuration page, and the front page says when summaries keep
+  machine, tries on a section of a paper to compare, a choice among OpenCode Zen's models, and a local
+  model pulled from the page (the disk's room checked first). The same choice is on the Configuration page, and the front page says when summaries keep
   failing.
+- **A section** opens on the paper's own pages, where it starts, with the rest of the pages dimmed;
+  in the dark theme they are recolored for it, or shown as printed. Its extracted text is a click
+  away.
 - **Focus** on a board shows only your part of the project: questions for you and answers to yours,
   your tasks, the plans and reviews that concern you, and your questions still waiting.
 

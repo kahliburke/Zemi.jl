@@ -45,6 +45,28 @@ test("the paper's PDF opens from its buttons, and the backdrop closes it", async
   await close()
 })
 
+test("a section opens on its pages, recolored for the dark theme, with its text a click away", async () => {
+  const { id, slug } = await paper()
+  const { page, errors, close } = await open(`/generated/kb/papers/${slug}`, '.kbst summary')
+  const section = page.locator('details.kbst').first()
+  const drawn = page.waitForResponse(r => r.url().includes('/api/page-image') && r.url().includes(`id=${encodeURIComponent(id)}`))
+  await section.locator('summary').click()
+  const r = await drawn
+  assert.equal(r.status(), 200)
+  assert.equal(r.headers()['content-type'], 'image/webp')
+  assert.ok(r.url().includes('theme=dark'), r.url())
+  assert.ok(await section.locator('.kbst-page svg mask rect').count() > 1)        // the page, and the section's blocks on it
+  // As printed: the same page without the theme.
+  const printed = page.waitForResponse(r => r.url().includes('/api/page-image') && !r.url().includes('theme='))
+  await section.locator('.kbst-printed input').check()
+  assert.equal((await printed).status(), 200)
+  await section.locator('.kbst-views button', { hasText: 'Text' }).click()
+  assert.equal(await section.locator('.kbst-page').count(), 0)
+  assert.ok((await section.locator('p').count()) > 0)
+  assert.deepEqual(errors, [])
+  await close()
+})
+
 test('without the service, an upload offers no PDF', async () => {
   const { slug } = await paper()
   const { page, errors, close } = await open(`/generated/kb/papers/${slug}`, '.kbst summary', {

@@ -306,15 +306,22 @@ end
 const RELEVANCE_BADGE = ("unrelated", "peripheral", "related", "central")
 
 """
-    section_text_json(kb, id, section) -> Vector{Dict}
+    section_text_json(kb, id, section) -> Dict
 
-Section `section`'s text of paper `id`, for its page to show when it is opened (KBSectionText.vue):
-its blocks in order, each `kind` (paragraph, equation, caption, reference…) and `text`.
+Section `section` of paper `id`, for its page to show when it is opened (KBSectionText.vue):
+`"blocks"`, its heading and text in order, each its `kind` (heading, paragraph, equation,
+caption…), `text`, `page` and `box` on the page in PDF points; `"figures"`, the `page` and `box` of
+each figure and table it has the caption of (see [`figure_region`](@ref)); and `"pdf"`, whether the
+paper is read from a PDF, whose pages can be shown in place of the text.
 """
-section_text_json(kb::KB, id::AbstractString, section::Integer) =
-    [Dict("kind" => String(r.kind), "text" => String(r.text))
-     for r in query(kb, "SELECT kind, text FROM blocks WHERE paper_id = ? AND section = ? AND kind != 'heading' ORDER BY ord",
-                    (paper_id(kb, id), section))]
+function section_text_json(kb::KB, id::AbstractString, section::Integer)
+    rows = query(kb, "SELECT section, kind, page, x0, y0, x1, y1, text FROM blocks WHERE paper_id = ? ORDER BY ord", (paper_id(kb, id),))
+    regions = (figure_region(rows, c.label) for c in captions(rows) if c.block.section == section)
+    return Dict("pdf" => is_kind(k -> k.pdf, id),
+                "blocks" => [Dict("kind" => String(r.kind), "text" => String(r.text), "page" => r.page, "box" => [r.x0, r.y0, r.x1, r.y1])
+                             for r in rows if r.section == section],
+                "figures" => [Dict("page" => r.page, "box" => [r.x0, r.y0, r.x1, r.y1]) for r in regions if r !== nothing])
+end
 
 "The digest of the pages a build compiles from the knowledge base, in the site (see [`write_site`](@ref))."
 const BUILT_PAGES_FILE = "built-pages.sha256"

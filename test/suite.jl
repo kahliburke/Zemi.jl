@@ -3518,8 +3518,10 @@ end
         @test any(r -> r["label"] == "Relevance" && startswith(r["value"], "2 of 3, related"), data["classification"])
         # A section's text is sent when it is opened, not carried in the page's data.
         @test data["sections"][1]["text"] == "Full text, p. 1" && !occursin("Different words.", K.JSON.json(data))
-        @test [b["kind"] for b in K.section_text_json(kb, "2609.00001", 1)] == ["paragraph"] &&
-              startswith(K.section_text_json(kb, "2609.00001", 1)[1]["text"], "Different words.")
+        st = K.section_text_json(kb, "2609.00001", 1)
+        @test [b["kind"] for b in st["blocks"] if b["kind"] != "heading"] == ["paragraph"] &&
+              startswith(only(b for b in st["blocks"] if b["kind"] == "paragraph")["text"], "Different words.")
+        @test st["pdf"] && all(b -> b["page"] isa Integer && length(b["box"]) == 4, st["blocks"])
         # A related codebase links to its page in the code section, a related paper to its own.
         sp = K.site_paper(kb, "2609.00001"; related = false)
         near = [(; doc_id = "code-demo", title = "Demo", score = 0.9), (; doc_id = "2609.00002", title = "Other", score = 0.8)]
@@ -6163,6 +6165,40 @@ end
     tw = K.theme_figures(wsrc)
     @test tw == (; light = wsrc, dark = joinpath(dir, "fig-w-dark.webp")) && K.image_size(tw.dark) == (160, 120)
     @test near(K.load_image(tw.dark)[1, 1], K.THEME_COLORS.dark.bg) && near(K.load_image(tw.dark)[12, 30], K.THEME_COLORS.dark.fg)
+end
+
+@zset "a paper's pages as images" begin
+    # Sizes from `mutool pages`: the crop box where there is one, turned with the page.
+    out = """
+    <page pagenum="2">
+    <MediaBox l="0" b="0" r="612" t="792" />
+    </page>
+    <page pagenum="3">
+    <MediaBox l="0" b="0" r="612" t="792" />
+    <CropBox l="10" b="20" r="560" t="770" />
+    <Rotate v="90" />
+    </page>
+    """
+    @test K.page_bounds(out) == [(page = 2, width = 612.0, height = 792.0), (page = 3, width = 750.0, height = 550.0)]
+    @test K.page_step.((100, 800, 801, 1600, 5000)) == (800, 800, 1200, 1600, 2000)
+
+    dir = mktempdir()
+    write(joinpath(dir, "p.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 24 Tf 72 700 Td (A page.) Tj ET\n")
+    pdf = joinpath(dir, "p.pdf")
+    run(`mutool create -o $pdf $(joinpath(dir, "p.txt"))`)
+    withenv("XDG_CACHE_HOME" => mktempdir()) do
+        c = temp_config()
+        f = K.draw_page(c, pdf, 1; width = 700)
+        @test endswith(f, "-p1-w800.webp") && (s = K.image_size(f); s[1] == 800 && abs(s[2] - 800 * 792 / 612) < 1)
+        # Kept: asked for again, it is not drawn again.
+        t = mtime(f)
+        @test K.draw_page(c, pdf, 1; width = 750) == f && mtime(f) == t
+        # For the dark theme, the paper is the theme's background.
+        d = K.draw_page(c, pdf, 1; width = 700, theme = "dark")
+        @test d == replace(f, ".webp" => "-dark.webp") && (px = K.RGB{Float64}(K.load_image(d)[5, 5]); bg = K.convert(K.RGB{Float64}, K.THEME_COLORS.dark.bg);
+             all(abs.((px.r - bg.r, px.g - bg.g, px.b - bg.b)) .< 0.02))
+        @test_throws "No page 9" K.draw_page(c, pdf, 9)
+    end
 end
 
 @zset "backups" begin

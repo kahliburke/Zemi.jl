@@ -234,6 +234,23 @@ route!("GET", "/api/paper-text") do c
     section_text_json(c.kb, id, int_param(c.params, "section", -1))
 end
 
+# The size of a paper's pages (`?id=…&pages=3-5`), in PDF points.
+route!("GET", "/api/paper-pages") do c
+    id = known_paper(c.kb, seen_document(c.kb, c.caller, normalize_id(get(c.params, "id", ""))))
+    m = match(r"^(\d+)-(\d+)$", get(c.params, "pages", ""))
+    m === nothing && error("Name the pages as 3-5.")
+    a, b = parse(Int, m[1]), parse(Int, m[2])
+    b - a < 200 || error("Ask for at most 200 pages.")
+    [Dict("page" => p.page, "width" => p.width, "height" => p.height) for p in paper_pages(c.kb, id, a, b)]
+end
+
+# A page of it, drawn (`?id=…&page=3&width=1200&theme=dark`).
+route!("GET", "/api/page-image") do c
+    id = known_paper(c.kb, seen_document(c.kb, c.caller, normalize_id(get(c.params, "id", ""))))
+    file_response(page_file(c.kb, id, int_param(c.params, "page", 1, 1:100_000);
+                             width = int_param(c.params, "width", 1200, 100:4000), theme = get(c.params, "theme", "")); c.req)
+end
+
 # Its PDF, for the browser's own viewer: an arXiv paper's fetched and kept when not here.
 route!("GET", "/api/pdf/*paper") do c
     id = known_paper(c.kb, normalize_id(c[:paper]))
