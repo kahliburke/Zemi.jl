@@ -1,7 +1,7 @@
 // The board (docs/src/components/KBProjects.vue) on the seeded test service (see serve.jl).
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { open, api, closeBrowser } from './browser.mjs'
+import { open, api, closeBrowser, SITE } from './browser.mjs'
 
 after(closeBrowser)
 
@@ -14,6 +14,14 @@ test('the columns, with their cards, and nothing failing', async () => {
   assert.deepEqual(await cards(page, 'in_progress'), ['BR-2'])
   assert.deepEqual(await cards(page, 'review'), ['BR-5'])
   assert.ok((await cards(page, 'proposed')).includes('BR-6'))
+  assert.deepEqual(errors, [])
+  await close()
+})
+
+test('the page opens on the project this browser last showed', async () => {
+  const { page, errors, close } = await open('/projects#OT', '.kbp-col')
+  await page.goto(SITE + '/projects', { waitUntil: 'load' })
+  await page.waitForFunction(() => location.hash === '#OT')
   assert.deepEqual(errors, [])
   await close()
 })

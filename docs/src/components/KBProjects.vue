@@ -82,13 +82,16 @@ const personLabel = (id: string) => people.value.find(p => p.id === id)?.label ?
 // Who reaches the open project, whom its questions can be asked of.
 const projectPeople = ref<Person[]>([])
 
-// The address names a project (#KB) or a task in one (#KB-12).
+// The address names a project (#KB) or a task in one (#KB-12). Without one, the page opens on the
+// project this browser last showed.
+const LAST_PROJECT = 'kb-last-project'
 const fromHash = () => { const m = location.hash.slice(1).toUpperCase().match(/^([A-Z][A-Z0-9]*)(?:-(\d+))?$/); return m ? { key: m[1], task: m[2] ? m[0] : '' } : null }
 async function loadList() {
   const r = await getJSON('/api/projects'); list.value = r.projects; statuses.value = r.statuses
   people.value = await getJSON('/api/tasks/people')
-  const named = fromHash()?.key
-  if (!key.value) key.value = (named && list.value.some(p => p.key === named) ? named : list.value[0]?.key) || ''
+  if (key.value) return
+  const known = (k?: string | null) => (k && list.value.some(p => p.key === k) ? k : '')
+  key.value = known(fromHash()?.key) || known(localStorage.getItem(LAST_PROJECT)) || list.value[0]?.key || ''
 }
 // A board that arrives after another project was chosen is dropped.
 async function loadBoard() {
@@ -704,7 +707,7 @@ function onHash() {
   if (h.task && h.task !== open.value?.ref) openRef(h.task)
 }
 const setHash = (h: string) => { if (location.hash.slice(1).toUpperCase() !== h) history.replaceState(history.state, '', '#' + h) }
-watch(key, k => { if (k) setHash(k); open.value = null; milestone.value = ''; reviewing.value = false; declined.value = null; library.value = false; loadBoard() })
+watch(key, k => { if (k) { setHash(k); localStorage.setItem(LAST_PROJECT, k) }; open.value = null; milestone.value = ''; reviewing.value = false; declined.value = null; library.value = false; loadBoard() })
 watch(open, t => { if (key.value) setHash(t ? t.ref : key.value) })
 watch(() => open.value?.ref, () => { diffText.value = null })
 watch(() => board.value?.codebase?.id ?? '', id => setCodebase(id), { immediate: true })
