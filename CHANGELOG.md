@@ -9,6 +9,8 @@
   drags by touch.
 - **API tokens** are known by their hash alone, so those an earlier version issued under another
   prefix keep working.
+- **Search** on a server whose Qdrant Kaimon runs: the shared service starts that Qdrant when it is
+  not running, and keeps to it once the service's own Kaimon is up.
 
 ## 0.3.0 (2026-11-10)
 
