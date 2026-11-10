@@ -28,23 +28,30 @@ Two kinds:
 - **API**: one request per section to an OpenAI-compatible endpoint (OpenCode Zen, OpenAI, Ollama's
   `/v1`).
 - **Agent**: an agent supporting ACP (Claude Code, opencode, Codex), run through Kaimon; reads the
-  whole paper before summarizing. Needs Kaimon loaded in the same process (the `zemi` command, the
-  Kaimon extension, Slate notebooks).
+  whole paper before summarizing. Needs a Kaimon running on this machine, or Kaimon running the
+  knowledge base as its extension.
 
 Built in:
 
 - `deepseek-v4.1-flash`, `deepseek-flash`: OpenCode Zen, with a key typed on the setup page
-  (`opencode_key` beside the config) or `opencode auth login`.
+  (`opencode_key` beside the config, used first), or `opencode auth login`, or `OPENCODE_API_KEY`.
+  Any other of Zen's chat models can be chosen too: it gets a summarizer of its own, `zen-<model>`.
 - `gpt-5.4-mini`: OpenAI, its key in `~/.config/zemi/openai_key`.
 - `opus-agent-pdf`, `opus-agent-text`, `opus-agent-code`, `sonnet-agent-pdf`, `sonnet-agent-code`:
   Claude through a Claude subscription.
 
-Setup's Model step and the Configuration page choose among these by where the model runs, with what
-each needs here (a key, Kaimon's agents, Ollama and a model). **Try it** has the choice summarize a
-short passage, and says plainly why one fails (a key refused or expired, a model not pulled). For a
-local model, they recommend one for the machine's memory and pull it into Ollama, refusing when the
-disk would keep less than 5 GB free. When the summarizer keeps failing, the front page says so to
-those who may change it.
+Setup's Model step and the Configuration page choose among these by where the model runs (a
+service, Claude through Kaimon, or Ollama on this machine), with what each needs here: a key, Kaimon's
+agents, Ollama and a model. Zen's models are listed with their cost per paper, from Zen's prices.
+
+**Try** has the choice summarize a section as each section of a paper is summarized: a section of a
+paper here, a sample one before there are any, or a passage pasted. Each answer stays beside the
+others to compare, with how many words it made of how many and how long it took; a failure is said
+plainly (a key refused or expired, a model not pulled, nothing answering).
+
+For a local model, they recommend one for the machine's memory and free disk, and pull it into
+Ollama, refusing when the disk would keep less than 5 GB free. When the summarizer keeps failing (at
+once for a refused key), the front page says so to those who may change it.
 
 Add others:
 
