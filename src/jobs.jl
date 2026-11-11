@@ -99,14 +99,16 @@ take_changes!() = lock(CHANGED_LOCK) do
 end
 
 """
-    start_job(f, name; ids = String[], changes = nothing) -> Job
+    start_job(f, name; ids = String[], changes = nothing, forget_idle = false) -> Job
 
 Run `f(job)` on a new task, working on the documents `ids`. `changes` is a file to touch when the
 job ends, however it ends (see [`changes_stamp`](@ref)), the documents first noted as changed (see
 [`note_changes!`](@ref); with none, everything is). `f` reports progress with `report!(job, msg)` and should return early
-when `cancelled(job)`.
+when `cancelled(job)`. With `forget_idle`, a job that ends without failing and with no documents
+named (`f` may add to `job.ids`) is forgotten as it ends, and touches nothing: work run on a
+schedule that found nothing to do.
 """
-function start_job(f, name::AbstractString; ids = String[], changes::Union{String,Nothing} = nothing)
+function start_job(f, name::AbstractString; ids = String[], changes::Union{String,Nothing} = nothing, forget_idle::Bool = false)
     id = "j$(Threads.atomic_add!(JOB_COUNTER, 1) + 1)"
     job = Job(id, name, :running, "starting", now(), nothing, nothing, nothing, Threads.Atomic{Bool}(false),
               String.(ids), Base.Event())
@@ -126,8 +128,10 @@ function start_job(f, name::AbstractString; ids = String[], changes::Union{Strin
             job.error = failure_message(e)          # (the backtrace goes to the log)
             @error "Job $id ($name) failed" exception = (e, catch_backtrace())
         finally
+            idle = forget_idle && job.status == :done && isempty(job.ids)
             # The documents it worked on are noted before the stamp moves, for the refresh it starts.
-            changes === nothing || (note_changes!(job.ids); try touch(changes) catch end)
+            changes === nothing || idle || (note_changes!(job.ids); try touch(changes) catch end)
+            idle && lock(() -> (delete!(JOBS, id); delete!(JOB_STARTERS, id)), JOBS_LOCK)
             job.finished = now()
             notify(job.done)
         end

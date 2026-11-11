@@ -144,6 +144,7 @@ mutable struct SourceRun
     const started::Float64
     const upload::Union{NamedTuple,Nothing}
     const ids::Vector{String}
+    const touched::Vector{String}
     added::Int
     changed::Int
     skipped::Int
@@ -152,7 +153,7 @@ mutable struct SourceRun
     figure_bytes::Int
     spent::String
 end
-SourceRun(kb::KB, s::RecordSource, job = nothing; upload = nothing) = SourceRun(kb, s, job, time(), upload, String[], 0, 0, 0, 0, 0, 0, "")
+SourceRun(kb::KB, s::RecordSource, job = nothing; upload = nothing) = SourceRun(kb, s, job, time(), upload, String[], String[], 0, 0, 0, 0, 0, 0, "")
 
 Base.show(io::IO, run::SourceRun) = print(io, "SourceRun(", run.source.name, ")")
 
@@ -203,6 +204,7 @@ function Base.put!(run::SourceRun, r)
     end
     push!(run.ids, id)
     if changed
+        push!(run.touched, id)
         new ? (run.added += 1) : (run.changed += 1)
         run.figure_bytes += bytes
     else
@@ -222,6 +224,7 @@ function remove!(run::SourceRun, key::AbstractString)
     id = source_record(run.kb, run.source.name, key)
     id === nothing && return nothing
     delete_record!(run.kb, id)
+    push!(run.touched, id)
     run.removed += 1
     return id
 end
@@ -318,15 +321,15 @@ const SOURCE_RUNS_LOCK = ReentrantLock()
 source_running(name::AbstractString) = lock(() -> haskey(SOURCE_RUNS, name), SOURCE_RUNS_LOCK)
 
 """
-    run_source!(kb, s, job = nothing; path = nothing, upload = nothing) -> SourceRun
+    run_source!(kb, s, job = nothing; path = nothing, upload = nothing, run) -> SourceRun
 
 Run source `s` once: its `poll`, or with `path`, its `read` of that file, uploaded as `upload` says.
 Its status records the run; a scheduled one (`path` absent) also sets when it next runs: after
 `every`, or after a failure, later each time (see [`retry_wait`](@ref)). A run stopped (see
 [`SourceStopped`](@ref)) has done what it did; one that failed throws, once its status says so.
 """
-function run_source!(kb::KB, s::RecordSource, job::Union{Job,Nothing} = nothing; path = nothing, upload = nothing)
-    run = SourceRun(kb, s, job; upload)
+function run_source!(kb::KB, s::RecordSource, job::Union{Job,Nothing} = nothing; path = nothing, upload = nothing,
+                     run::SourceRun = SourceRun(kb, s, job; upload))
     scheduled = path === nothing
     source_status!(kb, s.name; started = now_iso(), trigger = scheduled ? "scheduled" : "upload")
     outcome, why = "ok", ""
@@ -353,17 +356,21 @@ function run_summary(run::SourceRun)
 end
 
 """
-    start_source_run(kb, s) -> Job
+    start_source_run(kb, s; scheduled = false) -> Job
 
-Run source `s`'s `poll` as a job (see [`run_source!`](@ref)), unless it is running already.
+Run source `s`'s `poll` as a job (see [`run_source!`](@ref)), unless it is running already. The job
+names the records the run added, changed or removed, and the site refreshes only those; a scheduled
+run that changed none is forgotten as it ends, so polling leaves no trail of empty runs.
 """
-function start_source_run(kb::KB, s::RecordSource)
+function start_source_run(kb::KB, s::RecordSource; scheduled::Bool = false)
     lock(SOURCE_RUNS_LOCK) do
         haskey(SOURCE_RUNS, s.name) && error("Source $(s.name) is running already")
-        job = start_job("source $(s.name)"; changes = changes_stamp(kb.config)) do job
+        job = start_job("source $(s.name)"; changes = changes_stamp(kb.config), forget_idle = scheduled) do job
+            run = SourceRun(kb, s, job)
             try
-                run_summary(run_source!(kb, s, job))
+                run_summary(run_source!(kb, s, job; run))
             finally
+                append!(job.ids, unique(run.touched))
                 lock(() -> get(SOURCE_RUNS, s.name, nothing) === job && delete!(SOURCE_RUNS, s.name), SOURCE_RUNS_LOCK)
             end
         end
@@ -383,7 +390,7 @@ function due_sources!(kb::KB; at::Real = time())
     for s in SOURCES[]
         (s.poll === nothing || !runs_here(s) || !used_here(kb, s) || source_running(s.name)) && continue
         st = source_status(kb, s.name)
-        get(st, "paused", false) || get(st, "next_at", 0.0) > at || push!(jobs, start_source_run(kb, s))
+        get(st, "paused", false) || get(st, "next_at", 0.0) > at || push!(jobs, start_source_run(kb, s; scheduled = true))
     end
     return jobs
 end

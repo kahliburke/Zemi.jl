@@ -1164,6 +1164,9 @@ end
         # Run again, an unchanged record is skipped, and the state saved is given back.
         @test waitfor(() -> get(st(), "skipped", 0) == 1)
         @test st()["added"] == 0 && seen[]["runs"] >= 1
+        # Scheduled runs that changed nothing leave no job behind; the one that added the record names it.
+        ran = filter(j -> j.name == "source zz-fake", K.list_jobs())
+        @test all(j -> j.finished === nothing || !isempty(j.ids), ran) && any(j -> j.ids == [id], ran)
         # A failure is tried again later each time, and a success sets it back.
         fail[] = true
         @test waitfor(() -> get(st(), "failures", 0) >= 2)
