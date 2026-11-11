@@ -28,8 +28,9 @@ function write_object!(s::DirStore, key::AbstractString, bytes::AbstractVector{U
                        progress = (sent, total) -> nothing)
     f = joinpath(s.dir, key)
     mkpath(dirname(f))
-    write(f * ".part", bytes)
-    mv(f * ".part", f; force = true)
+    part = "$f.$(rand(UInt32)).part"                 # its own, as two writes of one key may overlap
+    write(part, bytes)
+    mv(part, f; force = true)
     progress(length(bytes), length(bytes))
     return nothing
 end

@@ -741,6 +741,7 @@ end
     call(c, method, target, body = UInt8[]) = (r = K.handle(kb, HTTP.Request(method, target, [], body), c); (r.status, r.body))
     json(c, method, target, body = UInt8[]) = ((s, b) = call(c, method, target, body); (s, JSON.parse(String(b))))
     note = "/api/library/files/" * HTTP.escapeuri("📄 notes/Reef survey.md")
+    K.READ_LIBRARIES[] = false
     try
         # Everyone keeps one, in a space of their own the store keeps under their id.
         @test json(as(ada), "GET", "/api/library/files")[2] == Dict("files" => [], "used" => 0, "limit" => 1000)
@@ -778,6 +779,7 @@ end
         # Run for one person, the space is theirs.
         @test K.library_space(K.local_caller()) == "people/local"
     finally
+        K.READ_LIBRARIES[] = true
         close(kb)
     end
     # The libraries are kept apart from the dataset, which others read.
@@ -2085,7 +2087,8 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
                   body = HTTP.escapeuri(["grant_type" => "refresh_token", "refresh_token" => t["refresh_token"], "client_id" => client])))
     @test t2["scope"] == "library" && K.token_caller(kb, t2["access_token"]).permissions == Set(["library"])
 
-    # A vault kept in step: sent, read there, and the references Zemi writes come back.
+    # A vault kept in step: sent, read there, and the references Zemi writes come back. (Read here, not by the job a change starts.)
+    K.READ_LIBRARIES[] = false
     dir = mktempdir()
     mk(path, text) = (f = joinpath(dir, path); mkpath(dirname(f)); write(f, text); f)
     mk(".obsidian/app.json", "{}")
@@ -2121,5 +2124,6 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     @test K.sync_folder!(remote, dir, "Notes", state).removed_there == 1 && !("Notes/Topics/Estuaries.md" in paths())
     K.delete_library_file!(kb, "people/$ada", "Notes/Reading/Tidal mixing.md")
     @test K.sync_folder!(remote, dir, "Notes", state).removed_here == 1 && !isfile(tidal)
+    K.READ_LIBRARIES[] = true
     close(kb)
 end

@@ -60,6 +60,11 @@ library_files(kb::KB, space::AbstractString) =
 "How many bytes a space holds."
 library_usage(kb::KB, space::AbstractString) = Int(scalar(kb, "SELECT coalesce(sum(size), 0) FROM library_files WHERE space = ?", (space,)))
 
+"One lock per space: a change is checked against the file there and made as one step."
+const SPACE_LOCKS = Dict{String,ReentrantLock}()
+const SPACE_LOCKS_LOCK = ReentrantLock()
+space_lock(space::AbstractString) = lock(() -> get!(ReentrantLock, SPACE_LOCKS, String(space)), SPACE_LOCKS_LOCK)
+
 library_row(kb::KB, space, path) =
     (r = query(kb, "SELECT size, sha256 FROM library_files WHERE space = ? AND path = ?", (space, path)); isempty(r) ? nothing : first(r))
 
@@ -82,19 +87,21 @@ Write `bytes` as the file at `path` in `space`, returning its row (see [`library
 function put_library_file!(kb::KB, space::AbstractString, path::AbstractString, bytes::AbstractVector{UInt8};
                            base::Union{AbstractString,Nothing} = nothing, modified::Union{DateTime,Nothing} = nothing)
     path = library_path(path)
-    row = library_row(kb, space, path)
-    check_base(row, base, path)
-    sha = bytes2hex(sha256(bytes))
-    row !== nothing && row.sha256 == sha && return only(filter(f -> f.path == path, library_files(kb, space)))
-    limit = library_limit(kb.config)
-    library_usage(kb, space) - (row === nothing ? 0 : row.size) + length(bytes) > limit &&
-        throw(Refusal(413, "A library holds at most $(round(limit / 1e9; digits = 1)) GB: remove something first"))
-    write_object!(library_store(kb.config), "$space/$path", bytes)
-    at = iso(something(modified, now(UTC)))
-    execute!(kb, """INSERT INTO library_files (space, path, size, sha256, modified) VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT (space, path) DO UPDATE SET size = excluded.size, sha256 = excluded.sha256, modified = excluded.modified""",
-             (space, path, length(bytes), sha, at))
-    return (; path, size = length(bytes), sha256 = sha, modified = at)
+    lock(space_lock(space)) do
+        row = library_row(kb, space, path)
+        check_base(row, base, path)
+        sha = bytes2hex(sha256(bytes))
+        row !== nothing && row.sha256 == sha && return only(filter(f -> f.path == path, library_files(kb, space)))
+        limit = library_limit(kb.config)
+        library_usage(kb, space) - (row === nothing ? 0 : row.size) + length(bytes) > limit &&
+            throw(Refusal(413, "A library holds at most $(round(limit / 1e9; digits = 1)) GB: remove something first"))
+        write_object!(library_store(kb.config), "$space/$path", bytes)
+        at = iso(something(modified, now(UTC)))
+        execute!(kb, """INSERT INTO library_files (space, path, size, sha256, modified) VALUES (?, ?, ?, ?, ?)
+                        ON CONFLICT (space, path) DO UPDATE SET size = excluded.size, sha256 = excluded.sha256, modified = excluded.modified""",
+                 (space, path, length(bytes), sha, at))
+        return (; path, size = length(bytes), sha256 = sha, modified = at)
+    end
 end
 
 "The file at `path` in `space`, its bytes, or `nothing` when there is none."
@@ -112,12 +119,14 @@ the one whose SHA-256 that is (see [`put_library_file!`](@ref)).
 """
 function delete_library_file!(kb::KB, space::AbstractString, path::AbstractString; base::Union{AbstractString,Nothing} = nothing)
     path = library_path(path)
-    row = library_row(kb, space, path)
-    check_base(row, base, path)
-    row === nothing && return false
-    delete_object!(library_store(kb.config), "$space/$path")
-    execute!(kb, "DELETE FROM library_files WHERE space = ? AND path = ?", (space, path))
-    return true
+    lock(space_lock(space)) do
+        row = library_row(kb, space, path)
+        check_base(row, base, path)
+        row === nothing && return false
+        delete_object!(library_store(kb.config), "$space/$path")
+        execute!(kb, "DELETE FROM library_files WHERE space = ? AND path = ?", (space, path))
+        return true
+    end
 end
 
 """
@@ -172,7 +181,7 @@ route!("PUT", "/api/library/files/*path"; need = "library") do c
     modified = t === nothing ? nothing : unix2datetime(t)
     space = library_space(c.caller)
     f = put_library_file!(c.kb, space, c[:path], body_bytes(c); base, modified)
-    queue_library!(c.kb, [space])
+    READ_LIBRARIES[] && queue_library!(c.kb, [space])
     library_file_json(f)
 end
 
@@ -181,6 +190,6 @@ route!("DELETE", "/api/library/files/*path"; need = "library") do c
     base = haskey(c.params, "base") ? c.params["base"] : nothing
     space = library_space(c.caller)
     removed = delete_library_file!(c.kb, space, c[:path]; base)
-    removed && queue_library!(c.kb, [space])
+    removed && READ_LIBRARIES[] && queue_library!(c.kb, [space])
     Dict("removed" => removed)
 end

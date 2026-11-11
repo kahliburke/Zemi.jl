@@ -4,6 +4,9 @@
 # change to a space through the API queues it to be read, and every space is read as the service
 # starts, catching up with what changed while it was not running.
 
+"Whether a change to a space through the API has it read (tests that read spaces themselves turn it off)."
+const READ_LIBRARIES = Ref(true)
+
 "The person whose space `space` is (their user id), or `nothing` for whoever runs the knowledge base on their own machine."
 space_holder(space::AbstractString) = (m = match(r"^people/(\d+)$", space); m === nothing ? nothing : parse(Int, m[1]))
 
