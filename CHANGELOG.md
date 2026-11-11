@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 (2026-11-10)
+
+- **Studies** link the codebases they find to the codebases' pages, and show without a link what
+  the site has no page for; a bibliography entry names a page only where there is one.
+
 ## 0.3.1 (2026-11-10)
 
 - **On a phone** an open task takes the whole screen, closed by a back arrow; the board's columns
