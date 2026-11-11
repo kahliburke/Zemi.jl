@@ -273,13 +273,15 @@ end
 How Kaimon runs the knowledge base when it hosts it as its extension (`[service]`, see hosted.jl):
 for one person (`mode = "solo"`, on `port`) or for the people signed in to it (`"shared"`, on
 `[shared] port`), the site built (`dev = false`) or from VitePress's development server on
-`dev_port`, its components updated as they are edited.
+`dev_port`, its components updated as they are edited. Shared with `local_sign_in`, anyone signs in
+as anyone on this machine, for trying the shared service (see [`local_sign_in`](@ref)).
 """
 Base.@kwdef struct ServiceConfig
     mode::Symbol = :solo
     dev::Bool = false
     port::Int = 8000
     dev_port::Int = 5173
+    local_sign_in::Bool = false
 end
 
 function service_config(t::AbstractDict)
@@ -287,7 +289,7 @@ function service_config(t::AbstractDict)
     mode = Symbol(get(t, "mode", "solo"))
     mode in (:solo, :shared) || error("[service] mode is solo or shared, not $mode")
     return ServiceConfig(; mode, dev = Bool(get(t, "dev", d.dev)), port = Int(get(t, "port", d.port)),
-                         dev_port = Int(get(t, "dev_port", d.dev_port)))
+                         dev_port = Int(get(t, "dev_port", d.dev_port)), local_sign_in = Bool(get(t, "local_sign_in", d.local_sign_in)))
 end
 
 """

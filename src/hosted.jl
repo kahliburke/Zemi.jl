@@ -36,7 +36,9 @@ function start_hosted!()
     isdefined(Main, :Revise) && (TRACK_PLUGIN[] = m -> Base.invokelatest(Main.Revise.track, m))
     try
         s = kb().config.service
-        HOST[] = s.mode == :shared ? start_shared(; dev = s.dev, hosted = true) : start_local(; dev = s.dev, hosted = true, build = HOST_BUILD[])
+        HOST[] = s.mode == :shared ?
+                 start_shared(; dev = s.dev, hosted = true, local_sign_in = s.local_sign_in || get(ENV, "ZEMI_LOCAL_SIGN_IN", "") == "1") :
+                 start_local(; dev = s.dev, hosted = true, build = HOST_BUILD[])
         HOST_STATE[] = "running"
         @info "Zemi is at $(HOST[].url)"
     catch e
@@ -109,6 +111,8 @@ const MACHINE_SETTINGS = [
      help = "For you alone, or for the people signed in to it ([shared] in the config)"),
     (key = "service.dev", kind = "bool", choices = String[], label = "Development",
      help = "The site from VitePress's development server, components updated as they are edited"),
+    (key = "service.local_sign_in", kind = "bool", choices = String[], label = "Local sign-in",
+     help = "Shared, signing in as anyone on this machine, for trying it"),
     (key = "service.port", kind = "int", choices = String[], label = "Port", help = "Where it is served for one person"),
     (key = "service.dev_port", kind = "int", choices = String[], label = "Development port", help = "VitePress's development server"),
     (key = "data_dir", kind = "path", choices = String[], label = "Data folder", help = "The database, the papers and the site's builds"),
