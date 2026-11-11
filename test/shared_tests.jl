@@ -2196,3 +2196,44 @@ end
         close(kb)
     end
 end
+
+@zset "a vault from one's machine to the group" begin
+    sh = shared_config(sign_up = :open, default_role = "Learner")
+    kb = open_kb(temp_config(shared = sh, layers = Layer[]))
+    K.ensure_roles!(kb)
+    account(email) = K.sign_in!(kb, sh, "Campus", email; email, verified = true)
+    as(uid) = K.session_caller(kb, K.start_session!(kb, uid, sh))
+    ada, bea = account("ada@x.org"), account("bea@x.org")
+    K.create_project!(kb, "Reefs"; key = "RF", owner = ada, by = K.person("Ada"))
+    K.set_member!(kb, "RF", bea, "contributor"; by = "ada@x.org")
+    found(uid, q) = [h.doc_id for h in K.search(kb, q; limit = 20, keyword = true, layers = String[], except = K.unfound_documents(kb, as(uid)))]
+    dir = mktempdir()
+    mk(path, text) = (f = joinpath(dir, path); mkpath(dirname(f)); write(f, text); f)
+    mk(".obsidian/app.json", "{}")
+    mk("Survey.md", "# Reef survey\n\nBleaching on the north side of the atoll.\n")
+    K.READ_LIBRARIES[] = false
+    K.READ_PUT[] = false                                                    # read here, as each comes
+    try
+        # Ada's vault, synced from her machine and read: hers alone.
+        K.sync_folder!(InProcessLibrary(kb, as(ada)), dir, "Notes", Dict{String,Any}())
+        K.read_space!(kb, "people/$ada")
+        note = K.source_record(kb, "obsidian", "people/$ada/Notes/Survey.md")
+        K.read_record!(kb, note)
+        @test note !== nothing && K.document_visible(kb, as(ada), note) && !K.document_visible(kb, as(bea), note)
+        @test note in found(ada, "bleaching atoll") && !(note in found(bea, "bleaching atoll"))
+        # Shared with the project: Bea finds it.
+        K.share_document!(kb, as(ada), note, "projects"; projects = ["RF"])
+        @test note in found(bea, "bleaching atoll")
+        # Contributed: the group's copy, found by both, and by Ada in her note's place.
+        c = K.contribute_document!(kb, as(ada), note; access = "projects", projects = ["RF"])
+        K.read_record!(kb, c)
+        @test c in found(bea, "bleaching atoll") && c in found(ada, "bleaching atoll") && !(note in found(ada, "bleaching atoll"))
+        # Ada leaves: her note goes, the group keeps what she contributed.
+        K.remove_library!(kb, ada)
+        @test ismissing(K.paper_id(kb, note)) && c in found(bea, "bleaching atoll")
+    finally
+        K.READ_LIBRARIES[] = true
+        K.READ_PUT[] = true
+        close(kb)
+    end
+end

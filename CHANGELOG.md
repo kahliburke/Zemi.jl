@@ -10,6 +10,12 @@
   Paper notes get references back (`zemi`, `zemi-page`, and the paper's details where the note's
   template leaves them empty); nothing else is written into the vault. PDFs in a library are read as
   documents.
+- **Sharing and contributing** what one holds, from the Documents page: shared, a document stays its
+  holder's and live; contributed, the group gets a version that stays. Project access applies to any
+  kind of document.
+- **`zemi connect`** keeps a folder (an Obsidian vault) in step with one's library, signed in through
+  the browser for a token that reaches the library alone (OAuth scope `library`), or to the knowledge
+  base on the same machine.
 - **Sources** can remove a record whose item is gone (`Zemi.remove!`), follow one that moved
   (`Zemi.rekey!`), and have their records embedded for searching without summarizing them
   (`summarized = false`), and say what their records are (`about`), as agents are told.

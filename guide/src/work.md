@@ -277,6 +277,20 @@ people's libraries is one document, held for both; one no longer in anyone's lib
 A paper is one document whoever brings it in: once anyone adds it to the group's library, it is open
 to every reader.
 
+**Sharing and contributing.** The Documents page lists your library (`my library`; everyone sees
+theirs there), with who sees each document: private, shared with projects, or shared with everyone.
+Select documents to act on them:
+
+- **Share with everyone**, or **with projects** you work in: they see it, and it stays yours. They see
+  your changes as you make them, you can make it private again, and it goes when you remove it.
+- **Contribute**: give the group a version of it, open to everyone or to projects, which stays when you
+  leave. A paper becomes the group's. A note is copied into a record the group owns; contributing it
+  again brings that copy up to date, keeping its links and the findings citing it. While your note is
+  as you contributed it, your searches show the group's copy alone.
+
+Removing your library (`POST /api/library/remove`) takes its files and everything held for you alone,
+shared or not. What you contributed stays, and so does what others hold too.
+
 ## Dropping a document
 
 Drop a document on the Documents page, with a reason if you like, and it is removed and kept out.
