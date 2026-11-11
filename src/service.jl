@@ -134,11 +134,11 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             # A token made without `read` is for what else it was given (tasks, say), not the pages.
             HTTP.Response(403, ["Content-Type" => "text/plain; charset=utf-8"], "Not permitted (read).")
         else
-            # A codebase the site is built without, any record and any private paper are answered here, to those who may see them.
+            # A codebase the site is built without, any record and any paper not open to all are answered here, to those who may see them.
             caller, path = shared ? caller : local_caller(), HTTP.unescapeuri(uri.path)
             live = codebase_site_response(kb, caller, path; req)
             live === nothing && (live = record_site_response(kb, caller, path; req))
-            live === nothing && (live = private_paper_response(kb, caller, path; req))
+            live === nothing && (live = closed_paper_response(kb, caller, path; req))
             f = live === nothing ? site_file(kb.config, uri.path) : nothing
             live !== nothing ? live :
             f !== nothing ? file_response(f; req) :

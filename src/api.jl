@@ -212,7 +212,7 @@ route!("GET", "/api/search") do c
     kinds = let k = get(params, "kinds", "")
         isempty(k) ? nothing : split_list(k)
     end
-    t = @elapsed hits = search(kb, q; limit, layers, keyword, kinds, except = hidden_documents(kb, c.caller))
+    t = @elapsed hits = search(kb, q; limit, layers, keyword, kinds, except = unfound_documents(kb, c.caller))
     found = can(c.caller, "tasks.view") ? search_findings(kb, q; projects = visible_projects(kb, c.caller), limit = 5) : NamedTuple[]
     Dict("query" => q, "seconds" => t, "k" => kb.config.rrf_k, "hits" => [hit_json(kb, h) for h in hits],
          "findings" => Any[Dict(pairs(f)) for f in found])
@@ -261,7 +261,7 @@ end
 
 # The papers nearest by their paper-level vectors.
 route!(c -> related_papers(c.kb, seen_document(c.kb, c.caller, normalize_id(c[:paper])); limit = int_param(c.params, "limit", 8, 1:50),
-                           except = hidden_documents(c.kb, c.caller)), "GET", "/api/similar/*paper")
+                           except = unfound_documents(c.kb, c.caller)), "GET", "/api/similar/*paper")
 
 # A paper's figures and tables (`?id=…`), and one of them, cut when it was read: sent as it is looked
 # at, never built into the site. A document added here is named by its id (its slug), and its figures
@@ -273,9 +273,13 @@ route!("GET", "/api/figures/:paper/:file") do c
     isfile(f) ? file_response(f; c.req) : not_found("No such figure.")
 end
 
-# Documents, for managing them (`?q=…&state=…&limit=…&offset=…`).
-route!("GET", "/api/documents"; need = "paper.manage") do c
-    list_documents(c.kb; q = get(c.params, "q", ""), state = get(c.params, "state", ""), except = hidden_documents(c.kb, c.caller),
+# Documents, for managing them (`?q=…&state=…&limit=…&offset=…`): every one, for those who manage them;
+# for anyone else, their own (`state=mine`).
+route!("GET", "/api/documents"; need = "library") do c
+    state = get(c.params, "state", "")
+    can(c.caller, "paper.manage") || state == "mine" || not_permitted("Not permitted (paper.manage): ask for state=mine, your own documents")
+    held = c.caller.user_id === nothing ? Set{String}() : held_documents(c.kb, c.caller.user_id)
+    list_documents(c.kb; q = get(c.params, "q", ""), state, except = others_private(c.kb, c.caller), held,
                    limit = int_param(c.params, "limit", 50, 1:500), offset = int_param(c.params, "offset", 0, 0:typemax(Int)))
 end
 

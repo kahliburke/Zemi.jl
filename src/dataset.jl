@@ -80,13 +80,13 @@ function set_shared!(kb::KB, ids::AbstractVector{<:AbstractString}, shared::Bool
 end
 
 """
-Whether a document is published: none that is private (see document_access.jl); every arXiv paper,
-and documents of one's own of a kind published
+Whether a document is published: none that is not open to every reader (see document_access.jl);
+every arXiv paper, and documents of one's own of a kind published
 when shared (see [`DocumentKind`](@ref)) marked shared, but not one open only to its projects'
 members, which another member's service would show to all its readers. A document of no kind is not.
 """
 function publishable(kb::KB, doc_id::AbstractString)
-    coalesce(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (doc_id,)), "open") == "private" && return false
+    coalesce(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (doc_id,)), "open") == "open" || return false
     is_arxiv_id(doc_id) && return true
     kind = local_kind(doc_id)
     (kind === nothing || !kind.published) && return false

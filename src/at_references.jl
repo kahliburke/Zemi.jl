@@ -190,7 +190,7 @@ function at_reference_matches(kb::KB, q::AbstractString; limit::Integer = 5, pro
     end
     hidden = hidden_documents(kb, caller)
     n = 0
-    for r in query(kb, """SELECT doc_id, title FROM papers WHERE $(literature_sql(private = true)) AND metadata_at IS NOT NULL
+    for r in query(kb, """SELECT doc_id, title FROM papers WHERE $(literature_sql(closed = true)) AND metadata_at IS NOT NULL
                           AND (lower(doc_id) LIKE ? ESCAPE '\\' OR ' ' || lower(title) LIKE ? ESCAPE '\\')
                           ORDER BY published DESC""", (starts, word))
         r.doc_id in hidden && continue

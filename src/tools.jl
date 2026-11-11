@@ -92,7 +92,7 @@ function search_tool(query::String; limit::Int = 8, category::String = "", since
     only = isempty(project) ? nothing : library_papers(kb(), project)
     only !== nothing && isempty(only) && return "$(uppercase(strip(project)))'s library has no papers yet: see `library`."
     caller = tool_caller()
-    hits = search(kb(), query; limit, keyword, only, except = hidden_documents(kb(), caller),
+    hits = search(kb(), query; limit, keyword, only, except = unfound_documents(kb(), caller),
         kinds = isempty(kind) ? nothing : split_list(kind),
         category = isempty(category) ? nothing : category,
         since = since == 0 ? nothing : since,
@@ -225,7 +225,7 @@ tool!("references", references_tool; need = "read")
 Papers in the knowledge base closest to this one, by the embedding of title and abstract.
 """
 function similar_tool(doc_id::String; limit::Int = 8)::String
-    hits = similar_papers(kb(), tool_document(doc_id); limit, except = hidden_documents(kb(), tool_caller()))
+    hits = similar_papers(kb(), tool_document(doc_id); limit, except = unfound_documents(kb(), tool_caller()))
     isempty(hits) && return "No similar papers found."
     return join(("$(i). [$(h.doc_id)] $(h.title)  (similarity $(round(h.score; digits = 3)))"
                  for (i, h) in enumerate(hits)), "\n")

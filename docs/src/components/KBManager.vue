@@ -2,13 +2,15 @@
   Managing the knowledge base's documents: find them by title, author or id, see how far each has
   been processed, and run any step again, for one document or a selection. A document whose access is
   set (a codebase, a record) is linked to projects and unlinked here. Dropping a document removes it
-  and keeps it out (see src/dropped.jl); the dropped view lists those, to restore.
+  and keeps it out (see src/dropped.jl); the dropped view lists those, to restore. One's own library
+  (`my library`, all that those who do not manage documents see) is here too: what one holds, who
+  sees each, and sharing it or contributing it to the group (see src/sharing.jl).
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
 import KBTitle from './KBTitle.vue'
 import { ref, computed, onMounted, watch } from 'vue'
-import { mode, status, connect, post, getJSON, jobs, followJobs, finishedJobs, blockers, latest, isStale, type Job } from './kbApi'
+import { mode, status, connect, post, getJSON, jobs, followJobs, finishedJobs, blockers, latest, isStale, can, type Job } from './kbApi'
 import { kbPage } from './kbLinks'
 import { isCodebase, hasAccess, isResource } from './kbKinds'
 import { byline } from './kbFormat'
@@ -16,7 +18,10 @@ import KBJobs from './KBJobs.vue'
 import KBDialog from './KBDialog.vue'
 
 type Doc = { id: string; slug: string; page: string; title: string; authors: string[]; published: string; category: string; kind: string;
-             access: 'open' | 'projects'; projects: string[]; posted: string; parsed: boolean; passages: number; layers: number; summaries: number }
+             access: 'open' | 'projects' | 'private'; projects: string[]; posted: string; parsed: boolean; passages: number; layers: number;
+             summaries: number; held: boolean }
+// Those who manage documents see every one; anyone else, their own library.
+const manages = computed(() => can('paper.manage'))
 
 const PAGE = 50
 const q = ref('')
@@ -40,12 +45,34 @@ const ACTIONS: Action[] = [
     code: 'Write every file\'s summary again, as for a new summary format, and embed them' },
   { name: 'classify', label: 'Classify', help: 'Set category (uploads: also authors, year, abstract)' },
   { name: 'refresh', label: 'Refresh metadata', help: 'Refetch the arXiv record, or reread an upload\'s metadata' },
-  { name: 'share', label: 'Share', help: 'Include in the published dataset' },
-  { name: 'unshare', label: 'Unshare', help: 'Exclude from the published dataset' },
+  { name: 'share', label: 'Publish', help: 'Include in the published dataset' },
+  { name: 'unshare', label: 'Unpublish', help: 'Leave out of the published dataset' },
   { name: 'open', label: 'Open to all', help: 'Let every reader see the document', access: 'open' },
   { name: 'close', label: 'Projects only', help: 'Let only the members of the projects linked to the document see it', access: 'projects' },
   { name: 'drop', label: 'Drop', help: 'Remove the document and keep it out: no source brings it back until it is restored' },
 ]
+
+// What one does with what one holds (see src/sharing.jl): who sees it, and giving the group a version.
+const LIBRARY: Action[] = [
+  { name: 'private', label: 'Make private', help: 'Only you see it' },
+  { name: 'share-all', label: 'Share with everyone', help: 'Every reader sees it. It stays yours: they see your changes, and it goes if you remove it' },
+  { name: 'share-projects', label: 'Share with projects…', help: 'The members of the projects you choose see it. It stays yours' },
+  { name: 'contribute', label: 'Contribute…', help: 'Give the group a version of it, which stays when you leave' },
+]
+const mine = (ids: string[]) => ids.length > 0 && ids.every(id => docs.value.find(d => d.id === id)?.held)
+const reach = (d: Doc) => d.access === 'private' ? 'private: only you' :
+  d.access === 'projects' ? `shared with ${d.projects.length ? d.projects.join(', ') : 'no project yet'}` : 'shared with everyone'
+
+// Sharing with projects, or contributing, asks how in a dialog.
+const sharing = ref<{ action: string; ids: string[]; to: 'open' | 'projects'; keys: string[] } | null>(null)
+async function share(action: string, ids: string[], access: string, keys: string[] = []) {
+  error.value = ''
+  const verb = action === 'contribute' ? 'contribute' : 'share'
+  try { for (const id of ids) await post(`/api/documents/${encodeURIComponent(id)}/${verb}`, JSON.stringify({ access, projects: keys })) }
+  catch (e: any) { error.value = e.message ?? String(e) }
+  sharing.value = null
+  return load()
+}
 
 // Typing and paging ask in turn: the list shown answers the last.
 const listing = latest()
@@ -69,7 +96,10 @@ onMounted(async () => {
   const id = asked.get('id')
   if (asked.get('state')) state.value = asked.get('state')!
   if (id) { q.value = id; selected.value = new Set([id]) }
-  await connect(); followJobs(); load()
+  await connect()
+  if (!manages.value) state.value = 'mine'
+  else followJobs()
+  load()
   try { projects.value = (await getJSON('/api/projects')).projects.map((p: { key: string }) => p.key) } catch { /* linking waits for the list */ }
 })
 
@@ -101,6 +131,12 @@ function toggleAll() {
 async function run(action: string, ids: string[], why = '') {
   if (!ids.length) return
   if (action === 'drop' && !dropping.value) { dropping.value = ids; reason.value = ''; return }
+  if (action === 'private') return share(action, ids, 'private')
+  if (action === 'share-all') return share(action, ids, 'open')
+  if (action === 'share-projects' || action === 'contribute') {
+    sharing.value = { action, ids, to: action === 'contribute' ? 'open' : 'projects', keys: [] }
+    return
+  }
   error.value = ''
   const access = ACTIONS.find(a => a.name === action)?.access
   if (access) {
@@ -182,16 +218,19 @@ const who = (d: Doc) => byline(d.authors)
     <KBNeedsService>
       <div class="kbm-filters">
         <input v-model="q" type="search" class="kb-field kbm-input" placeholder="Title, author or id…" />
-        <select v-model="state" class="kbm-select">
-          <option value="">every document</option>
-          <option value="read">full text</option>
-          <option value="recorded">abstract only</option>
-          <option value="unsummarized">no summaries</option>
-          <option value="unembedded">not embedded</option>
-          <option value="uploaded">uploaded PDFs</option>
-          <option value="code">codebases</option>
-          <option value="record">records</option>
-          <option value="dropped">dropped</option>
+        <select v-model="state" class="kbm-select" :disabled="!manages">
+          <option value="mine">my library</option>
+          <template v-if="manages">
+            <option value="">every document</option>
+            <option value="read">full text</option>
+            <option value="recorded">abstract only</option>
+            <option value="unsummarized">no summaries</option>
+            <option value="unembedded">not embedded</option>
+            <option value="uploaded">uploaded PDFs</option>
+            <option value="code">codebases</option>
+            <option value="record">records</option>
+            <option value="dropped">dropped</option>
+          </template>
         </select>
       </div>
       <p v-if="unavailable.length" class="kbm-dim kbm-unavailable">
@@ -217,9 +256,15 @@ const who = (d: Doc) => byline(d.authors)
         <div class="kbm-bar">
           <span>{{ total }} documents<span v-if="selected.size"> · {{ selected.size }} selected</span></span>
           <template v-if="selected.size">
-            <button v-for="a in ACTIONS" :key="a.name" type="button" :title="tip(a, [...selected])"
-                    :disabled="barred(a, [...selected])"
-                    :class="['kbm-action', { danger: a.name === 'drop' }]" @click="run(a.name, [...selected])">{{ a.label }}</button>
+            <template v-if="mine([...selected])">
+              <button v-for="a in LIBRARY" :key="a.name" type="button" :title="a.help" class="kbm-action kbm-library"
+                      @click="run(a.name, [...selected])">{{ a.label }}</button>
+            </template>
+            <template v-if="manages">
+              <button v-for="a in ACTIONS" :key="a.name" type="button" :title="tip(a, [...selected])"
+                      :disabled="barred(a, [...selected])"
+                      :class="['kbm-action', { danger: a.name === 'drop' }]" @click="run(a.name, [...selected])">{{ a.label }}</button>
+            </template>
             <button type="button" class="kb-link" @click="selected = new Set()">clear</button>
           </template>
         </div>
@@ -238,10 +283,11 @@ const who = (d: Doc) => byline(d.authors)
               <td>
                 <a :href="kbPage(d.page)"><KBTitle :text="d.title" /></a>
                 <div class="kbm-dim">{{ who(d) }}<span v-if="who(d)"> · </span><code>{{ d.id }}</code>
-                  <span v-if="d.access === 'projects'"> · its projects only</span>
+                  <span v-if="d.held" class="kbm-reach" :class="d.access"> · {{ reach(d) }}</span>
+                  <span v-else-if="d.access === 'projects'"> · its projects only</span>
                   <template v-if="isResource(d.id)"> · <label class="kb-link kbm-upload">upload its PDF
                     <input type="file" accept="application/pdf" @change="promote($event, d.id)" /></label></template></div>
-                <div v-if="hasAccess(d.id)" class="kbm-dim kbm-projects">
+                <div v-if="manages && hasAccess(d.id) && !d.held" class="kbm-dim kbm-projects">
                   <template v-if="d.projects.length">linked to
                     <span v-for="k in d.projects" :key="k">{{ k }}<button type="button" class="kb-link" :title="`Unlink ${k}`"
                           @click="link(d, k, true)">×</button></span></template>
@@ -268,8 +314,13 @@ const who = (d: Doc) => byline(d.authors)
               <td>
                 <select class="kbm-select small" @change="rowAction($event, d.id)">
                   <option value="">actions…</option>
-                  <option v-for="a in ACTIONS" :key="a.name" :value="a.name" :title="tip(a, [d.id])"
-                          :disabled="barred(a, [d.id])">{{ a.label }}</option>
+                  <template v-if="d.held">
+                    <option v-for="a in LIBRARY" :key="a.name" :value="a.name" :title="a.help">{{ a.label }}</option>
+                  </template>
+                  <template v-if="manages">
+                    <option v-for="a in ACTIONS" :key="a.name" :value="a.name" :title="tip(a, [d.id])"
+                            :disabled="barred(a, [d.id])">{{ a.label }}</option>
+                  </template>
                 </select>
               </td>
             </tr>
@@ -281,6 +332,27 @@ const who = (d: Doc) => byline(d.authors)
           <button type="button" class="kb-link" :disabled="offset + PAGE >= total" @click="offset += PAGE">next</button>
         </div>
       </template>
+      <KBDialog v-if="sharing" width="min(30rem, 94vw)" @close="sharing = null">
+        <h3 class="kbm-title">{{ sharing.action === 'contribute' ? 'Contribute' : 'Share' }}
+          {{ sharing.ids.length === 1 ? sharing.ids[0] : `${sharing.ids.length} documents` }}</h3>
+        <p v-if="sharing.action === 'contribute'" class="kbm-dim">The group gets a version of it, which stays when you leave.
+          A paper becomes the group's; a note is copied, and contributing it again brings the group's copy up to date.</p>
+        <p v-else class="kbm-dim">It stays yours: its projects' members see your changes, and it goes if you remove it.</p>
+        <div v-if="sharing.action === 'contribute'" class="kbm-choice">
+          <label><input v-model="sharing.to" type="radio" value="open" /> every reader</label>
+          <label><input v-model="sharing.to" type="radio" value="projects" /> the members of projects</label>
+        </div>
+        <div v-if="sharing.to === 'projects'" class="kbm-choice">
+          <label v-for="k in projects" :key="k"><input v-model="sharing.keys" type="checkbox" :value="k" /> {{ k }}</label>
+          <p v-if="!projects.length" class="kbm-dim">You belong to no project.</p>
+        </div>
+        <div class="kbm-buttons">
+          <button type="button" class="kb-primary" :disabled="sharing.to === 'projects' && !sharing.keys.length"
+                  @click="share(sharing.action, sharing.ids, sharing.to, sharing.keys)">
+            {{ sharing.action === 'contribute' ? 'Contribute' : 'Share' }}</button>
+          <button type="button" class="kb-link" @click="sharing = null">cancel</button>
+        </div>
+      </KBDialog>
       <KBDialog v-if="dropping" width="min(30rem, 94vw)" @close="dropping = null">
         <h3 class="kbm-title">Drop {{ dropping.length === 1 ? dropping[0] : `${dropping.length} documents` }}?</h3>
         <p class="kbm-dim">It is removed, with its text, summaries and vectors, and kept out: no source brings it back
@@ -298,6 +370,10 @@ const who = (d: Doc) => byline(d.authors)
 <style scoped>
 .kbm { margin: 1rem 0 2rem; font-size: 0.9rem; }
 .kbm-filters { display: flex; gap: 0.6rem; }
+.kbm-reach { color: var(--vp-c-brand-1); }
+.kbm-reach.private { color: var(--vp-c-text-2); font-style: italic; }
+.kbm-library { border-color: var(--vp-c-brand-soft); }
+.kbm-choice { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; margin: 0.6rem 0; }
 .kbm-upload { cursor: pointer; }
 .kbm-upload input { display: none; }
 .kbm-input { flex: 1; padding: 0.5rem 0.8rem; border-radius: 8px; }

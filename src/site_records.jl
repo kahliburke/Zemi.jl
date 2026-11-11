@@ -110,20 +110,20 @@ const PAPER_ADDRESSES = [
     r"^kb-data/papers/(?<slug>[^/]+)\.json$" => :page_data]
 
 """
-    private_paper_response(kb, caller, path; req = nothing) -> Union{HTTP.Response,Nothing}
+    closed_paper_response(kb, caller, path; req = nothing) -> Union{HTTP.Response,Nothing}
 
-The answer to a request for the site's `path` when it names a private paper's page, script or data
-(see `PAPER_ADDRESSES`), which the site is built without (see document_access.jl): to one of its
-holders, what a built page would have there, its data from the knowledge base; to anyone else, the
-site's 404 page. `nothing` for any other path, which the site answers.
+The answer to a request for the site's `path` when it names the page, script or data (see
+`PAPER_ADDRESSES`) of a paper not open to every reader, which the site is built without (see
+document_access.jl): to one who may see it, what a built page would have there, its data from the
+knowledge base; to anyone else, the site's 404 page. `nothing` for any other path, which the site answers.
 """
-function private_paper_response(kb::KB, caller::Caller, path::AbstractString; req::Union{HTTP.Request,Nothing} = nothing)
+function closed_paper_response(kb::KB, caller::Caller, path::AbstractString; req::Union{HTTP.Request,Nothing} = nothing)
     rel = lstrip(path, '/')
     i = findfirst(((re, _),) -> occursin(re, rel), PAPER_ADDRESSES)
     i === nothing && return nothing
     re, what = PAPER_ADDRESSES[i]
     m = match(re, rel)
-    rows = query(kb, """SELECT doc_id FROM papers WHERE access = 'private' AND $(literature_sql(private = true))
+    rows = query(kb, """SELECT doc_id FROM papers WHERE access != 'open' AND $(literature_sql(closed = true))
                         AND replace(replace(doc_id, '.', '-'), '/', '-') = ?""", (m[:slug],))
     isempty(rows) && return nothing
     id = String(first(rows).doc_id)
@@ -158,10 +158,10 @@ route!("GET", "/api/records") do c
         for r in visible_records(c.kb, c.caller; project = get(c.params, "project", ""), source = get(c.params, "source", ""))]
 end
 
-# Link a document of a kind with access to a project, or undo it: `{"project": KEY, "remove": true}`.
+# Link a document to a project, or undo it: `{"project": KEY, "remove": true}`. Someone's private
+# document is, to anyone else, none.
 route!("POST", "/api/documents/:id/projects"; need = "paper.manage") do c
-    b, id = json_body(c), c[:id]
-    is_kind(k -> k.access, id) || error("Only a document whose access is set is linked to projects")
+    b, id = json_body(c), managed_document(c.kb, c.caller, c[:id])
     key = String(get(b, "project", ""))
     get(b, "remove", false) === true ? unlink_document!(c.kb, id, key) : link_document!(c.kb, id, key)
     Dict("id" => id, "projects" => document_projects(c.kb, id))

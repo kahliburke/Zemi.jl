@@ -268,6 +268,7 @@ end
     @test call(reader, "POST", "/api/tasks/X-1/delete", Dict())[1] == 403
     @test call(reader, "POST", "/api/documents", Dict("arxiv" => "2609.00002"))[1] == 403
     @test call(reader, "GET", "/api/documents")[1] == 403 && call(reader, "GET", "/api/jobs")[1] == 403
+    @test call(reader, "GET", "/api/documents?state=mine")[1] == 200                              # their own library
     # One job is its starter's to follow, which needs no more than reading.
     @test K.find_route("GET", ["api", "jobs", "j3"])[1].need == "read"
     @test call(K.local_caller(), "GET", "/api/documents")[1] == 200
@@ -657,11 +658,14 @@ end
         @test K.document_visible(kb, as(boss), "note-survey")                                    # projects.all
         @test K.hidden_documents(kb, as(bea)) == Set(["note-survey"]) && isempty(K.hidden_documents(kb, as(ada)))
         @test_throws "No note note-survey" K.seen_document(kb, as(bea), "note-survey")
-        # Opened to every reader, it is every reader's; a paper has no access to set.
+        # Opened to every reader, it is every reader's.
         K.set_document_access!(kb, "note-survey", "open")
         @test K.document_visible(kb, as(bea), "note-survey") && isempty(K.hidden_documents(kb, as(bea)))
         K.execute!(kb, "INSERT INTO papers (doc_id, title, added_at) VALUES ('2609.00001', 'Reef patches', ?)", (K.now_iso(),))
-        @test_throws "not opened to projects" K.set_document_access!(kb, "2609.00001", "projects")
+        # A paper too can be open to its projects' members alone.
+        K.set_document_access!(kb, "2609.00001", "projects")
+        @test !K.document_visible(kb, as(bea), "2609.00001")
+        K.set_document_access!(kb, "2609.00001", "open")
         @test K.document_visible(kb, as(bea), "2609.00001")
         # A link undone, or its project deleted, no longer shows it.
         K.set_document_access!(kb, "note-survey", "projects")
@@ -693,14 +697,14 @@ end
         @test K.document_visible(kb, K.local_caller(), id)                                       # run for one person
         @test K.hidden_documents(kb, as(boss)) == Set([id]) && isempty(K.hidden_documents(kb, as(ada)))
         @test_throws "No paper $id" K.seen_document(kb, as(boss), id)
-        @test !(id in [d.id for d in K.list_documents(kb; except = K.hidden_documents(kb, as(boss))).documents])
-        @test id in [d.id for d in K.list_documents(kb; except = K.hidden_documents(kb, as(ada))).documents]
+        @test !(id in [d.id for d in K.list_documents(kb; except = K.others_private(kb, as(boss))).documents])
+        @test id in [d.id for d in K.list_documents(kb; except = K.others_private(kb, as(ada))).documents]
         # Left out of what is drawn up for every reader, of the site and of the dataset.
         @test id in K.closed_documents(kb) && isempty(K.query(kb, "SELECT 1 FROM papers WHERE doc_id = ? AND $(K.literature_sql())", (id,)))
         @test !K.publishable(kb, id) && K.document_page_source(kb, id) === nothing
         # Its page is answered to its holders alone; an open paper's is the site's.
-        @test K.private_paper_response(kb, as(boss), "/kb-data/papers/2609-00002.json").status == 404
-        r = K.private_paper_response(kb, as(ada), "/kb-data/papers/2609-00002.json")
+        @test K.closed_paper_response(kb, as(boss), "/kb-data/papers/2609-00002.json").status == 404
+        r = K.closed_paper_response(kb, as(ada), "/kb-data/papers/2609-00002.json")
         @test r.status == 200 && K.JSON.parse(String(r.body))["id"] == id
         # Brought in by Bea for herself too, it is one document held for both.
         K.add_papers!(kb, [id]; holder = bea)
@@ -709,15 +713,14 @@ end
         K.add_papers!(kb, ["2609.00003"])
         K.add_papers!(kb, ["2609.00003"]; holder = ada)
         @test access("2609.00003") == "open" && isempty(K.document_holders(kb, "2609.00003"))
-        @test K.private_paper_response(kb, as(boss), "/kb-data/papers/2609-00003.json") === nothing
+        @test K.closed_paper_response(kb, as(boss), "/kb-data/papers/2609-00003.json") === nothing
         # Brought in for the group, a private paper is every reader's.
         K.add_papers!(kb, [id])
         @test access(id) == "open" && K.document_visible(kb, as(boss), id) && isempty(K.hidden_documents(kb, as(boss)))
-        # Made private again with a holder; never without one, and a paper is not opened to projects.
+        # Made private again with a holder; never without one.
         K.set_document_access!(kb, id, "private"; holder = ada)
         @test access(id) == "private" && !K.document_visible(kb, as(boss), id)
         @test_throws "held for someone" K.set_document_access!(kb, "2609.00003", "private")
-        @test_throws "not opened to projects" K.set_document_access!(kb, id, "projects")
         # A person's record is private to them, and a record does not name itself private.
         rid, _ = K.put_record!(kb, "notes", (; key = "k1", title = "Reef notes", date = "2026-11-01", sections = ["Seen" => "Bleaching."]);
                                read = false, label = "Written by hand", holder = bea)
@@ -822,7 +825,7 @@ end
         # Those who manage documents link it to a project, whose members then see it.
         @test call(bea, "POST", "/api/documents/$id/projects", Dict("project" => "PU"))[1] == 403
         @test call(rowan, "POST", "/api/documents/$id/projects", Dict("project" => "XX"))[1] == 404
-        @test call(rowan, "POST", "/api/documents/2609.00001/projects", Dict("project" => "PU"))[1] == 400
+        @test call(rowan, "POST", "/api/documents/2609.00001/projects", Dict("project" => "PU"))[1] == 404     # (no such paper here)
         @test call(rowan, "POST", "/api/documents/$id/projects", Dict("project" => "OT")) == (200, Dict("id" => id, "projects" => ["OT"]))
         @test call(rowan, "POST", "/api/documents/$id/projects", Dict("project" => "OT", "remove" => true))[2]["projects"] == []
         call(rowan, "POST", "/api/documents/$id/projects", Dict("project" => "PU"))
@@ -2126,4 +2129,70 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     @test K.sync_folder!(remote, dir, "Notes", state).removed_here == 1 && !isfile(tidal)
     K.READ_LIBRARIES[] = true
     close(kb)
+end
+
+@zset "sharing and contributing what one holds" begin
+    sh = shared_config(sign_up = :open, default_role = "Learner")
+    kb = open_kb(temp_config(shared = sh, layers = Layer[]))
+    K.ensure_roles!(kb)
+    account(email, roles) = (uid = K.sign_in!(kb, sh, "Campus", email; email, verified = true); K.set_roles!(kb, uid, roles); uid)
+    as(uid) = K.session_caller(kb, K.start_session!(kb, uid, sh))
+    ada, bea, cy = account("ada@x.org", ["Learner"]), account("bea@x.org", ["Learner"]), account("cy@x.org", ["Learner"])
+    K.create_project!(kb, "Reefs"; key = "RF", owner = ada, by = K.person("Ada"))
+    K.set_member!(kb, "RF", bea, "contributor"; by = "ada@x.org")
+    access(id) = K.scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,))
+    sees(uid, id) = K.document_visible(kb, as(uid), id)
+    try
+        # A note of Ada's, private to her.
+        note, _ = K.put_record!(kb, "obsidian", (; key = "people/$ada/Notes/Survey.md", title = "Reef survey", date = "2026-11-01",
+                                               sections = ["Seen" => "Bleaching on the north side."]); read = false, holder = ada)
+        @test sees(ada, note) && !sees(bea, note) && !sees(cy, note)
+        # Shared with a project its members see it; it stays hers, and private again it is hers alone.
+        @test_throws "No document" K.share_document!(kb, as(bea), note, "open")              # not Bea's to share
+        @test_throws "No project" K.share_document!(kb, as(ada), note, "projects"; projects = ["XX"])
+        @test K.share_document!(kb, as(ada), note, "projects"; projects = ["RF"]) == "projects"
+        @test sees(bea, note) && !sees(cy, note) && K.document_holders(kb, note) == [ada]
+        K.share_document!(kb, as(ada), note, "open")
+        @test sees(cy, note) && !(note in K.closed_documents(kb))
+        K.share_document!(kb, as(ada), note, "private")
+        @test !sees(bea, note) && !sees(cy, note)
+        # A paper of Ada's shared with a project: the site is built without it, and its page is answered to them.
+        paper = only(K.add_papers!(kb, ["2609.00002"]; holder = ada))
+        K.share_document!(kb, as(ada), paper, "projects"; projects = ["RF"])
+        @test sees(bea, paper) && !sees(cy, paper) && isempty(K.query(kb, "SELECT 1 FROM papers WHERE doc_id = ? AND $(K.literature_sql())", (paper,)))
+        @test K.closed_paper_response(kb, as(cy), "/kb-data/papers/2609-00002.json").status == 404
+        @test K.closed_paper_response(kb, as(bea), "/kb-data/papers/2609-00002.json").status == 200
+        # Contributed, a paper is the group's: held for no one.
+        @test K.contribute_document!(kb, as(ada), paper) == paper
+        @test access(paper) == "open" && isempty(K.document_holders(kb, paper)) && sees(cy, paper)
+        # Contributed, a note is copied into a record the group owns; while hers is as contributed, what she finds shows the copy.
+        c = K.contribute_document!(kb, as(ada), note; access = "projects", projects = ["RF"])
+        @test c != note && K.record_row(kb, c).source == "contributions" && occursin("Contributed by", K.record_row(kb, c).label)
+        @test sees(bea, c) && !sees(cy, c) && !sees(bea, note) && isempty(K.document_holders(kb, c))
+        @test K.superseded_documents(kb, as(ada)) == Set([note]) && note in K.unfound_documents(kb, as(ada))
+        # Her library lists what she holds, and who sees each.
+        mine = K.list_documents(kb; state = "mine", held = K.held_documents(kb, ada), except = K.others_private(kb, as(ada))).documents
+        @test [(d.id, d.access, d.held) for d in mine] == [(note, "private", true)]
+        # Changed since, hers is found again; contributed again, the group's is brought up to date, its id kept.
+        K.put_record!(kb, "obsidian", (; key = "people/$ada/Notes/Survey.md", title = "Reef survey", date = "2026-11-01",
+                                       sections = ["Seen" => "Bleaching on both sides."]); read = false, holder = ada)
+        @test isempty(K.superseded_documents(kb, as(ada)))
+        @test K.contribute_document!(kb, as(ada), note) == c && access(c) == "open" && sees(cy, c)
+        @test occursin("both sides", join((s["text"] for s in K.record_document(kb, c)["sections"]), " "))
+        # Leaving: what is hers alone goes, shared or not; what she contributed, and what others hold too, stays.
+        shared = only(K.add_papers!(kb, ["2609.00003"]; holder = ada))
+        K.share_document!(kb, as(ada), shared, "open")
+        both = only(K.add_papers!(kb, ["2609.00004"]; holder = ada))
+        K.add_papers!(kb, [both]; holder = bea)
+        K.put_library_file!(kb, "people/$ada", "Notes/Survey.md", Vector{UInt8}("x"))
+        r = K.remove_library!(kb, ada)
+        @test r.files == 1 && isempty(K.library_files(kb, "people/$ada"))
+        @test ismissing(K.paper_id(kb, note)) && ismissing(K.paper_id(kb, shared))
+        @test !ismissing(K.paper_id(kb, c)) && !ismissing(K.paper_id(kb, paper)) && K.document_holders(kb, both) == [bea]
+        # The group taking up a paper someone holds makes it the group's.
+        K.add_papers!(kb, [both])
+        @test access(both) == "open" && isempty(K.document_holders(kb, both))
+    finally
+        close(kb)
+    end
 end

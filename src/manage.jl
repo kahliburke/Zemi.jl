@@ -2,17 +2,18 @@
 # them. The site's Manage page and the tools call these.
 
 """
-    list_documents(kb; q = "", state = "", except = Set(), limit = 50, offset = 0) -> (; total, documents)
+    list_documents(kb; q = "", state = "", except = Set(), held = Set(), limit = 50, offset = 0) -> (; total, documents)
 
 Documents most recently posted or added first. `q` matches words of the title, authors or id;
 `state` is `"recorded"` (not read yet), `"read"` (parsed), `"uploaded"`, a kind of document's name
 (`"code"`, `"record"`, see [`DocumentKind`](@ref)), `"unsummarized"` (read but without summaries) or
-`"unembedded"` (read but without vectors). Those in `except` (the documents someone may not see, see
+`"unembedded"` (read but without vectors), or `"mine"`: those in `held` (the documents held for the
+one asking, see [`held_documents`](@ref)). Those in `except` (the documents they may not see, see
 [`hidden_documents`](@ref)) are left out. Each document comes with what has been done to it, who may
-see it and the projects it is linked to (see document_access.jl).
+see it, the projects it is linked to (see document_access.jl), and whether it is held for them.
 """
-function list_documents(kb::KB; q::AbstractString = "", state::AbstractString = "", except = Set{String}(), limit::Integer = 50,
-                        offset::Integer = 0)
+function list_documents(kb::KB; q::AbstractString = "", state::AbstractString = "", except = Set{String}(), held = Set{String}(),
+                        limit::Integer = 50, offset::Integer = 0)
     rows = query(kb, """
         SELECT p.id, p.doc_id, p.title, p.authors, p.published, p.primary_category, p.kind, p.access, p.added_at,
                (SELECT max(posted_at) FROM mentions m WHERE m.paper_id = p.id) AS posted,
@@ -26,16 +27,17 @@ function list_documents(kb::KB; q::AbstractString = "", state::AbstractString = 
     in_state(r) = state == "" ||
         (state == "recorded" && r.parsed == 0) || (state == "read" && r.parsed > 0) ||
         (state == "uploaded" && is_upload(r.doc_id)) ||
-        state == r.kind || (state == "unsummarized" && r.parsed > 0 && r.summaries == 0) ||
+        state == r.kind || (state == "mine" && r.doc_id in held) || (state == "unsummarized" && r.parsed > 0 && r.summaries == 0) ||
         (state == "unembedded" && r.parsed > 0 && r.layers == 0)
     found = filter(r -> !(r.doc_id in except) && matches(r) && in_state(r), rows)
     page = found[min(offset + 1, end + 1):min(offset + limit, end)]
+    linked = documents_projects(kb)
     docs = [(; id = r.doc_id, slug = page_slug(r.doc_id), page = document_page(r.doc_id), title = coalesce(r.title, r.doc_id),
                authors = json_list(r.authors), published = coalesce(r.published, ""),
                category = coalesce(r.primary_category, ""), kind = r.kind, access = r.access,
-               projects = is_kind(k -> k.access, r.doc_id) ? document_projects(kb, r.doc_id) : String[],
+               projects = get(linked, r.doc_id, String[]),
                posted = ismissing(r.posted) ? "" : Dates.format(unix2datetime(r.posted), "yyyy-mm-dd"),
-               parsed = r.parsed > 0, r.passages, r.layers, r.summaries) for r in page]
+               parsed = r.parsed > 0, r.passages, r.layers, r.summaries, held = r.doc_id in held) for r in page]
     return (; total = length(found), documents = docs)
 end
 
