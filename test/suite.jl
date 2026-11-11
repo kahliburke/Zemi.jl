@@ -1427,6 +1427,7 @@ end
         id(key) = K.source_record(kb, "obsidian", key)
         text(i) = join((x["text"] for x in K.record_document(kb, i)["sections"]), "\n")
         before = read(tidal, String)
+        Base.run(`touch -t 202001011200 $tidal`)                              # last changed long ago
         run = K.run_source!(kb, s)
         # Its notes are records; its templates and the folders it is told to skip are not read.
         @test run.added == 3 && first.(K.vault_files(K.vault_config(K.settings(run))).files) == ["Attachments/plot.png"]
@@ -1447,6 +1448,7 @@ end
         # Given its reference, and nothing else of it changed; Zemi's own writing is not read as an edit.
         after = read(tidal, String)
         @test occursin("\nzemi: \"2401.00001\"\n", after) && join(filter(l -> !startswith(l, "zemi"), split(after, '\n')), '\n') == before
+        @test K.record_row(kb, t).happened == "2020-01-01"                    # dated as before Zemi wrote into it
         run = K.run_source!(kb, s)
         @test (run.added, run.changed, run.removed) == (0, 0, 0)
         # Once the paper's record is known, the properties the note leaves empty are filled; one it does not use is not added.
@@ -2643,8 +2645,11 @@ end
         repo = mktempdir()
         write(joinpath(repo, "Tool.jl"), "\"Add two numbers.\"\nadd(a, b) = a + b\n")
         code = add_codebase!(kb, repo; name = "Tool")
+        # A record read with it is a kind not classified: left out, not failed.
+        rec, _ = K.put_record!(kb, "upload", (; key = "reef notes", title = "Reef notes", date = "2026-10-01",
+                                              sections = ["Notes" => "The corals held."]); read = false)
         r = sync!(kb; arxiv = false)
-        @test only(r.ingested).ok && code in r.classified && isempty(r.failed)
+        @test length(r.ingested) == 2 && all(x -> x.ok, r.ingested) && code in r.classified && !(rec in r.classified) && isempty(r.failed)
         @test K.scalar(kb, "SELECT classifier FROM classifications WHERE paper_id = ?", (K.paper_id(kb, code),)) == "namer"
 
         # Watching arXiv: new papers in the categories, placed against the focus areas and the library;
@@ -6483,6 +6488,10 @@ end
         write(joinpath(kdir, "extensions.json"), JSON.json(Dict("extensions" => [Dict("project_path" => "/elsewhere/Other", "enabled" => true, "auto_start" => true)])))
         @test K.register_extension(; project_path = v1) == :added
         @test length(entries()) == 2 && K.zemi_extension()["project_path"] == v1 && K.kaimon_runs_zemi()
+        # Kaimon runs the default config's knowledge base; one `ZEMI_CONFIG` names elsewhere is served here.
+        quiet(f) = redirect_stdout(() -> redirect_stderr(f, devnull), devnull)
+        @test withenv(() -> quiet(() -> K.kaimon_serves(String[])), "ZEMI_CONFIG" => nothing)
+        @test !withenv(() -> K.kaimon_serves(String[]), "ZEMI_CONFIG" => joinpath(dir, "trial", "config.toml"))
         @test K.register_extension(; project_path = v1) == :already
         # An update moves the install: its entry is repointed, keeping whether it starts with Kaimon.
         es = entries(); es[2]["auto_start"] = false
