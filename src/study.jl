@@ -72,7 +72,8 @@ end
 
 A paper a theme found: `strength` sums, over the theme's queries, how strongly each search ranked
 it (its fused score against a first place in every ranking), `queries` counts the queries that
-found it, and `passages` holds its best-matching passages.
+found it, and `passages` holds its best-matching passages. `page` is its page among the docs sources
+(see [`document_page_source`](@ref)), `nothing` when the site has none for it.
 """
 Base.@kwdef struct EvidencePaper
     id::String
@@ -82,6 +83,7 @@ Base.@kwdef struct EvidencePaper
     strength::Float64
     queries::Int
     passages::Vector{Passage}
+    page::Union{String,Nothing}
 end
 
 """
@@ -117,9 +119,10 @@ function study_evidence(kb::KB, study::Study; per_query::Integer = 15, each::Int
             was = get(found, h.doc_id, nothing)
             found[h.doc_id] = was === nothing ?
                 EvidencePaper(; id = h.doc_id, h.title, h.authors, year = first(h.published, 4), strength, queries = 1,
-                              passages = first(sort!(unique(p -> p.ord, passages); by = p -> -p.score), 3)) :
+                              passages = first(sort!(unique(p -> p.ord, passages); by = p -> -p.score), 3),
+                              page = document_page_source(kb, h.doc_id)) :
                 EvidencePaper(; was.id, was.title, was.authors, was.year, strength = was.strength + strength,
-                              queries = was.queries + 1,
+                              queries = was.queries + 1, was.page,
                               passages = first(sort!(unique(p -> p.ord, [was.passages; passages]); by = p -> -p.score), 3))
             end
         end
@@ -457,12 +460,15 @@ Base.show(io::IO, ::MIME"text/markdown", m::StudyMarkdown) = print(io, m.text)
 Base.show(io::IO, ::MIME"text/plain", m::StudyMarkdown) = print(io, m.text)
 Base.show(io::IO, m::StudyMarkdown) = print(io, m.text)
 
-# A docs-source path the docs build makes relative to the page holding it (DocumenterSlate), so a
-# link works on whichever page the notebook is placed.
-page_href(id; pages = "generated/kb/") = "slate-docpage:$(pages)papers/$(page_slug(id)).md"
 first_author(p) = isempty(p.authors) ? "" : last(split(first(p.authors))) * (length(p.authors) > 1 ? " et al." : "")
 cell_text(s) = replace(md_escape(s), "|" => "\\|")
-paper_cell(id, title, who; pages) = "[$(cell_text(title))]($(page_href(id; pages)))" * (isempty(who) ? "" : " · " * cell_text(who))
+# Linked by a docs-source path, which the docs build makes relative to the page holding it
+# (DocumenterSlate), so the link works on whichever page the notebook is placed.
+function paper_cell(p::EvidencePaper; pages)
+    title = p.page === nothing ? cell_text(p.title) : "[$(cell_text(p.title))](slate-docpage:$(pages)$(p.page))"
+    who = first_author(p)
+    return title * (isempty(who) ? "" : " · " * cell_text(who))
+end
 
 """
     study_text(kb, study, slug) -> StudyMarkdown
@@ -485,7 +491,7 @@ function papers_table(kb::KB, papers::AbstractVector{EvidencePaper}; shown::Inte
     read_in_full = Set(r.id for r in query(kb, "SELECT p.doc_id AS id FROM papers p JOIN parses x ON x.paper_id = p.id"))
     rows = ["| Strength | Year | Paper | Read |", "|---:|:--|:--|:--|"]
     for p in first(papers, shown)
-        push!(rows, "| $(round(p.strength; digits = 2)) | $(p.year) | $(paper_cell(p.id, p.title, first_author(p); pages)) | " *
+        push!(rows, "| $(round(p.strength; digits = 2)) | $(p.year) | $(paper_cell(p; pages)) | " *
                     (p.id in read_in_full ? "in full" : "abstract") * " |")
     end
     more = length(papers) > shown ? "\n\n*…and $(length(papers) - shown) more.*" : ""
@@ -515,7 +521,7 @@ function crossings_table(evidence, name::AbstractString; pages::AbstractString =
     found = crossings(evidence, name)
     isempty(found) && return StudyMarkdown("*No paper of “$(name)” is found by another theme.*")
     rows = ["| Paper | Year | Also found by |", "|:--|:--|:--|"]
-    append!(rows, ["| $(paper_cell(r.paper.id, r.paper.title, first_author(r.paper); pages)) | $(r.paper.year) | " *
+    append!(rows, ["| $(paper_cell(r.paper; pages)) | $(r.paper.year) | " *
                    join(cell_text.(r.themes), ", ") * " |" for r in found])
     return StudyMarkdown(join(rows, "\n"))
 end

@@ -60,7 +60,7 @@ function bib_entry(kb::KB, id::AbstractString; pages::AbstractString = "generate
     end
     journal = !ismissing(p.journal_ref) ? bib_escape(p.journal_ref) : arxiv ? "arXiv preprint arXiv:$id" : missing
     print(io, field("journal", journal), field("doi", p.doi))
-    docpage && print(io, field("docpage", "$(pages)$(document_page(id)).md"))
+    docpage && print(io, docpage_field(kb, id, pages))
     print(io, "}\n")
     return String(take!(io))
 end
@@ -106,10 +106,13 @@ function resource_bib(kb::KB, id::AbstractString; pages::AbstractString = "gener
     # An address is printed as it is (styles set it with \url), so it is not escaped.
     print(io, field("doi", coalesce(r.doi, ""); escape = false), field("url", r.url; escape = false),
           isempty(r.url) ? "" : field("urldate", r.accessed))
-    docpage && print(io, field("docpage", "$(pages)$(document_page(id)).md"))
+    docpage && print(io, docpage_field(kb, id, pages))
     print(io, "}\n")
     return String(take!(io))
 end
+
+"An entry's `docpage` field, or nothing for a document with no page on the site."
+docpage_field(kb, id, pages) = (s = document_page_source(kb, id); s === nothing ? "" : "  docpage = {$(pages)$(s)},\n")
 
 """
     bibliography(kb; ids = every document cited, caller = nothing, keys = nothing, docpage = false) -> String

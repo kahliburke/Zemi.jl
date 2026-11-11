@@ -207,6 +207,24 @@ kind_summarizer(c, id::AbstractString) = kind_summarizer(c, something(document_k
 "Where document `id`'s page is, under the knowledge base's pages (a paper's, for an id of no kind)."
 document_page(id::AbstractString) = something(document_kind(id), PAPER).page(page_slug(id))
 
+"""
+    document_page_source(kb, id) -> Union{String,Nothing}
+
+Document `id`'s page among the docs sources, under the knowledge base's pages: the stub the docs
+build resolves a link to it against. `nothing` for one whose page is not built into the site (a
+record, or a codebase open only to its projects' members).
+"""
+function document_page_source(kb, id::AbstractString)
+    k = something(document_kind(id), PAPER)
+    k.site || return nothing
+    if k.access
+        r = query(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,))
+        (isempty(r) || r[1].access != "open") && return nothing
+    end
+    page = k.page(page_slug(id))
+    return (endswith(page, "/") ? page * "index" : page) * ".md"
+end
+
 "What a reader or an agent is told of where document `id` came from (see [`DocumentKind`](@ref)), empty for most."
 document_note(kb, id::AbstractString) = (k = document_kind(id); k === nothing || k.note === nothing ? "" : k.note(kb, id))
 

@@ -2368,7 +2368,8 @@ end
     @test only(study.syntheses).slug == "overview"
 
     # Overlaps and crossings between themes.
-    paper(id, year) = K.EvidencePaper(; id, title = "Paper $id", authors = ["A. Author"], year, strength = 1.0, queries = 1, passages = K.Passage[])
+    paper(id, year; page = "papers/$(K.page_slug(id)).md") =
+        K.EvidencePaper(; id, title = "Paper $id", authors = ["A. Author"], year, strength = 1.0, queries = 1, passages = K.Passage[], page)
     ev = [study.themes[1] => [paper("2401.00001", "2024"), paper("2401.00002", "2023")],
           study.themes[2] => [paper("2401.00002", "2023"), paper("2401.00003", "2023")]]
     @test theme_overlaps(ev) == [2 1; 1 2]
@@ -2422,6 +2423,8 @@ end
         table = md(papers_table(kb2, papers))
         @test occursin("| [Paper 2401.00001](slate-docpage:generated/kb/papers/2401-00001.md) · Author | abstract |", table)
         @test occursin("2401-00002.md", md(crossings_table(ev, "Restoration methods")))
+        @test K.document_page_source(kb2, "2401.00001") == "papers/2401-00001.md"
+        @test occursin("| Paper 2401.00001 · Author | abstract |", md(papers_table(kb2, [paper("2401.00001", "2024"; page = nothing)])))
         @test startswith(md(overlaps_table(ev)), "| | Restoration methods | AI, computation & GPUs |")
         @test occursin("My own note.", shown)
         close(kb2)
@@ -4472,6 +4475,11 @@ end
               K.JSON.parsefile(in_public("kb-data", "code", "code-reef", "src_Reef_jl.json"))["path"] == "src/Reef.jl"
         @test !ispath(in_site("code-tide")) && !ispath(in_public("code", "code-tide.json")) &&
               !ispath(in_public("kb-data", "codebase", "code-tide")) && !ispath(in_public("kb-data", "code", "code-tide"))
+        # A link to a codebase leads to the stub of its page, and there is none to one the site leaves out.
+        @test K.document_page_source(kb, open_id) == "code/code-reef/index.md" && isfile(joinpath(site, K.document_page_source(kb, open_id)))
+        @test K.document_page_source(kb, closed_id) === nothing
+        @test occursin("docpage = {generated/kb/code/code-reef/index.md}", K.bib_entry(kb, open_id)) &&
+              !occursin("docpage", K.bib_entry(kb, closed_id))
         listing = read(in_site("index.md"), String)
         @test occursin("[Reef](./code-reef/index.md)", listing) && !occursin("Tide", listing) &&
               occursin("<KBCodebases />", listing) && occursin("<KBUpload codebases manage />", listing)
