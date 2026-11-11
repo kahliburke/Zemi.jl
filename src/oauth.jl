@@ -4,7 +4,14 @@
 # a page of the service, signed in; what the client gets is one of that person's API tokens (see
 # accounts.jl), so /mcp treats it as any other: it acts for them, within their roles and projects, and
 # shows in their tokens, where revoking it ends the connection. Its secret lasts an hour and is
-# replaced in place on each refresh.
+# replaced in place on each refresh. Scope `library` asks for a token of the `library` permission
+# alone, for the API rather than /mcp: `zemi connect`'s, keeping a folder in step with one's library.
+
+migration!(17, ["ALTER TABLE oauth_codes ADD COLUMN scope TEXT NOT NULL DEFAULT 'mcp'",
+                "ALTER TABLE api_tokens ADD COLUMN scope TEXT"])
+
+"What a client may ask for: the tools at /mcp, or one's library through the API."
+const OAUTH_SCOPES = ("mcp", "library")
 
 "How long an access token, an authorization code and an unused refresh token last."
 const OAUTH_ACCESS = Hour(1)
@@ -25,7 +32,7 @@ oauth_server_metadata(base) = Dict(
     "issuer" => base, "authorization_endpoint" => "$base/oauth/authorize", "token_endpoint" => "$base/oauth/token",
     "registration_endpoint" => "$base/oauth/register", "response_types_supported" => ["code"],
     "grant_types_supported" => ["authorization_code", "refresh_token"], "code_challenge_methods_supported" => ["S256"],
-    "token_endpoint_auth_methods_supported" => ["none"], "scopes_supported" => ["mcp"])
+    "token_endpoint_auth_methods_supported" => ["none"], "scopes_supported" => collect(OAUTH_SCOPES))
 
 """
 The hosts a client may be sent back to over https: those of the MCP clients people connect. Anyone
@@ -72,8 +79,8 @@ end
     authorization_request(kb, params) -> NamedTuple
 
 Check an authorization request: a code (`response_type`) for a registered client, sent back to one
-of its addresses, with an S256 challenge. Returns `(; client_id, client_name, redirect_uri, state,
-challenge)`. A request that cannot be sent back (no such client, or an address it did not register)
+of its addresses, with an S256 challenge, for a scope of `OAUTH_SCOPES` (`mcp` when none is named).
+Returns `(; client_id, client_name, redirect_uri, state, challenge, scope)`. A request that cannot be sent back (no such client, or an address it did not register)
 is refused outright; any other problem is `(; …, error)`, for the client to be told at its address.
 """
 function authorization_request(kb::KB, params::AbstractDict)
@@ -86,10 +93,12 @@ function authorization_request(kb::KB, params::AbstractDict)
     isempty(uri) && length(registered) == 1 && (uri = only(registered))
     uri in registered || error("That address is not one the client registered")
     allowed_redirect(uri) || error("That address is not one clients may be sent back to")
+    scope = strip(get(params, "scope", ""))
     out = (; client_id = String(id), client_name = String(c.name), redirect_uri = String(uri), state = get(params, "state", ""),
-             challenge = get(params, "code_challenge", ""))
+             challenge = get(params, "code_challenge", ""), scope = isempty(scope) ? "mcp" : String(scope))
     problem = get(params, "response_type", "") != "code" ? "unsupported_response_type" :
-              isempty(out.challenge) || get(params, "code_challenge_method", "") != "S256" ? "invalid_request" : ""
+              isempty(out.challenge) || get(params, "code_challenge_method", "") != "S256" ? "invalid_request" :
+              out.scope in OAUTH_SCOPES ? "" : "invalid_scope"
     return merge(out, (; error = problem))
 end
 
@@ -109,8 +118,8 @@ browser back to, with a code good once, for five minutes, to this client with th
 function issue_code!(kb::KB, request, uid::Integer)
     code = "zemio_" * new_secret()
     execute!(kb, "DELETE FROM oauth_codes WHERE expires_at < ?", (now_iso(),))
-    execute!(kb, "INSERT INTO oauth_codes (code_hash, client_id, user_id, redirect_uri, challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
-             (secret_hash(code), request.client_id, uid, request.redirect_uri, request.challenge, iso_in(OAUTH_CODE)))
+    execute!(kb, "INSERT INTO oauth_codes (code_hash, client_id, user_id, redirect_uri, challenge, expires_at, scope) VALUES (?, ?, ?, ?, ?, ?, ?)",
+             (secret_hash(code), request.client_id, uid, request.redirect_uri, request.challenge, iso_in(OAUTH_CODE), request.scope))
     return back_to(request.redirect_uri, "code" => code, "state" => request.state)
 end
 
@@ -129,13 +138,15 @@ Base.showerror(io::IO, e::OAuthError) = print(io, e.code, ": ", e.description)
 
 The token endpoint: exchange a code (`grant_type=authorization_code`, with `code_verifier`) or a
 refresh token (`grant_type=refresh_token`) for an access token and a new refresh token. A code
-makes a token for its person, named for the client; a refresh replaces that token's secrets in
-place, so the old ones stop working. Refuses (`OAuthError`) what does not match.
+makes a token for its person, named for the client, with their permissions (for scope `library`,
+that one alone, where they have it); a refresh replaces that token's secrets in place, so the old
+ones stop working. Refuses (`OAuthError`) what does not match.
 """
 function oauth_token!(kb::KB, form::AbstractDict)
     grant = get(form, "grant_type", "")
     client = get(form, "client_id", "")
     access, refresh = "zemi_" * new_secret(), "zemir_" * new_secret()
+    scope = "mcp"
     if grant == "authorization_code"
         code = get(form, "code", "")
         # Taken and removed in one step, so two requests with one code cannot both have it.
@@ -151,11 +162,13 @@ function oauth_token!(kb::KB, form::AbstractDict)
         c.redirect_uri == get(form, "redirect_uri", c.redirect_uri) || throw(OAuthError("invalid_grant", "another redirect_uri"))
         pkce_challenge(get(form, "code_verifier", "")) == c.challenge || throw(OAuthError("invalid_grant", "the code_verifier does not match"))
         name = String(scalar(kb, "SELECT name FROM oauth_clients WHERE client_id = ?", (client,)))
+        scope = String(c.scope)
         perms = collect(user_permissions(kb, c.user_id))
-        execute!(kb, """INSERT INTO api_tokens (user_id, name, token_hash, prefix, permissions, created_at, expires_at, client_id, refresh_hash)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        scope == "library" && (perms = intersect(perms, ["library"]))
+        execute!(kb, """INSERT INTO api_tokens (user_id, name, token_hash, prefix, permissions, created_at, expires_at, client_id, refresh_hash, scope)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                  (c.user_id, "$name (connected)", secret_hash(access), first(access, 10), JSON.json(perms), now_iso(),
-                  iso_in(OAUTH_ACCESS), client, secret_hash(refresh)))
+                  iso_in(OAUTH_ACCESS), client, secret_hash(refresh), scope))
         audit!(kb, account_caller(kb, c.user_id, :session), "oauth.connect"; detail = Dict("client" => name))
     elseif grant == "refresh_token"
         r = query(kb, "SELECT * FROM api_tokens WHERE refresh_hash = ?", (secret_hash(get(form, "refresh_token", "")),))
@@ -164,13 +177,14 @@ function oauth_token!(kb::KB, form::AbstractDict)
         ismissing(t.revoked_at) || throw(OAuthError("invalid_grant", "the connection was revoked"))
         t.client_id == client || throw(OAuthError("invalid_grant", "the refresh token is another client's"))
         coalesce(t.last_used, t.created_at) < iso_in(-OAUTH_REFRESH) && throw(OAuthError("invalid_grant", "the refresh token expired"))
+        scope = String(coalesce(t.scope, "mcp"))
         execute!(kb, "UPDATE api_tokens SET token_hash = ?, prefix = ?, expires_at = ?, refresh_hash = ?, last_used = ? WHERE id = ?",
                  (secret_hash(access), first(access, 10), iso_in(OAUTH_ACCESS), secret_hash(refresh), now_iso(), t.id))
     else
         throw(OAuthError("unsupported_grant_type", "authorization_code or refresh_token"))
     end
     return Dict("access_token" => access, "token_type" => "Bearer", "expires_in" => Dates.value(Second(OAUTH_ACCESS)),
-                "refresh_token" => refresh, "scope" => "mcp")
+                "refresh_token" => refresh, "scope" => scope)
 end
 
 # ── Pages and routes ──────────────────────────────────────────────────────────────────────────────
@@ -192,7 +206,9 @@ function consent_page(request, who::AbstractString, params::AbstractDict, form_k
         .y{background:#3dd68c;color:#1b1b1f}.n{background:#2e2e32;color:#dfdfd6}
         </style></head><body><main>
         <h1>Connect $(html_escape(request.client_name))</h1>
-        <p>It would act as <b>$(html_escape(who))</b>, with your roles and projects, and is sent back to
+        <p>$(request.scope == "library" ?
+             "It would keep your library in step with a folder, as <b>$(html_escape(who))</b>: read and write your library's files, and nothing else." :
+             "It would act as <b>$(html_escape(who))</b>, with your roles and projects.") It is sent back to
         <b>$(html_escape(something(tryparse_host(request.redirect_uri), request.redirect_uri)))</b>.</p>
         <p>Revoke it under Your account, Tokens.</p>
         <form method="post" action="/oauth/authorize">$fields<input type="hidden" name="form_key" value="$(attr_escape(form_key))">

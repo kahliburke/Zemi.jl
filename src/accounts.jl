@@ -396,8 +396,9 @@ function token_caller(kb::KB, token::AbstractString; mcp::Bool = false)
     isempty(r) && return ANONYMOUS
     t = first(r)
     (ismissing(t.revoked_at) && (ismissing(t.expires_at) || t.expires_at > now_iso())) || return ANONYMOUS
-    # A token an MCP client got by OAuth is for /mcp: its tools, not the whole API.
-    mcp || ismissing(t.client_id) || return ANONYMOUS
+    # A token an MCP client got by OAuth is for /mcp: its tools, not the whole API. One got for a
+    # library (scope `library`) is for the API, with that permission alone.
+    mcp || ismissing(t.client_id) || coalesce(t.scope, "mcp") == "library" || return ANONYMOUS
     seen_now(t.last_used) && execute!(kb, "UPDATE api_tokens SET last_used = ? WHERE id = ?", (now_iso(), t.id))
     return account_caller(kb, t.user_id, :token; token_id = Int(t.id), only = Set(JSON.parse(t.permissions)),
                           projects = ismissing(t.projects) ? nothing : Set{String}(JSON.parse(t.projects)))

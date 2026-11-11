@@ -21,6 +21,11 @@ const CLI_HELP = """
     zemi publish                         publish this knowledge base's stream of the dataset
     zemi pull                            import the dataset's streams
     zemi bib [FILE]                      every paper and upload as BibTeX, to FILE or the terminal
+    zemi connect SITE FOLDER [--name NAME]
+                                         keep FOLDER (an Obsidian vault, say) in step with your library at SITE,
+                                         signing in there in the browser (SITE `local`: the knowledge base run
+                                         here); then `zemi connect` keeps every such folder in step until
+                                         stopped, --once once, --install at every login
     zemi token create NAME --out FILE [--write]
                                          issue NAME a key to the dataset's bucket, saved to FILE (read-only,
                                          or read and write with --write)
@@ -139,6 +144,8 @@ function cli(args::AbstractVector{<:AbstractString})
                 error("something answers on port $port, the service's: stop it first (or pass --force if it is not this knowledge base)")
             before = restore_backup!(c, rest[1]; config_files = "--config" in rest)
             println("Restored $(rest[1]) into $(c.data_dir).", isempty(before) ? "" : " What was there is kept as the snapshot $before.")
+        elseif cmd == "connect"
+            return connect_cli(rest)
         elseif cmd == "token"
             c = load_config()
             sub = get(rest, 1, "")

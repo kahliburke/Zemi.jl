@@ -2028,3 +2028,97 @@ end
     @test call(ada, "POST", "/api/push/test", Dict("endpoint" => "https://fcm.googleapis.com/fcm/send/ada"))[2]["sent"] == 0
     close(kb)
 end
+
+# One's library as `zemi connect` reaches it, answered in this process by the API itself.
+struct InProcessLibrary <: K.LibraryRemote
+    kb::Any
+    caller::Any
+end
+function library_call(r::InProcessLibrary, method, path; body = UInt8[], query = Pair{String,String}[])
+    target = "/api/library/files" * (isempty(path) ? "" : "/" * join(K.HTTP.escapeuri.(split(path, '/')), '/')) *
+             (isempty(query) ? "" : "?" * K.HTTP.escapeuri(query))
+    resp = K.handle(r.kb, K.HTTP.Request(method, target, [], body), r.caller)
+    resp.status < 300 || throw(K.Refusal(resp.status, String(resp.body)))
+    return resp.body
+end
+K.list_files(r::InProcessLibrary) = K.JSON.parse(String(library_call(r, "GET", "")))["files"]
+K.fetch_file(r::InProcessLibrary, path) = library_call(r, "GET", path)
+K.store_file!(r::InProcessLibrary, path, bytes; base, modified) =
+    K.JSON.parse(String(library_call(r, "PUT", path; body = bytes, query = ["base" => something(base, ""), "modified" => string(modified)])))
+K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path; query = ["base" => something(base, "")])
+
+@zset "connecting a folder to one's library" begin
+    HTTP = K.HTTP
+    kb = open_kb(temp_config(; shared = shared_config(sign_up = :open, default_role = "Learner"), layers = Layer[]))
+    K.ensure_roles!(kb)
+    sh = kb.config.shared
+    ada = K.sign_in!(kb, sh, "Campus", "u1"; email = "ada@x.org", verified = true, name = "Ada")
+    K.set_roles!(kb, ada, ["Learner"])
+    serve(method, target; headers = Pair{String,String}[], body = "") = K.respond_service(kb, HTTP.Request(method, target, headers, body); shared = true)
+    js(r) = K.JSON.parse(String(r.body))
+    location(r) = HTTP.header(r, "Location")
+    # Signing in for one's library: the scope asks for a token of that permission alone, for the API.
+    back = "http://127.0.0.1:4567/callback"
+    client = js(serve("POST", "/oauth/register"; body = K.JSON.json(Dict("client_name" => "zemi connect", "redirect_uris" => [back]))))["client_id"]
+    verifier = "a-verifier-long-enough-for-pkce-0123456789abcdef"
+    P = ["response_type" => "code", "client_id" => client, "redirect_uri" => back, "state" => "s1",
+         "code_challenge" => K.pkce_challenge(verifier), "code_challenge_method" => "S256", "scope" => "library"]
+    @test "library" in js(serve("GET", "/.well-known/oauth-authorization-server"))["scopes_supported"]
+    @test startswith(location(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P[1:6]; "scope" => "everything"]))), "$back?error=invalid_scope")
+    ck = ["Cookie" => "kb_session=$(K.start_session!(kb, ada, sh))"]
+    page = String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri(P); headers = ck).body)
+    @test occursin("keep your library in step with a folder", page)
+    key = match(r"name=\"form_key\" value=\"([^\"]+)\"", page)[1]
+    r = serve("POST", "/oauth/authorize"; headers = [ck; "Content-Type" => "application/x-www-form-urlencoded"],
+              body = HTTP.escapeuri([P; ["form_key" => key, "decision" => "allow"]]))
+    code = HTTP.queryparams(HTTP.URI(location(r)))["code"]
+    t = js(serve("POST", "/oauth/token"; headers = ["Content-Type" => "application/x-www-form-urlencoded"],
+                 body = HTTP.escapeuri(["grant_type" => "authorization_code", "code" => code, "client_id" => client, "redirect_uri" => back,
+                                        "code_verifier" => verifier])))
+    @test t["scope"] == "library"
+    caller = K.token_caller(kb, t["access_token"])
+    @test caller.user_id == ada && caller.permissions == Set(["library"])
+    auth = ["Authorization" => "Bearer $(t["access_token"])"]
+    @test serve("GET", "/api/library/files"; headers = auth).status == 200 && serve("GET", "/api/status"; headers = auth).status == 403
+    # A refresh keeps the scope.
+    t2 = js(serve("POST", "/oauth/token"; headers = ["Content-Type" => "application/x-www-form-urlencoded"],
+                  body = HTTP.escapeuri(["grant_type" => "refresh_token", "refresh_token" => t["refresh_token"], "client_id" => client])))
+    @test t2["scope"] == "library" && K.token_caller(kb, t2["access_token"]).permissions == Set(["library"])
+
+    # A vault kept in step: sent, read there, and the references Zemi writes come back.
+    dir = mktempdir()
+    mk(path, text) = (f = joinpath(dir, path); mkpath(dirname(f)); write(f, text); f)
+    mk(".obsidian/app.json", "{}")
+    mk(".obsidian/workspace.json", "{}")                                   # this machine's own: not sent
+    mk(".zemi.toml", "skip = [\"Private\"]\n")
+    mk("Private/Diary.md", "Not for the knowledge base.\n")                # never leaves this machine
+    tidal = mk("Reading/Tidal mixing.md", "---\narxiv: \"2401.00001\"\n---\n# Tidal mixing\n\nStrongest at spring tide.\n")
+    remote = InProcessLibrary(kb, caller)
+    state = Dict{String,Any}()
+    r = K.sync_folder!(remote, dir, "Notes", state)
+    paths() = sort([f.path for f in K.library_files(kb, "people/$ada")])
+    @test r.up == 3 && paths() == ["Notes/.obsidian/app.json", "Notes/.zemi.toml", "Notes/Reading/Tidal mixing.md"]
+    K.READ_PUT[] = false
+    try
+        K.read_space!(kb, "people/$ada")
+    finally
+        K.READ_PUT[] = true
+    end
+    @test !isnothing(K.source_record(kb, "obsidian", "people/$ada/Notes/Reading/Tidal mixing.md"))
+    r = K.sync_folder!(remote, dir, "Notes", state)
+    @test r.down == 1 && occursin("zemi: \"2401.00001\"", read(tidal, String))
+    @test K.sync_folder!(remote, dir, "Notes", state) == (; up = 0, down = 0, removed_here = 0, removed_there = 0, waiting = 0, full = false)
+    # Changed on both sides, this machine's stands.
+    K.put_library_file!(kb, "people/$ada", "Notes/Reading/Tidal mixing.md", Vector{UInt8}("changed there"))
+    write(tidal, "changed here")
+    @test K.sync_folder!(remote, dir, "Notes", state).up == 1
+    @test String(K.read_library_file(kb, "people/$ada", "Notes/Reading/Tidal mixing.md")) == "changed here"
+    # Removed on one side, removed on the other.
+    note = mk("Topics/Estuaries.md", "Where rivers meet the sea.\n")
+    K.sync_folder!(remote, dir, "Notes", state)
+    rm(note)
+    @test K.sync_folder!(remote, dir, "Notes", state).removed_there == 1 && !("Notes/Topics/Estuaries.md" in paths())
+    K.delete_library_file!(kb, "people/$ada", "Notes/Reading/Tidal mixing.md")
+    @test K.sync_folder!(remote, dir, "Notes", state).removed_here == 1 && !isfile(tidal)
+    close(kb)
+end
