@@ -220,6 +220,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
     blocked = cannot_run(kb, "classify", String[])
     function enqueue(id)
         classify || return
+        something(document_kind(id), PAPER).classified || return             # (a record, say)
         isequal(scalar(kb, "SELECT classifier FROM classifications WHERE paper_id = ?", (paper_id(kb, id),)),
                 kb.config.summarizer) && return
         isempty(blocked) ? put!(queue, id) : push!(skipped, id)
