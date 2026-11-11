@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **An Obsidian vault** kept in step with a `zemi` run for one person (`[sources.obsidian]`): its
+  notes are records the person's searches and agents use, wikilinks references between them, and a
+  note naming a paper by arXiv id or DOI brings the paper in. Paper notes get references back (`zemi`,
+  `zemi-page`, and the paper's details where the note's template leaves them empty); nothing else is
+  written into the vault.
+- **Sources** can remove a record whose item is gone (`Zemi.remove!`), follow one that moved
+  (`Zemi.rekey!`), and have their records embedded for searching without summarizing them
+  (`summarized = false`).
+
 ## 0.3.2 (2026-11-10)
 
 - **Studies** link the codebases they find to the codebases' pages, and show without a link what

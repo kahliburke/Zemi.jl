@@ -140,8 +140,7 @@ function Record(; key, title, date, people = String[], sections, figures = [], t
         !empty && isempty(s) && error("A record needs $what");
         length(s) <= max || error("$what is longer than $max characters");
         s)
-    key = text(key, "a key", L.key)
-    any(iscntrl, key) && error("A record's key has control characters: $(repr(key))")
+    key = record_key(key)
     title = text(title, "a title", L.title)
     date = record_date(date)
     people = unique([text(p, "a person's name", L.name) for p in people])
@@ -179,6 +178,16 @@ function Record(; key, title, date, people = String[], sections, figures = [], t
         error("A record's access is \"open\" or \"projects\", not $(repr(access))")
     label = text(label, "a label", L.label; empty = true)
     return Record(key, title, date, people, sections, figures, transcript, url, projects, access, label)
+end
+
+"A record's key as a source gives it, checked: text of at most `RECORD_LIMITS.key` characters, without control characters."
+function record_key(key)
+    k = String(strip(string(key)))
+    isvalid(k) || error("a key is not valid text")
+    isempty(k) && error("A record needs a key")
+    length(k) <= RECORD_LIMITS.key || error("a key is longer than $(RECORD_LIMITS.key) characters")
+    any(iscntrl, k) && error("A record's key has control characters: $(repr(k))")
+    return k
 end
 
 "A record from what a source handed in: a [`Record`](@ref), or the NamedTuple or Dict of its fields."
@@ -419,6 +428,23 @@ function purge_source!(kb::KB, source::AbstractString)
                                            (record_source(source),))]
     foreach(id -> delete_record!(kb, id), ids)
     return length(ids)
+end
+
+"""
+    document_layers(kb, id, layers) -> Vector{Layer}
+
+The layers of `layers` document `id` is embedded in: its kind's (see [`kind_layers`](@ref)), and for
+a record from a source whose records are not summarized (see [`record_source!`](@ref)), only those
+over its own text.
+"""
+function document_layers(kb::KB, id::AbstractString, layers)
+    k = something(document_kind(id), PAPER)
+    if k === RECORD
+        r = record_row(kb, id)
+        s = r === nothing ? nothing : registered_source(r.source)
+        s === nothing || s.summarized || return filter(l -> isempty(l.source), layers)
+    end
+    return kind_layers(k, layers)
 end
 
 "Record `id`'s row of `records`, or `nothing` for a document that is not a record here."

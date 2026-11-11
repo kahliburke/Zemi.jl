@@ -211,6 +211,36 @@ Everything else, and a paper with no copy to read, is a resource; upload its PDF
 Items that are the same work (the same DOI, or the same title) come in once, and one dropped here is
 not brought in again.
 
+## An Obsidian vault
+
+A `zemi` run for one person can keep an Obsidian vault in step with it, so the person's searches and
+agents use their notes along with their papers:
+
+```toml
+[sources.obsidian]
+vault = "~/Documents/Obsidian/Notes"
+# skip = ["Private"]                        # folders not read
+# write = false                             # read the vault without writing paper notes' references
+# dates = ["date", "created", "timestamp"]  # the properties a note's date is taken from
+# arxiv = ["arxiv"]                         # the properties naming a paper by its arXiv id
+# doi = ["doi"]                             # and by its DOI
+```
+
+Every half minute it reads the notes changed since. Each note is a record, keyed by its path in the
+vault: its title the `title` property, else its first heading, else its file's name; its date a date
+property, else a daily note's day (by the vault's daily notes' folder and format), else when its file
+changed. Its text keeps its headings; its properties follow it. Wikilinks become references to the
+records of the notes they name, an embedded image a figure, and Dataview and Bases blocks and
+`%% comments %%` are left out. The notes are read and embedded for searching, not summarized. Hidden
+folders, the vault's templates folder and the folders `skip` names are not read. A note moved keeps its
+record, and one deleted is removed.
+
+A note naming a paper by an arXiv id or DOI (its `arxiv` or `doi` property) brings the paper in, and
+the note's record and the notes linking to it refer to the paper. Zemi writes only references into the
+vault: on each paper note, `zemi` (the paper's id) and `zemi-page` (its page here), and the paper's
+title, authors, arXiv id and DOI into those of the note's properties left empty, as a template leaves
+them. Only those lines of the note change.
+
 ## Dropping a document
 
 Drop a document on the Documents page, with a reason if you like, and it is removed and kept out.

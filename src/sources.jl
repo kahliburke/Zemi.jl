@@ -16,8 +16,8 @@ const SOURCE_MODES = (:local, :shared)
 
 """
 A source of records, as [`record_source!`](@ref) registered it: `every` in seconds (0 for one that
-does not poll), `configured` whether it runs only where the config has its section, and `plugin` the
-package that registered it, empty for Zemi's own.
+does not poll), `configured` whether it runs only where the config has its section, `summarized`
+whether its records are summarized, and `plugin` the package that registered it, empty for Zemi's own.
 """
 struct RecordSource
     name::String
@@ -29,6 +29,7 @@ struct RecordSource
     read::Union{Function,Nothing}
     budget::typeof(DEFAULT_BUDGET)
     configured::Bool
+    summarized::Bool
     plugin::String
 end
 
@@ -38,7 +39,8 @@ const SOURCES_LOCK = ReentrantLock()
 
 """
     record_source!(name; label, modes = (:local, :shared), every = nothing, poll = nothing,
-                   accepts = nothing, read = nothing, budget = (;), configured = false, api) -> RecordSource
+                   accepts = nothing, read = nothing, budget = (;), configured = false,
+                   summarized = true, api) -> RecordSource
 
 Register a source of records, or replace the one of that name. A source is code that reads another
 system and hands Zemi what it finds; it is given only a run (see [`SourceRun`](@ref)), and Zemi
@@ -53,6 +55,8 @@ writes, labels and guards what it hands in.
 - `accepts(path)` and `read(run, path)`: a file someone uploads that it knows how to read
 - `configured`: it runs, and is listed among the sources, only where the config has its section
   (`[sources.<name>]`): one Zemi has that only some knowledge bases use
+- `summarized`: its records are summarized as records are; `false`, they are read and embedded for
+  searching without a model writing summaries of them (a person's many short notes, say)
 - `budget`: the most a run may do, as `records` written, `figure_bytes` of their figures and
   `seconds` (see `DEFAULT_BUDGET`); a run that has spent it is stopped
 - `api`: the version of this interface it was written for; one that is not [`PLUGIN_API`](@ref) is refused
@@ -62,7 +66,8 @@ to the source as registered.
 """
 function record_source!(name::AbstractString; label::AbstractString, modes = SOURCE_MODES, every = nothing,
                         poll::Union{Function,Nothing} = nothing, accepts::Union{Function,Nothing} = nothing,
-                        read::Union{Function,Nothing} = nothing, budget = (;), configured::Bool = false, api::Integer)
+                        read::Union{Function,Nothing} = nothing, budget = (;), configured::Bool = false,
+                        summarized::Bool = true, api::Integer)
     api == PLUGIN_API ||
         error("Source $name is written for Zemi's plugin interface $api, and this Zemi's is $PLUGIN_API: update the one or the other")
     name = record_source(name)
@@ -79,7 +84,8 @@ function record_source!(name::AbstractString; label::AbstractString, modes = SOU
     isempty(extra) || error("Source $name's budget is $(join(keys(DEFAULT_BUDGET), ", ")), not $(join(extra, ", "))")
     b = (; (k => convert(fieldtype(typeof(DEFAULT_BUDGET), k), get(budget, k, DEFAULT_BUDGET[k])) for k in keys(DEFAULT_BUDGET))...)
     all(>(0), values(b)) || error("Source $name's budget is positive: $b")
-    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, configured, get(task_local_storage(), :zemi_plugin, ""))
+    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, configured, summarized,
+                     get(task_local_storage(), :zemi_plugin, ""))
     lock(SOURCES_LOCK) do
         i = findfirst(x -> x.name == name, SOURCES[])
         SOURCES[] = i === nothing ? [SOURCES[]; s] : [SOURCES[][1:i-1]; s; SOURCES[][i+1:end]]
@@ -111,6 +117,10 @@ are Zemi's; a source uses these:
   fields), returning its id. Zemi writes it with the source's name and label, counting it against
   the budget; an unchanged one is skipped, and one a person dropped is kept out (`nothing`). Once the run is stopped (its budget spent, cancelled,
   the service stopping) it throws, which ends the run cleanly
+- `remove!(run, key)`: remove the record the source keeps as `key`, whose item is gone from it,
+  returning its id (`nothing` for none)
+- `rekey!(run, from, to)`: keep the record kept as `from` as `to` instead, for an item that moved in
+  the source, so it keeps its id, links and the findings citing it
 - `state(run)` and `save_state!(run, dict)`: a small JSON document kept for the source between runs,
   what it last saw, say
 - `settings(run)`: its section of the config, `[sources.<name>]`, with the settings file's over it
@@ -132,10 +142,11 @@ mutable struct SourceRun
     changed::Int
     skipped::Int
     dropped::Int
+    removed::Int
     figure_bytes::Int
     spent::String
 end
-SourceRun(kb::KB, s::RecordSource, job = nothing; upload = nothing) = SourceRun(kb, s, job, time(), upload, String[], 0, 0, 0, 0, 0, "")
+SourceRun(kb::KB, s::RecordSource, job = nothing; upload = nothing) = SourceRun(kb, s, job, time(), upload, String[], 0, 0, 0, 0, 0, 0, "")
 
 Base.show(io::IO, run::SourceRun) = print(io, "SourceRun(", run.source.name, ")")
 
@@ -191,6 +202,31 @@ function Base.put!(run::SourceRun, r)
     else
         run.skipped += 1
     end
+    return id
+end
+
+"The id of the record source `name` keeps as `key`, or `nothing`."
+source_record(kb::KB, name::AbstractString, key::AbstractString) =
+    (id = scalar(kb, "SELECT p.doc_id FROM records x JOIN papers p ON p.id = x.paper_id WHERE x.source = ? AND x.key = ?", (name, key));
+     ismissing(id) ? nothing : String(id))
+
+function remove!(run::SourceRun, key::AbstractString)
+    why = stop_reason(run)
+    isempty(why) || throw(SourceStopped(why, !isempty(run.spent)))
+    id = source_record(run.kb, run.source.name, key)
+    id === nothing && return nothing
+    delete_record!(run.kb, id)
+    run.removed += 1
+    return id
+end
+
+function rekey!(run::SourceRun, from::AbstractString, to::AbstractString)
+    name = run.source.name
+    to = record_key(to)
+    id = source_record(run.kb, name, from)
+    id === nothing && error("Source $name keeps no record as $(repr(from))")
+    source_record(run.kb, name, to) === nothing || error("Source $name keeps another record as $(repr(to)) already")
+    execute!(run.kb, "UPDATE records SET key = ? WHERE source = ? AND key = ?", (to, name, from))
     return id
 end
 
@@ -303,9 +339,10 @@ function run_source!(kb::KB, s::RecordSource, job::Union{Job,Nothing} = nothing;
     return run
 end
 
-"What a run did, in a line: `3 added, 1 changed, 12 skipped, 1 dropped kept out`, and why it stopped if it did."
+"What a run did, in a line: `3 added, 1 changed, 12 skipped, 2 removed, 1 dropped kept out`, and why it stopped if it did."
 function run_summary(run::SourceRun)
-    line = "$(run.added) added, $(run.changed) changed, $(run.skipped) skipped" * (run.dropped > 0 ? ", $(run.dropped) dropped kept out" : "")
+    line = "$(run.added) added, $(run.changed) changed, $(run.skipped) skipped" * (run.removed > 0 ? ", $(run.removed) removed" : "") *
+           (run.dropped > 0 ? ", $(run.dropped) dropped kept out" : "")
     return isempty(run.spent) ? line : "$line; stopped as $(run.spent)"
 end
 
@@ -396,7 +433,8 @@ bring them back before someone resumes it.
 function forget_source!(kb::KB, name::AbstractString)
     name = record_source(name)
     n = purge_source!(kb, name)
-    execute!(kb, "DELETE FROM kv WHERE key = ?", (source_state_key(name),))
+    # Its state, and any a source of Zemi's own keeps beside it (`source_state:<name>:<part>`).
+    execute!(kb, "DELETE FROM kv WHERE key = ? OR key LIKE ?", (source_state_key(name), source_state_key(name) * ":%"))
     s = registered_source(name)
     source_status!(kb, name; purged = now_iso(), added = 0, changed = 0, skipped = 0,
                    (s !== nothing && s.poll !== nothing ? (; paused = true) : (;))...)

@@ -768,7 +768,7 @@ function ingest_paper!(kb::KB, id::AbstractString, layers::AbstractVector{Layer}
                        force_parse::Bool = false, step = msg -> nothing)
     kind = document_kind(id)
     kind === nothing && error("$id is not a kind of document the knowledge base reads")
-    layers = kind_layers(kind, layers)
+    layers = document_layers(kb, id, layers)
     parsed = kind.read(kb, id; force = force_parse, step)
     warnings = String[]
     # Its figures and tables, cut once from each reading of its PDF.
@@ -818,6 +818,7 @@ function build_layer!(kb::KB, name::AbstractString; ids = nothing, progress = ms
     n = 0
     for (i, id) in enumerate(ids)
         cancelled() && break
+        l in document_layers(kb, id, [l]) || continue                    # not embedded in this layer
         progress("[$i/$(length(ids))] $id: embedding ($(l.name))")
         lock(paper_lock(id)) do
             isempty(l.source) || summarize_paper!(kb, summarizer_for(kb.config, l, id), id; progress)

@@ -25,6 +25,7 @@ A source registers itself with `Zemi.record_source!`, in its package's `__init__
 | `poll`, `every` | `poll(run)`, run every `every` (a period such as `Minute(30)`, or seconds). |
 | `accepts`, `read` | `accepts(path)` says whether a file someone uploads is one it reads; `read(run, path)` reads it. |
 | `budget` | The most one run may do: `records` written (500), `figure_bytes` of their figures (200 MB), `seconds` (1800). |
+| `summarized` | `false` for records read and embedded for searching without a model summarizing them: many short notes, say. |
 | `api` | The version of this interface it was written for: `Zemi.PLUGIN_API`. Zemi refuses a source written for another. |
 
 A source polls, reads uploads, or both. Registering a name again replaces the source. Pass named
@@ -122,6 +123,8 @@ The only thing `poll` and `read` are given:
 | | |
 |:---|:---|
 | `put!(run, record)` | Hand in a record; its id. Once the run is stopped, it throws, which ends the run. |
+| `Zemi.remove!(run, key)` | Remove the record kept as `key`, whose item is gone from the source; its id, or `nothing`. |
+| `Zemi.rekey!(run, from, to)` | Keep the record kept as `from` as `to`, for an item that moved, so it keeps its id and what cites it. |
 | `Zemi.state(run)`, `Zemi.save_state!(run, dict)` | A small JSON document kept for the source between runs. |
 | `Zemi.settings(run)` | Its section of the config, `[sources.<name>]`, with the settings file's over it. |
 | `Zemi.secret(run, key)` | The secret a `file:` or `env:` setting names. |

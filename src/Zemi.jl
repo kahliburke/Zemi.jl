@@ -30,6 +30,7 @@ using SQLite
 using Tables
 import TimeZones
 import KaimonGate
+import YAML
 
 include("locked_dict.jl")
 include("refusal.jl")
@@ -128,6 +129,7 @@ include("people_activity.jl")
 include("sources.jl")
 include("upload_source.jl")
 include("zotero.jl")
+include("obsidian.jl")
 include("plugins.jl")
 include("findings.jl")
 include("finding_search.jl")

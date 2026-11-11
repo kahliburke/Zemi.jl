@@ -1373,6 +1373,106 @@ end
     end
 end
 
+@zset "an Obsidian vault" begin
+    # What a note's text and properties are read as.
+    @test K.split_frontmatter("---\na: 1\n---\nBody\n") == (yaml = "a: 1", body = "Body\n")
+    @test K.split_frontmatter("No properties\n").yaml == "" && K.split_frontmatter("---\nunclosed\n").yaml == ""
+    @test K.property_text(K.note_properties("arxiv: 2401.10000"), "arxiv: 2401.10000", "arxiv") == "2401.10000"   # its digits kept
+    @test K.wikilink_parts("Estuaries#Mouths|the mouths") == (target = "Estuaries", heading = "Mouths", label = "the mouths")
+    v = K.VaultConfig(; dir = "/v", daily_folder = "Daily", daily_format = "YYYY/MM/YYYY-MM-DD")
+    @test K.daily_date(v, "Daily/2026/11/2026-11-09.md") == K.Date(2026, 11, 9) && K.daily_date(v, "Notes/2026-11-09.md") === nothing
+    @test K.daily_date(K.VaultConfig(; dir = "/v", daily_format = "DD.MM.YYYY dddd"), "09.11.2026 Monday.md") == K.Date(2026, 11, 9)
+    # Properties are set line by line, every other byte as it was.
+    note = "---\r\ntitle: Tides\r\nauthors:\r\ntags:\r\n  - sea\r\n---\r\nText\r\n"
+    @test K.set_properties(note, ["authors" => ["Ada Lovelace", "Bea Hale"], "zemi" => "2401.00001"]) ==
+          "---\r\ntitle: Tides\r\nauthors:\r\n  - \"Ada Lovelace\"\r\n  - \"Bea Hale\"\r\ntags:\r\n  - sea\r\nzemi: \"2401.00001\"\r\n---\r\nText\r\n"
+    @test K.set_properties("Just text\n", ["zemi" => "x"]) == "---\nzemi: \"x\"\n---\nJust text\n"
+
+    vault = mktempdir()
+    mk(path, text) = (f = joinpath(vault, path); mkpath(dirname(f)); write(f, text); f)
+    mk(".obsidian/templates.json", """{"folder": "Templates"}""")
+    mk(".obsidian/daily-notes.json", """{"folder": "Daily", "format": "YYYY/MM/YYYY-MM-DD"}""")
+    mk("Templates/Paper.md", "---\narxiv:\nauthors:\n---\n")
+    mk("Private/Diary.md", "Not for the knowledge base.\n")
+    mkpath(joinpath(vault, "Attachments"))
+    K.PNGFiles.save(joinpath(vault, "Attachments", "plot.png"), fill(K.RGB{K.N0f8}(0.2, 0.4, 0.6), 20, 30))
+    tidal = mk("Reading/Tidal mixing.md", """
+        ---
+        type: "[[Paper]]"
+        tags:
+          - reading
+        arxiv: "2401.00001"
+        authors:
+        see also:
+          - "[[Estuaries]]"
+        ---
+        # Tidal mixing
+
+        Mixing is strongest at spring tide, as [[Estuaries|estuaries]] show.
+
+        ![[plot.png|A plot]]
+
+        ```dataview
+        LIST FROM "Reading"
+        ```
+        %% a reminder to myself %%
+        """)
+    mk("Topics/Estuaries.md", "Where rivers meet the sea: see [[Tidal mixing]] and [[A note not written]].\n")
+    daily = mk("Daily/2026/11/2026-11-09.md", "---\ntags: [daily]\n---\nRead about tides.\n")
+    kb = open_kb(temp_config(layers = Layer[], sources = Dict{String,Any}("obsidian" => Dict{String,Any}("vault" => vault, "skip" => ["Private"]))))
+    K.READ_PUT[] = false
+    try
+        s = K.registered_source("obsidian")
+        @test s.modes == [:local] && s.configured && !s.summarized
+        id(key) = K.source_record(kb, "obsidian", key)
+        text(i) = join((x["text"] for x in K.record_document(kb, i)["sections"]), "\n")
+        before = read(tidal, String)
+        run = K.run_source!(kb, s)
+        # Its notes are records; its templates and the folders it is told to skip are not read.
+        @test run.added == 3 && first.(K.vault_files(K.vault_config(K.settings(run))).files) == ["Attachments/plot.png"]
+        @test id("Private/Diary.md") === nothing && id("Templates/Paper.md") === nothing
+        t, e, d = id("Reading/Tidal mixing.md"), id("Topics/Estuaries.md"), id("Daily/2026/11/2026-11-09.md")
+        @test K.paper_row(kb, t).title == "Tidal mixing" && K.paper_row(kb, e).title == "Estuaries"
+        @test K.record_row(kb, d).happened == "2026-11-09"                                    # a daily note's day, from its path
+        # A paper note brings its paper in, and its record refers to it; links are references to the notes' records and papers.
+        @test !ismissing(K.paper_id(kb, "2401.00001")) && only(K.mentions(kb, "2401.00001")).source == "obsidian"
+        @test occursin("as @[estuaries](record:$e) show", text(t)) && occursin("A note on @[Tidal mixing](paper:2401.00001).", text(t))
+        @test occursin("- see also: @[Estuaries](record:$e)", text(t)) && occursin("- tags: reading", text(t))
+        @test occursin("![A plot](img-1)", text(t)) && length(K.record_document(kb, t)["figures"]) == 1
+        @test !occursin("dataview", text(t)) && !occursin("reminder", text(t))
+        @test occursin("see @[Tidal mixing](paper:2401.00001) and A note not written.", text(e))
+        # Read for searching, not summarized.
+        layers = [Layer(; name = "text", model = "m", unit = :chunk), Layer(; name = "over", model = "m", unit = :section, source = "writer")]
+        @test [l.name for l in K.document_layers(kb, t, layers)] == ["text"]
+        # Given its reference, and nothing else of it changed; Zemi's own writing is not read as an edit.
+        after = read(tidal, String)
+        @test occursin("\nzemi: \"2401.00001\"\n", after) && join(filter(l -> !startswith(l, "zemi"), split(after, '\n')), '\n') == before
+        run = K.run_source!(kb, s)
+        @test (run.added, run.changed, run.removed) == (0, 0, 0)
+        # Once the paper's record is known, the properties the note leaves empty are filled; one it does not use is not added.
+        K.execute!(kb, "UPDATE papers SET title = 'On tidal mixing', authors = '[\"Ada Lovelace\"]' WHERE doc_id = '2401.00001'")
+        K.run_source!(kb, s)
+        props = K.note_properties(K.split_frontmatter(read(tidal, String)).yaml)
+        @test props["authors"] == ["Ada Lovelace"] && !haskey(props, "title") && props["zemi"] == "2401.00001"
+        # A note moved keeps its record; one deleted is removed.
+        mkpath(joinpath(vault, "Places")); mv(joinpath(vault, "Topics", "Estuaries.md"), joinpath(vault, "Places", "Estuaries.md"))
+        rm(daily)
+        run = K.run_source!(kb, s)
+        @test id("Places/Estuaries.md") == e && id("Topics/Estuaries.md") === nothing
+        @test run.removed == 1 && id("Daily/2026/11/2026-11-09.md") === nothing && ismissing(K.paper_id(kb, d))
+        # A note naming another paper: the notes linking to it follow.
+        write(tidal, replace(read(tidal, String), "arxiv: \"2401.00001\"" => "arxiv: \"2401.00002\""))
+        K.run_source!(kb, s)
+        @test occursin("see @[Tidal mixing](paper:2401.00002)", text(e))
+        # Forgotten, its records and what it knew of the notes go; run again, the vault comes back.
+        @test K.forget_source!(kb, "obsidian") == 2 && isempty(K.load_vault_index(kb))
+        @test K.run_source!(kb, s).added == 2
+    finally
+        K.READ_PUT[] = true
+        close(kb)
+    end
+end
+
 @zset "nightly ingest" begin
     (; DateTime, Time, Hour, Day) = K.Dates
     la = K.TimeZones.TimeZone("America/Los_Angeles")

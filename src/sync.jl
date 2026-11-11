@@ -88,7 +88,7 @@ function reading_out_of_date(kb::KB, d)
         r === nothing || r.content_sha == d.file_sha || push!(reasons, "its source changed it")
     end
     d.parser_version == PARSER_VERSION || push!(reasons, "parsed by an older version of the reader")
-    layers = kind_layers(document_kind(d.id), ingest_layers(kb.config))
+    layers = document_layers(kb, d.id, ingest_layers(kb.config))
     for s in unique(summarizer_for(kb.config, l, d.id) for l in layers if !isempty(l.source))
         name = s.name
         rows = query(kb, "SELECT unit_key, model, prompt_version FROM summaries WHERE paper_id = ? AND summarizer = ?", (d.pid, name))
@@ -278,7 +278,8 @@ const RESUMMARIZE_LIMIT = 10
 
 "The agent summarizers that write summaries of document `id`."
 agent_summarizers(kb::KB, id::AbstractString) =
-    unique(s for s in (summarizer_for(kb.config, l, id) for l in ingest_layers(kb.config) if !isempty(l.source)) if s.kind == :agent)
+    unique(s for s in (summarizer_for(kb.config, l, id) for l in document_layers(kb, id, ingest_layers(kb.config)) if !isempty(l.source))
+           if s.kind == :agent)
 
 """
     resummarizes(kb, id; newer = false) -> Bool
