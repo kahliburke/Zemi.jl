@@ -17,7 +17,8 @@ const SOURCE_MODES = (:local, :shared)
 """
 A source of records, as [`record_source!`](@ref) registered it: `every` in seconds (0 for one that
 does not poll), `configured` whether it runs only where the config has its section, `summarized`
-whether its records are summarized, and `plugin` the package that registered it, empty for Zemi's own.
+whether its records are summarized, `about` what its records are as readers and agents are told,
+and `plugin` the package that registered it, empty for Zemi's own.
 """
 struct RecordSource
     name::String
@@ -30,6 +31,7 @@ struct RecordSource
     budget::typeof(DEFAULT_BUDGET)
     configured::Bool
     summarized::Bool
+    about::String
     plugin::String
 end
 
@@ -40,7 +42,7 @@ const SOURCES_LOCK = ReentrantLock()
 """
     record_source!(name; label, modes = (:local, :shared), every = nothing, poll = nothing,
                    accepts = nothing, read = nothing, budget = (;), configured = false,
-                   summarized = true, api) -> RecordSource
+                   summarized = true, about = RECORD_ABOUT, api) -> RecordSource
 
 Register a source of records, or replace the one of that name. A source is code that reads another
 system and hands Zemi what it finds; it is given only a run (see [`SourceRun`](@ref)), and Zemi
@@ -57,6 +59,8 @@ writes, labels and guards what it hands in.
   (`[sources.<name>]`): one Zemi has that only some knowledge bases use
 - `summarized`: its records are summarized as records are; `false`, they are read and embedded for
   searching without a model writing summaries of them (a person's many short notes, say)
+- `about`: what its records are, as readers and agents are told wherever one is given them ("a
+  person's own note"); by default, a record of the group's own work
 - `budget`: the most a run may do, as `records` written, `figure_bytes` of their figures and
   `seconds` (see `DEFAULT_BUDGET`); a run that has spent it is stopped
 - `api`: the version of this interface it was written for; one that is not [`PLUGIN_API`](@ref) is refused
@@ -67,12 +71,14 @@ to the source as registered.
 function record_source!(name::AbstractString; label::AbstractString, modes = SOURCE_MODES, every = nothing,
                         poll::Union{Function,Nothing} = nothing, accepts::Union{Function,Nothing} = nothing,
                         read::Union{Function,Nothing} = nothing, budget = (;), configured::Bool = false,
-                        summarized::Bool = true, api::Integer)
+                        summarized::Bool = true, about::AbstractString = RECORD_ABOUT, api::Integer)
     api == PLUGIN_API ||
         error("Source $name is written for Zemi's plugin interface $api, and this Zemi's is $PLUGIN_API: update the one or the other")
     name = record_source(name)
     label = String(strip(label))
     1 <= length(label) <= RECORD_LIMITS.label || error("Source $name needs a label of at most $(RECORD_LIMITS.label) characters")
+    about = String(strip(about))
+    1 <= length(about) <= RECORD_LIMITS.label || error("Source $name says what its records are in at most $(RECORD_LIMITS.label) characters")
     modes = unique(Symbol.(collect(modes)))
     !isempty(modes) && all(in(SOURCE_MODES), modes) || error("Source $name's modes are among $(join(SOURCE_MODES, " and ")): $modes")
     poll === nothing && read === nothing && error("Source $name neither polls nor reads uploads")
@@ -84,7 +90,7 @@ function record_source!(name::AbstractString; label::AbstractString, modes = SOU
     isempty(extra) || error("Source $name's budget is $(join(keys(DEFAULT_BUDGET), ", ")), not $(join(extra, ", "))")
     b = (; (k => convert(fieldtype(typeof(DEFAULT_BUDGET), k), get(budget, k, DEFAULT_BUDGET[k])) for k in keys(DEFAULT_BUDGET))...)
     all(>(0), values(b)) || error("Source $name's budget is positive: $b")
-    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, configured, summarized,
+    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, configured, summarized, about,
                      get(task_local_storage(), :zemi_plugin, ""))
     lock(SOURCES_LOCK) do
         i = findfirst(x -> x.name == name, SOURCES[])

@@ -610,20 +610,24 @@ end
 
 # ── What readers and agents are told ──────────────────────────────────────────────────────────────
 
+"What a record is, as readers and agents are told, where its source does not say (see [`record_source!`](@ref))."
+const RECORD_ABOUT = "a record of the group's own work"
+
 """
     record_note(kb, id) -> String
 
-What a reader or an agent is told wherever record `id` is given them: that it is a record of the
-group's own work, with its date, its label (how it was made) and its people, to be weighed as what
-people said.
+What a reader or an agent is told wherever record `id` is given them: what it is (as its source says,
+see [`record_source!`](@ref)), with its date, its label (how it was made) and its people, to be
+weighed as what people said.
 """
 function record_note(kb::KB, id::AbstractString)
     r = record_row(kb, id)
     r === nothing && return ""
+    s = registered_source(r.source)
     people = json_list(scalar(kb, "SELECT authors FROM papers WHERE doc_id = ?", (id,)))
-    return "$id is a record of the group's own work, from $(record_day(r.happened)) ($(r.label))" *
+    return "$id is $(s === nothing ? RECORD_ABOUT : s.about), from $(record_day(r.happened)) ($(r.label))" *
            (isempty(people) ? "" : ", with $(prose_list(people))") *
-           ". Weigh what it says as what the people in it said, not as established."
+           ". Weigh what it says as what people said or wrote, not as established."
 end
 
 "What record summarizers are told they are doing."

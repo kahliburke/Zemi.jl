@@ -9,7 +9,7 @@
   written into the vault.
 - **Sources** can remove a record whose item is gone (`Zemi.remove!`), follow one that moved
   (`Zemi.rekey!`), and have their records embedded for searching without summarizing them
-  (`summarized = false`).
+  (`summarized = false`), and say what their records are (`about`), as agents are told.
 
 ## 0.3.2 (2026-11-10)
 

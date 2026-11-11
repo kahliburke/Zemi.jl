@@ -1445,6 +1445,8 @@ end
         # Read for searching, not summarized.
         layers = [Layer(; name = "text", model = "m", unit = :chunk), Layer(; name = "over", model = "m", unit = :section, source = "writer")]
         @test [l.name for l in K.document_layers(kb, t, layers)] == ["text"]
+        # Agents are told it is a person's own note, not a record of the group's work.
+        @test occursin("$t is a person's own note, from ", K.record_note(kb, t))
         # Given its reference, and nothing else of it changed; Zemi's own writing is not read as an edit.
         after = read(tidal, String)
         @test occursin("\nzemi: \"2401.00001\"\n", after) && join(filter(l -> !startswith(l, "zemi"), split(after, '\n')), '\n') == before

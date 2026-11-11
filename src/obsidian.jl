@@ -642,4 +642,4 @@ function write_references!(run::SourceRun, v::VaultConfig, ix::VaultIndex, files
 end
 
 record_source!("obsidian"; label = "From an Obsidian vault", modes = (:local,), every = 30, poll = obsidian_poll, configured = true,
-               summarized = false, api = PLUGIN_API)
+               summarized = false, about = "a person's own note", api = PLUGIN_API)

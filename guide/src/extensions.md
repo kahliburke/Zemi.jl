@@ -26,6 +26,7 @@ A source registers itself with `Zemi.record_source!`, in its package's `__init__
 | `accepts`, `read` | `accepts(path)` says whether a file someone uploads is one it reads; `read(run, path)` reads it. |
 | `budget` | The most one run may do: `records` written (500), `figure_bytes` of their figures (200 MB), `seconds` (1800). |
 | `summarized` | `false` for records read and embedded for searching without a model summarizing them: many short notes, say. |
+| `about` | What its records are, as readers and agents are told wherever one is given them ("a person's own note"). By default, a record of the group's own work. |
 | `api` | The version of this interface it was written for: `Zemi.PLUGIN_API`. Zemi refuses a source written for another. |
 
 A source polls, reads uploads, or both. Registering a name again replaces the source. Pass named
