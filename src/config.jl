@@ -649,7 +649,8 @@ end
 xdg_home(var, fallback) = get(ENV, var, joinpath(homedir(), fallback))
 
 "The config file: `ZEMI_CONFIG` names one (a shared service's, say), else `~/.config/zemi/config.toml`."
-config_path() = get(ENV, "ZEMI_CONFIG", joinpath(xdg_home("XDG_CONFIG_HOME", ".config"), "zemi", "config.toml"))
+config_path() = get(ENV, "ZEMI_CONFIG", default_config_path())
+default_config_path() = joinpath(xdg_home("XDG_CONFIG_HOME", ".config"), "zemi", "config.toml")
 
 db_path(c::Config) = joinpath(c.data_dir, "kb.sqlite3")
 

@@ -36,10 +36,12 @@ const KAIMON_PANEL = "Kaimon › Extensions › zemi, then [u]"
     kaimon_serves(args) -> Bool
 
 Whether Kaimon runs this knowledge base as its extension, so `zemi` should not serve a second copy:
-said, with where it is served and how to run it here instead (`--here`).
+said, with where it is served and how to run it here instead (`--here`). Kaimon's runs the default
+config's, so one `ZEMI_CONFIG` names elsewhere is another knowledge base, served here.
 """
 function kaimon_serves(args)
     ("--here" in args || !kaimon_runs_zemi()) && return false
+    abspath(expanduser(config_path())) == abspath(default_config_path()) || return false
     c = try load_config() catch; nothing end
     where = c === nothing ? () : (("Served at", served_address(c), "zemi open, with the key"),)
     say(:info, "Kaimon runs this knowledge base",
