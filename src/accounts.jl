@@ -9,6 +9,7 @@ Every permission, with what it allows. API routes and MCP tools each need one (s
 """
 const PERMISSIONS = [
     "read" => "Read the pages, search, and see papers and notebooks",
+    "library" => "Keep a private library: one's own notes and files",
     "tutor" => "Discuss papers with the tutor",
     "notebook.create" => "Have an agent make a notebook from a paper",
     "notebook.upload" => "Attach notebooks to papers",
@@ -38,7 +39,7 @@ const PERMISSION_NAMES = first.(PERMISSIONS)
 
 "The permissions by what they concern, each in one group, as the forms that choose them show them."
 const PERMISSION_GROUPS = [
-    "Reading" => ["read"],
+    "Reading" => ["read", "library"],
     "Projects and tasks" => ["tasks.view", "tasks.edit", "projects.create", "projects.all"],
     "Tutor and notebooks" => ["tutor", "notebook.create", "notebook.upload"],
     "Documents" => ["paper.add", "paper.manage", "records.purge", "sync", "daily", "watch"],
@@ -58,12 +59,12 @@ Admins can change them, and add others.
 """
 const DEFAULT_ROLES = [
     (name = "Reader", description = "Reads and searches the knowledge base",
-     permissions = ["read", "tasks.view"], quotas = Dict("tutor" => 0, "notebook" => 0)),
+     permissions = ["read", "library", "tasks.view"], quotas = Dict("tutor" => 0, "notebook" => 0)),
     (name = "Learner", description = "Reads, discusses papers with the tutor and makes notebooks",
-     permissions = ["read", "tutor", "notebook.create", "tasks.view", "tasks.edit", "projects.create"],
+     permissions = ["read", "library", "tutor", "notebook.create", "tasks.view", "tasks.edit", "projects.create"],
      quotas = Dict("tutor" => 60, "notebook" => 3)),
     (name = "Curator", description = "Looks after the papers and the service's work",
-     permissions = ["read", "tutor", "notebook.create", "notebook.upload", "paper.add", "paper.manage", "sync", "daily",
+     permissions = ["read", "library", "tutor", "notebook.create", "notebook.upload", "paper.add", "paper.manage", "sync", "daily",
                     "watch", "jobs.view", "agents.view", "server.view", "config.view", "tasks.view", "tasks.edit", "projects.create"],
      quotas = Dict("tutor" => 200, "notebook" => 10)),
     (name = "Admin", description = "Runs the service: its configuration, people and tokens",

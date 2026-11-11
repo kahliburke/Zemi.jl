@@ -261,7 +261,7 @@ end
 
     @test call(K.ANONYMOUS, "GET", "/api/status")[1] == 401
     s, me = call(reader, "GET", "/api/status")
-    @test s == 200 && sort(me["me"]["permissions"]) == ["read", "tasks.view"] && me["me"]["quotas"]["tutor"] == 0
+    @test s == 200 && sort(me["me"]["permissions"]) == ["library", "read", "tasks.view"] && me["me"]["quotas"]["tutor"] == 0
     # A reader sees the boards and changes nothing on them.
     @test call(reader, "GET", "/api/projects")[1] == 200
     @test call(reader, "POST", "/api/tasks", Dict("project" => "X", "title" => "t"))[1] == 403
@@ -728,6 +728,66 @@ end
     finally
         close(kb)
     end
+end
+
+@zset "each person's library space" begin
+    HTTP, JSON = K.HTTP, K.JSON
+    sh = shared_config(sign_up = :open, default_role = "Reader")
+    kb = open_kb(temp_config(shared = sh, layers = Layer[], library_max_gb = 1e-6))       # 1000 bytes each
+    K.ensure_roles!(kb)
+    account(email, roles) = (uid = K.sign_in!(kb, sh, "Campus", email; email, verified = true); K.set_roles!(kb, uid, roles); uid)
+    as(uid) = K.session_caller(kb, K.start_session!(kb, uid, sh))
+    ada, bea = account("ada@x.org", ["Reader"]), account("bea@x.org", ["Reader"])
+    call(c, method, target, body = UInt8[]) = (r = K.handle(kb, HTTP.Request(method, target, [], body), c); (r.status, r.body))
+    json(c, method, target, body = UInt8[]) = ((s, b) = call(c, method, target, body); (s, JSON.parse(String(b))))
+    note = "/api/library/files/" * HTTP.escapeuri("📄 notes/Reef survey.md")
+    try
+        # Everyone keeps one, in a space of their own the store keeps under their id.
+        @test json(as(ada), "GET", "/api/library/files")[2] == Dict("files" => [], "used" => 0, "limit" => 1000)
+        s, f = json(as(ada), "PUT", note, Vector{UInt8}("# Reef survey\nBleaching seen."))
+        @test s == 200 && f["path"] == "📄 notes/Reef survey.md" && f["size"] == 28 && length(f["sha256"]) == 64
+        @test isfile(joinpath(kb.config.data_dir, "library", "people", string(ada), "📄 notes", "Reef survey.md"))
+        @test String(call(as(ada), "GET", note)[2]) == "# Reef survey\nBleaching seen."
+        @test only(json(as(ada), "GET", "/api/library/files")[2]["files"])["path"] == "📄 notes/Reef survey.md"
+        # Dated by when it last changed where it came from, when that is given.
+        @test json(as(ada), "PUT", "/api/library/files/old.md?modified=1577880000", Vector{UInt8}("x"))[2]["modified"] == "2020-01-01T12:00:00Z"
+        @test json(as(ada), "DELETE", "/api/library/files/old.md")[2]["removed"]
+        # Nobody reaches another's: Bea's space is her own, and empty.
+        @test call(as(bea), "GET", note)[1] == 404 && isempty(json(as(bea), "GET", "/api/library/files")[2]["files"])
+        @test call(K.ANONYMOUS, "GET", "/api/library/files")[1] == 401
+        # A change made over a version someone else has changed since is refused, a removal too.
+        @test call(as(ada), "PUT", note * "?base=" * "0"^64, Vector{UInt8}("other"))[1] == 409
+        @test call(as(ada), "PUT", note * "?base=", Vector{UInt8}("other"))[1] == 409             # (none was to be there)
+        s, g = json(as(ada), "PUT", note * "?base=" * f["sha256"], Vector{UInt8}("# Reef survey\nNone seen."))
+        @test s == 200 && g["sha256"] != f["sha256"]
+        @test call(as(ada), "DELETE", note * "?base=" * f["sha256"])[1] == 409
+        # A space holds no more than its limit.
+        @test call(as(ada), "PUT", "/api/library/files/big.pdf", zeros(UInt8, 990))[1] == 413
+        @test json(as(ada), "DELETE", note * "?base=" * g["sha256"])[2]["removed"]
+        @test json(as(ada), "GET", "/api/library/files")[2]["used"] == 0
+        @test call(as(ada), "PUT", "/api/library/files/big.pdf", zeros(UInt8, 990))[1] == 200
+        # A file's place is relative and plain.
+        for bad in ("../x", "a/./b", "a\\b", "x\ty")
+            @test_throws "Not a file's place" K.library_path(bad)
+        end
+        @test K.library_path("e\u0301.md") == "\u00e9.md"                                            # composed, as a Mac writes it otherwise
+        # A token for the library alone reaches it and nothing else.
+        t = K.create_token!(kb, bea; name = "vault", permissions = ["library"]).token
+        tc = K.token_caller(kb, t)
+        @test call(tc, "GET", "/api/library/files")[1] == 200 && call(tc, "GET", "/api/search?q=reef")[1] == 403
+        # Run for one person, the space is theirs.
+        @test K.library_space(K.local_caller()) == "people/local"
+    finally
+        close(kb)
+    end
+    # The libraries are kept apart from the dataset, which others read.
+    d = mktempdir()
+    @test_throws "overlaps the dataset's" K.validate(temp_config(dataset = K.DatasetConfig(; store = "dir:$d"),
+                                                                library = K.StoreConfig(; store = "dir:$d/library")))
+    @test_throws "overlaps the dataset's" K.validate(temp_config(dataset = K.DatasetConfig(; store = "s3", endpoint = "https://e", bucket = "b", prefix = "kb"),
+                                                                library = K.StoreConfig(; store = "s3", endpoint = "https://e/", bucket = "b", prefix = "kb/people")))
+    @test K.validate(temp_config(dataset = K.DatasetConfig(; store = "s3", endpoint = "https://e", bucket = "b", prefix = "kb"),
+                                 library = K.StoreConfig(; store = "s3", endpoint = "https://e", bucket = "b", prefix = "libraries"))) isa K.Config
 end
 
 @zset "record access" begin

@@ -613,6 +613,10 @@ Base.@kwdef struct Config
     media_max_mb::Int = 200
     # A private copy of every attached file (`[media.backup]`, see media.jl).
     media_backup::StoreConfig = StoreConfig()
+    # Each person's private library (`[library]`, see library_store.jl): where it is kept (empty, a folder
+    # in the data directory), and the most each person's space holds, in GB.
+    library::StoreConfig = StoreConfig()
+    library_max_gb::Float64 = 10.0
     backup::BackupConfig = BackupConfig()
     dataset::DatasetConfig = DatasetConfig()
     shared::SharedConfig = SharedConfig()
@@ -767,6 +771,8 @@ function load_config(path::AbstractString = config_path())
         slate_port = Int(get(get(t, "notebooks", Dict()), "slate_port", d.slate_port)),
         media_max_mb = Int(get(get(t, "media", Dict()), "max_mb", d.media_max_mb)),
         media_backup = store_config(get(get(t, "media", Dict()), "backup", Dict()); path = here),
+        library = store_config(get(t, "library", Dict()); path = here),
+        library_max_gb = Float64(get(get(t, "library", Dict()), "max_gb", d.library_max_gb)),
         backup = backup_config(get(t, "backup", Dict()); path = here),
         dataset = dataset_config(get(t, "dataset", Dict()); path = here),
         shared = shared_config(get(t, "shared", Dict()); path = here),
@@ -868,6 +874,9 @@ function validate(c::Config)
         v >= 0 || error("[backup] $k can't be negative, got $v")
     end
     within_dir(backup_dir(c), c.data_dir) && error("[backup] dir $(backup_dir(c)) is in the data folder, so losing the data would lose the backups")
+    c.library_max_gb > 0 || error("[library] max_gb must be more than 0, got $(c.library_max_gb)")
+    stores_overlap(library_store_config(c), c.dataset) &&
+        error("[library] store overlaps the dataset's: the dataset is read by others, and the libraries are private. Keep them apart")
     sh = c.shared
     sh.sign_up in (:invite, :open) || error("[shared] sign_up must be \"invite\" or \"open\", got \"$(sh.sign_up)\"")
     sh.kaimon in (:embedded, :external) || error("[shared] kaimon must be \"embedded\" or \"external\", got \"$(sh.kaimon)\"")
