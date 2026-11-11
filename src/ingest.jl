@@ -1,23 +1,26 @@
 """
-    add_papers!(kb, ids; source = "added", by = nothing, anyway = false) -> Vector{String}
+    add_papers!(kb, ids; source = "added", by = nothing, anyway = false, holder = nothing) -> Vector{String}
 
 Record papers by arXiv id (URLs and `arXiv:` references are accepted too) without fetching
 anything. Returns the normalized ids. A paper new to the knowledge base gets a mention of how it
 came: `source` is one of [`ARRIVALS`](@ref) or a registered source's name (see
-[`record_source!`](@ref)), and `by` who added it, where known.
+[`record_source!`](@ref)), and `by` who added it, where known. With `holder` (a user id), the papers
+are brought in for that person, private to them unless open already (see [`bring_in!`](@ref));
+without, for the group.
 
 A paper a person dropped (see [`drop!`](@ref)) is left out when a source brings it, and refused with
 a [`DroppedError`](@ref) when a person adds it by hand ([`BY_HAND`](@ref)), unless `anyway`, which
 restores it.
 """
 function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::AbstractString = "added", by = nothing,
-                     anyway::Bool = false)
+                     anyway::Bool = false, holder::Union{Integer,Nothing} = nothing)
     source in keys(ARRIVALS) || registered_source(source) !== nothing || error("Not a way a paper arrives: $source")
     out = String[]
     transaction(kb) do
         for s in ids
             if local_kind(s) !== nothing
                 ismissing(paper_id(kb, s)) && not_found("No document $s in the knowledge base")
+                bring_in!(kb, s, holder; new = false)
                 push!(out, String(s))
                 continue
             end
@@ -33,6 +36,7 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
             execute!(kb, "INSERT OR IGNORE INTO papers (doc_id, version, added_at) VALUES (?, ?, ?)",
                 (id.id, id.version, now_iso()))
             new && record_arrival!(kb, paper_id(kb, id.id), source, by)
+            bring_in!(kb, id.id, holder; new)
             push!(out, id.id)
         end
     end
@@ -84,7 +88,7 @@ record_arrival!(kb::KB, pid, source::AbstractString, by = nothing) =
 
 """
     add_pdf!(kb, path; title = nothing, authors = String[], abstract = nothing, published = nothing,
-             added_by = nothing, source = "upload", anyway = false) -> String
+             added_by = nothing, source = "upload", anyway = false, holder = nothing) -> String
 
 Add a paper that is not on arXiv from its PDF, returning its id: `doc-` and the start of the file's
 SHA-256, so adding the same file again gives the same paper. The file is copied into the data
@@ -97,16 +101,17 @@ A paper is not added twice. An arXiv PDF (its first page stamped with its id, se
 [`arxiv_stamp`](@ref)) is added as that arXiv paper; a PDF whose published record has the DOI of a
 paper here (from arXiv, or uploaded before as another file) gives that paper's id, and adds nothing.
 One a person dropped, as this file, as its arXiv paper or by its DOI, is refused with a
-[`DroppedError`](@ref), unless `anyway`, which restores it.
+[`DroppedError`](@ref), unless `anyway`, which restores it. With `holder` (a user id), it is
+brought in for that person (see [`bring_in!`](@ref)).
 """
 function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::AbstractVector{<:AbstractString} = String[],
                   abstract = nothing, published = nothing, added_by = nothing, source::AbstractString = "upload",
-                  anyway::Bool = false)
+                  anyway::Bool = false, holder::Union{Integer,Nothing} = nothing)
     startswith(String(read(path, 5)), "%PDF") || error("$path is not a PDF")
     stamp = arxiv_stamp(path, kb.config)
     if stamp !== nothing
         ismissing(paper_id(kb, stamp)) && keep_out!(kb, anyway; by = added_by, id = stamp)
-        return only(add_papers!(kb, [stamp]; source, by = added_by))
+        return only(add_papers!(kb, [stamp]; source, by = added_by, holder))
     end
     sha = bytes2hex(open(sha256, path))
     id = PAPER.prefix * sha[1:10]
@@ -141,6 +146,7 @@ function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::Abstra
         same = rec === nothing || rec.doi === nothing ? missing : paper_with_doi(kb, rec.doi)
         if !ismissing(same)
             copied && rm(dest; force = true)
+            bring_in!(kb, same, holder; new = false)
             return same
         end
     end
@@ -150,7 +156,8 @@ function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::Abstra
     cited = parsed_citation(parsed)
     published = something(published, cited === nothing ? missing : cited.year)
     transaction(kb) do
-        if ismissing(paper_id(kb, id))
+        new = ismissing(paper_id(kb, id))
+        if new
             execute!(kb, """
                 INSERT INTO papers (doc_id, version, title, abstract, authors, published, primary_category,
                                     categories, journal_ref, metadata_at, added_at)
@@ -168,6 +175,7 @@ function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::Abstra
         ismissing(scalar(kb, "SELECT 1 FROM mentions WHERE paper_id = ? AND source = ?", (pid, source))) && execute!(kb, """
             INSERT INTO mentions (paper_id, source, channel, posted_at, author, url, message)
             VALUES (?, ?, NULL, ?, ?, NULL, ?)""", (pid, source, time(), something(added_by, missing), basename(path)))
+        bring_in!(kb, id, holder; new)
     end
     # A lookup that failed is left for heal_uploads! to try again.
     looked && heal_upload!(kb, id; parsed, lookup = (_; contact) -> rec)
@@ -175,8 +183,8 @@ function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::Abstra
 end
 
 """
-    add_doi!(kb, doi; title = nothing, authors = String[], published = nothing, source = "added", by = nothing, anyway = false)
-        -> Union{String,Nothing}
+    add_doi!(kb, doi; title = nothing, authors = String[], published = nothing, source = "added", by = nothing, anyway = false,
+             holder = nothing) -> Union{String,Nothing}
 
 Add the paper with DOI `doi` to be read in full, returning its id: the paper here with that DOI; else
 its arXiv copy, as that arXiv paper, which OpenAlex knows or a search of arXiv for `title` finds (see
@@ -184,21 +192,23 @@ its arXiv copy, as that arXiv paper, which OpenAlex knows or a search of arXiv f
 added as [`add_pdf!`](@ref) does with `title`, `authors` and `published` where given. `nothing` when
 there is no copy to read, as for a closed paper. Its arrival is a mention from `source`, as `by` added
 it. It is not read here (see [`ingest!`](@ref)). A work a person dropped is refused with a
-[`DroppedError`](@ref), unless `anyway`, which restores it.
+[`DroppedError`](@ref), unless `anyway`, which restores it. With `holder` (a user id), it is brought
+in for that person (see [`bring_in!`](@ref)).
 """
 function add_doi!(kb::KB, doi::AbstractString; title = nothing, authors::AbstractVector{<:AbstractString} = String[],
-                  published = nothing, source::AbstractString = "added", by = nothing, anyway::Bool = false)
+                  published = nothing, source::AbstractString = "added", by = nothing, anyway::Bool = false,
+                  holder::Union{Integer,Nothing} = nothing)
     d = normalize_doi(doi)
     isempty(d) && error("Not a DOI: $(repr(doi))")
     here = paper_with_doi(kb, d)
-    ismissing(here) || return here
+    ismissing(here) || (bring_in!(kb, here, holder; new = false); return here)
     keep_out!(kb, anyway; by, doi = d)
     c = DOI_COPIES[](d; contact = kb.config.contact)
     arxiv = c.arxiv
     arxiv === nothing && title !== nothing && (arxiv = arxiv_copy(kb.config, title; doi = d, authors))
     if arxiv !== nothing
         ismissing(paper_id(kb, arxiv)) && keep_out!(kb, anyway; by, id = arxiv)
-        return only(add_papers!(kb, [arxiv]; source, by))
+        return only(add_papers!(kb, [arxiv]; source, by, holder))
     end
     for url in c.pdfs
         body = open_pdf(url)
@@ -206,7 +216,7 @@ function add_doi!(kb::KB, doi::AbstractString; title = nothing, authors::Abstrac
         path = tempname() * ".pdf"
         try
             write(path, body)
-            id = add_pdf!(kb, path; title, authors, published, added_by = by, source, anyway)
+            id = add_pdf!(kb, path; title, authors, published, added_by = by, source, anyway, holder)
             execute!(kb, "UPDATE papers SET doi = ? WHERE doc_id = ? AND doi IS NULL", (d, id))
             return id
         finally

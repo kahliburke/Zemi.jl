@@ -275,7 +275,7 @@ end
 
 # Documents, for managing them (`?q=…&state=…&limit=…&offset=…`).
 route!("GET", "/api/documents"; need = "paper.manage") do c
-    list_documents(c.kb; q = get(c.params, "q", ""), state = get(c.params, "state", ""),
+    list_documents(c.kb; q = get(c.params, "q", ""), state = get(c.params, "state", ""), except = hidden_documents(c.kb, c.caller),
                    limit = int_param(c.params, "limit", 50, 1:500), offset = int_param(c.params, "offset", 0, 0:typemax(Int)))
 end
 

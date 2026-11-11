@@ -1,13 +1,15 @@
-# Who may see a document of a kind with access (see `DocumentKind`; a codebase, a record): every
-# member of the site (`open`), or only those who reach a project linked to it (`projects`), as for a
-# private repository's. A document is linked to projects in `document_projects`, and a codebase to the
-# projects it is the codebase of as well. Run for one person, every document is theirs. A document
-# someone may not see is, to them, none: it is answered as one that does not exist and left out of
-# lists. The site every reader is served is built without it (see site_code.jl), and the dataset does
-# not carry it.
+# Who may see a document. Any document may be private: seen only by the people it is held for (its
+# holders, in `document_holders`), whatever their role, as their own work in progress is. A document
+# of a kind with access (see `DocumentKind`; a codebase, a record) is otherwise open to every member
+# of the site (`open`), or only to those who reach a project linked to it (`projects`), as for a
+# private repository's; one of any other kind is open. A document is linked to projects in
+# `document_projects`, and a codebase to the projects it is the codebase of as well. Run for one
+# person, every document is theirs. A document someone may not see is, to them, none: it is answered
+# as one that does not exist and left out of lists. The site every reader is served is built without
+# it (see site_code.jl), and the dataset does not carry it.
 
-"A document's access: open to every reader, or only to the members of the projects linked to it."
-const DOCUMENT_ACCESS = ("open", "projects")
+"A document's access: open to every reader, only to the members of the projects linked to it, or only to its holders."
+const DOCUMENT_ACCESS = ("open", "projects", "private")
 
 migration!(2, ["ALTER TABLE papers ADD COLUMN access TEXT NOT NULL DEFAULT 'open' CHECK (access IN ('open', 'projects'))"])
 
@@ -17,6 +19,59 @@ migration!(3, ["""CREATE TABLE document_projects (
                       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                       PRIMARY KEY (paper_id, project_id))""",
                "CREATE INDEX document_projects_project ON document_projects (project_id)"])
+
+# Access gains `private` (a column's CHECK cannot change in place, so the column is made again), and
+# a private document's holders are kept.
+migration!(15, ["ALTER TABLE papers ADD COLUMN access_new TEXT NOT NULL DEFAULT 'open' CHECK (access_new IN ('open', 'projects', 'private'))",
+                "UPDATE papers SET access_new = access",
+                "ALTER TABLE papers DROP COLUMN access",
+                "ALTER TABLE papers RENAME COLUMN access_new TO access",
+                """CREATE TABLE document_holders (
+                       paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                       PRIMARY KEY (paper_id, user_id))""",
+                "CREATE INDEX document_holders_user ON document_holders (user_id)"])
+
+"The people (their user ids) document `id` is held for, in order."
+document_holders(kb::KB, id::AbstractString) =
+    [Int(r.user_id) for r in query(kb, """SELECT h.user_id FROM document_holders h JOIN papers p ON p.id = h.paper_id
+                                         WHERE p.doc_id = ? ORDER BY h.user_id""", (id,))]
+
+"The documents (their ids) held for person `uid`."
+held_documents(kb::KB, uid::Integer) =
+    Set{String}(String(r.doc_id) for r in query(kb, """SELECT p.doc_id FROM document_holders h JOIN papers p ON p.id = h.paper_id
+                                                        WHERE h.user_id = ?""", (uid,)))
+
+"Whether `caller` is one of document `id`'s holders."
+holds(kb::KB, caller::Caller, id::AbstractString) =
+    caller.user_id !== nothing && !ismissing(scalar(kb, """SELECT 1 FROM document_holders h JOIN papers p ON p.id = h.paper_id
+                                                          WHERE p.doc_id = ? AND h.user_id = ?""", (id, caller.user_id)))
+
+"Hold document `id` for person `uid`."
+hold_document!(kb::KB, id::AbstractString, uid::Integer) =
+    (execute!(kb, "INSERT OR IGNORE INTO document_holders SELECT id, ? FROM papers WHERE doc_id = ?", (uid, id)); nothing)
+
+"""
+    bring_in!(kb, id, holder; new)
+
+Document `id` has been brought into the knowledge base, `new` to it or not, for one person (`holder`,
+their user id) or for the group (`nothing`). Brought for a person, a new document is private to
+them, and a private one is held for them as well; one open already stays open. Brought for the
+group, a private document of a kind without access is open to every reader from then on: a paper is
+one document, whoever brings it in.
+"""
+function bring_in!(kb::KB, id::AbstractString, holder::Union{Integer,Nothing}; new::Bool)
+    access = scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,))
+    ismissing(access) && return nothing
+    if holder === nothing
+        access == "private" && !something(document_kind(id), PAPER).access &&
+            (execute!(kb, "UPDATE papers SET access = 'open' WHERE doc_id = ?", (id,)); note_changes!([id]))
+    elseif new || access == "private"
+        new && execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (id,))
+        hold_document!(kb, id, holder)
+    end
+    return nothing
+end
 
 """
     document_projects(kb, id) -> Vector{String}
@@ -64,16 +119,20 @@ end
 """
     document_visible(kb, caller, id) -> Bool
 
-Whether `caller` may see document `id`: an open one, and one with `projects` access when they are
-a member of a project linked to it (see [`project_membership`](@ref); `projects.all` reaches every
-project), whatever they may do with its tasks. One linked to no project only those with its kind's `unassigned` permission see (a
-record, before anyone assigns it). A document of a kind without access is every reader's.
+Whether `caller` may see document `id`: an open one; a private one when they are one of its holders,
+whatever their role; and one with `projects` access when they are a member of a project linked to it
+(see [`project_membership`](@ref); `projects.all` reaches every project), whatever they may do with
+its tasks. One linked to no project only those with its kind's `unassigned` permission see (a
+record, before anyone assigns it). A document of a kind without access is every reader's unless it
+is private.
 """
 function document_visible(kb::KB, caller::Caller, id::AbstractString)
     caller.via == :local && return true
+    access = coalesce(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,)), "open")
+    access == "open" && return true
+    access == "private" && return holds(kb, caller, id)
     kind = document_kind(id)
     kind !== nothing && kind.access || return true
-    coalesce(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,)), "open") == "open" && return true
     return closed_visible(caller, kind, document_projects(kb, id), k -> project_membership(kb, caller, k) >= VIEW)
 end
 
@@ -81,7 +140,7 @@ end
 closed_visible(caller::Caller, kind::DocumentKind, linked, sees) =
     isempty(linked) ? kind.unassigned !== nothing && can(caller, kind.unassigned) : any(sees, linked)
 
-"The documents (their ids) open only to the members of their projects."
+"The documents (their ids) not open to every reader: private, or open only to the members of their projects."
 closed_documents(kb::KB) =
     Set{String}(String(r.doc_id) for r in query(kb, "SELECT doc_id FROM papers WHERE NOT ($(open_sql()))"))
 
@@ -90,10 +149,16 @@ function hidden_documents(kb::KB, caller::Caller)
     caller.via == :local && return Set{String}()
     linked, member = documents_projects(kb), Dict{String,Bool}()
     sees(k) = get!(() -> project_membership(kb, caller, k) >= VIEW, member, k)
+    held = caller.user_id === nothing ? Set{String}() : held_documents(kb, caller.user_id)
     hidden = Set{String}()
-    for id in closed_documents(kb)
-        kind = document_kind(id)
-        kind !== nothing && kind.access && !closed_visible(caller, kind, get(linked, id, String[]), sees) && push!(hidden, id)
+    for r in query(kb, "SELECT doc_id, access FROM papers WHERE NOT ($(open_sql()))")
+        id = String(r.doc_id)
+        if r.access == "private"
+            id in held || push!(hidden, id)
+        else
+            kind = document_kind(id)
+            kind !== nothing && kind.access && !closed_visible(caller, kind, get(linked, id, String[]), sees) && push!(hidden, id)
+        end
     end
     return hidden
 end
@@ -119,17 +184,21 @@ function default_codebase_access(c::Config, remote::AbstractString)
 end
 
 """
-    set_document_access!(kb, id, access) -> String
+    set_document_access!(kb, id, access; holder = nothing) -> String
 
-Make document `id`, of a kind with access, open to every reader (`"open"`) or only to the members of
-the projects linked to it (`"projects"`). Its pages join or leave the site as it is next refreshed.
+Make document `id` open to every reader (`"open"`), open only to the members of the projects linked
+to it (`"projects"`, for a kind with access), or private to its holders (`"private"`), with `holder`
+(a user id) one of them; a private document has at least one. Its pages join or leave the site as it
+is next refreshed.
 """
-function set_document_access!(kb::KB, id::AbstractString, access::AbstractString)
+function set_document_access!(kb::KB, id::AbstractString, access::AbstractString; holder::Union{Integer,Nothing} = nothing)
     access = lowercase(strip(access))
-    access in DOCUMENT_ACCESS || error("A document's access is \"open\" or \"projects\", not \"$access\"")
-    kind = document_kind(id)
-    (kind === nothing || ismissing(paper_id(kb, id))) && not_found("No document $id in the knowledge base")
-    kind.access || error("Every $(kind.noun) is open to every reader: its access is not set")
+    access in DOCUMENT_ACCESS || error("A document's access is \"open\", \"projects\" or \"private\", not \"$access\"")
+    kind = something(document_kind(id), PAPER)
+    ismissing(paper_id(kb, id)) && not_found("No document $id in the knowledge base")
+    access == "projects" && !kind.access && error("A $(kind.noun) is not opened to projects: it is open or private")
+    holder === nothing || hold_document!(kb, id, holder)
+    access == "private" && isempty(document_holders(kb, id)) && error("A private document is held for someone: give its holder")
     execute!(kb, "UPDATE papers SET access = ? WHERE doc_id = ?", (access, id))
     note_changes!([id])
     mkpath(kb.config.data_dir)
@@ -149,7 +218,11 @@ route!("GET", "/api/codebases") do c
         for d in (codebase_page_json(c.kb, p) for p in visible_codebases(c.kb, c.caller))]
 end
 
-# A document's access: `{"access": "open" | "projects"}`.
+# A document's access: `{"access": "open" | "projects"}`. A private document is its holders' to open
+# (and, to anyone else, none); making one private is theirs too.
 route!("POST", "/api/documents/:id/access"; need = "paper.manage") do c
-    Dict("id" => c[:id], "access" => set_document_access!(c.kb, c[:id], String(get(json_body(c), "access", ""))))
+    seen_document(c.kb, c.caller, c[:id])
+    access = String(get(json_body(c), "access", ""))
+    lowercase(strip(access)) == "private" && error("A document is made private by one of its holders")
+    Dict("id" => c[:id], "access" => set_document_access!(c.kb, c[:id], access))
 end

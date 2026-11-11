@@ -74,14 +74,24 @@ function record_site_response(kb::KB, caller::Caller, path::AbstractString; req:
     rows = query(kb, "SELECT * FROM papers WHERE doc_id = ? AND $(kind_in(RECORD))", (m[:slug],))
     (isempty(rows) || !document_visible(kb, caller, first(rows).doc_id)) && return not_found_page(kb.config)
     p = first(rows)
-    if what == :page_data
-        r = json_response(record_page_json(kb, p))
-        HTTP.setheader(r, "Cache-Control" => "no-store")
-        return r
-    end
+    what == :page_data && return live_data_response(record_page_json(kb, p))
+    return live_page_response(kb, "records", "generated/kb/records/$(p.doc_id)", what, m; req)
+end
+
+"A page's data, answered for one caller: not kept by the browser."
+live_data_response(data) = (r = json_response(data); HTTP.setheader(r, "Cache-Control" => "no-store"); r)
+
+"""
+    live_page_response(kb, kind, page, what, m; req = nothing) -> Union{HTTP.Response,Nothing}
+
+A page of templated `kind` (see `TEMPLATED`) the service answers rather than the site (`page`, its
+address without `.html`): for `what` `:page`, the kind's built template; for `:page_script`, the copy of
+its script that names `page`, its tail `m[:tail]`. `nothing` when the site served lacks the template.
+"""
+function live_page_response(kb::KB, kind::AbstractString, page::AbstractString, what::Symbol, m; req = nothing)
     root = current_site(kb.config)
     root === nothing && return nothing
-    template = Dict(TEMPLATED)["records"].template
+    template = Dict(TEMPLATED)[kind].template
     if what == :page
         f = joinpath(root, template * ".html")
         return isfile(f) ? file_response(f; req) : nothing
@@ -90,7 +100,36 @@ function record_site_response(kb::KB, caller::Caller, path::AbstractString; req:
     j = findfirst(((tail, _),) -> copy_tail(tail) == m[:tail], scripts)
     j === nothing && return nothing
     return HTTP.Response(200, ["Content-Type" => CONTENT_TYPES[".js"], "Cache-Control" => "no-cache"],
-                         own_script(last(scripts[j]), template, "generated/kb/records/$(p.doc_id)"))
+                         own_script(last(scripts[j]), template, page))
+end
+
+"The addresses of a paper's page, its script and its data on the site, each with the paper's slug (see [`page_slug`](@ref))."
+const PAPER_ADDRESSES = [
+    r"^generated/kb/papers/(?<slug>[^/]+?)(?:\.html)?$" => :page,
+    r"^assets/generated_kb_papers_(?<slug>[^/]+?)\.md(?<tail>\..+\.js)$" => :page_script,
+    r"^kb-data/papers/(?<slug>[^/]+)\.json$" => :page_data]
+
+"""
+    private_paper_response(kb, caller, path; req = nothing) -> Union{HTTP.Response,Nothing}
+
+The answer to a request for the site's `path` when it names a private paper's page, script or data
+(see `PAPER_ADDRESSES`), which the site is built without (see document_access.jl): to one of its
+holders, what a built page would have there, its data from the knowledge base; to anyone else, the
+site's 404 page. `nothing` for any other path, which the site answers.
+"""
+function private_paper_response(kb::KB, caller::Caller, path::AbstractString; req::Union{HTTP.Request,Nothing} = nothing)
+    rel = lstrip(path, '/')
+    i = findfirst(((re, _),) -> occursin(re, rel), PAPER_ADDRESSES)
+    i === nothing && return nothing
+    re, what = PAPER_ADDRESSES[i]
+    m = match(re, rel)
+    rows = query(kb, """SELECT doc_id FROM papers WHERE access = 'private' AND $(literature_sql(private = true))
+                        AND replace(replace(doc_id, '.', '-'), '/', '-') = ?""", (m[:slug],))
+    isempty(rows) && return nothing
+    id = String(first(rows).doc_id)
+    document_visible(kb, caller, id) || return not_found_page(kb.config)
+    what == :page_data && return live_data_response(paper_json(site_paper(kb, id); notebooks = paper_notebooks(kb, id), cite = cite_json(kb, id)))
+    return live_page_response(kb, "papers", "generated/kb/papers/$(m[:slug])", what, m; req)
 end
 
 """

@@ -187,15 +187,21 @@ function kind_in(f::Function; on::AbstractString = "")
 end
 kind_in(kind::DocumentKind; on::AbstractString = "") = kind_in(==(kind); on)
 
-"SQL true of a row of `papers` that is literature (see [`DocumentKind`](@ref)); `on` its table's alias."
-literature_sql(; on::AbstractString = "") = kind_in(k -> k.literature; on)
+"""
+SQL true of a row of `papers` that is literature (see [`DocumentKind`](@ref)) the group shares: not
+private (see document_access.jl), unless `private`; `on` its table's alias. What is drawn up for every
+reader (the site, the authors, the paper of the day, the references between papers) is drawn from it.
+"""
+literature_sql(; on::AbstractString = "", private::Bool = false) =
+    private ? kind_in(k -> k.literature; on) : "($(kind_in(k -> k.literature; on)) AND $(isempty(on) ? "" : on * ".")access != 'private')"
 
 """
-SQL true of a row of `papers` open to every reader: not one of a kind with access (see
-document_access.jl) open only to its projects' members; `on` its table's alias.
+SQL true of a row of `papers` open to every reader: not private, and not one of a kind with access
+(see document_access.jl) open only to its projects' members; `on` its table's alias.
 """
 open_sql(; on::AbstractString = "") =
-    "NOT ($(kind_in(k -> k.access; on)) AND $(isempty(on) ? "" : on * ".")access = 'projects')"
+    (a = (isempty(on) ? "" : on * ".") * "access";
+     "($a = 'open' OR ($a = 'projects' AND NOT ($(kind_in(k -> k.access; on)))))")
 
 """
 The name of the summarizer configured for documents of kind `k` (or document `id`'s, a paper's for an
@@ -212,15 +218,14 @@ document_page(id::AbstractString) = something(document_kind(id), PAPER).page(pag
 
 Document `id`'s page among the docs sources, under the knowledge base's pages: the stub the docs
 build resolves a link to it against. `nothing` for one whose page is not built into the site (a
-record, or a codebase open only to its projects' members).
+record, a private document, or a codebase open only to its projects' members).
 """
 function document_page_source(kb, id::AbstractString)
     k = something(document_kind(id), PAPER)
     k.site || return nothing
-    if k.access
-        r = query(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,))
-        (isempty(r) || r[1].access != "open") && return nothing
-    end
+    r = query(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,))
+    isempty(r) && k.access && return nothing
+    !isempty(r) && r[1].access != "open" && (k.access || r[1].access == "private") && return nothing
     page = k.page(page_slug(id))
     return (endswith(page, "/") ? page * "index" : page) * ".md"
 end

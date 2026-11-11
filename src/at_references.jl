@@ -188,12 +188,15 @@ function at_reference_matches(kb::KB, q::AbstractString; limit::Integer = 5, pro
                           ORDER BY lower(p.key || '-' || t.number) = ? DESC, t.updated_at DESC LIMIT ?""", (starts, word, q, limit))
         push!(found, (; kind = "task", target = String(r.ref), label = String(r.ref), detail = String(r.title)))
     end
-    for r in query(kb, """SELECT doc_id, title FROM papers WHERE $(literature_sql()) AND metadata_at IS NOT NULL
-                          AND (lower(doc_id) LIKE ? ESCAPE '\\' OR ' ' || lower(title) LIKE ? ESCAPE '\\')
-                          ORDER BY published DESC LIMIT ?""", (starts, word, limit))
-        push!(found, (; kind = "paper", target = String(r.doc_id), label = String(r.doc_id), detail = coalesce(r.title, "")))
-    end
     hidden = hidden_documents(kb, caller)
+    n = 0
+    for r in query(kb, """SELECT doc_id, title FROM papers WHERE $(literature_sql(private = true)) AND metadata_at IS NOT NULL
+                          AND (lower(doc_id) LIKE ? ESCAPE '\\' OR ' ' || lower(title) LIKE ? ESCAPE '\\')
+                          ORDER BY published DESC""", (starts, word))
+        r.doc_id in hidden && continue
+        push!(found, (; kind = "paper", target = String(r.doc_id), label = String(r.doc_id), detail = coalesce(r.title, "")))
+        (n += 1) >= limit && break
+    end
     n = 0
     for r in query(kb, """SELECT p.doc_id, p.title, x.happened FROM papers p JOIN records x ON x.paper_id = p.id
                           WHERE lower(p.doc_id) LIKE ? ESCAPE '\\' OR ' ' || lower(p.title) LIKE ? ESCAPE '\\'

@@ -661,7 +661,7 @@ end
         K.set_document_access!(kb, "note-survey", "open")
         @test K.document_visible(kb, as(bea), "note-survey") && isempty(K.hidden_documents(kb, as(bea)))
         K.execute!(kb, "INSERT INTO papers (doc_id, title, added_at) VALUES ('2609.00001', 'Reef patches', ?)", (K.now_iso(),))
-        @test_throws "open to every reader" K.set_document_access!(kb, "2609.00001", "projects")
+        @test_throws "not opened to projects" K.set_document_access!(kb, "2609.00001", "projects")
         @test K.document_visible(kb, as(bea), "2609.00001")
         # A link undone, or its project deleted, no longer shows it.
         K.set_document_access!(kb, "note-survey", "projects")
@@ -673,6 +673,59 @@ end
         @test_throws "No document note-none" K.link_document!(kb, "note-none", "RF")
     finally
         filter!(k -> k.name != "note", K.DOCUMENT_KINDS)
+        close(kb)
+    end
+end
+
+@zset "private documents" begin
+    sh = shared_config(sign_up = :open, default_role = "Reader")
+    kb = open_kb(temp_config(shared = sh, layers = Layer[]))
+    K.ensure_roles!(kb)
+    account(email, roles) = (uid = K.sign_in!(kb, sh, "Campus", email; email, verified = true); K.set_roles!(kb, uid, roles); uid)
+    as(uid) = K.session_caller(kb, K.start_session!(kb, uid, sh))
+    boss, ada, bea = account("boss@example.org", ["Admin"]), account("ada@x.org", ["Learner"]), account("bea@x.org", ["Learner"])
+    access(id) = K.scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,))
+    try
+        # Brought in for Ada, a new paper is hers alone, whatever anyone else's role.
+        id = only(K.add_papers!(kb, ["2609.00002"]; holder = ada))
+        @test access(id) == "private" && K.document_holders(kb, id) == [ada]
+        @test K.document_visible(kb, as(ada), id) && !K.document_visible(kb, as(bea), id) && !K.document_visible(kb, as(boss), id)
+        @test K.document_visible(kb, K.local_caller(), id)                                       # run for one person
+        @test K.hidden_documents(kb, as(boss)) == Set([id]) && isempty(K.hidden_documents(kb, as(ada)))
+        @test_throws "No paper $id" K.seen_document(kb, as(boss), id)
+        @test !(id in [d.id for d in K.list_documents(kb; except = K.hidden_documents(kb, as(boss))).documents])
+        @test id in [d.id for d in K.list_documents(kb; except = K.hidden_documents(kb, as(ada))).documents]
+        # Left out of what is drawn up for every reader, of the site and of the dataset.
+        @test id in K.closed_documents(kb) && isempty(K.query(kb, "SELECT 1 FROM papers WHERE doc_id = ? AND $(K.literature_sql())", (id,)))
+        @test !K.publishable(kb, id) && K.document_page_source(kb, id) === nothing
+        # Its page is answered to its holders alone; an open paper's is the site's.
+        @test K.private_paper_response(kb, as(boss), "/kb-data/papers/2609-00002.json").status == 404
+        r = K.private_paper_response(kb, as(ada), "/kb-data/papers/2609-00002.json")
+        @test r.status == 200 && K.JSON.parse(String(r.body))["id"] == id
+        # Brought in by Bea for herself too, it is one document held for both.
+        K.add_papers!(kb, [id]; holder = bea)
+        @test K.document_holders(kb, id) == sort([ada, bea]) && K.document_visible(kb, as(bea), id) && !K.document_visible(kb, as(boss), id)
+        # An open paper brought in for a person stays open.
+        K.add_papers!(kb, ["2609.00003"])
+        K.add_papers!(kb, ["2609.00003"]; holder = ada)
+        @test access("2609.00003") == "open" && isempty(K.document_holders(kb, "2609.00003"))
+        @test K.private_paper_response(kb, as(boss), "/kb-data/papers/2609-00003.json") === nothing
+        # Brought in for the group, a private paper is every reader's.
+        K.add_papers!(kb, [id])
+        @test access(id) == "open" && K.document_visible(kb, as(boss), id) && isempty(K.hidden_documents(kb, as(boss)))
+        # Made private again with a holder; never without one, and a paper is not opened to projects.
+        K.set_document_access!(kb, id, "private"; holder = ada)
+        @test access(id) == "private" && !K.document_visible(kb, as(boss), id)
+        @test_throws "held for someone" K.set_document_access!(kb, "2609.00003", "private")
+        @test_throws "not opened to projects" K.set_document_access!(kb, id, "projects")
+        # A person's record is private to them, and a record does not name itself private.
+        rid, _ = K.put_record!(kb, "notes", (; key = "k1", title = "Reef notes", date = "2026-11-01", sections = ["Seen" => "Bleaching."]);
+                               read = false, label = "Written by hand", holder = bea)
+        @test access(rid) == "private" && K.document_holders(kb, rid) == [bea]
+        @test K.document_visible(kb, as(bea), rid) && !K.document_visible(kb, as(ada), rid) && !K.document_visible(kb, as(boss), rid)
+        @test_throws "\"open\" or \"projects\"" K.as_record((; key = "k2", title = "x", date = "2026-11-01", sections = ["A" => "b"],
+                                                                 access = "private"))
+    finally
         close(kb)
     end
 end

@@ -174,7 +174,7 @@ function Record(; key, title, date, people = String[], sections, figures = [], t
     url = text(url, "an address", L.url; empty = true)
     isempty(url) || occursin(r"^https?://\S+$", url) || error("A record's address is a web address: $(repr(url))")
     projects = unique([uppercase(text(k, "a project's key", 40)) for k in projects])
-    access === nothing || (access = lowercase(strip(string(access)))) in DOCUMENT_ACCESS ||
+    access === nothing || (access = lowercase(strip(string(access)))) in ("open", "projects") ||
         error("A record's access is \"open\" or \"projects\", not $(repr(access))")
     label = text(label, "a label", L.label; empty = true)
     return Record(key, title, date, people, sections, figures, transcript, url, projects, access, label)
@@ -312,11 +312,12 @@ call a source makes for each record it has:
   written in place, it is embedded again where that changed what it embeds, its summaries kept.
 
 `label`, given, is the record's whatever `r` says (a registered source's, see [`record_source!`](@ref));
-`by` is who added it, as its arrival's mention names them. A new record a person dropped is refused
+`by` is who added it, as its arrival's mention names them. With `holder` (a user id), the record is
+that person's: a new one is private to them (see [`bring_in!`](@ref)). A new record a person dropped is refused
 with a [`DroppedError`](@ref), unless `anyway`, which restores it.
 """
 function put_record!(kb::KB, source::AbstractString, r; read::Bool = true, label::Union{AbstractString,Nothing} = nothing,
-                     by::Union{AbstractString,Nothing} = nothing, anyway::Bool = false)
+                     by::Union{AbstractString,Nothing} = nothing, anyway::Bool = false, holder::Union{Integer,Nothing} = nothing)
     r = as_record(r)
     label === nothing || (r = Record(r.key, r.title, r.date, r.people, r.sections, r.figures, r.transcript, r.url, r.projects, r.access,
                                      String(label)))
@@ -355,6 +356,7 @@ function put_record!(kb::KB, source::AbstractString, r; read::Bool = true, label
                  something(r.access, "projects")))
             pid = paper_id(kb, id)
             r.access === nothing || execute!(kb, "UPDATE papers SET access = ? WHERE id = ?", (r.access, pid))
+            bring_in!(kb, id, holder; new)
             execute!(kb, """
                 INSERT INTO records (paper_id, source, key, happened, url, label, content_sha, reading_sha, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
