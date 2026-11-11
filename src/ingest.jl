@@ -20,7 +20,8 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
         for s in ids
             if local_kind(s) !== nothing
                 ismissing(paper_id(kb, s)) && not_found("No document $s in the knowledge base")
-                bring_in!(kb, s, holder; new = false)
+                # A document here named by its id stays whose it is, but for a person bringing it in too.
+                holder === nothing || bring_in!(kb, s, holder; new = false)
                 push!(out, String(s))
                 continue
             end

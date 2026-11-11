@@ -717,6 +717,11 @@ end
         # Brought in for the group, a private paper is every reader's.
         K.add_papers!(kb, [id])
         @test access(id) == "open" && K.document_visible(kb, as(boss), id) && isempty(K.hidden_documents(kb, as(boss)))
+        # An upload of Ada's named by its id stays hers.
+        K.execute!(kb, "INSERT INTO papers (doc_id, title, added_at, access) VALUES ('doc-0123456789', 'Notes on reefs', ?, 'private')", (K.now_iso(),))
+        K.hold_document!(kb, "doc-0123456789", ada)
+        K.add_papers!(kb, ["doc-0123456789"])
+        @test access("doc-0123456789") == "private" && K.document_holders(kb, "doc-0123456789") == [ada]
         # Made private again with a holder; never without one.
         K.set_document_access!(kb, id, "private"; holder = ada)
         @test access(id) == "private" && !K.document_visible(kb, as(boss), id)
