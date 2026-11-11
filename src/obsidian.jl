@@ -633,8 +633,10 @@ function write_references!(run::SourceRun, v::VaultConfig, ix::VaultIndex, files
         e["props"] = reference_properties(v, new)
         new == text && continue                                  # (properties it cannot read: nothing to change)
         write_atomic(files[k], new)
+        # Dated as before: Zemi's writing is not when the note changed.
+        changed = e["mtime"]
         e["sha"], e["mtime"], e["size"] = bytes2hex(sha256(new)), mtime(files[k]), filesize(files[k])
-        r = note_record(v, ix, k, new, e["mtime"]; paper)
+        r = note_record(v, ix, k, new, changed; paper)
         r === nothing || (e["id"] = put!(run, r.record))
     end
 end
