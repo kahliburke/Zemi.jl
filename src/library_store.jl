@@ -167,7 +167,9 @@ end
 route!("PUT", "/api/library/files/*path"; need = "library") do c
     base = haskey(c.params, "base") ? c.params["base"] : nothing
     m = get(c.params, "modified", "")
-    modified = isempty(m) ? nothing : unix2datetime(something(tryparse(Float64, m), error("?modified= is a time in seconds since 1970")))
+    t = isempty(m) ? nothing : tryparse(Float64, m)
+    isempty(m) || t !== nothing || error("?modified= is a time in seconds since 1970")
+    modified = t === nothing ? nothing : unix2datetime(t)
     library_file_json(put_library_file!(c.kb, library_space(c.caller), c[:path], body_bytes(c); base, modified))
 end
 

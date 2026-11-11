@@ -745,7 +745,7 @@ end
         # Everyone keeps one, in a space of their own the store keeps under their id.
         @test json(as(ada), "GET", "/api/library/files")[2] == Dict("files" => [], "used" => 0, "limit" => 1000)
         s, f = json(as(ada), "PUT", note, Vector{UInt8}("# Reef survey\nBleaching seen."))
-        @test s == 200 && f["path"] == "📄 notes/Reef survey.md" && f["size"] == 28 && length(f["sha256"]) == 64
+        @test s == 200 && f["path"] == "📄 notes/Reef survey.md" && f["size"] == 29 && length(f["sha256"]) == 64
         @test isfile(joinpath(kb.config.data_dir, "library", "people", string(ada), "📄 notes", "Reef survey.md"))
         @test String(call(as(ada), "GET", note)[2]) == "# Reef survey\nBleaching seen."
         @test only(json(as(ada), "GET", "/api/library/files")[2]["files"])["path"] == "📄 notes/Reef survey.md"
