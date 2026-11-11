@@ -65,8 +65,9 @@ writes, labels and guards what it hands in.
   `seconds` (see `DEFAULT_BUDGET`); a run that has spent it is stopped
 - `api`: the version of this interface it was written for; one that is not [`PLUGIN_API`](@ref) is refused
 
-A source polls, reads uploads, or both. Pass named functions: Revise applies edits to their methods
-to the source as registered.
+A source polls, reads uploads, or both; or neither, when Zemi itself hands it records (the notes of
+the vaults in people's libraries, see library_reading.jl). Pass named functions: Revise applies edits
+to their methods to the source as registered.
 """
 function record_source!(name::AbstractString; label::AbstractString, modes = SOURCE_MODES, every = nothing,
                         poll::Union{Function,Nothing} = nothing, accepts::Union{Function,Nothing} = nothing,
@@ -81,7 +82,6 @@ function record_source!(name::AbstractString; label::AbstractString, modes = SOU
     1 <= length(about) <= RECORD_LIMITS.label || error("Source $name says what its records are in at most $(RECORD_LIMITS.label) characters")
     modes = unique(Symbol.(collect(modes)))
     !isempty(modes) && all(in(SOURCE_MODES), modes) || error("Source $name's modes are among $(join(SOURCE_MODES, " and ")): $modes")
-    poll === nothing && read === nothing && error("Source $name neither polls nor reads uploads")
     (poll === nothing) == (every === nothing) || error("Source $name polls every so often: it needs both `poll` and `every`")
     (accepts === nothing) == (read === nothing) || error("Source $name reads uploads with both `accepts` and `read`")
     seconds = every === nothing ? 0.0 : every isa Real ? Float64(every) : Dates.toms(every) / 1000
@@ -143,6 +143,7 @@ mutable struct SourceRun
     const job::Union{Job,Nothing}
     const started::Float64
     const upload::Union{NamedTuple,Nothing}
+    const holder::Union{Int,Nothing}
     const ids::Vector{String}
     const touched::Vector{String}
     added::Int
@@ -153,7 +154,8 @@ mutable struct SourceRun
     figure_bytes::Int
     spent::String
 end
-SourceRun(kb::KB, s::RecordSource, job = nothing; upload = nothing) = SourceRun(kb, s, job, time(), upload, String[], String[], 0, 0, 0, 0, 0, 0, "")
+SourceRun(kb::KB, s::RecordSource, job = nothing; upload = nothing, holder::Union{Integer,Nothing} = nothing) =
+    SourceRun(kb, s, job, time(), upload, holder, String[], String[], 0, 0, 0, 0, 0, 0, "")
 
 Base.show(io::IO, run::SourceRun) = print(io, "SourceRun(", run.source.name, ")")
 
@@ -196,7 +198,8 @@ function Base.put!(run::SourceRun, r)
     end
     new = ismissing(scalar(run.kb, "SELECT 1 FROM records WHERE source = ? AND key = ?", (s.name, r.key)))
     id, changed = try
-        put_record!(run.kb, s.name, r; read = READ_PUT[], label = s.label, by = run.upload === nothing ? nothing : run.upload.by)
+        put_record!(run.kb, s.name, r; read = READ_PUT[], label = s.label, by = run.upload === nothing ? nothing : run.upload.by,
+                    holder = run.holder)
     catch e
         e isa DroppedError || rethrow()
         run.dropped += 1

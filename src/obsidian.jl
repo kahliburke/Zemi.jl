@@ -1,29 +1,32 @@
-# Obsidian: a vault of notes kept in step with the knowledge base run for one person. Each note comes
-# in as a record of the `obsidian` source, keyed by its path in the vault, and is read and embedded
-# for the person's searches and agents without being summarized. A note naming a paper by its arXiv
-# id or DOI brings the paper in, and is given references back: the properties Zemi owns (`zemi`, the
-# paper's id, and `zemi-page`, its page here), and the paper's title, authors, arXiv id and DOI where
-# the note has those properties empty, as a template leaves them. Nothing else is written into the vault.
+# Obsidian vaults in people's libraries (see library_store.jl): a folder of a person's space that holds
+# `.obsidian`, synced there from their machine (see `zemi connect`). Each note comes in as a record of
+# the `obsidian` source, the person's alone (see document_access.jl), keyed by its place in their
+# space, and is read and embedded for their searches and agents without being summarized. A note
+# naming a paper by its arXiv id or DOI brings the paper in, private to them unless the group has it,
+# and is given references back: the properties Zemi owns (`zemi`, the paper's id, and `zemi-page`, its
+# page here), and the paper's title, authors, arXiv id and DOI where the note has those properties
+# empty, as a template leaves them. Nothing else is written into the vault.
 #
-#     [sources.obsidian]
-#     vault = "~/Documents/Obsidian/Notes"
-#     skip = ["Private"]                         # folders not read, besides hidden ones and the templates folder
+# The vault's own settings say where its templates and daily notes are (`.obsidian/templates.json`,
+# `.obsidian/daily-notes.json`): its templates are not read, and a daily note is dated by its path.
+# The person's settings for Zemi are in `.zemi.toml` at the vault's root, every one optional:
+#
+#     skip = ["Drafts"]                          # folders not read, besides hidden ones and the templates folder
 #     write = true                               # give paper notes their references (false: only read the vault)
 #     dates = ["date", "created", "timestamp"]   # the properties a note's date is taken from, the first set
 #     arxiv = ["arxiv"]                          # the properties naming a paper by its arXiv id
 #     doi = ["doi"]                              # and by its DOI
-#
-# The vault's own settings say where its templates and daily notes are (`.obsidian/templates.json`,
-# `.obsidian/daily-notes.json`): its templates are not read, and a daily note is dated by its path.
 
 """
     VaultConfig
 
-A vault as `[sources.obsidian]` sets it (see obsidian.jl), with what the vault's own settings say:
-the folder of its templates and of its daily notes, and the daily notes' format of name.
+A vault: the library space it is in and its folder there (`root`, empty for the space itself), with
+the person's settings (see obsidian.jl) and what the vault's own say: the folder of its templates
+and of its daily notes, and the daily notes' format of name.
 """
 Base.@kwdef struct VaultConfig
-    dir::String
+    space::String
+    root::String = ""
     skip::Vector{String} = String[]
     write::Bool = true
     dates::Vector{String} = ["date", "created", "timestamp"]
@@ -37,21 +40,25 @@ end
 "A path in the vault as notes are keyed and folders compared: with `/`, in Unicode's composed form."
 vault_path(p::AbstractString) = Base.Unicode.normalize(join(filter(!isempty, split(replace(String(p), '\\' => '/'), '/')), '/'), :NFC)
 
-"""
-    vault_config(settings) -> VaultConfig
+"Where vault `v`'s file `key` is in its space."
+in_space(v::VaultConfig, key::AbstractString) = isempty(v.root) ? String(key) : v.root * "/" * key
 
-The vault `[sources.obsidian]` names, with its settings, and the vault's own (see [`VaultConfig`](@ref)).
 """
-function vault_config(s::AbstractDict)
-    dir = strip(string(get(s, "vault", "")))
-    isempty(dir) && error("Set [sources.obsidian] vault to the folder of the Obsidian vault")
-    dir = abspath(expanduser(dir))
-    isdir(dir) || error("The Obsidian vault $dir is not a folder here")
+    vault_config(kb, space, root) -> VaultConfig
+
+The vault at `root` in library `space`, with the person's settings (`.zemi.toml`) and the vault's own
+(see [`VaultConfig`](@ref)). Settings that cannot be read are left at their defaults.
+"""
+function vault_config(kb::KB, space::AbstractString, root::AbstractString)
+    file(rel) = read_library_file(kb, space, isempty(root) ? rel : root * "/" * rel)
+    parsed(rel, parse) = (b = file(rel); b === nothing ? Dict() : try parse(String(b)) catch; Dict() end)
+    s = parsed(".zemi.toml", TOML.parse)
     names(k, default) = (v = get(s, k, default); String[string(x) for x in (v isa AbstractVector ? v : [v]) if !isempty(strip(string(x)))])
-    own(file) = (f = joinpath(dir, ".obsidian", file); isfile(f) ? try JSON.parsefile(f) catch; Dict() end : Dict())
+    own(name) = parsed(".obsidian/" * name, JSON.parse)
     daily = own("daily-notes.json")
     format = strip(string(something(get(daily, "format", nothing), "")))
-    return VaultConfig(; dir, skip = vault_path.(names("skip", String[])), write = get(s, "write", true) === true,
+    return VaultConfig(; space = String(space), root = String(root), skip = vault_path.(names("skip", String[])),
+                       write = get(s, "write", true) !== false,
                        dates = names("dates", ["date", "created", "timestamp"]), arxiv = names("arxiv", ["arxiv"]),
                        doi = names("doi", ["doi"]),
                        templates = vault_path(string(something(get(own("templates.json"), "folder", nothing), ""))),
@@ -63,29 +70,36 @@ end
 in_folder(p::AbstractString, dir::AbstractString) = !isempty(dir) && (p == dir || startswith(p, dir * "/"))
 
 """
-    vault_files(v) -> (; notes, files)
+    vault_files(kb, v) -> (; notes, files)
 
-The vault's notes, as `key => file`: each Markdown file's path in the vault (see [`vault_path`](@ref))
-and where it is, sorted by key; and every other file (attachments), likewise. Hidden files and
-folders, links to folders, the templates folder and the folders `skip` names are left out.
+The vault's notes, as `key => file`: each Markdown file's path in the vault and its row of the library
+(see [`library_files`](@ref)), sorted by key; and every other file (attachments), likewise. Hidden
+files and folders, the templates folder, the folders `skip` names and vaults within it are left out.
 """
-function vault_files(v::VaultConfig)
-    notes, files = Pair{String,String}[], Pair{String,String}[]
+function vault_files(kb::KB, v::VaultConfig)
+    notes, files = Pair{String,Any}[], Pair{String,Any}[]
     left_out(p) = any(d -> in_folder(p, d), [v.templates; v.skip])
-    function walk(dir, rel)
-        for name in readdir(dir)
-            startswith(name, ".") && continue
-            path = joinpath(dir, name)
-            p = isempty(rel) ? vault_path(name) : rel * "/" * vault_path(name)
-            if isdir(path)
-                islink(path) || left_out(p) || walk(path, p)
-            elseif isfile(path) && !left_out(p)
-                push!(lowercase(splitext(name)[2]) == ".md" ? notes : files, p => path)
-            end
-        end
+    all = library_files(kb, v.space)
+    prefix = isempty(v.root) ? "" : v.root * "/"
+    inner = [r for r in vault_roots(all) if r != v.root && (isempty(v.root) || in_folder(r, v.root))]
+    for f in all
+        startswith(f.path, prefix) || continue
+        p = f.path[ncodeunits(prefix)+1:end]
+        any(startswith("."), split(p, '/')) && continue
+        (left_out(p) || any(r -> in_folder(f.path, r), inner)) && continue
+        push!(lowercase(splitext(p)[2]) == ".md" ? notes : files, p => f)
     end
-    walk(v.dir, "")
     return (; notes = sort!(notes; by = first), files = sort!(files; by = first))
+end
+
+"The vaults among a space's files (see [`library_files`](@ref)): the folders holding `.obsidian`, by their place in it."
+function vault_roots(files)
+    roots = Set{String}()
+    for f in files
+        m = match(r"^(?:(.*)/)?\.obsidian/", f.path)
+        m === nothing || push!(roots, something(m[1], ""))
+    end
+    return sort!(collect(roots))
 end
 
 # ── A note's text ─────────────────────────────────────────────────────────────────────────────────
@@ -153,22 +167,22 @@ end
     VaultIndex
 
 What a vault's links resolve to: its notes and other files by name and path, the record of each note,
-and the paper each paper note names.
+and the paper each paper note names; and how a file of it is read (`read(path)`, its bytes or `nothing`).
 """
 struct VaultIndex
     notes::Dict{String,Vector{String}}     # a note's name (its file's, lower case) => the keys of the notes so named
     files::Dict{String,Vector{String}}     # a file's name (lower case) => the paths of the files so named
-    paths::Dict{String,String}             # a file's path in the vault => where it is
+    read::Function                         # a file's path in the vault => its bytes, or `nothing`
     records::Dict{String,String}           # a note's key => its record's id
     papers::Dict{String,String}            # a paper note's key => the paper's id
 end
 
-function VaultIndex(notes, files, records::AbstractDict, papers::AbstractDict)
+function VaultIndex(notes, files, records::AbstractDict, papers::AbstractDict; read::Function = p -> nothing)
     by_name(ps) = (d = Dict{String,Vector{String}}(); foreach(p -> push!(get!(d, lowercase(splitext(basename(p))[1]), String[]), p), ps); d)
     names = by_name(first.(notes))
     fnames = Dict{String,Vector{String}}()
     foreach(p -> push!(get!(fnames, lowercase(basename(p)), String[]), p), first.(files))
-    return VaultIndex(names, fnames, Dict(files), Dict{String,String}(records), Dict{String,String}(papers))
+    return VaultIndex(names, fnames, read, Dict{String,String}(records), Dict{String,String}(papers))
 end
 
 """
@@ -234,8 +248,8 @@ function note_text(ix::VaultIndex, text::AbstractString)
             if m[1] == "!" && lowercase(splitext(l.target)[2]) in FIGURE_FILES
                 p = resolve_file(ix, l.target)
                 p === nothing && return ""
-                bytes = read(ix.paths[p])
-                (image_kind(bytes) === nothing || length(bytes) > RECORD_LIMITS.image || length(figures) >= RECORD_LIMITS.figures) && return ""
+                bytes = ix.read(p)
+                (bytes === nothing || image_kind(bytes) === nothing || length(bytes) > RECORD_LIMITS.image || length(figures) >= RECORD_LIMITS.figures) && return ""
                 name = "img-$(length(figures) + 1)"
                 caption = occursin(r"^\d+(x\d+)?$", l.label) ? "" : l.label
                 push!(figures, (; name, caption, image = bytes))
@@ -380,20 +394,20 @@ function paper_reference(v::VaultConfig, props::AbstractDict, yaml::AbstractStri
 end
 
 """
-    note_paper!(kb, ref) -> Union{String,Nothing}
+    note_paper!(kb, ref; holder = nothing) -> Union{String,Nothing}
 
-The paper a note names (see [`paper_reference`](@ref)), brought in as the `obsidian` source's and
-queued to be read where it is new: its id, or `nothing` for one there is no copy of to read, one
-dropped here, or one that could not be found.
+The paper a note names (see [`paper_reference`](@ref)), brought in as the `obsidian` source's for the
+note's person (`holder`, see [`bring_in!`](@ref)) and queued to be read where it is new: its id, or
+`nothing` for one there is no copy of to read, one dropped here, or one that could not be found.
 """
-function note_paper!(kb::KB, ref::AbstractString)
+function note_paper!(kb::KB, ref::AbstractString; holder::Union{Integer,Nothing} = nothing)
     isempty(ref) && return nothing
     id = try
         if startswith(ref, "arxiv:")
-            ids = add_papers!(kb, [ref[7:end]]; source = "obsidian")      # none for one dropped here
+            ids = add_papers!(kb, [ref[7:end]]; source = "obsidian", holder)      # none for one dropped here
             isempty(ids) ? nothing : only(ids)
         else
-            add_doi!(kb, ref[5:end]; source = "obsidian")
+            add_doi!(kb, ref[5:end]; source = "obsidian", holder)
         end
     catch e
         e isa InterruptException && rethrow()
@@ -483,22 +497,30 @@ function set_properties(text::AbstractString, changes)
     return bom * join([String(lines[1]); fm; String.(lines[close:end])], nl)
 end
 
-# ── The source ────────────────────────────────────────────────────────────────────────────────────
+# ── Reading a vault ───────────────────────────────────────────────────────────────────────────────
 
-"Where the `obsidian` source keeps what it knows of each note (see [`obsidian_poll`](@ref)), apart from its small state."
-vault_index_key() = source_state_key("obsidian") * ":notes"
+"A note's record key: its place in its person's space (see [`note_key`](@ref)), so that people's notes are kept apart."
+vault_key(v::VaultConfig, k::AbstractString) = note_key(v.space * "/" * in_space(v, k))
 
-load_vault_index(kb::KB) =
-    Dict{String,Any}(JSON.parse(coalesce(scalar(kb, "SELECT value FROM kv WHERE key = ?", (vault_index_key(),)), "{}")))
-save_vault_index!(kb::KB, d) = execute!(kb, "INSERT OR REPLACE INTO kv VALUES (?, ?)", (vault_index_key(), JSON.json(d)))
+"Where what is known of each note of vault `v` is kept (see [`read_vault!`](@ref)), apart from the source's small state."
+vault_index_key(v::VaultConfig) = source_state_key("obsidian") * ":" * v.space * ":" * v.root
 
-file_sha(path) = bytes2hex(open(sha256, path))
+load_vault_index(kb::KB, v::VaultConfig) =
+    Dict{String,Any}(JSON.parse(coalesce(scalar(kb, "SELECT value FROM kv WHERE key = ?", (vault_index_key(v),)), "{}")))
+save_vault_index!(kb::KB, v::VaultConfig, d) = execute!(kb, "INSERT OR REPLACE INTO kv VALUES (?, ?)", (vault_index_key(v), JSON.json(d)))
+
+"When a file of a library last changed, in Unix seconds."
+file_time(f) = datetime2unix(parse_iso(f.modified))
+
+"Note `k` of vault `v` as its space holds it now (empty for one gone since)."
+read_note(kb::KB, v::VaultConfig, k::AbstractString) = String(something(read_library_file(kb, v.space, in_space(v, k)), UInt8[]))
 
 """
-    obsidian_poll(run)
+    read_vault!(run, v)
 
-Bring the vault in step (see obsidian.jl). Each note is known by its file's time, size and hash, the
-paper it names and the notes it links to, so a run reads only the notes that changed:
+Bring vault `v` in step (see obsidian.jl) as `run`, for the person whose space it is in (its
+`holder`). Each note is known by its file's hash, the paper it names and the notes it links to, so a
+run reads only the notes that changed:
 
 - a note new or changed is handed in as a record (see [`note_record`](@ref)); one with no text has none
 - a note gone is removed, unless a new one has its content, which is the note moved: its record keeps
@@ -510,30 +532,24 @@ paper it names and the notes it links to, so a run reads only the notes that cha
 - with `write`, a paper note is given its references (see [`note_references`](@ref)), its file
   rewritten only where they change, and what Zemi wrote is known as the note, not read as an edit
 """
-function obsidian_poll(run::SourceRun)
+function read_vault!(run::SourceRun, v::VaultConfig)
     kb = run.kb
-    v = vault_config(settings(run))
-    seen = load_vault_index(kb)
+    seen = load_vault_index(kb, v)
+    prefix = v.space * "/" * (isempty(v.root) ? "" : v.root * "/")
     records = Dict(String(r.key) => String(r.doc_id) for r in query(kb, """
-        SELECT x.key, p.doc_id FROM records x JOIN papers p ON p.id = x.paper_id WHERE x.source = 'obsidian'"""))
-    vf = vault_files(v)
+        SELECT x.key, p.doc_id FROM records x JOIN papers p ON p.id = x.paper_id
+        WHERE x.source = 'obsidian' AND substr(x.key, 1, ?) = ?""", (length(prefix), prefix)))
+    vf = vault_files(kb, v)
     files = Dict(vf.notes)
     try
-        # What changed: by time and size, then by content.
-        stats = Dict(k => (; mtime = mtime(f), size = filesize(f)) for (k, f) in vf.notes)
+        # What changed, by content.
         texts = Dict{String,String}()
         changed = String[]
         for (k, f) in vf.notes
             e = get(seen, k, nothing)
-            gone = e !== nothing && e["id"] !== nothing && !haskey(records, note_key(k))
-            e !== nothing && !gone && e["mtime"] == stats[k].mtime && e["size"] == stats[k].size && continue
-            text = read(f, String)
-            sha = bytes2hex(sha256(text))
-            if e !== nothing && !gone && e["sha"] == sha
-                e["mtime"], e["size"] = stats[k].mtime, stats[k].size
-                continue
-            end
-            texts[k] = text
+            gone = e !== nothing && e["id"] !== nothing && !haskey(records, vault_key(v, k))
+            e !== nothing && !gone && e["sha"] == f.sha256 && continue
+            texts[k] = read_note(kb, v, k)
             push!(changed, k)
         end
         # Moved: a note gone whose content a new one has.
@@ -542,16 +558,16 @@ function obsidian_poll(run::SourceRun)
             haskey(seen, k) && continue
             from = get(lost, bytes2hex(sha256(texts[k])), nothing)
             from === nothing && continue
-            haskey(records, note_key(from)) && !haskey(records, note_key(k)) || continue
-            rekey!(run, note_key(from), note_key(k))
-            records[note_key(k)] = pop!(records, note_key(from))
+            haskey(records, vault_key(v, from)) && !haskey(records, vault_key(v, k)) || continue
+            rekey!(run, vault_key(v, from), vault_key(v, k))
+            records[vault_key(v, k)] = pop!(records, vault_key(v, from))
             seen[k] = pop!(seen, from)
             delete!(lost, seen[k]["sha"])
         end
         for k in collect(keys(seen))
             haskey(files, k) && continue
-            remove!(run, note_key(k))
-            delete!(records, note_key(k))
+            remove!(run, vault_key(v, k))
+            delete!(records, vault_key(v, k))
             delete!(seen, k)
         end
         # The papers the changed notes name; the notes linking to one whose paper changed are handed in again.
@@ -563,26 +579,26 @@ function obsidian_poll(run::SourceRun)
             ref = paper_reference(v, note_properties(fm.yaml), fm.yaml)
             e = get(seen, k, nothing)
             was = e === nothing ? nothing : e["paper"]
-            paper = e !== nothing && e["ref"] == ref ? was : note_paper!(kb, ref)
+            paper = e !== nothing && e["ref"] == ref ? was : note_paper!(kb, ref; holder = run.holder)
             refs[k] = ref
             paper === nothing ? delete!(papers, k) : (papers[k] = paper)
             paper == was || push!(moved, k)
         end
         for (k, e) in seen
             (k in changed || isempty(intersect(e["links"], moved))) && continue
-            texts[k] = read(files[k], String)
+            texts[k] = read_note(kb, v, k)
             refs[k] = e["ref"]
             push!(changed, k)
         end
-        ix = VaultIndex(vf.notes, vf.files, Dict(k => get(records, note_key(k), record_id("obsidian", note_key(k))) for (k, _) in vf.notes), papers)
+        ix = VaultIndex(vf.notes, vf.files, Dict(k => get(records, vault_key(v, k), record_id("obsidian", vault_key(v, k))) for (k, _) in vf.notes),
+                        papers; read = p -> read_library_file(kb, v.space, in_space(v, p)))
         for (i, k) in enumerate(changed)
             i % 50 == 0 && progress(run, "$i of $(length(changed)) notes read")
-            sha = bytes2hex(sha256(texts[k]))
-            entry = Dict{String,Any}("mtime" => stats[k].mtime, "size" => stats[k].size, "sha" => sha, "ref" => refs[k],
+            entry = Dict{String,Any}("sha" => bytes2hex(sha256(texts[k])), "modified" => files[k].modified, "ref" => refs[k],
                                      "paper" => get(papers, k, nothing), "links" => String[], "id" => nothing)
             haskey(papers, k) && (entry["props"] = reference_properties(v, texts[k]))
             r = try
-                note_record(v, ix, k, texts[k], stats[k].mtime; paper = get(papers, k, nothing))
+                note_record(v, ix, k, texts[k], file_time(files[k]); paper = get(papers, k, nothing))
             catch e
                 e isa InterruptException && rethrow()
                 @warn "An Obsidian note could not be read as a record; it is tried again when it changes" note = k exception = e
@@ -590,11 +606,11 @@ function obsidian_poll(run::SourceRun)
                 continue
             end
             if r === nothing
-                remove!(run, note_key(k))
+                remove!(run, vault_key(v, k))
             else
                 entry["links"] = r.links
                 entry["id"] = try
-                    put!(run, r.record)
+                    put!(run, (; r.record..., key = vault_key(v, k)))
                 catch e
                     e isa SourceStopped && rethrow()
                     @warn "An Obsidian note could not be handed in; it is tried again when it changes" note = k exception = e
@@ -605,8 +621,21 @@ function obsidian_poll(run::SourceRun)
         end
         v.write && write_references!(run, v, ix, files, seen)
     finally
-        save_vault_index!(kb, seen)
+        save_vault_index!(kb, v, seen)
     end
+    return nothing
+end
+
+"""
+    forget_vault!(run, v)
+
+Vault `v` is gone from its space: remove the records of its notes, and what was known of them.
+"""
+function forget_vault!(run::SourceRun, v::VaultConfig)
+    for k in keys(load_vault_index(run.kb, v))
+        remove!(run, vault_key(v, k))
+    end
+    execute!(run.kb, "DELETE FROM kv WHERE key = ?", (vault_index_key(v),))
     return nothing
 end
 
@@ -618,8 +647,9 @@ end
 
 """
 Give each paper note its references (see [`note_references`](@ref)), worked out from the properties it
-had when last read; its file is read and rewritten only where they change, and only as it was last
-read. The note's record is then handed in again as the file now is.
+had when last read: written into the space's copy (which reaches the person's own as it syncs), only
+where they change, and only over the version last read, dated as that was. The note's record is then
+handed in again as the note now is.
 """
 function write_references!(run::SourceRun, v::VaultConfig, ix::VaultIndex, files, seen)
     for (k, e) in seen
@@ -627,19 +657,25 @@ function write_references!(run::SourceRun, v::VaultConfig, ix::VaultIndex, files
         (paper === nothing || !haskey(files, k)) && continue
         isempty(note_references(run.kb, v, paper, get(e, "props", Dict{String,Any}()))) && continue
         cancelled(run) && return
-        text = read(files[k], String)
+        text = read_note(run.kb, v, k)
         bytes2hex(sha256(text)) == e["sha"] || continue          # changed since: read again in the next run
         new = set_properties(text, note_references(run.kb, v, paper, reference_properties(v, text)))
         e["props"] = reference_properties(v, new)
         new == text && continue                                  # (properties it cannot read: nothing to change)
-        write_atomic(files[k], new)
         # Dated as before: Zemi's writing is not when the note changed.
-        changed = e["mtime"]
-        e["sha"], e["mtime"], e["size"] = bytes2hex(sha256(new)), mtime(files[k]), filesize(files[k])
-        r = note_record(v, ix, k, new, changed; paper)
-        r === nothing || (e["id"] = put!(run, r.record))
+        f = try
+            put_library_file!(run.kb, v.space, in_space(v, k), Vector{UInt8}(new); base = e["sha"], modified = parse_iso(e["modified"]))
+        catch ex
+            ex isa Refusal && ex.status in (409, 413) && continue   # changed meanwhile, or the space is full: next time
+            rethrow()
+        end
+        e["sha"] = f.sha256
+        r = note_record(v, ix, k, new, file_time(f); paper)
+        r === nothing || (e["id"] = put!(run, (; r.record..., key = vault_key(v, k))))
     end
 end
 
-record_source!("obsidian"; label = "From an Obsidian vault", modes = (:local,), every = 30, poll = obsidian_poll, configured = true,
-               summarized = false, about = "a person's own note", api = PLUGIN_API)
+# Its records are handed in by Zemi as it reads people's libraries (see library_reading.jl): it neither
+# polls nor reads uploads, and a library holds many notes, so a run may write many.
+record_source!("obsidian"; label = "From an Obsidian vault", summarized = false, about = "a person's own note",
+               budget = (; records = 100_000, figure_bytes = 10_000_000_000, seconds = 86_400.0), api = PLUGIN_API)

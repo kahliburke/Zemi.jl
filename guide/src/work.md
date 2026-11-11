@@ -211,35 +211,56 @@ Everything else, and a paper with no copy to read, is a resource; upload its PDF
 Items that are the same work (the same DOI, or the same title) come in once, and one dropped here is
 not brought in again.
 
-## An Obsidian vault
+## Your library
 
-A `zemi` run for one person can keep an Obsidian vault in step with it, so the person's searches and
-agents use their notes along with their papers:
+Everyone signed in keeps a private library: their own notes and files, which the knowledge base reads
+like any other document, for their searches and agents alone. Nobody else sees what is in it, whatever
+their role, until its owner shares it. It is private as a private repository is: kept from the other
+members, not hidden from those who run the service.
+
+What a library holds is kept in the site's library store, in a space of each person's own:
 
 ```toml
-[sources.obsidian]
-vault = "~/Documents/Obsidian/Notes"
-# skip = ["Private"]                        # folders not read
-# write = false                             # read the vault without writing paper notes' references
-# dates = ["date", "created", "timestamp"]  # the properties a note's date is taken from
-# arxiv = ["arxiv"]                         # the properties naming a paper by its arXiv id
-# doi = ["doi"]                             # and by its DOI
+[library]
+store = "s3"               # or "dir:<path>"; without, a folder in the data directory
+endpoint = "https://<account>.r2.cloudflarestorage.com"
+bucket = "group-libraries"
+credentials = "~/.config/zemi/library-credentials.toml"
+max_gb = 10                # the most each person's space holds
 ```
 
-Every half minute it reads the notes changed since. Each note is a record, keyed by its path in the
-vault: its title the `title` property, else its first heading, else its file's name; its date a date
+Only the service reads the store; people reach their own space through the API (`/api/library/files`,
+permission `library`). The store is kept apart from the dataset's, which others read: one that
+overlaps it is refused.
+
+**An Obsidian vault** in a library (a folder holding `.obsidian`) is read as notes. Each note is a
+record: its title the `title` property, else its first heading, else its file's name; its date a date
 property, else a daily note's day (by the vault's daily notes' folder and format), else when its file
 changed. Its text keeps its headings; its properties follow it. Wikilinks become references to the
 records of the notes they name, an embedded image a figure, and Dataview and Bases blocks and
 `%% comments %%` are left out. The notes are read and embedded for searching, not summarized. Hidden
-folders, the vault's templates folder and the folders `skip` names are not read. A note moved keeps its
-record, and one deleted is removed.
+folders and the vault's templates folder are not read. A note moved keeps its record, and one deleted
+is removed. Settings for Zemi go in `.zemi.toml` at the vault's root, every one optional:
 
-A note naming a paper by an arXiv id or DOI (its `arxiv` or `doi` property) brings the paper in, and
-the note's record and the notes linking to it refer to the paper. Zemi writes only references into the
-vault: on each paper note, `zemi` (the paper's id) and `zemi-page` (its page here), and the paper's
-title, authors, arXiv id and DOI into those of the note's properties left empty, as a template leaves
-them. Only those lines of the note change.
+```toml
+skip = ["Drafts"]                          # folders not read
+write = true                               # give paper notes their references (false: read only)
+dates = ["date", "created", "timestamp"]   # the properties a note's date is taken from
+arxiv = ["arxiv"]                          # the properties naming a paper by its arXiv id
+doi = ["doi"]                              # and by its DOI
+```
+
+A note naming a paper by an arXiv id or DOI (its `arxiv` or `doi` property) brings the paper in,
+private to its owner unless the group has it, and the note's record and the notes linking to it refer
+to the paper. Zemi writes only references into the vault: on each paper note, `zemi` (the paper's id)
+and `zemi-page` (its page here), and the paper's title, authors, arXiv id and DOI into those of the
+note's properties left empty, as a template leaves them. Only those lines of the note change.
+
+**A PDF** anywhere in a library is read in full as a document, its owner's. The same file in two
+people's libraries is one document, held for both; one no longer in anyone's library is removed.
+
+A paper is one document whoever brings it in: once anyone adds it to the group's library, it is open
+to every reader.
 
 ## Dropping a document
 

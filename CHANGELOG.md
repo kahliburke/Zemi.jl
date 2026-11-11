@@ -2,11 +2,14 @@
 
 ## Unreleased
 
-- **An Obsidian vault** kept in step with a `zemi` run for one person (`[sources.obsidian]`): its
-  notes are records the person's searches and agents use, wikilinks references between them, and a
-  note naming a paper by arXiv id or DOI brings the paper in. Paper notes get references back (`zemi`,
-  `zemi-page`, and the paper's details where the note's template leaves them empty); nothing else is
-  written into the vault.
+- **Private libraries**: everyone signed in keeps their own notes and files in a space of their own
+  in the site's library store (`[library]`, kept apart from the dataset), read for their searches and
+  agents alone. A document can be private to the people who brought it in, whatever anyone's role.
+- **Obsidian vaults** in a library are read as notes: records the person's searches and agents use,
+  wikilinks references between them, and a note naming a paper by arXiv id or DOI brings the paper in.
+  Paper notes get references back (`zemi`, `zemi-page`, and the paper's details where the note's
+  template leaves them empty); nothing else is written into the vault. PDFs in a library are read as
+  documents.
 - **Sources** can remove a record whose item is gone (`Zemi.remove!`), follow one that moved
   (`Zemi.rekey!`), and have their records embedded for searching without summarizing them
   (`summarized = false`), and say what their records are (`about`), as agents are told.

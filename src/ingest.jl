@@ -50,7 +50,8 @@ elsewhere (a base set's posts in a channel, say) is worded by its source and cha
 """
 const ARRIVALS = Dict("upload" => "uploaded", "added" => "added",
                       "cited" => "added from citations", "watch" => "added from the arXiv watch",
-                      "daily" => "picked as paper of the day", "study" => "found for a study")
+                      "daily" => "picked as paper of the day", "study" => "found for a study",
+                      "library" => "added from a person's library")
 
 "The ways in of [`ARRIVALS`](@ref) that are a person's, who is told a paper was dropped rather than it being left out."
 const BY_HAND = ("added", "upload", "cited")

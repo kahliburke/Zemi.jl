@@ -170,11 +170,17 @@ route!("PUT", "/api/library/files/*path"; need = "library") do c
     t = isempty(m) ? nothing : tryparse(Float64, m)
     isempty(m) || t !== nothing || error("?modified= is a time in seconds since 1970")
     modified = t === nothing ? nothing : unix2datetime(t)
-    library_file_json(put_library_file!(c.kb, library_space(c.caller), c[:path], body_bytes(c); base, modified))
+    space = library_space(c.caller)
+    f = put_library_file!(c.kb, space, c[:path], body_bytes(c); base, modified)
+    queue_library!(c.kb, [space])
+    library_file_json(f)
 end
 
 # A file removed (`?base=<sha256>`: only that version).
 route!("DELETE", "/api/library/files/*path"; need = "library") do c
     base = haskey(c.params, "base") ? c.params["base"] : nothing
-    Dict("removed" => delete_library_file!(c.kb, library_space(c.caller), c[:path]; base))
+    space = library_space(c.caller)
+    removed = delete_library_file!(c.kb, space, c[:path]; base)
+    removed && queue_library!(c.kb, [space])
+    Dict("removed" => removed)
 end

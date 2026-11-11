@@ -362,6 +362,7 @@ function start_local(; port::Integer = local_port(kb().config), dev::Bool = fals
     push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db))
     load_plugins!(db.config)
     push!(r.tasks, follow_sources(db))
+    catch_up_libraries!(db)
     dev || upgrade_landscape(db)
     start_figure_sweep(db)
     hosted && push!(r.tasks, start_autosync!(db))
@@ -449,7 +450,7 @@ function start_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool 
         end
     end
     # The sources start once the service's Kaimon is up, since what they bring in is read by its agents.
-    begin_sources() = (STARTING[] = false; push!(r.tasks, follow_sources(db)); upgrade_landscape(db))
+    begin_sources() = (STARTING[] = false; push!(r.tasks, follow_sources(db)); catch_up_libraries!(db); upgrade_landscape(db))
     ready === nothing ? begin_sources() : @async (try wait(ready) catch end; begin_sources())
     db.config.dataset.role == :none || start_import(db)
     push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db), follow_notifications(db))

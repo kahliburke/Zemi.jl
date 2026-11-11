@@ -1115,13 +1115,16 @@ end
         @test length(K.SOURCES[]) == n + 1 && K.registered_source("zz-notes") === s
         @test s.every == 300 && s.modes == [:local, :shared] && s.budget == K.DEFAULT_BUDGET && s.plugin == ""
         @test_throws "plugin interface 2, and this Zemi's is 1" record_source!("zz-new"; label = "x", every = 1, poll = noop, api = 2)
-        @test_throws "neither polls" record_source!("zz-x"; label = "x", api = K.PLUGIN_API)
         @test_throws "both `poll` and `every`" record_source!("zz-x"; label = "x", poll = noop, api = K.PLUGIN_API)
         @test_throws "both `accepts` and `read`" record_source!("zz-x"; label = "x", read = (r, p) -> nothing, api = K.PLUGIN_API)
         @test_throws "modes" record_source!("zz-x"; label = "x", every = 1, poll = noop, modes = (:cloud,), api = K.PLUGIN_API)
         @test_throws "not pages" record_source!("zz-x"; label = "x", every = 1, poll = noop, budget = (; pages = 3), api = K.PLUGIN_API)
         @test_throws "lower case" record_source!("Notes"; label = "x", every = 1, poll = noop, api = K.PLUGIN_API)
         @test K.registered_source("zz-new") === nothing && K.registered_source("zz-x") === nothing
+        # One that neither polls nor reads is handed its records by Zemi (a library's vaults): it never runs.
+        fed = record_source!("zz-fed"; label = "Handed in", api = K.PLUGIN_API)
+        @test fed.poll === nothing && fed.read === nothing && K.registered_source("zz-fed") === fed
+        filter!(x -> x.name != "zz-fed", K.SOURCES[])
 
         # A run reaches the knowledge base only through its context: its settings and secrets, its state.
         f = tempname(); write(f, "# a comment\ns3cret\n")
@@ -1382,24 +1385,32 @@ end
     @test K.split_frontmatter("No properties\n").yaml == "" && K.split_frontmatter("---\nunclosed\n").yaml == ""
     @test K.property_text(K.note_properties("arxiv: 2401.10000"), "arxiv: 2401.10000", "arxiv") == "2401.10000"   # its digits kept
     @test K.wikilink_parts("Estuaries#Mouths|the mouths") == (target = "Estuaries", heading = "Mouths", label = "the mouths")
-    v = K.VaultConfig(; dir = "/v", daily_folder = "Daily", daily_format = "YYYY/MM/YYYY-MM-DD")
+    v = K.VaultConfig(; space = "people/local", daily_folder = "Daily", daily_format = "YYYY/MM/YYYY-MM-DD")
     @test K.daily_date(v, "Daily/2026/11/2026-11-09.md") == K.Date(2026, 11, 9) && K.daily_date(v, "Notes/2026-11-09.md") === nothing
-    @test K.daily_date(K.VaultConfig(; dir = "/v", daily_format = "DD.MM.YYYY dddd"), "09.11.2026 Monday.md") == K.Date(2026, 11, 9)
+    @test K.daily_date(K.VaultConfig(; space = "people/local", daily_format = "DD.MM.YYYY dddd"), "09.11.2026 Monday.md") == K.Date(2026, 11, 9)
     # Properties are set line by line, every other byte as it was.
     note = "---\r\ntitle: Tides\r\nauthors:\r\ntags:\r\n  - sea\r\n---\r\nText\r\n"
     @test K.set_properties(note, ["authors" => ["Ada Lovelace", "Bea Hale"], "zemi" => "2401.00001"]) ==
           "---\r\ntitle: Tides\r\nauthors:\r\n  - \"Ada Lovelace\"\r\n  - \"Bea Hale\"\r\ntags:\r\n  - sea\r\nzemi: \"2401.00001\"\r\n---\r\nText\r\n"
     @test K.set_properties("Just text\n", ["zemi" => "x"]) == "---\nzemi: \"x\"\n---\nJust text\n"
 
-    vault = mktempdir()
-    mk(path, text) = (f = joinpath(vault, path); mkpath(dirname(f)); write(f, text); f)
+    # A person's vault, synced into their library (here as `zemi connect` would put it).
+    kb = open_kb(temp_config(layers = Layer[]))
+    ada = Int(K.scalar(kb, "INSERT INTO users (email, name, created_at) VALUES ('ada@x.org', 'Ada', ?) RETURNING id", (K.now_iso(),)))
+    space = "people/$ada"
+    mk(path, text; modified = nothing) = K.put_library_file!(kb, space, "Notes/" * path, text isa String ? Vector{UInt8}(text) : text; modified)
+    note(path) = String(K.read_library_file(kb, space, "Notes/" * path))
+    gone(path) = K.delete_library_file!(kb, space, "Notes/" * path)
     mk(".obsidian/templates.json", """{"folder": "Templates"}""")
     mk(".obsidian/daily-notes.json", """{"folder": "Daily", "format": "YYYY/MM/YYYY-MM-DD"}""")
+    mk(".zemi.toml", "skip = [\"Private\"]\n")
     mk("Templates/Paper.md", "---\narxiv:\nauthors:\n---\n")
     mk("Private/Diary.md", "Not for the knowledge base.\n")
-    mkpath(joinpath(vault, "Attachments"))
-    K.PNGFiles.save(joinpath(vault, "Attachments", "plot.png"), fill(K.RGB{K.N0f8}(0.2, 0.4, 0.6), 20, 30))
-    tidal = mk("Reading/Tidal mixing.md", """
+    png = tempname() * ".png"
+    K.PNGFiles.save(png, fill(K.RGB{K.N0f8}(0.2, 0.4, 0.6), 20, 30))
+    mk("Attachments/plot.png", read(png))
+    tidal = "Reading/Tidal mixing.md"
+    mk(tidal, """
         ---
         type: "[[Paper]]"
         tags:
@@ -1419,27 +1430,31 @@ end
         LIST FROM "Reading"
         ```
         %% a reminder to myself %%
-        """)
+        """; modified = K.DateTime(2020, 1, 1, 12))                         # last changed long ago
     mk("Topics/Estuaries.md", "Where rivers meet the sea: see [[Tidal mixing]] and [[A note not written]].\n")
-    daily = mk("Daily/2026/11/2026-11-09.md", "---\ntags: [daily]\n---\nRead about tides.\n")
-    kb = open_kb(temp_config(layers = Layer[], sources = Dict{String,Any}("obsidian" => Dict{String,Any}("vault" => vault, "skip" => ["Private"]))))
+    daily = "Daily/2026/11/2026-11-09.md"
+    mk(daily, "---\ntags: [daily]\n---\nRead about tides.\n")
     K.READ_PUT[] = false
     try
         s = K.registered_source("obsidian")
-        @test s.modes == [:local] && s.configured && !s.summarized
-        id(key) = K.source_record(kb, "obsidian", key)
+        @test s.poll === nothing && !s.summarized
+        id(path) = K.source_record(kb, "obsidian", "$space/Notes/$path")
         text(i) = join((x["text"] for x in K.record_document(kb, i)["sections"]), "\n")
-        before = read(tidal, String)
-        Base.run(`touch -t 202001011200 $tidal`)                              # last changed long ago
-        run = K.run_source!(kb, s)
+        notes() = Int(K.scalar(kb, "SELECT count(*) FROM records WHERE source = 'obsidian'"))
+        before = note(tidal)
+        @test K.vault_roots(K.library_files(kb, space)) == ["Notes"]
+        K.read_space!(kb, space)
         # Its notes are records; its templates and the folders it is told to skip are not read.
-        @test run.added == 3 && first.(K.vault_files(K.vault_config(K.settings(run))).files) == ["Attachments/plot.png"]
+        @test notes() == 3 && first.(K.vault_files(kb, K.vault_config(kb, space, "Notes")).files) == ["Attachments/plot.png"]
         @test id("Private/Diary.md") === nothing && id("Templates/Paper.md") === nothing
-        t, e, d = id("Reading/Tidal mixing.md"), id("Topics/Estuaries.md"), id("Daily/2026/11/2026-11-09.md")
+        t, e, d = id(tidal), id("Topics/Estuaries.md"), id(daily)
         @test K.paper_row(kb, t).title == "Tidal mixing" && K.paper_row(kb, e).title == "Estuaries"
         @test K.record_row(kb, d).happened == "2026-11-09"                                    # a daily note's day, from its path
+        # Ada's alone: her notes, and the paper her note brings in, which the group does not have.
+        @test all(i -> K.document_holders(kb, i) == [ada] && K.scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (i,)) == "private",
+                  [t, e, d, "2401.00001"])
         # A paper note brings its paper in, and its record refers to it; links are references to the notes' records and papers.
-        @test !ismissing(K.paper_id(kb, "2401.00001")) && only(K.mentions(kb, "2401.00001")).source == "obsidian"
+        @test only(K.mentions(kb, "2401.00001")).source == "obsidian"
         @test occursin("as @[estuaries](record:$e) show", text(t)) && occursin("A note on @[Tidal mixing](paper:2401.00001).", text(t))
         @test occursin("- see also: @[Estuaries](record:$e)", text(t)) && occursin("- tags: reading", text(t))
         @test occursin("![A plot](img-1)", text(t)) && length(K.record_document(kb, t)["figures"]) == 1
@@ -1450,31 +1465,79 @@ end
         @test [l.name for l in K.document_layers(kb, t, layers)] == ["text"]
         # Agents are told it is a person's own note, not a record of the group's work.
         @test occursin("$t is a person's own note, from ", K.record_note(kb, t))
-        # Given its reference, and nothing else of it changed; Zemi's own writing is not read as an edit.
-        after = read(tidal, String)
+        # Given its reference in the library's copy, and nothing else of it changed; Zemi's own writing is not read as an edit.
+        after = note(tidal)
         @test occursin("\nzemi: \"2401.00001\"\n", after) && join(filter(l -> !startswith(l, "zemi"), split(after, '\n')), '\n') == before
         @test K.record_row(kb, t).happened == "2020-01-01"                    # dated as before Zemi wrote into it
-        run = K.run_source!(kb, s)
-        @test (run.added, run.changed, run.removed) == (0, 0, 0)
+        shas() = Dict(r.doc_id => r.content_sha for r in K.query(kb, "SELECT p.doc_id, x.content_sha FROM records x JOIN papers p ON p.id = x.paper_id"))
+        was = shas()
+        K.read_space!(kb, space)
+        @test shas() == was && note(tidal) == after
         # Once the paper's record is known, the properties the note leaves empty are filled; one it does not use is not added.
         K.execute!(kb, "UPDATE papers SET title = 'On tidal mixing', authors = '[\"Ada Lovelace\"]' WHERE doc_id = '2401.00001'")
-        K.run_source!(kb, s)
-        props = K.note_properties(K.split_frontmatter(read(tidal, String)).yaml)
+        K.read_space!(kb, space)
+        props = K.note_properties(K.split_frontmatter(note(tidal)).yaml)
         @test props["authors"] == ["Ada Lovelace"] && !haskey(props, "title") && props["zemi"] == "2401.00001"
+        # Not over a version changed meanwhile: the person's edit stands, and is read in the next run.
+        @test_throws "has changed" K.put_library_file!(kb, space, "Notes/$tidal", Vector{UInt8}("x"); base = "0"^64)
         # A note moved keeps its record; one deleted is removed.
-        mkpath(joinpath(vault, "Places")); mv(joinpath(vault, "Topics", "Estuaries.md"), joinpath(vault, "Places", "Estuaries.md"))
-        rm(daily)
-        run = K.run_source!(kb, s)
+        mk("Places/Estuaries.md", note("Topics/Estuaries.md"))
+        gone("Topics/Estuaries.md")
+        gone(daily)
+        K.read_space!(kb, space)
         @test id("Places/Estuaries.md") == e && id("Topics/Estuaries.md") === nothing
-        @test run.removed == 1 && id("Daily/2026/11/2026-11-09.md") === nothing && ismissing(K.paper_id(kb, d))
+        @test id(daily) === nothing && ismissing(K.paper_id(kb, d))
         # A note naming another paper: the notes linking to it follow.
-        write(tidal, replace(read(tidal, String), "arxiv: \"2401.00001\"" => "arxiv: \"2401.00002\""))
-        K.run_source!(kb, s)
+        mk(tidal, replace(note(tidal), "arxiv: \"2401.00001\"" => "arxiv: \"2401.00002\""))
+        K.read_space!(kb, space)
         @test occursin("see @[Tidal mixing](paper:2401.00002)", text(e))
-        # Forgotten, its records and what it knew of the notes go; run again, the vault comes back.
-        @test K.forget_source!(kb, "obsidian") == 2 && isempty(K.load_vault_index(kb))
-        @test K.run_source!(kb, s).added == 2
+        # A vault gone from the space takes its notes' records with it.
+        gone(".obsidian/templates.json"); gone(".obsidian/daily-notes.json")
+        K.read_space!(kb, space)
+        @test notes() == 0 && isempty(K.load_vault_index(kb, K.VaultConfig(; space, root = "Notes")))
+        # The spaces read as the service starts: those with files, and those read before.
+        @test space in K.library_spaces(kb)
     finally
+        K.READ_PUT[] = true
+        close(kb)
+    end
+end
+
+@zset "PDFs in a library" begin
+    dir = mktempdir()
+    pdf(name, title) = (write(joinpath(dir, "$name.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 24 Tf 72 700 Td ($title) Tj ET\n");
+                        run(`mutool create -o $(joinpath(dir, "$name.pdf")) $(joinpath(dir, "$name.txt"))`); read(joinpath(dir, "$name.pdf")))
+    kb = open_kb(temp_config(layers = Layer[]))
+    user(email) = Int(K.scalar(kb, "INSERT INTO users (email, name, created_at) VALUES (?, '', ?) RETURNING id", (email, K.now_iso())))
+    ada, bea = user("ada@x.org"), user("bea@x.org")
+    saved = K.UPLOAD_LOOKUP[]
+    K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
+    K.READ_PUT[] = false
+    try
+        K.put_library_file!(kb, "people/$ada", "Papers/Sediment budgets.pdf", pdf("a", "Sediment budgets of estuaries"))
+        K.read_space!(kb, "people/$ada")
+        id = K.load_library_state(kb, "people/$ada")["pdfs"]["Papers/Sediment budgets.pdf"]["id"]
+        # A document, Ada's alone, read like any other.
+        @test K.document_holders(kb, id) == [ada] && K.scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,)) == "private"
+        @test only(K.mentions(kb, id)).source == "library"
+        # The same file in Bea's library is the same document, held for both; gone from Ada's, it is Bea's alone.
+        K.put_library_file!(kb, "people/$bea", "x.pdf", pdf("a", "Sediment budgets of estuaries"))
+        K.read_space!(kb, "people/$bea")
+        @test K.document_holders(kb, id) == sort([ada, bea])
+        K.delete_library_file!(kb, "people/$ada", "Papers/Sediment budgets.pdf")
+        K.read_space!(kb, "people/$ada")
+        @test K.document_holders(kb, id) == [bea]
+        # Gone from everyone's, a private document is removed.
+        K.delete_library_file!(kb, "people/$bea", "x.pdf")
+        K.read_space!(kb, "people/$bea")
+        @test ismissing(K.paper_id(kb, id))
+        # Queued, a space is read by a job of its own.
+        K.put_library_file!(kb, "people/$ada", "Again.pdf", pdf("b", "Tides and mixing"))
+        job = K.queue_library!(kb, ["people/$ada"])
+        wait(job.done)
+        @test job.status == :done && haskey(K.load_library_state(kb, "people/$ada")["pdfs"], "Again.pdf")
+    finally
+        K.UPLOAD_LOOKUP[] = saved
         K.READ_PUT[] = true
         close(kb)
     end
