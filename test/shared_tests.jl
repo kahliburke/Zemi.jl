@@ -2098,6 +2098,7 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     r = K.sync_folder!(remote, dir, "Notes", state)
     paths() = sort([f.path for f in K.library_files(kb, "people/$ada")])
     @test r.up == 3 && paths() == ["Notes/.obsidian/app.json", "Notes/.zemi.toml", "Notes/Reading/Tidal mixing.md"]
+    @test sort(collect(keys(K.folder_files(dir; skip = ["Reading"])))) == [".obsidian/app.json", ".zemi.toml"]   # told to skip it
     K.READ_PUT[] = false
     try
         K.read_space!(kb, "people/$ada")

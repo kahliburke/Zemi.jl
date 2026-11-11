@@ -233,6 +233,21 @@ Only the service reads the store; people reach their own space through the API (
 permission `library`). The store is kept apart from the dataset's, which others read: one that
 overlaps it is refused.
 
+**`zemi connect`** keeps a folder on your machine in step with your library, an Obsidian vault say:
+
+```sh
+zemi connect https://kb.example.org ~/Documents/Obsidian/Notes --skip Private
+zemi connect local ~/Documents/Obsidian/Notes      # the knowledge base run on this machine
+zemi connect --install                             # keep it in step from every login on
+```
+
+The first time, it opens your browser to sign in and approve it: it gets a token for your library and
+nothing else, which you can revoke under Your account, Tokens. The folder is kept as `Notes/` in your
+library (`--name` names it otherwise). A file changed on one side is copied to the other; changed on
+both, your machine's stands. Hidden files stay on your machine, but for a vault's settings the
+knowledge base reads, and so do the folders `--skip` names. `zemi connect` with no arguments keeps
+every folder in step until stopped, `--once` once.
+
 **An Obsidian vault** in a library (a folder holding `.obsidian`) is read as notes. Each note is a
 record: its title the `title` property, else its first heading, else its file's name; its date a date
 property, else a daily note's day (by the vault's daily notes' folder and format), else when its file

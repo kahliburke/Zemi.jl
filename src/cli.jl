@@ -21,11 +21,11 @@ const CLI_HELP = """
     zemi publish                         publish this knowledge base's stream of the dataset
     zemi pull                            import the dataset's streams
     zemi bib [FILE]                      every paper and upload as BibTeX, to FILE or the terminal
-    zemi connect SITE FOLDER [--name NAME]
+    zemi connect SITE FOLDER [--name NAME] [--skip SUBFOLDER]...
                                          keep FOLDER (an Obsidian vault, say) in step with your library at SITE,
                                          signing in there in the browser (SITE `local`: the knowledge base run
-                                         here); then `zemi connect` keeps every such folder in step until
-                                         stopped, --once once, --install at every login
+                                         here), its SUBFOLDERs never sent; then `zemi connect` keeps every such
+                                         folder in step until stopped, --once once, --install at every login
     zemi token create NAME --out FILE [--write]
                                          issue NAME a key to the dataset's bucket, saved to FILE (read-only,
                                          or read and write with --write)

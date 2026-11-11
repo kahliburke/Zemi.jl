@@ -8,11 +8,11 @@
 # syncs both ways: a file changed on one side only is copied to the other; changed on both, this
 # machine's stands (what Zemi writes, it writes again). Each change is made over the version both last
 # agreed on (`?base=`), so neither side's is lost to the other's. Folders and hidden files are left
-# out but for a vault's settings the knowledge base reads, and the folders a vault's `.zemi.toml`
-# says to skip never leave this machine.
+# out but for a vault's settings the knowledge base reads, and the folders a vault's `.zemi.toml` says
+# to skip, or that `zemi connect` is told to (`--skip`), never leave this machine.
 
-"Where `zemi connect` keeps the folders it syncs and the knowledge base they go to."
-connect_config_path() = joinpath(dirname(default_config_path()), "connect.toml")
+"Where `zemi connect` keeps the folders it syncs and the knowledge base they go to: beside the config (`ZEMI_CONFIG`'s, given)."
+connect_config_path() = joinpath(dirname(config_path()), "connect.toml")
 
 "Where it keeps what it knows of each folder, and its sign-in."
 connect_dir() = joinpath(xdg_home("XDG_DATA_HOME", ".local/share"), "zemi", "connect")
@@ -41,7 +41,7 @@ function library_request(r::HTTPLibrary, method, path; body = UInt8[], query = P
           (isempty(query) ? "" : "?" * HTTP.escapeuri(query))
     for attempt in 1:2
         resp = HTTP.request(method, url, ["Authorization" => "Bearer " * r.token()], body; status_exception = false, retry = false,
-                            connect_timeout = 20, readtimeout = 300)
+                            connect_timeout = 20, read_idle_timeout = 300)
         resp.status == 401 && attempt == 1 && (r.renew(); continue)
         resp.status < 300 && return resp.body
         msg = try String(get(JSON.parse(String(resp.body)), "error", "")) catch; "" end
@@ -59,19 +59,19 @@ remove_file!(r::HTTPLibrary, path; base) = library_request(r, "DELETE", path; qu
 # ── Syncing a folder ──────────────────────────────────────────────────────────────────────────────
 
 """
-    folder_files(dir) -> Dict{String,String}
+    folder_files(dir; skip = []) -> Dict{String,String}
 
 The files of folder `dir` kept in step, by their place in it (with `/`, in Unicode's composed form):
 every file but hidden ones and those under hidden folders, except a vault's settings
-(`CONNECT_HIDDEN`), and but those in the folders its `.zemi.toml` says to `skip`.
+(`CONNECT_HIDDEN`), and but those in the folders `skip` names or its `.zemi.toml` says to `skip`.
 """
-function folder_files(dir::AbstractString)
-    skip = String[]
+function folder_files(dir::AbstractString; skip = String[])
+    skip = vault_path.(String.(skip))
     zt = joinpath(dir, ".zemi.toml")
     if isfile(zt)
         s = try TOML.parsefile(zt) catch; Dict() end
         v = get(s, "skip", String[])
-        skip = vault_path.(String[string(x) for x in (v isa AbstractVector ? v : [v])])
+        append!(skip, vault_path.(String[string(x) for x in (v isa AbstractVector ? v : [v])]))
     end
     out = Dict{String,String}()
     for (root, dirs, files) in walkdir(dir)
@@ -87,21 +87,27 @@ function folder_files(dir::AbstractString)
     return out
 end
 
-"What is known of a folder: each file's hash as both sides last agreed on it, and its time and size here when hashed."
-folder_state_path(site::AbstractString, dir::AbstractString) = joinpath(connect_dir(), bytes2hex(sha256("$site|$dir"))[1:16] * ".json")
+"""
+What is known of a folder: each file's hash as both sides last agreed on it, and its time and size
+here when hashed. Kept for the folder and where it goes: the site, or the knowledge base run here by its config.
+"""
+folder_state_path(site::AbstractString, dir::AbstractString) =
+    joinpath(connect_dir(), bytes2hex(sha256("$(site == "local" ? "local:" * abspath(config_path()) : site)|$dir"))[1:16] * ".json")
 
 """
-    sync_folder!(remote, dir, name, state) -> NamedTuple
+    sync_folder!(remote, dir, name, state; skip = []) -> NamedTuple
 
-Bring folder `dir` and `<name>/` in library `remote` in step (see connect.jl), `state` what is known of
-them (see [`folder_state_path`](@ref)), changed in place. Returns how many files went each way,
+Bring folder `dir` (but for the folders `skip` names) and `<name>/` in library `remote` in step (see
+connect.jl), `state` what is known of them (see [`folder_state_path`](@ref)), changed in place. Returns how many files went each way,
 were removed on each side, and were left for the next time (`waiting`: changed meanwhile, or the
 library full).
 """
-function sync_folder!(remote::LibraryRemote, dir::AbstractString, name::AbstractString, state::AbstractDict)
+function sync_folder!(remote::LibraryRemote, dir::AbstractString, name::AbstractString, state::AbstractDict; skip = String[])
     prefix = name * "/"
+    left_out(p) = any(d -> in_folder(p, d), vault_path.(String.(skip)))
     there = Dict(f["path"][ncodeunits(prefix)+1:end] => f for f in list_files(remote) if startswith(f["path"], prefix))
-    here = folder_files(dir)
+    filter!(((p, _),) -> !left_out(p), there)
+    here = folder_files(dir; skip)
     agreed = get!(state, "agreed", Dict{String,Any}())
     seen = get!(state, "seen", Dict{String,Any}())
     n = (; up = Ref(0), down = Ref(0), removed_here = Ref(0), removed_there = Ref(0), waiting = Ref(0), full = Ref(false))
@@ -286,7 +292,7 @@ function connect_once(; quiet::Bool = false)
         statefile = folder_state_path(site, dir)
         state = isfile(statefile) ? Dict{String,Any}(JSON.parsefile(statefile)) : Dict{String,Any}()
         r = try
-            sync_folder!(remote, dir, name, state)
+            sync_folder!(remote, dir, name, state; skip = get(f, "skip", String[]))
         catch e
             e isa InterruptException && rethrow()
             say(:warn, "$name could not be kept in step", failure_message(e))
@@ -311,14 +317,16 @@ const CONNECT_EVERY = 10
     connect_cli(args)
 
 `zemi connect`: with a site and a folder, keep that folder in step with one's library there (signing
-in first); `--name NAME` names it there. With no arguments, keep every folder in step until stopped;
-`--once`, once; `--install`, at every login, in the background.
+in first); `--name NAME` names it there, and each `--skip FOLDER` is a folder of it never sent. With
+no arguments, keep every folder in step until stopped; `--once`, once; `--install`, at every login,
+in the background.
 """
 function connect_cli(args::AbstractVector{<:AbstractString})
     flags = filter(startswith("--"), args)
-    i = findfirst(==("--name"), args)
-    name = i === nothing || i == length(args) ? nothing : args[i+1]
-    plain = [a for (j, a) in enumerate(args) if !startswith(a, "--") && (i === nothing || j != i + 1)]
+    valued = Set(j + 1 for (j, a) in enumerate(args) if a in ("--name", "--skip") && j < length(args))
+    given(flag) = [args[j+1] for (j, a) in enumerate(args) if a == flag && j < length(args)]
+    name = (n = given("--name"); isempty(n) ? nothing : last(n))
+    plain = [a for (j, a) in enumerate(args) if !startswith(a, "--") && !(j in valued)]
     if length(plain) == 2
         site = plain[1] == "local" ? "local" : site_address(plain[1])
         dir = abspath(expanduser(plain[2]))
@@ -329,7 +337,7 @@ function connect_cli(args::AbstractVector{<:AbstractString})
             save_connect_auth!(sign_in_library(site))
         end
         folders = [f for f in get(c, "folders", Any[]) if abspath(expanduser(f["path"])) != dir]
-        push!(folders, Dict("path" => contractuser(dir), "name" => something(name, basename(dir))))
+        push!(folders, Dict{String,Any}("path" => contractuser(dir), "name" => something(name, basename(dir)), "skip" => given("--skip")))
         save_connect_config!(Dict("site" => site, "folders" => folders))
         connect_once()
         say(:info, "Keep it in step", "`zemi connect` until stopped, or `zemi connect --install` to start it at every login")
