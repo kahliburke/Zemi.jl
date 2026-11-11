@@ -741,7 +741,7 @@ function showMoving(ref_: string, status?: string) {
 const statusOf = computed(() => new Map((board.value?.tasks ?? []).map(t => [t.ref, t.status])))
 const approvedAlone = (t: { parent: string; status: string }) => !!t.parent && t.status !== 'proposed' && statusOf.value.get(t.parent) === 'proposed'
 // Tasks have cards; their subtasks are listed in them (when asked for), and the open task always has
-// its own card, in its column.
+// its own card, in its column, listing its own subtasks too.
 // Each task's subtasks, read once per board: the board is drawn again on every move of a dragged
 // card, so what is worked out from the tree is computed when the board changes, not when it is drawn.
 const children = computed(() => {
@@ -1586,7 +1586,7 @@ function keepRecordsOpen(open: boolean) {
               <span v-if="t.assignee">@{{ personLabel(t.assignee) }}</span>
               <span v-if="t.parent">in {{ t.parent }}</span>
             </div>
-            <ul v-if="(subtasks || only) && t.subtasks && !t.parent && cardSubs(t.ref).length" class="kbp-card-subs">
+            <ul v-if="(subtasks || only) && t.subtasks && cardSubs(t.ref).length" class="kbp-card-subs">
               <li v-for="n in cardSubs(t.ref)" :key="n.t.ref" :style="{ paddingLeft: `${n.d * 0.9}rem` }"
                   :class="{ done: n.t.status === 'done', open: open?.ref === n.t.ref, match: only && n.t.status === only }"
                   :draggable="editable" @dragstart.stop="startDrag(n.t.ref)" @dragend="dragEnded" @click.stop="show(n.t)">
