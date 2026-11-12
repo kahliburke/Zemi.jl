@@ -3021,7 +3021,7 @@ end
     close(kb)
 end
 
-@zset "codebases from their repositories" begin
+@zset "codebases from their folders and repositories" begin
     @test K.clone_url("git@github.com:ada/demo.jl.git") == K.clone_url("https://ada@github.com/ada/demo.jl/") ==
           K.clone_url("https://github.com/ada/demo.jl") == "https://github.com/ada/demo.jl.git"
     @test K.github_repo("https://github.com/ada/demo.jl") == ("ada", "demo.jl") && K.github_repo("/srv/demo.git") === nothing
@@ -3078,7 +3078,7 @@ end
         K.record_remotes!(kb)
         @test K.scalar(kb, "SELECT remote FROM papers WHERE doc_id = ?", (local_id,)) == "https://github.com/ada/local.git"
         # Added from the Manage page, by its repository's address or a folder here: one by its address is
-        # read from a clone of it, fetched with the others; a folder needs a machine of its own.
+        # read from a clone of it, fetched with the others; a folder is read where it is.
         url_id = K.add_codebase_from!(kb, "file://$(dirname(origin))/$(basename(origin))")
         @test K.codebase_dir(kb, url_id) == K.clone_dir(kb.config, url_id)
         @test occursin("not fetched", K.codebase_problem(kb, url_id))
@@ -3086,7 +3086,24 @@ end
         @test K.codebase_dir(kb, K.add_codebase_from!(kb, origin)) == origin
         @test_throws "No folder" K.add_codebase_from!(kb, joinpath(origin, "nothing-here"))
         K.SHARED_MODE[] = true
-        @test_throws "from their repositories" K.add_codebase_from!(kb, origin)
+        # In a shared service, a folder of its machine is added by someone who may change its
+        # configuration, and read where it is, not fetched; a project may be linked to it by its path.
+        curator = K.Caller(nothing, "Bea", "", Set(["read", "paper.add", "tasks.edit"]), :token, nothing)
+        folder = mktempdir()
+        write(joinpath(folder, "c.jl"), "h() = 3\n")
+        @test_throws "config.edit" K.add_codebase_from!(kb, folder; caller = curator)
+        @test_throws "config.edit" K.update_project!(kb, "RP"; codebase = folder, by = me, caller = curator)
+        folder_id = K.add_codebase_from!(kb, folder)
+        @test K.codebase_dir(kb, folder_id) == folder && K.parse_code!(kb, folder_id)
+        @test K.fetch_codebases!(kb) == 0                  # each is read from its folder (that one too, added from it since)
+        K.update_project!(kb, "OX"; codebase = folder * "/", by = me, caller = curator)   # known: linked by its path
+        @test only(p for p in K.projects(kb) if p.key == "OX").codebase == folder_id
+        # One whose folder is on another machine is read from its repository's clone.
+        @test K.codebase_dir(kb, local_id) == origin
+        K.execute!(kb, "UPDATE papers SET source_path = '/elsewhere/local', remote = ? WHERE doc_id = ?", ("file://$origin", local_id))
+        @test K.codebase_dir(kb, local_id) == K.clone_dir(kb.config, local_id)
+        K.execute!(kb, "UPDATE papers SET remote = NULL WHERE doc_id = ?", (local_id,))
+        @test occursin("/elsewhere/local is gone", K.codebase_problem(kb, local_id))
         # A shared service clones from https:// or ssh only: not from its own disk.
         K.LOCAL_REPOSITORIES[] = false
         @test_throws "https:// or ssh" K.add_codebase_from!(kb, "file://$origin")

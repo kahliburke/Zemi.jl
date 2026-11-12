@@ -156,6 +156,11 @@ with the **pen** (the toolbar in the window's corner, or `P`); what they draw fa
 </figure>
 ```
 
+A project's codebase is linked from the code line under its context: one the knowledge base has, or
+another by its repository's address or a folder's path. A folder is read where it is, on the
+machine the knowledge base runs on; in a shared service, only someone who may change its
+configuration adds one, since its readers see what is read from it.
+
 When a project has a codebase, a commit naming a task is recorded on it: on a trailer line
 (`Tasks: RB-12`, or `Task:`, `Refs:`) or after `Part of`, as its work; anywhere else, as a mention.
 A new commit that says `Fixes`, `Closes`, `Resolves` or `Implements RB-12` also moves the task to

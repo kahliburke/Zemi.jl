@@ -19,6 +19,8 @@
 - **Sources** can remove a record whose item is gone (`Zemi.remove!`), follow one that moved
   (`Zemi.rekey!`), and have their records embedded for searching without summarizing them
   (`summarized = false`), and say what their records are (`about`), as agents are told.
+- **A project's codebase** can be linked by a folder's path, or a repository's address, from its board.
+  A shared service reads a folder of its machine in place; only someone with `config.edit` adds one.
 
 ## 0.3.2 (2026-11-10)
 

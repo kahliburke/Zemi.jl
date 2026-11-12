@@ -472,11 +472,12 @@ tool!("project_create", project_create_tool; need = "tasks.edit")
 """
     project_codebase(project::String, codebase::String) -> String
 
-Link project `project` to `codebase` (its id, `code-…`, as `papers` lists codebases, or its
-repository's address, `https://github.com/owner/repo`), so agents working in that codebase's
-directory find the project with `projects(path=…)`, and its commits are recorded against the
-project's tasks. A shared service reads a codebase from its repository, so give the repository
-for one it doesn't know; adding a repository it doesn't have takes paper.add. `"none"` unlinks it.
+Link project `project` to `codebase` (its id, `code-…`, as `papers` lists codebases, its
+repository's address, `https://github.com/owner/repo`, or a folder on the service's machine,
+`~/code/project`), so agents working in that codebase's directory find the project with
+`projects(path=…)`, and its commits are recorded against the project's tasks. Adding one the
+knowledge base doesn't have takes paper.add, and a folder, in a shared service, config.edit.
+`"none"` unlinks it.
 """
 project_codebase_tool(project::String, codebase::String)::String = refusing() do
     tool_needs(project, MAINTAIN)

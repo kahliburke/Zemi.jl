@@ -284,7 +284,7 @@ route!("GET", "/api/documents"; need = "library") do c
 end
 
 # Add a document and start reading it: a PDF as the body (`?name=…&title=…&by=…`), or JSON with
-# `arxiv` (ids or URLs) or `codebase` (a repository or folder). With `"read": false` papers are only
+# `arxiv` (ids or URLs) or `codebase` (a repository, or a folder on this machine). With `"read": false` papers are only
 # recorded, to be read in full later; `source` is how they came (see ARRIVALS), `by` who added them.
 # A resource's PDF, uploaded to read it in full (see `promote_resource!`): the paper it becomes, being read.
 route!("POST", "/api/resources/:id/pdf"; need = "paper.add") do c
@@ -322,7 +322,7 @@ route!("POST", "/api/documents"; need = "paper.add") do c
     # A document dropped here is added only `anyway`, which restores it.
     anyway = get(b, "anyway", false) === true
     if !isempty(strip(String(get(b, "codebase", ""))))
-        id = add_codebase_from!(kb, String(b["codebase"]); by = adder(get(b, "by", nothing), caller), anyway)
+        id = add_codebase_from!(kb, String(b["codebase"]); by = adder(get(b, "by", nothing), caller), anyway, caller)
         job = start_job("ingest $id"; ids = [id], changes = changes_stamp(kb.config)) do job
             # One read from a clone of its repository is fetched first.
             if codebase_dir(kb, id) == clone_dir(kb.config, id)

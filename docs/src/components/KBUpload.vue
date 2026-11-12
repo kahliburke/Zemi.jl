@@ -1,8 +1,9 @@
 <!--
   Adding documents from the site: PDFs dropped or chosen here, arXiv ids and links, or a codebase by
-  its repository's address (or, run for one person, a folder on this machine). Each goes through the
-  whole pipeline (parse, summarize, embed) as a job of the knowledge base API. With `codebases`, only
-  a codebase, as on the Codebases page; with `manage` too, a link to managing those there are.
+  its repository's address or a folder on the service's machine (in a shared service, a folder by
+  someone who may change its configuration). Each goes through the whole pipeline (parse, summarize,
+  embed) as a job of the knowledge base API. With `codebases`, only a codebase, as on the Codebases
+  page; with `manage` too, a link to managing those there are.
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
@@ -88,7 +89,7 @@ async function add(anyway = false) {
           <textarea v-model="arxiv" class="kb-field kbu-input" rows="2" placeholder="arXiv ids or links"></textarea>
         </template>
         <input v-model="codebase" class="kb-field kbu-input" @keydown.enter="add()"
-               :placeholder="shared ? 'A codebase: its repository, https://github.com/owner/repo' : 'A codebase: its repository (https://github.com/owner/repo) or a folder here'" />
+               :placeholder="shared && !can('config.edit') ? 'A codebase: its repository, https://github.com/owner/repo' : 'A codebase: its repository (https://github.com/owner/repo) or a folder here'" />
         <div class="kbu-actions">
           <button type="button" class="kb-primary kbu-button" :disabled="busy || (!files.length && !arxiv.trim() && !codebase.trim())" @click="add()">
             {{ busy ? 'Adding…' : 'Add' }}</button>

@@ -38,10 +38,12 @@ end
 """
     codebase_id(kb, codebase; add = true, caller = local_caller())
 
-The id of codebase `codebase` (`code-…`, or a repository's address, whose codebase is recorded if new);
-`missing` when it is empty or `none`, and an error for anything else. A repository the knowledge base
-does not have is added only with `add`: the service clones it with its own credentials and shows it
-to its readers, so adding one takes what adding a paper does (`paper.add`). Linking a project to a
+The id of codebase `codebase` (`code-…`, a repository's address, or a folder on this machine, whose
+codebase is recorded if new); `missing` when it is empty or `none`, and an error for anything else. A
+repository or folder the knowledge base does not have is added only with `add`: the service reads it
+with its own credentials and shows it to its readers, so adding one takes what adding a paper does
+(`paper.add`), and a folder, in a shared service, what changing its configuration does (see
+[`add_codebase_from!`](@ref)). Linking a project to a
 codebase shows it to the project's members, so one `caller` may not see is none to them, unless
 they decide who sees codebases (`paper.manage`).
 """
@@ -55,8 +57,15 @@ function codebase_id(kb::KB, codebase::AbstractString; add::Bool = true, caller:
         add || not_permitted("Not permitted: a repository the knowledge base does not have yet is added by someone with paper.add")
         return paper_id(kb, link_repository!(kb, codebase))
     end
+    if is_folder(codebase)
+        root = (r = abspath(expanduser(codebase)); r == "/" ? r : String(rstrip(r, '/')))
+        known = query(kb, "SELECT id, doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND source_path = ?", (root,))
+        isempty(known) || (linkable(first(known).doc_id); return Int(first(known).id))
+        add || not_permitted("Not permitted: a folder the knowledge base does not have yet is added by someone with paper.add")
+        return paper_id(kb, add_codebase_from!(kb, root; caller))
+    end
     id = is_codebase(codebase) ? paper_id(kb, codebase) : missing
-    ismissing(id) && not_found("No codebase $codebase in the knowledge base (a codebase's id begins code-)")
+    ismissing(id) && not_found("No codebase $codebase in the knowledge base (a codebase's id begins code-; give a repository's address or a folder's path for a new one)")
     linkable(codebase)
     return id
 end

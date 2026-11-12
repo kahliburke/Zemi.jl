@@ -1,8 +1,10 @@
-# Codebases from their repositories. A codebase records the repository it comes from (`remote`: the
-# `origin` of the directory it was added from, or the repository it was linked to). A shared service
-# reads no directory of the machine that added a codebase: it keeps a clone of each repository under
-# its data directory, fetched before commits are read, and reads files and commits from there.
-# Private repositories on GitHub are read as a GitHub App (`[shared.github_app]`) installed on them.
+# Codebases from their folders or repositories. A codebase records the folder it was added from
+# (`source_path`) and the repository it comes from (`remote`: the folder's `origin`, or the repository
+# it was linked to). One added from a folder is read there, where the folder is on this machine; else
+# from a clone of its repository the service keeps under its data directory, fetched before commits
+# are read. In a shared service a folder of its machine is added only by someone who may change its
+# configuration, since every reader sees what is read from it. Private repositories on GitHub are read
+# as a GitHub App (`[shared.github_app]`) installed on them.
 
 """
     clone_url(url) -> String
@@ -25,6 +27,9 @@ end
 "Whether `s` names a repository rather than a codebase: an address with a scheme, or a `git@` one."
 is_repository(s::AbstractString) = occursin(r"^[a-z][a-z0-9+.-]*://|^git@"i, strip(s))
 
+"Whether `s` names a folder rather than a codebase or repository: a path from the root, home or here."
+is_folder(s::AbstractString) = occursin(r"^(/|~(/|$)|\.\.?(/|$))", strip(s))
+
 "The `origin` remote of the repository at `root`, as it is configured, or `\"\"` for none."
 function git_origin(root::AbstractString)
     (isempty(root) || !isdir(root)) && return ""
@@ -40,31 +45,34 @@ clone_dir(c::Config, id::AbstractString) = joinpath(c.data_dir, "codebases", id)
 """
     codebase_dir(kb, id) -> String
 
-The directory codebase `id` is read from: in shared mode the service's clone of its repository
-(`""` when it records none); run for one person, the folder it was added from, or for one added by
-its repository's address, this knowledge base's clone of it.
+The directory codebase `id` is read from: the folder it was added from; in a shared service, for one
+whose folder is not on this machine (added on another), the service's clone of its repository; for
+one added by its repository's address, the clone (`""` when it records no repository).
 """
 function codebase_dir(kb::KB, id::AbstractString)
     rows = query(kb, "SELECT source_path, remote FROM papers WHERE doc_id = ?", (id,))
     isempty(rows) && return ""
     r = first(rows)
     clone = ismissing(r.remote) ? "" : clone_dir(kb.config, id)
-    SHARED_MODE[] && return clone
-    return ismissing(r.source_path) ? clone : r.source_path
+    ismissing(r.source_path) && return clone
+    SHARED_MODE[] && !isdir(r.source_path) && !isempty(clone) && return clone
+    return r.source_path
 end
 
 """
-    add_codebase_from!(kb, what; by = nothing, anyway = false) -> String
+    add_codebase_from!(kb, what; by = nothing, anyway = false, caller = local_caller()) -> String
 
 A codebase from `what`: a repository's address (`https://…`, `ssh://…`, `git@host:…`, `file://…`),
-recorded with it and read from this knowledge base's clone of it (see [`fetch_codebase!`](@ref)); or,
-run for one person, a folder on this machine. Returns its id. One a person dropped is refused, unless
+recorded with it and read from this knowledge base's clone of it (see [`fetch_codebase!`](@ref)); or a
+folder on this machine, read where it is, which in a shared service `caller` adds only if they may
+change its configuration (`config.edit`). Returns its id. One a person dropped is refused, unless
 `anyway` (see [`link_repository!`](@ref)).
 """
-function add_codebase_from!(kb::KB, what::AbstractString; by = nothing, anyway::Bool = false)
+function add_codebase_from!(kb::KB, what::AbstractString; by = nothing, anyway::Bool = false, caller::Caller = local_caller())
     w = strip(what)
     occursin(r"^[a-z]+://|^[\w.-]+@[\w.-]+:", w) && return link_repository!(kb, w; by, anyway)
-    SHARED_MODE[] && error("A shared service reads codebases from their repositories: give the repository's address")
+    SHARED_MODE[] && !can(caller, "config.edit") &&
+        not_permitted("Not permitted (config.edit): a folder on the service's machine is added by someone who changes its configuration; give the repository's address")
     root = expanduser(w)
     isdir(root) || error("No folder at $w")
     return add_codebase!(kb, root; by, anyway)
@@ -180,15 +188,14 @@ function fetch_codebase!(kb::KB, id::AbstractString)
 end
 
 """
-Fetch every codebase read from a clone of its repository (see [`fetch_codebase!`](@ref)): in shared
-mode every one that records its repository, run for one person those added by its address. Returns
-how many are up to date.
+Fetch every codebase read from a clone of its repository (see [`fetch_codebase!`](@ref)): those
+added by its address, and in a shared service those whose folder is on another machine. Returns how
+many are up to date.
 """
 function fetch_codebases!(kb::KB)
     record_remotes!(kb)
-    return count(r -> fetch_codebase!(kb, String(r.doc_id)),
-                 query(kb, "SELECT doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND remote IS NOT NULL AND (? = 1 OR source_path IS NULL)",
-                       (Int(SHARED_MODE[]),)))
+    ids = [String(r.doc_id) for r in query(kb, "SELECT doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND remote IS NOT NULL")]
+    return count(id -> fetch_codebase!(kb, id), filter(id -> codebase_dir(kb, id) == clone_dir(kb.config, id), ids))
 end
 
 "Run git with `env` added to its environment, never asking for a password; an error gives what git said."
@@ -200,12 +207,12 @@ function git!(env::AbstractDict, args::Cmd)
 end
 
 """
-Why codebase `id` cannot be read here, for the status: its directory gone, or in shared mode what
-stopped its repository being fetched.
+Why codebase `id` cannot be read here, for the status: its folder gone, or what stopped its
+repository being fetched.
 """
 function codebase_problem(kb::KB, id::AbstractString)
     r = first(query(kb, "SELECT source_path, remote FROM papers WHERE doc_id = ?", (id,)))
-    SHARED_MODE[] || ismissing(r.source_path) || return "its directory $(r.source_path) is gone"
+    !ismissing(r.source_path) && codebase_dir(kb, id) == r.source_path && return "its directory $(r.source_path) is gone"
     ismissing(r.remote) && return "no repository is recorded for it: link one with `project_codebase`"
     return get(FETCH_PROBLEMS, id, "it is not fetched from $(r.remote) yet")
 end

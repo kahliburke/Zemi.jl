@@ -163,14 +163,24 @@ const focusEmpty = computed(() => { const f = focused.value
 const askedOf = (t: Asked) => t.to_whom === 'agents' ? 'the agents' : t.to_whom === 'anyone' ? 'anyone on the project' : personLabel(t.to_person ?? '')
 // The project's codebase: where its code is, which agents working there find it by, and whose
 // commits are recorded against its tasks. A person links it, or changes it.
+// One not yet in the knowledge base is given by its repository's address, or a folder on the
+// service's machine (in a shared service, by someone who may change its configuration).
 const codebases = ref<{ id: string; title: string }[] | null>(null)
 const codeDraft = ref<string | null>(null)
+const NEW_CODEBASE = '+new'
+const codeNew = ref('')
+const addsCodebase = computed(() => can('paper.add'))
+const codeNewHint = computed(() => !shared.value || can('config.edit')
+  ? 'https://github.com/owner/repo, or a folder: ~/code/project' : 'https://github.com/owner/repo')
 async function editCodebase() {
   codeDraft.value = board.value?.codebase?.id ?? 'none'
+  codeNew.value = ''
   if (!codebases.value) try { codebases.value = await getJSON('/api/tasks/codebases') } catch (e: any) { error.value = e.message }
 }
 async function saveCodebase() {
-  try { await post(`/api/projects/${key.value}`, JSON.stringify({ codebase: codeDraft.value })); codeDraft.value = null; await loadBoard() }
+  const codebase = codeDraft.value === NEW_CODEBASE ? codeNew.value.trim() : codeDraft.value
+  if (!codebase) return
+  try { await post(`/api/projects/${key.value}`, JSON.stringify({ codebase })); codeDraft.value = null; codebases.value = null; await loadBoard() }
   catch (e: any) { error.value = e.message }
 }
 const remoteName = (u: string) => u.replace(/^https:\/\//, '')
@@ -1371,8 +1381,11 @@ function keepRecordsOpen(open: boolean) {
             <select v-model="codeDraft" class="kbp-select" aria-label="Codebase">
               <option value="none">None</option>
               <option v-for="c in codebases ?? []" :key="c.id" :value="c.id">{{ c.title }}</option>
+              <option v-if="addsCodebase" :value="NEW_CODEBASE">Another: a repository or folder…</option>
             </select>
-            <button class="kbp-small" @click="saveCodebase">Save</button>
+            <input v-if="codeDraft === NEW_CODEBASE" v-model="codeNew" class="kb-field kbp-code-new" aria-label="A repository's address or a folder"
+                   :placeholder="codeNewHint" @keydown.enter="saveCodebase" />
+            <button class="kbp-small" :disabled="codeDraft === NEW_CODEBASE && !codeNew.trim()" @click="saveCodebase">Save</button>
             <button class="kbp-small" @click="codeDraft = null">Cancel</button>
           </template>
         </div>
@@ -2128,6 +2141,7 @@ form.kbp-add { position: relative; }
 .kbp-edited { font-size: 0.72rem; color: var(--vp-c-text-3); }
 .kbp-codebase { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; margin-top: 0.5rem; font-size: 0.85rem; }
 .kbp-codebase code { font-size: 0.75rem; }
+.kbp-code-new { min-width: 18rem; flex: 1; font-size: 0.85rem; }
 .kbp-records { margin-top: 0.5rem; font-size: 0.85rem; }
 .kbp-records-head { display: flex; gap: 0.5rem; align-items: baseline; cursor: pointer; list-style: none; width: fit-content; }
 .kbp-records-head::-webkit-details-marker { display: none; }
