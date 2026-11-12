@@ -33,6 +33,8 @@ function write_dev_pages!(kb::KB; api::AbstractString, all::Bool = true)
     t0 = time()
     run_make(kb.config, dir, Dict("ZEMI_SITE_BUILD" => joinpath(dir, "build"), "ZEMI_SITE_DOCS" => sources); api)
     link_sources!(docs, md)
+    # What a phone installs the site as, from the development server's origin as the pages are.
+    write(joinpath(md, "public", "manifest.webmanifest"), JSON.json(web_manifest(kb.config)))
     @info "[dev] Pages written in $(duration(time() - t0))"
 end
 
@@ -149,15 +151,19 @@ end
 
 """
 Replace the copies of the checkout's components and theme styles in the pages folder `md` with links
-to them, and link ones added since. Links already in place are left alone.
+to them, and link ones added since. Links already in place are left alone. The service worker is
+linked into the public files, as the service serves it at the site's root and a page registers one
+only from its own origin, which here is the development server's.
 """
 function link_sources!(docs::AbstractString, md::AbstractString)
     pairs = [[joinpath(docs, "src", "components", f) => joinpath(md, "components", f) for f in readdir(joinpath(docs, "src", "components"))];
              [joinpath(docs, "src", ".vitepress", "theme", f) => joinpath(md, ".vitepress", "theme", f)
-              for f in readdir(joinpath(docs, "src", ".vitepress", "theme"))]]
+              for f in readdir(joinpath(docs, "src", ".vitepress", "theme"))];
+             SERVICE_WORKER => joinpath(md, "public", basename(SERVICE_WORKER))]
     for (from, to) in pairs
         isfile(from) || continue
         islink(to) && readlink(to) == from && continue
+        mkpath(dirname(to))
         rm(to; force = true)
         symlink(from, to)
     end

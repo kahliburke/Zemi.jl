@@ -1418,6 +1418,8 @@ end
     K.link_sources!(docs, md)
     @test islink(joinpath(md, "components", "KBX.vue")) && read(joinpath(md, "components", "KBX.vue"), String) == "<template/>"
     @test islink(joinpath(md, ".vitepress", "theme", "overrides.css")) && !islink(joinpath(md, "components", "Theirs.vue"))
+    # The service worker too, among the public files at the root, as a page registers it from its own origin.
+    @test readlink(joinpath(md, "public", "zemi-sw.js")) == K.SERVICE_WORKER
     # Linking again picks up a component added since, and leaves the links in place alone.
     write(joinpath(docs, "src", "components", "KBNew.vue"), "<template/>")
     made = lstat(joinpath(md, "components", "KBX.vue")).ctime
