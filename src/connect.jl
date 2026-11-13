@@ -206,9 +206,9 @@ function sign_in_library(site::AbstractString; open_browser = open_in_browser)
     http = HTTP.serve!("127.0.0.1", port) do req
         uri = HTTP.URI(req.target)
         uri.path == "/callback" || return HTTP.Response(404)
-        isready(got) || put!(got, Dict{String,String}(HTTP.queryparams(uri)))
-        HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"],
-                      "<!doctype html><p style=\"font:16px system-ui;margin:4rem auto;max-width:30rem\">Done: you can close this tab.</p>")
+        back = Dict{String,String}(HTTP.queryparams(uri))
+        isready(got) || put!(got, back)
+        HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"], approval_page(site, back))
     end
     try
         reg = JSON.parse(String(HTTP.post("$site/oauth/register", ["Content-Type" => "application/json"],
@@ -229,6 +229,15 @@ function sign_in_library(site::AbstractString; open_browser = open_in_browser)
     finally
         close(http)
     end
+end
+
+"The page the browser comes back to from approving `zemi connect` at `site`, by what the site sent `back`."
+function approval_page(site::AbstractString, back::AbstractDict)
+    err = get(back, "error", "")
+    isempty(err) && return service_page("zemi connect is approved",
+        "<p>It keeps your folders in step with your library at <b>$(html_escape(site))</b>. You can close this tab.</p>"; icon = false)
+    why = err == "access_denied" ? "You denied it." : "The site refused it: $(html_escape(err))."
+    return service_page("zemi connect is not approved", "<p>$why Run <b>zemi connect</b> again to connect.</p>"; icon = false)
 end
 
 "Open `url` in this machine's browser; say it, where none opens."

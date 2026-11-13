@@ -2079,7 +2079,11 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     @test startswith(location(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P[1:6]; "scope" => "everything"]))), "$back?error=invalid_scope")
     ck = ["Cookie" => "kb_session=$(K.start_session!(kb, ada, sh))"]
     page = String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri(P); headers = ck).body)
-    @test occursin("keep your library in step with a folder", page)
+    @test occursin("keep your library in step with a folder", page) && occursin("prefers-color-scheme:light", page)
+    # What the browser comes back to, approved or not.
+    @test occursin("zemi connect is approved", K.approval_page("https://kb.example.org", Dict("code" => "c", "state" => "s")))
+    @test occursin("You denied it", K.approval_page("https://kb.example.org", Dict("error" => "access_denied")))
+    @test occursin("refused it: invalid_scope", K.approval_page("https://kb.example.org", Dict("error" => "invalid_scope")))
     key = match(r"name=\"form_key\" value=\"([^\"]+)\"", page)[1]
     r = serve("POST", "/oauth/authorize"; headers = [ck; "Content-Type" => "application/x-www-form-urlencoded"],
               body = HTTP.escapeuri([P; ["form_key" => key, "decision" => "allow"]]))

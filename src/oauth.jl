@@ -197,15 +197,9 @@ could do, with Allow and Deny. The request's fields ride along in the form.
 """
 function consent_page(request, who::AbstractString, params::AbstractDict, form_key::AbstractString)
     fields = join(("<input type=\"hidden\" name=\"$(attr_escape(k))\" value=\"$(attr_escape(v))\">" for (k, v) in params), "")
-    return """
-        <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">$ICON_LINK
-        <title>Connect $(html_escape(request.client_name))</title><style>
-        body{font:16px/1.5 system-ui,sans-serif;background:#1b1b1f;color:#dfdfd6;display:grid;place-items:center;min-height:100vh;margin:0}
-        main{max-width:30rem;padding:2rem}h1{font-size:1.4rem}p{color:#98989f}b{color:#dfdfd6}
-        .a{display:flex;gap:.6rem;margin-top:1.5rem}button{flex:1;padding:.7rem 1rem;border-radius:8px;border:0;font:inherit;font-weight:600;cursor:pointer}
-        .y{background:#3dd68c;color:#1b1b1f}.n{background:#2e2e32;color:#dfdfd6}
-        </style></head><body><main>
-        <h1>Connect $(html_escape(request.client_name))</h1>
+    style = """.a{display:flex;gap:.6rem;margin-top:1.5rem}button{flex:1;padding:.7rem 1rem;border-radius:8px;border:0;font:inherit;font-weight:600;cursor:pointer}
+               .y{background:var(--brand);color:var(--bg)}.n{background:var(--muted);color:var(--fg)}"""
+    return service_page("Connect $(request.client_name)", """
         <p>$(request.scope == "library" ?
              "It would keep your library in step with a folder, as <b>$(html_escape(who))</b>: read and write your library's files, and nothing else." :
              "It would act as <b>$(html_escape(who))</b>, with your roles and projects.") It is sent back to
@@ -213,7 +207,7 @@ function consent_page(request, who::AbstractString, params::AbstractDict, form_k
         <p>Revoke it under Your account, Tokens.</p>
         <form method="post" action="/oauth/authorize">$fields<input type="hidden" name="form_key" value="$(attr_escape(form_key))">
         <div class="a"><button class="n" name="decision" value="deny">Deny</button><button class="y" name="decision" value="allow">Allow</button></div>
-        </form></main></body></html>"""
+        </form>"""; style)
 end
 
 """
@@ -252,7 +246,7 @@ function oauth_response(kb::KB, sh::SharedConfig, req::HTTP.Request, parts, para
         request = try authorization_request(kb, fields) catch e
             msg = reason(e)
             msg === nothing && rethrow()
-            return html("<!doctype html><p>$(html_escape(msg)).</p>"; status = 400)
+            return html(service_page("Not connected", "<p>$(html_escape(msg)).</p>"); status = 400)
         end
         isempty(request.error) || return redirect(back_to(request.redirect_uri, "error" => request.error, "state" => request.state))
         session = cookie(req, SESSION_COOKIE)
@@ -260,7 +254,7 @@ function oauth_response(kb::KB, sh::SharedConfig, req::HTTP.Request, parts, para
         caller.via == :session || return redirect("/auth/sign-in?return_to=" * HTTP.escapeuri(req.target))
         # An admin viewing as someone acts for them in nothing that outlasts the view, as tokens do.
         caller.admin === nothing ||
-            return html("<!doctype html><p>Stop viewing as $(html_escape(caller.name)) to connect a client as yourself.</p>"; status = 403)
+            return html(service_page("Not connected", "<p>Stop viewing as $(html_escape(caller.name)) to connect a client as yourself.</p>"); status = 403)
         # The approval comes from the page this service showed this person for this client.
         key = secret_hash("oauth|$session|$(request.client_id)|$(request.redirect_uri)")
         if req.method == "GET"
@@ -268,7 +262,7 @@ function oauth_response(kb::KB, sh::SharedConfig, req::HTTP.Request, parts, para
                                                               "code_challenge_method", "response_type", "scope", "resource"))
             return html(consent_page(request, caller_label(caller), keep, key))
         end
-        get(fields, "form_key", "") == key || return html("<!doctype html><p>This approval did not come from this service's page.</p>"; status = 403)
+        get(fields, "form_key", "") == key || return html(service_page("Not connected", "<p>This approval did not come from this service's page.</p>"); status = 403)
         get(fields, "decision", "") == "allow" ||
             return redirect(back_to(request.redirect_uri, "error" => "access_denied", "state" => request.state))
         return redirect(issue_code!(kb, request, caller.user_id))

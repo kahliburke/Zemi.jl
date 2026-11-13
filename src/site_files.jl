@@ -126,3 +126,19 @@ end
 
 "The head line naming the site's icon, for the service's own pages."
 const ICON_LINK = """<link rel="icon" type="image/png" href="/favicon.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png">"""
+
+"""
+    service_page(title, body; icon = true, style = "") -> String
+
+A page of the service's own, outside the site (approving a client, what came of it): `body` (HTML)
+under `title`, in the site's colors, dark or light as the system is. `icon`: the site's icon, from a
+page the service serves; `style`, more CSS.
+"""
+service_page(title::AbstractString, body::AbstractString; icon::Bool = true, style::AbstractString = "") = """
+    <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">$(icon ? ICON_LINK : "")
+    <title>$(html_escape(title))</title><style>
+    :root{color-scheme:light dark;--bg:#1b1b1f;--fg:#dfdfd6;--soft:#98989f;--muted:#2e2e32;--brand:#3dd68c}
+    @media (prefers-color-scheme:light){:root{--bg:#fff;--fg:#3c3c43;--soft:#67676c;--muted:#f1f1f3;--brand:#18794e}}
+    body{font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--fg);display:grid;place-items:center;min-height:100vh;margin:0}
+    main{max-width:30rem;padding:2rem}h1{font-size:1.4rem}p{color:var(--soft)}b{color:var(--fg)}$style
+    </style></head><body><main><h1>$(html_escape(title))</h1>$body</main></body></html>"""
