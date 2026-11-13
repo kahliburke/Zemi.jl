@@ -10,7 +10,7 @@
 import KBNeedsService from './KBNeedsService.vue'
 import KBTitle from './KBTitle.vue'
 import { ref, computed, onMounted, watch } from 'vue'
-import { mode, status, connect, post, getJSON, jobs, followJobs, finishedJobs, blockers, latest, isStale, can, type Job } from './kbApi'
+import { mode, status, connect, post, getJSON, api, shared, jobs, followJobs, finishedJobs, blockers, latest, isStale, can, type Job } from './kbApi'
 import { kbPage } from './kbLinks'
 import { isCodebase, hasAccess, isResource } from './kbKinds'
 import { byline } from './kbFormat'
@@ -60,6 +60,9 @@ const LIBRARY: Action[] = [
   { name: 'contribute', label: 'Contribute…', help: 'Give the group a version of it, which stays when you leave' },
 ]
 const mine = (ids: string[]) => ids.length > 0 && ids.every(id => docs.value.find(d => d.id === id)?.held)
+// The command that keeps a folder in step with one's library here (see src/connect.jl).
+const connectCommand = computed(() =>
+  `zemi connect ${shared.value ? new URL(api.value || '/', location.href).origin : 'local'} ~/Documents/Notes`)
 const reach = (d: Doc) => d.access === 'private' ? 'private: only you' :
   d.access === 'projects' ? `shared with ${d.projects.length ? d.projects.join(', ') : 'no project yet'}` : 'shared with everyone'
 
@@ -218,10 +221,9 @@ const who = (d: Doc) => byline(d.authors)
     <KBNeedsService>
       <div class="kbm-filters">
         <input v-model="q" type="search" class="kb-field kbm-input" placeholder="Title, author or id…" />
-        <select v-model="state" class="kbm-select" :disabled="!manages">
+        <select v-if="manages" v-model="state" class="kbm-select">
           <option value="mine">my library</option>
-          <template v-if="manages">
-            <option value="">every document</option>
+          <option value="">every document</option>
             <option value="read">full text</option>
             <option value="recorded">abstract only</option>
             <option value="unsummarized">no summaries</option>
@@ -230,8 +232,13 @@ const who = (d: Doc) => byline(d.authors)
             <option value="code">codebases</option>
             <option value="record">records</option>
             <option value="dropped">dropped</option>
-          </template>
         </select>
+      </div>
+      <div v-if="state === 'mine'" class="kbm-intro">
+        <p>Your library: the notes and files you keep in step from a folder on your machine. Only you see them until
+          you share them. Select some to share them or contribute them to the group.</p>
+        <p v-if="!docs.length && !loading && !q">Nothing is in it yet. Keep a folder in step with it, an Obsidian vault say:
+          <code>{{ connectCommand }}</code></p>
       </div>
       <p v-if="unavailable.length" class="kbm-dim kbm-unavailable">
         Unavailable here: {{ unavailable.join('; ') }}.
@@ -398,6 +405,7 @@ const who = (d: Doc) => byline(d.authors)
 @keyframes kbm-pulse { 50% { opacity: 0.55; } }
 .kbm-table tr.busy td:first-child { box-shadow: inset 3px 0 var(--vp-c-yellow-1); }
 .kbm-dim { color: var(--vp-c-text-3); font-size: 0.8rem; }
+.kbm-intro p { color: var(--vp-c-text-2); font-size: 0.9rem; margin: 0.5rem 0; }
 .kbm-pages { display: flex; gap: 1rem; align-items: center; margin-top: 0.6rem; }
 .kb-link:disabled { opacity: 0.4; cursor: default; }
 .kbm-title { margin: 0 0 0.5rem; font-size: 1.05rem; }
