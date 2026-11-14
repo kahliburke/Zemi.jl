@@ -243,15 +243,27 @@ overlaps it is refused.
 ```sh
 zemi connect https://kb.example.org ~/Documents/Obsidian/Notes --skip Private
 zemi connect local ~/Documents/Obsidian/Notes      # the knowledge base run on this machine
-zemi connect --install                             # keep it in step from every login on
+zemi connect                                       # watch and manage the folders
+zemi connect --background                          # sync from now and at every login
 ```
 
 The first time, it opens your browser to sign in and approve it: it gets a token for your library and
 nothing else, which you can revoke under Your account, Tokens. The folder is kept as `Notes/` in your
 library (`--name` names it otherwise). A file changed on one side is copied to the other; changed on
 both, your machine's stands. Hidden files stay on your machine, but for a vault's settings the
-knowledge base reads, and so do the folders `--skip` names. `zemi connect` with no arguments keeps
-every folder in step until stopped, `--once` once.
+knowledge base reads, and so do the folders `--skip` names.
+
+`zemi connect` with no arguments opens an app in the terminal: each folder with its state, files and
+when it last changed and was checked, and each file as it moves. Its keys add a folder (`a`, Tab
+completing the path), remove one (`d`: stop syncing it, or also remove its files from your library),
+set the subfolders never sent (`e`), sync now (`s`), pause (`p`), open your library's page (`o`),
+hand the syncing to the background service (`b`) and quit (`q`). It syncs while open, unless the
+background service does; then it shows the service's progress, and the service takes up the folders
+it changes. Off a terminal, `zemi connect` prints a line for each change instead.
+
+`--background` has a service sync from now and at every login (a launch agent on a Mac, a systemd
+user service on Linux), its log in `~/.local/share/zemi/connect/connect.log`; `--status` says how
+the folders stand, and `--stop` stops it. `--once` syncs once.
 
 **Your library** on the account page shows each folder in your library (its files, the documents read
 from it, whether it is a vault, when it last changed), how much of your space it uses, and each

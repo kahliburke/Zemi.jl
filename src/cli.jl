@@ -24,8 +24,9 @@ const CLI_HELP = """
     zemi connect SITE FOLDER [--name NAME] [--skip SUBFOLDER]...
                                          keep FOLDER (an Obsidian vault, say) in step with your library at SITE,
                                          signing in there in the browser (SITE `local`: the knowledge base run
-                                         here), its SUBFOLDERs never sent; then `zemi connect` keeps every such
-                                         folder in step until stopped, --once once, --install at every login
+                                         here), its SUBFOLDERs never sent. `zemi connect` alone: an app that
+                                         shows and manages the folders; --background syncs from every login
+                                         (--status, --stop), --once once
     zemi token create NAME --out FILE [--write]
                                          issue NAME a key to the dataset's bucket, saved to FILE (read-only,
                                          or read and write with --write)

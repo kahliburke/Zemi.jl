@@ -15,8 +15,10 @@
   kind of document.
 - **`zemi connect`** keeps a folder (an Obsidian vault) in step with one's library, signed in through
   the browser for a token that reaches the library alone (OAuth scope `library`), or to the knowledge
-  base on the same machine. The account page shows the library's folders and the machines keeping
-  them in step, each disconnected there.
+  base on the same machine. `zemi connect` alone opens a terminal app that shows the folders, what
+  moves, and adds, removes and pauses them; `--background` syncs from every login (`--status`,
+  `--stop`). The account page shows the library's folders and the machines keeping them in step,
+  each signed out there.
 - **Sources** can remove a record whose item is gone (`Zemi.remove!`), follow one that moved
   (`Zemi.rekey!`), and have their records embedded for searching without summarizing them
   (`summarized = false`), and say what their records are (`about`), as agents are told.

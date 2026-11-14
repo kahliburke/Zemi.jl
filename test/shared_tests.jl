@@ -2127,7 +2127,7 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     lib = js(serve("GET", "/api/library"; headers = ["Authorization" => "Bearer $(t2["access_token"])"]))
     @test only(lib["folders"])["name"] == "Notes" && only(lib["folders"])["vault"] && only(lib["folders"])["files"] == 3 &&
           only(lib["folders"])["documents"] == 1 && !isempty(only(lib["folders"])["changed"])
-    @test only(lib["connections"])["name"] == "zemi connect (connected)" && lib["used"] > 0
+    @test only(lib["connections"])["name"] == "zemi connect (connected)" && lib["used"] > 0 && lib["person"]["email"] == "ada@x.org"
     @test only(t for t in js(serve("GET", "/api/me"; headers = ck))["tokens"] if t["scope"] == "library")["revoked"] == false
     r = K.sync_folder!(remote, dir, "Notes", state)
     @test r.down == 1 && occursin("zemi: \"2401.00001\"", read(tidal, String))
@@ -2146,6 +2146,89 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     @test K.sync_folder!(remote, dir, "Notes", state).removed_here == 1 && !isfile(tidal)
     K.READ_LIBRARIES[] = true
     close(kb)
+end
+
+@zset "zemi connect's app and service" begin
+    TK = K.TK
+    kb = open_kb(temp_config(; shared = shared_config(sign_up = :open, default_role = "Learner"), layers = Layer[]))
+    K.ensure_roles!(kb)
+    sh = kb.config.shared
+    ada = K.sign_in!(kb, sh, "Campus", "u1"; email = "ada@x.org", verified = true, name = "Ada")
+    K.set_roles!(kb, ada, ["Learner"])
+    remote = InProcessLibrary(kb, K.session_caller(kb, K.start_session!(kb, ada, sh)))
+    paths() = sort([f["path"] for f in K.list_files(remote)])
+    K.READ_LIBRARIES[] = false
+    home = mktempdir()
+    try
+        withenv("ZEMI_CONFIG" => joinpath(home, "config.toml"), "XDG_DATA_HOME" => joinpath(home, "data")) do
+            site = "https://kb.example.org"
+            vault, other = mkpath(joinpath(home, "Vault")), mkpath(joinpath(home, "Other"))
+            write(joinpath(vault, "Tides.md"), "Spring tides.\n")
+            @test K.add_folder!(site, vault; name = "Notes")["name"] == "Notes"
+            @test_throws "Another folder is Notes/" K.add_folder!(site, other; name = "Notes")
+            # One process syncs a config's folders; it says how they stand, and each file it moves.
+            s = K.claim_syncing()
+            @test s isa K.Syncer && K.claim_syncing() === nothing && K.syncing_pid() == getpid()
+            lines = String[]
+            s.line = e -> push!(lines, K.activity_line(e))
+            @test K.sync_pass!(s; remote)
+            st = K.read_connect_status()
+            @test only(st["folders"])["state"] == "in step" && only(st["folders"])["files"] == 1
+            @test only(st["activity"])["what"] == "sent" && endswith(only(lines), "Notes  sent  Tides.md")
+            # What never leaves this machine, and pausing.
+            K.set_skips!("Notes", ["Private/", " "])
+            @test K.load_connect_config()["folders"][1]["skip"] == ["Private"]
+            mkpath(joinpath(vault, "Private")); write(joinpath(vault, "Private", "Diary.md"), "Not for the group.\n")
+            K.sync_pass!(s; remote)
+            @test paths() == ["Notes/Tides.md"]
+            K.set_paused!(true)
+            K.sync_pass!(s; remote)
+            @test only(s.status["folders"])["state"] == "paused" && s.status["paused"]
+            K.set_paused!(false)
+            @test isfile(K.connect_request_path())                                       # a pass is asked for
+            K.wait_for_pass(5)
+            @test !isfile(K.connect_request_path())                                      # and taken at once
+
+            # The app: what it shows, and adding and removing folders with its keys.
+            K.sync_pass!(s; remote)
+            m = K.ConnectApp(; syncer = s, remote, next_pass = time() + 1e9)
+            K.refresh!(m)
+            tb = TK.TestBackend(110, 20)
+            draw() = (TK.reset!(tb.buf); TK.view(m, TK.Frame(tb.buf, TK.Rect(1, 1, 110, 20), TK.GraphicsRegion[], TK.PixelSnapshot[])); tb)
+            draw()
+            @test TK.find_text(tb, "Notes") !== nothing && TK.find_text(tb, "in step") !== nothing && TK.find_text(tb, "Not sent") !== nothing && TK.find_text(tb, "Private") !== nothing
+            @test TK.find_text(tb, "sent") !== nothing && TK.find_text(tb, "Tides.md") !== nothing
+            TK.update!(m, TK.KeyEvent('a'))
+            @test m.dialog == :add_path && TK.find_text(draw(), "Add a folder") !== nothing
+            TK.set_text!(m.input, joinpath(home, "Oth"))
+            TK.update!(m, TK.KeyEvent(:tab))
+            @test TK.text(m.input) == other * "/"                                         # Tab completes the path
+            TK.update!(m, TK.KeyEvent(:enter))
+            @test m.dialog == :add_name && TK.text(m.input) == "Other"
+            TK.update!(m, TK.KeyEvent(:enter))
+            @test m.dialog == :none && [f["name"] for f in K.load_connect_config()["folders"]] == ["Notes", "Other"]
+            K.refresh!(m)
+            m.selected = 1
+            TK.update!(m, TK.KeyEvent('d'))
+            @test m.dialog == :remove && TK.find_text(draw(), "also remove its files from your library") !== nothing
+            TK.update!(m, TK.KeyEvent('r'))
+            K.refresh!(m)
+            @test first(K.app_folders(m))["state"] == "removing"
+            K.sync_pass!(s; remote)                                                         # whoever syncs removes them
+            @test isempty(paths()) && [f["name"] for f in K.load_connect_config()["folders"]] == ["Other"]
+            @test isfile(joinpath(vault, "Tides.md"))                                      # the folder here is left
+            TK.update!(m, TK.KeyEvent(:escape))
+            @test m.quit
+            K.release!(s)
+            @test K.syncing_pid() === nothing && K.read_connect_status()["pid"] == 0
+            again = K.claim_syncing()
+            @test again isa K.Syncer
+            K.release!(again)
+        end
+    finally
+        K.READ_LIBRARIES[] = true
+        close(kb)
+    end
 end
 
 @zset "renaming a person renames what they wrote" begin

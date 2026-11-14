@@ -95,14 +95,16 @@ folder_state_path(site::AbstractString, dir::AbstractString) =
     joinpath(connect_dir(), bytes2hex(sha256("$(site == "local" ? "local:" * abspath(config_path()) : site)|$dir"))[1:16] * ".json")
 
 """
-    sync_folder!(remote, dir, name, state; skip = []) -> NamedTuple
+    sync_folder!(remote, dir, name, state; skip = [], report = (what, path) -> nothing) -> NamedTuple
 
 Bring folder `dir` (but for the folders `skip` names) and `<name>/` in library `remote` in step (see
 connect.jl), `state` what is known of them (see [`folder_state_path`](@ref)), changed in place. Returns how many files went each way,
 were removed on each side, and were left for the next time (`waiting`: changed meanwhile, or the
-library full).
+library full). Each file moved is reported as it is: `report(what, path)`, `what` one of `:sent`,
+`:received`, `:removed_here`, `:removed_there` and `:waiting`.
 """
-function sync_folder!(remote::LibraryRemote, dir::AbstractString, name::AbstractString, state::AbstractDict; skip = String[])
+function sync_folder!(remote::LibraryRemote, dir::AbstractString, name::AbstractString, state::AbstractDict; skip = String[],
+                      report = (what, path) -> nothing)
     prefix = name * "/"
     left_out(p) = any(d -> in_folder(p, d), vault_path.(String.(skip)))
     there = Dict(f["path"][ncodeunits(prefix)+1:end] => f for f in list_files(remote) if startswith(f["path"], prefix))
@@ -122,15 +124,17 @@ function sync_folder!(remote::LibraryRemote, dir::AbstractString, name::Abstract
         return sha
     end
     function up(p, base)
-        n.full[] && (n.waiting[] += 1; return)
+        n.full[] && (n.waiting[] += 1; report(:waiting, p); return)
         try
             f = store_file!(remote, prefix * p, read(here[p]); base, modified = stat(here[p]).mtime)
             agreed[p] = f["sha256"]
             n.up[] += 1
+            report(:sent, p)
         catch e
             e isa Refusal && e.status in (409, 413) || rethrow()
             e.status == 413 && (n.full[] = true)
             n.waiting[] += 1
+            report(:waiting, p)
         end
     end
     function down(p)
@@ -142,6 +146,7 @@ function sync_folder!(remote::LibraryRemote, dir::AbstractString, name::Abstract
         agreed[p] = there[p]["sha256"]
         local_sha(p)
         n.down[] += 1
+        report(:received, p)
     end
     for p in sort!(collect(union(keys(here), keys(there), keys(agreed))))
         L = haskey(here, p) ? local_sha(p) : nothing
@@ -153,6 +158,7 @@ function sync_folder!(remote::LibraryRemote, dir::AbstractString, name::Abstract
             if R === nothing
                 rm(here[p]; force = true); delete!(seen, p); delete!(agreed, p)
                 n.removed_here[] += 1
+                report(:removed_here, p)
             else
                 down(p)
             end
@@ -160,9 +166,11 @@ function sync_folder!(remote::LibraryRemote, dir::AbstractString, name::Abstract
             try
                 remove_file!(remote, prefix * p; base = R)
                 delete!(agreed, p); n.removed_there[] += 1
+                report(:removed_there, p)
             catch e
                 e isa Refusal && e.status == 409 || rethrow()
                 n.waiting[] += 1
+                report(:waiting, p)
             end
         else                                                    # changed here, there too or not: this machine's stands
             up(p, R === nothing ? "" : R)
@@ -281,142 +289,4 @@ function save_connect_config!(c)
     mkpath(dirname(connect_config_path()))
     open(io -> (println(io, "# The folders `zemi connect` keeps in step with your library, and where it is."); TOML.print(io, c)),
          connect_config_path(), "w")
-end
-
-"""
-    connect_once(; quiet = false) -> Bool
-
-Sync every folder `zemi connect` keeps (see [`sync_folder!`](@ref)) once, saying what moved; whether
-all went well.
-"""
-function connect_once(; quiet::Bool = false)
-    c = load_connect_config()
-    site = get(c, "site", "")
-    isempty(site) && error("Nothing to keep in step: run `zemi connect SITE FOLDER` first")
-    remote = library_remote(site)
-    ok = true
-    for f in get(c, "folders", Any[])
-        dir, name = abspath(expanduser(f["path"])), f["name"]
-        isdir(dir) || (say(:warn, "Not a folder here", dir); ok = false; continue)
-        statefile = folder_state_path(site, dir)
-        state = isfile(statefile) ? Dict{String,Any}(JSON.parsefile(statefile)) : Dict{String,Any}()
-        r = try
-            sync_folder!(remote, dir, name, state; skip = get(f, "skip", String[]))
-        catch e
-            e isa InterruptException && rethrow()
-            say(:warn, "$name could not be kept in step", failure_message(e))
-            ok = false
-            continue
-        finally
-            mkpath(dirname(statefile))
-            write_atomic(statefile, JSON.json(state))
-        end
-        moved = r.up + r.down + r.removed_here + r.removed_there
-        r.full && say(:warn, "Your library is full", "Remove files from it to send more")
-        quiet && moved == 0 || say(:ok, "$name in step", "$(r.up) sent, $(r.down) received, $(r.removed_there) removed there, $(r.removed_here) removed here" *
-                                                         (r.waiting > 0 ? ", $(r.waiting) for the next time" : ""))
-    end
-    return ok
-end
-
-"How often `zemi connect` looks for changes, in seconds."
-const CONNECT_EVERY = 10
-
-"""
-    connect_cli(args)
-
-`zemi connect`: with a site and a folder, keep that folder in step with one's library there (signing
-in first); `--name NAME` names it there, and each `--skip FOLDER` is a folder of it never sent. With
-no arguments, keep every folder in step until stopped; `--once`, once; `--install`, at every login,
-in the background.
-"""
-function connect_cli(args::AbstractVector{<:AbstractString})
-    flags = filter(startswith("--"), args)
-    valued = Set(j + 1 for (j, a) in enumerate(args) if a in ("--name", "--skip") && j < length(args))
-    given(flag) = [args[j+1] for (j, a) in enumerate(args) if a == flag && j < length(args)]
-    name = (n = given("--name"); isempty(n) ? nothing : last(n))
-    plain = [a for (j, a) in enumerate(args) if !startswith(a, "--") && !(j in valued)]
-    if length(plain) == 2
-        site = plain[1] == "local" ? "local" : site_address(plain[1])
-        dir = abspath(expanduser(plain[2]))
-        isdir(dir) || error("$dir is not a folder here")
-        c = load_connect_config()
-        get(c, "site", site) == site || error("zemi connect keeps folders in step with $(c["site"]) already")
-        if site != "local" && get(load_connect_auth(), "site", "") != site
-            save_connect_auth!(sign_in_library(site))
-        end
-        folders = [f for f in get(c, "folders", Any[]) if abspath(expanduser(f["path"])) != dir]
-        push!(folders, Dict{String,Any}("path" => contractuser(dir), "name" => something(name, basename(dir)), "skip" => given("--skip")))
-        save_connect_config!(Dict("site" => site, "folders" => folders))
-        connect_once()
-        say(:info, "Keep it in step", "`zemi connect` until stopped, or `zemi connect --install` to start it at every login")
-    elseif !isempty(plain)
-        error("Give a site and a folder: zemi connect https://kb.example.org ~/Documents/Notes")
-    elseif "--install" in flags
-        install_connect()
-    elseif "--once" in flags
-        connect_once() || return 1
-    else
-        while true
-            try
-                connect_once(; quiet = true)
-            catch e
-                e isa InterruptException && rethrow()
-                say(:warn, "Could not keep the folders in step; trying again", failure_message(e))
-            end
-            sleep(CONNECT_EVERY)
-        end
-    end
-    return 0
-end
-
-"""
-    install_connect()
-
-Have `zemi connect` run at every login, in the background: a launch agent on a Mac, a systemd user
-service on Linux, its output in `connect.log` beside what it knows of the folders.
-"""
-function install_connect()
-    exe = joinpath(first(DEPOT_PATH), "bin", Sys.iswindows() ? "zemi.bat" : "zemi")
-    isfile(exe) || error("The zemi app is not installed here (`pkg> app add Zemi`): it is what runs at login")
-    mkpath(connect_dir())
-    log = joinpath(connect_dir(), "connect.log")
-    if Sys.isapple()
-        plist = joinpath(homedir(), "Library", "LaunchAgents", "org.zemi.connect.plist")
-        mkpath(dirname(plist))
-        write(plist, """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0"><dict>
-              <key>Label</key><string>org.zemi.connect</string>
-              <key>ProgramArguments</key><array><string>$exe</string><string>connect</string></array>
-              <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
-              <key>StandardOutPath</key><string>$log</string><key>StandardErrorPath</key><string>$log</string>
-            </dict></plist>
-            """)
-        try run(`launchctl unload $plist`; wait = true) catch end
-        run(`launchctl load -w $plist`)
-        say(:ok, "zemi connect starts at every login", ("Its log", contractuser(log)), ("To stop it", "launchctl unload -w $(contractuser(plist))"))
-    elseif Sys.islinux()
-        unit = joinpath(xdg_home("XDG_CONFIG_HOME", ".config"), "systemd", "user", "zemi-connect.service")
-        mkpath(dirname(unit))
-        write(unit, """
-            [Unit]
-            Description=zemi connect: folders kept in step with a Zemi library
-
-            [Service]
-            ExecStart=$exe connect
-            Restart=always
-            StandardOutput=append:$log
-            StandardError=append:$log
-
-            [Install]
-            WantedBy=default.target
-            """)
-        run(`systemctl --user daemon-reload`)
-        run(`systemctl --user enable --now zemi-connect.service`)
-        say(:ok, "zemi connect starts at every login", ("Its log", contractuser(log)), ("To stop it", "systemctl --user disable --now zemi-connect"))
-    else
-        error("Starting at login is set up on a Mac and on Linux: run `zemi connect` yourself")
-    end
 end

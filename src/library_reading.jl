@@ -155,7 +155,8 @@ being_read(space::AbstractString) =
 
 What `caller`'s library holds and what keeps it in step: each folder (its files, bytes, whether it is a
 vault, the documents read from it and when it last changed), how much the space uses of its limit,
-whether it is being read, and the `zemi connect` sign-ins that reach it (tokens of scope `library`).
+whether it is being read, the `zemi connect` sign-ins that reach it (tokens of scope `library`), and
+whose it is (`person`, their name and email).
 """
 function library_overview(kb::KB, caller::Caller)
     space = library_space(caller)
@@ -179,7 +180,8 @@ function library_overview(kb::KB, caller::Caller)
                                AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC""",
                         (caller.user_id, now_iso()))]
     return Dict("folders" => folders, "used" => library_usage(kb, space), "limit" => library_limit(kb.config),
-                "reading" => being_read(space), "connections" => connections)
+                "reading" => being_read(space), "connections" => connections,
+                "person" => Dict("name" => caller_name(caller), "email" => caller.email))
 end
 
 # What one's library holds, and what keeps it in step.
