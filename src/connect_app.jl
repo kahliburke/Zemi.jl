@@ -5,7 +5,7 @@
 # while the background service does, it shows the service's status and changes the folder list the
 # service reads.
 #
-#   ↑/↓ choose a folder · a add · d remove · e skipped subfolders · s sync now · p pause · o the
+#   ↑/↓ choose a folder · a add · d remove · e what of it syncs · s sync now · p pause · o the
 #   library's page · b background · q quit. The mouse resizes the panes and the table's columns,
 #   sorts by a column, and scrolls the activity.
 
@@ -26,7 +26,8 @@ import Tachikoma as TK
     busy::Bool = false                                # a pass of this process's runs
     next_pass::Float64 = 0.0
     who::String = ""                                  # who is signed in
-    dialog::Symbol = :none                            # :site, :signing_in, :add_path, :add_name, :skips, :remove
+    dialog::Symbol = :none                            # :site, :signing_in, :add_path, :add_name, :choose, :remove
+    chooser::Any = nothing                            # what of a folder syncs, as it is chosen (see `Chooser`)
     input::Union{TK.TextInput,Nothing} = nothing
     pending::Dict{String,Any} = Dict{String,Any}()   # what the dialog has gathered
     message::String = ""
@@ -102,6 +103,7 @@ end
 # ── Keys and the mouse ────────────────────────────────────────────────────────────────────────────
 
 function TK.update!(m::ConnectApp, e::TK.MouseEvent)
+    m.dialog == :choose && return (TK.handle_mouse!(m.chooser.tree, e); nothing)
     m.dialog == :none || return nothing
     TK.handle_resize!(m.layout, e) || TK.handle_mouse!(m.table, e) || TK.handle_mouse!(m.activity, e)
     return nothing
@@ -133,8 +135,9 @@ function TK.update!(m::ConnectApp, e::TK.KeyEvent)
         if chosen === nothing
             tell!(m, "No folder to change")
         else
-            m.pending = Dict{String,Any}("name" => chosen["name"])
-            ask!(m, :skips, "Never sent: ", join(chosen["skip"], ", "))
+            dir = abspath(expanduser(chosen["path"]))
+            isdir(dir) ? (m.chooser = Chooser(chosen["name"], dir, chosen["skip"]); m.dialog = :choose) :
+                         tell!(m, "$(chosen["path"]) is not a folder here"; error = true)
         end
     elseif k == :char && c == 's'
         request_pass(); m.next_pass = 0.0
@@ -160,6 +163,7 @@ ask_path!(m::ConnectApp) = ask!(m, :add_path, "Folder: ", "~/")
 
 function dialog_key!(m::ConnectApp, e::TK.KeyEvent)
     m.dialog == :signing_in && return (e.key == :escape && (m.dialog = :none); nothing)
+    m.dialog == :choose && return choose_key!(m, e)
     if m.dialog == :remove
         name = m.pending["name"]
         if e.key == :char && e.char in ('s', 'r')
@@ -211,10 +215,6 @@ function submit!(m::ConnectApp, value::AbstractString)
             m.dialog, m.input = :none, nothing
             request_pass()
             tell!(m, "$(f["name"]) is added; it syncs now")
-        elseif m.dialog == :skips
-            set_skips!(m.pending["name"], split(value, ','))
-            m.dialog, m.input = :none, nothing
-            tell!(m, "$(m.pending["name"]): the subfolders not sent are set")
         end
     catch err
         tell!(m, failure_message(err); error = true)
@@ -259,6 +259,101 @@ function spawn_who!(m::ConnectApp)
         name = String(get(me, "name", ""))
         isempty(name) ? String(get(me, "email", "")) : name
     end
+end
+
+# ── Choosing what syncs ───────────────────────────────────────────────────────────────────────────
+
+"""
+    Chooser(name, dir, skip)
+
+The files and folders of folder `dir` as a tree, each marked as syncing or not, for choosing what
+never leaves this machine (the folder's `skip`: paths of subfolders or files, see
+[`folder_files`](@ref)). A folder some of whose contents do not sync is marked as partly synced.
+"""
+mutable struct Chooser
+    name::String
+    dir::String
+    skip::Set{String}
+    tree::TK.TreeView
+end
+
+function Chooser(name::AbstractString, dir::AbstractString, skip)
+    root = TK.TreeNode(String(name); children = tree_nodes(dir, ""), expanded = true, content = "")
+    c = Chooser(String(name), String(dir), Set{String}(String.(skip)), TK.TreeView(root; selected = 1, focused = true))
+    mark!(c)
+    return c
+end
+
+# The entries of folder `rel` in `dir`, folders first: hidden ones are never sent and are left out.
+function tree_nodes(dir::AbstractString, rel::AbstractString)
+    here = isempty(rel) ? dir : joinpath(dir, split(rel, '/')...)
+    names = sort([n for n in readdir(here) if !startswith(n, ".") && !islink(joinpath(here, n))];
+                 by = n -> (!isdir(joinpath(here, n)), lowercase(n)))
+    map(names) do n
+        p = vault_path(isempty(rel) ? n : rel * "/" * n)
+        isdir(joinpath(here, n)) ? TK.TreeNode(n; children = tree_nodes(dir, p), expanded = false, content = p) : TK.TreeNode(n; content = p)
+    end
+end
+
+"Whether `p` is left out: it, or a folder it is in, never leaves this machine."
+left_out(c::Chooser, p::AbstractString) = !isempty(p) && any(s -> in_folder(p, s), c.skip)
+
+# Each node's mark and style: syncing ([✓]), partly ([-]: something in it does not) or not ([ ]).
+function mark!(c::Chooser, node::TK.TreeNode = c.tree.root)
+    p, name = node.content, replace(node.label, r"^\[.\] " => "")
+    out = left_out(c, p)
+    partly = !out && any(s -> s != p && (isempty(p) || in_folder(s, p)), c.skip)
+    node.label = (out ? "[ ] " : partly ? "[-] " : "[✓] ") * name
+    node.style = out ? TK.tstyle(:text_dim) : partly ? TK.tstyle(:warning) : TK.tstyle(:text)
+    foreach(n -> mark!(c, n), node.children)
+    node === c.tree.root && TK._invalidate_flat!(c.tree)
+end
+
+"Switch the chosen file or folder between syncing and not; `nothing`, or why it cannot be."
+function toggle!(c::Chooser)
+    node = TK.selected_node(c.tree)
+    node === nothing && return nothing
+    p = node.content
+    isempty(p) && return "The folder itself syncs: remove it to stop"
+    if p in c.skip
+        delete!(c.skip, p)
+    elseif left_out(c, p)
+        return "$(first(s for s in c.skip if in_folder(p, s))) does not sync: switch it on first"
+    else
+        filter!(s -> !in_folder(s, p), c.skip)          # what was left out inside it is now left out with it
+        push!(c.skip, p)
+    end
+    mark!(c)
+    return nothing
+end
+
+function choose_key!(m::ConnectApp, e::TK.KeyEvent)
+    c = m.chooser
+    if e.key == :escape
+        m.dialog, m.chooser = :none, nothing
+    elseif e.key == :enter
+        try
+            set_skips!(c.name, sort!(collect(c.skip)))
+            tell!(m, isempty(c.skip) ? "$(c.name): everything syncs" : "$(c.name): $(length(c.skip)) left on this machine")
+        catch err
+            tell!(m, failure_message(err); error = true)
+        end
+        m.dialog, m.chooser = :none, nothing
+    elseif e.key == :char && e.char == ' '
+        why = toggle!(c)
+        why === nothing || tell!(m, why; error = true)
+    else
+        TK.handle_key!(c.tree, e)
+    end
+    return nothing
+end
+
+function draw_chooser(c::Chooser, inner, buf)
+    rows = TK.split_layout(TK.Layout(TK.Vertical, [TK.Fill(), TK.Fixed(1)]), inner)
+    length(rows) < 2 && return
+    c.tree.tick = nothing
+    TK.render(c.tree, rows[1], buf)
+    TK.render(TK.Paragraph("space syncs or not · → ← open and close · Enter saves · Esc cancels"; style = TK.tstyle(:text_dim)), rows[2], buf)
 end
 
 # ── Drawing ───────────────────────────────────────────────────────────────────────────────────────
@@ -352,30 +447,30 @@ function TK.view(m::ConnectApp, f::TK.Frame)
                (note, c !== nothing && c["state"] in ("error", "missing"))
     TK.render(TK.Paragraph(msg; style = err ? TK.tstyle(:error) : TK.tstyle(:text)), rows[2], buf)
     paused = get(m.config, "paused", false) === true
-    keys = "a add · d remove · e skipped · s sync now · p $(paused ? "resume" : "pause") · o library · b background · q quit"
+    keys = "a add · d remove · e what syncs · s sync now · p $(paused ? "resume" : "pause") · o library · b background · q quit"
     TK.render(TK.StatusBar(; left = [TK.Span(" " * keys, TK.tstyle(:text_dim))]), rows[3], buf)
     m.dialog == :none || draw_dialog(m, inner, buf)
     return nothing
 end
 
 const DIALOG_TITLES = Dict(:site => "The knowledge base to sync with", :signing_in => "Signing in", :add_path => "Add a folder",
-                           :add_name => "Its name in your library", :skips => "Subfolders never sent", :remove => "Remove a folder")
+                           :add_name => "Its name in your library", :choose => "What syncs", :remove => "Remove a folder")
 const DIALOG_HINTS = Dict(
     :site => "Its address, as https://kb.example.org (local: the one run on this machine). Enter signs in. Esc cancels.",
     :signing_in => "Approve zemi connect in your browser. Esc stops waiting here.",
     :add_path => "A folder on this machine, an Obsidian vault say. Tab completes. Enter goes on. Esc cancels.",
     :add_name => "The folder it is in your library. Enter adds it. Esc cancels.",
-    :skips => "Subfolders, separated by commas, that never leave this machine. Enter saves. Esc cancels.",
 )
 
 function draw_dialog(m::ConnectApp, area, buf)
-    w, h = min(area.width - 2, 76), min(area.height - 2, 8)
+    w, h = m.dialog == :choose ? (min(area.width - 2, 90), area.height - 2) : (min(area.width - 2, 76), min(area.height - 2, 8))
     (w < 20 || h < 5) && return
     r = TK.center(area, w, h)
     for y in r.y:TK.bottom(r), x in r.x:TK.right(r)
         TK.set_char!(buf, x, y, ' ', TK.tstyle(:text))
     end
     inner = TK.render(TK.Block(; title = DIALOG_TITLES[m.dialog], border_style = TK.tstyle(:accent), box = TK.BOX_ROUNDED), r, buf)
+    m.dialog == :choose && return draw_chooser(m.chooser, inner, buf)
     line(i, text, style) = i < inner.height && TK.render(TK.Paragraph(text; style), TK.Rect(inner.x + 1, inner.y + i, inner.width - 2, 1), buf)
     if m.dialog == :remove
         name = m.pending["name"]

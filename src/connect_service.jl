@@ -249,7 +249,7 @@ function remove_folder!(name::AbstractString; from_library::Bool = false)
     request_pass()
 end
 
-"Set the subfolders of folder `name` that never leave this machine."
+"Set the subfolders and files of folder `name` that never leave this machine (paths in it)."
 function set_skips!(name::AbstractString, skip)
     c = load_connect_config()
     f = findfirst(f -> f["name"] == name, get(c, "folders", Any[]))

@@ -2209,6 +2209,20 @@ end
             TK.update!(m, TK.MouseEvent(5, border + 2, TK.mouse_left, TK.mouse_release, false, false, false))
             draw()
             @test TK.bottom(m.layout.rects[1]) != border
+            # Choosing what syncs: the folder as a tree, each file and folder marked; space switches one, Enter saves.
+            m.table.selected = 1
+            TK.update!(m, TK.KeyEvent('e'))
+            @test m.dialog == :choose && TK.find_text(draw(), "What syncs") !== nothing
+            ch = m.chooser
+            @test [n.label for n in ch.tree.root.children] == ["[ ] Private", "[✓] Tides.md"] && startswith(ch.tree.root.label, "[-] ")
+            TK.update!(m, TK.KeyEvent(:down))                                                # Private
+            TK.update!(m, TK.KeyEvent(' '))
+            TK.update!(m, TK.KeyEvent(:down))                                                # Tides.md
+            TK.update!(m, TK.KeyEvent(' '))
+            @test [n.label for n in ch.tree.root.children] == ["[✓] Private", "[ ] Tides.md"]
+            TK.update!(m, TK.KeyEvent(:enter))
+            @test m.dialog == :none && K.load_connect_config()["folders"][1]["skip"] == ["Tides.md"]
+            K.set_skips!("Notes", ["Private"])
             TK.update!(m, TK.KeyEvent('a'))
             @test m.dialog == :add_path && TK.find_text(draw(), "Add a folder") !== nothing
             TK.set_text!(m.input, joinpath(home, "Oth"))

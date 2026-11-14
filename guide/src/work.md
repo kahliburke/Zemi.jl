@@ -251,12 +251,12 @@ The first time, it opens your browser to sign in and approve it: it gets a token
 nothing else, which you can revoke under Your account, Tokens. The folder is kept as `Notes/` in your
 library (`--name` names it otherwise). A file changed on one side is copied to the other; changed on
 both, your machine's stands. Hidden files stay on your machine, but for a vault's settings the
-knowledge base reads, and so do the folders `--skip` names.
+knowledge base reads, and so do the subfolders and files `--skip` names.
 
 `zemi connect` with no arguments opens an app in the terminal: each folder with its state, files and
 when it last changed and was checked, and each file as it moves. Its keys add a folder (`a`, Tab
 completing the path), remove one (`d`: stop syncing it, or also remove its files from your library),
-set the subfolders never sent (`e`), sync now (`s`), pause (`p`), open your library's page (`o`),
+choose what of it syncs from a tree of its files and folders (`e`: space switches one on or off), sync now (`s`), pause (`p`), open your library's page (`o`),
 hand the syncing to the background service (`b`) and quit (`q`). It syncs while open, unless the
 background service does; then it shows the service's progress, and the service takes up the folders
 it changes. Off a terminal, `zemi connect` prints a line for each change instead.
