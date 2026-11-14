@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Questions and answers open where they are**: from Waiting on you, Focus, what others did lately
+  and notifications, a task opens scrolled to the note, marked for a moment (`#KB-12/345` links to one).
 - **Jobs show when they ran**: when each started and finished, how long it took and how many
   documents it changed; the Operations page also shows a job's result or error.
 - **Removing a note**: a comment, progress note or question is removed by whoever may edit it (on

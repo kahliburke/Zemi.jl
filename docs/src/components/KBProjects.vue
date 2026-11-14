@@ -48,7 +48,7 @@ type Codebase = { id: string; title: string; rev: string; remote: string; page: 
 // Who else has a board open, at the level each chose (src/people_activity.jl); what people did lately.
 type Viewer = { id: number; name: string; project: string; planning: boolean; open: string; draft_ref: string; draft: string;
                 following: number; view: string; at: string }
-type Action = { who: string; kind: string; ref: string; title: string; text: string; detail: Record<string, any>; at: string }
+type Action = { event: number; who: string; kind: string; ref: string; title: string; text: string; detail: Record<string, any>; at: string }
 
 const list = ref<Project[]>([])
 const statuses = ref<Status[]>([])
@@ -85,7 +85,11 @@ const projectPeople = ref<Person[]>([])
 // The address names a project (#KB) or a task in one (#KB-12). Without one, the page opens on the
 // project this browser last showed.
 const LAST_PROJECT = 'kb-last-project'
-const fromHash = () => { const m = location.hash.slice(1).toUpperCase().match(/^([A-Z][A-Z0-9]*)(?:-(\d+))?$/); return m ? { key: m[1], task: m[2] ? m[0] : '' } : null }
+// The address names a project, a task (`#KB-12`), or a note on it (`#KB-12/345`, as a notification links to one).
+const fromHash = () => {
+  const m = location.hash.slice(1).toUpperCase().match(/^([A-Z][A-Z0-9]*)(?:-(\d+))?(?:\/(\d+))?$/)
+  return m ? { key: m[1], task: m[2] ? `${m[1]}-${m[2]}` : '', note: m[2] && m[3] ? Number(m[3]) : 0 } : null
+}
 async function loadList() {
   const r = await getJSON('/api/projects'); list.value = r.projects; statuses.value = r.statuses
   people.value = await getJSON('/api/tasks/people')
@@ -105,7 +109,7 @@ async function loadBoard() {
 }
 // What waits on the person: plans to approve, tasks in Review, findings agents drafted, and their own open tasks.
 // With them, the questions the person asked that still wait on someone (`asked`), which only Focus shows.
-type Asked = Task & { question?: string; note?: number; asker?: string; answer?: string; answerer?: string; claim?: string; recheck?: string[];
+type Asked = Task & { question?: string; note?: number; asker?: string; answer?: string; answer_note?: number; answerer?: string; claim?: string; recheck?: string[];
                       concerns?: boolean; to_whom?: string; to_person?: string }
 type Section = 'proposed' | 'questions' | 'answered' | 'review' | 'findings' | 'mine'
 const waiting = ref<Record<Section | 'asked', Asked[]>>({ proposed: [], questions: [], answered: [], review: [], findings: [], mine: [], asked: [] })
@@ -124,9 +128,10 @@ async function resolve(r: string, note = 0) {
     } catch (e: any) { error.value = e.message }
   })
 }
-// A question waiting on you opens its task ready for your reply.
+// What waits on you opens its task at the note it is about: a question, ready for your reply; an
+// answer to yours; a question you asked.
 async function openWaiting(t: Asked, section = waitingOpen.value) {
-  await show(t)
+  await openAt(t.ref, section === 'answered' ? t.answer_note ?? t.note ?? 0 : t.note ?? 0)
   const e = section === 'questions' && t.note ? open.value?.activity.find(x => x.id === t.note) : undefined
   if (e) startReply(e)
 }
@@ -651,7 +656,7 @@ onLive(async () => {
   baseTitle = document.title
   const initial = fromHash()   // read before choosing the project rewrites the address
   window.addEventListener('hashchange', onHash)
-  try { await loadList(); await loadBoard(); loadWaiting(); if (initial?.task) await openRef(initial.task) } catch (e: any) { error.value = e.message }
+  try { await loadList(); await loadBoard(); loadWaiting(); if (initial?.task) await openAt(initial.task, initial.note) } catch (e: any) { error.value = e.message }
   follow()
   return () => { document.title = baseTitle; window.removeEventListener('hashchange', onHash) }
 })
@@ -722,7 +727,7 @@ function onHash() {
   const h = fromHash()
   if (!h || !list.value.some(p => p.key === h.key)) return
   if (h.key !== key.value) key.value = h.key
-  if (h.task && h.task !== open.value?.ref) openRef(h.task)
+  if (h.task && (h.task !== open.value?.ref || h.note)) openAt(h.task, h.note)
 }
 const setHash = (h: string) => { if (location.hash.slice(1).toUpperCase() !== h) history.replaceState(history.state, '', '#' + h) }
 watch(key, k => { if (k) { setHash(k); localStorage.setItem(LAST_PROJECT, k) }; open.value = null; milestone.value = ''; reviewing.value = false; declined.value = null; library.value = false; loadBoard() })
@@ -1177,9 +1182,10 @@ function setBlocked() {
 const markdown = shallowRef<Render>(escapeText)
 const render = (s: string) => markdown.value(s, { refs: true })
 onMounted(async () => { markdown.value = await loadMarkdown() })
-// A search result opens its task, at the comment that matched.
+// A task opened at a note in its activity (a search's match, a question, an answer), brought into view
+// and marked for a moment.
 const flashEvent = ref(0)
-async function openFromSearch(r: string, event: number) {
+async function openAt(r: string, event: number) {
   await openRef(r)
   if (!event) return
   await nextTick()
@@ -1297,7 +1303,7 @@ function keepRecordsOpen(open: boolean) {
             </template>
             <div v-if="followers.length" class="kbp-menu-item kbp-menu-wait">Following you: {{ followers.map(p => p.name).join(', ') }}</div>
             <div class="kbp-menu-label">Lately</div>
-            <button v-for="(e, i) in peopleDid" :key="i" class="kbp-menu-item" role="menuitem" @click="menu = ''; show({ ref: e.ref })">
+            <button v-for="(e, i) in peopleDid" :key="i" class="kbp-menu-item" role="menuitem" @click="menu = ''; openAt(e.ref, e.event)">
               <span class="kbp-menu-title"><b>{{ e.who }}</b> {{ actionText(e) }}</span><span class="kbp-menu-dim">{{ since(e.at) }}</span></button>
             <div v-if="!peopleDid.length" class="kbp-menu-item kbp-menu-wait">Nothing from others in the last week</div>
           </div>
@@ -1495,7 +1501,7 @@ function keepRecordsOpen(open: boolean) {
           <h3 class="kbp-focus-head asking">For you to answer</h3>
           <ul class="kbp-focus-list">
             <li v-for="t in focused.questions" :key="`q${t.note}`">
-              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ plainRefs(t.title) }}</div>
+              <div class="kbp-focus-task"><button class="kbp-reflink" @click="openWaiting(t, 'questions')">{{ t.ref }}</button> {{ plainRefs(t.title) }}</div>
               <div class="kbp-question-line"><b v-if="t.asker">{{ t.asker }}:</b> {{ t.question }}</div>
               <button v-if="editable" class="kbp-small" @click="openWaiting(t, 'questions')">Answer</button>
             </li>
@@ -1505,7 +1511,7 @@ function keepRecordsOpen(open: boolean) {
           <h3 class="kbp-focus-head answered">Answers to your questions</h3>
           <ul class="kbp-focus-list">
             <li v-for="t in focused.answered" :key="`a${t.note}`">
-              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ plainRefs(t.title) }}</div>
+              <div class="kbp-focus-task"><button class="kbp-reflink" @click="openWaiting(t, 'answered')">{{ t.ref }}</button> {{ plainRefs(t.title) }}</div>
               <div class="kbp-question-line">{{ t.question }}</div>
               <div class="kbp-question-line kbp-answer-line"><b v-if="t.answerer">{{ t.answerer }}:</b> {{ plainLine(t.answer ?? '') }}</div>
               <button class="kbp-small" :disabled="busy(`resolve:${t.ref}:${t.note}`)" title="Answered to your satisfaction"
@@ -1544,7 +1550,7 @@ function keepRecordsOpen(open: boolean) {
           <h3 class="kbp-focus-head">Your questions, waiting for an answer</h3>
           <ul class="kbp-focus-list">
             <li v-for="t in focused.asked" :key="`w${t.note}`">
-              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ plainRefs(t.title) }}</div>
+              <div class="kbp-focus-task"><button class="kbp-reflink" @click="openWaiting(t, 'asked')">{{ t.ref }}</button> {{ plainRefs(t.title) }}</div>
               <div class="kbp-question-line">{{ t.question }} <span class="kb-dim kbp-dim">· asked of {{ askedOf(t) }}</span></div>
             </li>
           </ul>
@@ -1556,7 +1562,7 @@ function keepRecordsOpen(open: boolean) {
 
       <!-- What the columns show, and in what order: just above them. -->
       <div v-if="key && !focus" class="kbp-filters" :class="{ folded: narrow && !filtersOpen }">
-        <KBTaskSearch :project="key" @open="openFromSearch" />
+        <KBTaskSearch :project="key" @open="openAt" />
         <button v-if="narrow && board" class="kb-primary kbp-button kbp-secondary" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen">
           {{ filtersOpen ? 'Fewer' : 'Filters' }}{{ !filtersOpen && (only || subtasks) ? ' ·' : '' }}</button>
         <select v-if="board" v-model="only" class="kbp-select" aria-label="Show tasks in a status"

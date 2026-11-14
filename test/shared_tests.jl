@@ -910,6 +910,7 @@ end
         made = K.create_task!(kb, "PU", "Check the seals"; by = K.person("Ada Lovelace"; id = "ada@x.org"))
         did = K.people_did(kb, "PU", as(boss))
         @test first(did).who == "Ada Lovelace" && first(did).kind == "created" && first(did).ref == made && first(did).title == "Check the seals"
+        @test first(did).event == first(K.task(kb, made).activity).id                       # opened at it
         ada_named = K.Caller(as(ada).user_id, "Ada Lovelace", "ada@x.org", Set(["tasks.view"]), :session, nothing, nothing, nothing)
         @test !any(e -> e.who == "Ada Lovelace", K.people_did(kb, "PU", ada_named))             # your own are left out
 
@@ -1892,6 +1893,9 @@ end
     @test isempty(asked(bea)) && !any(x -> x[1] == "Which gasket?", waits_on_others(ada))
     answered = call(ada, "GET", "/api/tasks/waiting")[2]["answered"]
     @test [(a["question"], a["answer"], a["answerer"]) for a in answered] == [("Which gasket?", "The neoprene one.", "Bea")]
+    # Each names its question's note and its answer's, for the board to open the task at them.
+    @test only(answered)["note"] == q.id &&
+          only(e for e in K.task(kb, "PU-1").activity if e.id == only(answered)["answer_note"]).text == "The neoprene one."
     # An agent's question goes to the assignee; asked back about a person's question, to that person.
     bot = K.agent("Claude for Ada"; id = "ada@x.org")
     K.note_task!(kb, "PU-1", "Shall I order spares?"; kind = "question", by = bot)
@@ -2006,6 +2010,9 @@ end
     round(200); round(270)
     @test to("bea")[end]["title"] == "Assigned to you · PU-2" && to("bea")[end]["body"] == "Order spares" &&
           to("bea")[end]["url"] == "/projects.html#PU-2"
+    # A question, or an answer, opens its task at the question.
+    @test K.notification(kb.config, [Dict("section" => "questions", "key" => "questions:41", "ref" => "PU-1", "text" => "Which gasket?")])["url"] ==
+          "/projects.html#PU-1/41"
     # What they did themselves is not pushed to them.
     call(bea, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Clean the filter", "assignee" => "bea@x.org"))
     round(300); round(370)

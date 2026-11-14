@@ -171,7 +171,7 @@ answers, not resolved, while they have not written on the task since the answer:
 function answered_questions(kb::KB, me::AbstractString)
     out = NamedTuple[]
     for q in query(kb, """
-            SELECT e.id, e.task_id, e.text, a.text AS answer, $(event_who("a")) AS answerer
+            SELECT e.id, e.task_id, e.text, a.id AS answer_id, a.text AS answer, $(event_who("a")) AS answerer
             FROM task_events e JOIN tasks t ON t.id = e.task_id
             JOIN task_events a ON a.id = (SELECT min(r.id) FROM task_events r WHERE r.reply_to = e.id AND r.kind = 'comment')
             WHERE e.kind = 'question' AND e.by_person = ? AND e.resolved_at IS NULL AND t.archived_at IS NULL
@@ -180,7 +180,7 @@ function answered_questions(kb::KB, me::AbstractString)
             ORDER BY a.id DESC""", (me, me))
         r = query(kb, TASK_SELECT * " WHERE t.id = ?", (q.task_id,))
         isempty(r) || push!(out, merge(task_row(first(r)), (; question = String(q.text), note = Int(q.id), answer = String(q.answer),
-                                                             answerer = String(q.answerer))))
+                                                             answer_note = Int(q.answer_id), answerer = String(q.answerer))))
     end
     return out
 end

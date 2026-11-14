@@ -108,12 +108,12 @@ end
     people_did(kb, key, caller; at = time()) -> Vector{NamedTuple}
 
 The latest of people's actions on project `key`'s tasks, the newest first: each `(; who, kind, ref,
-title, text, detail, at)`. Not `caller`'s, nor agents'.
+title, text, detail, at, event)`, `event` its number in the task's activity. Not `caller`'s, nor agents'.
 """
 people_did(kb::KB, key::AbstractString, caller::Caller; at::Float64 = time()) =
-    [(; who = String(r.who), kind = String(r.kind), ref = String(r.ref), title = String(r.title),
+    [(; event = Int(r.id), who = String(r.who), kind = String(r.kind), ref = String(r.ref), title = String(r.title),
         text = first(String(r.text), 200), detail = JSON.parse(String(r.detail)), at = String(r.at))
-     for r in query(kb, """SELECT $(event_who()) AS who, e.kind, e.text, e.detail, e.at, p.key || '-' || t.number AS ref, t.title
+     for r in query(kb, """SELECT e.id, $(event_who()) AS who, e.kind, e.text, e.detail, e.at, p.key || '-' || t.number AS ref, t.title
                            FROM task_events e CROSS JOIN tasks t ON t.id = e.task_id JOIN projects p ON p.id = t.project_id
                            WHERE p.key = ? AND e.by_agent = 0 AND e.by_person != ? AND e.at >= ?
                            ORDER BY e.at DESC, e.id DESC LIMIT ?""",

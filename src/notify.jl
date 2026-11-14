@@ -92,7 +92,7 @@ page_path(path::AbstractString) = (i = findfirst('#', path); i === nothing ? "/$
     notification(c, items) -> Dict
 
 What a push says of `items` (see [`waiting_items`](@ref)): a `title`, a `body`, the `url` to open
-(the task, for one). Each has no tag of its own, so none replaces another: a replaced one does not
+(the task for one, at its question for a question or an answer). Each has no tag of its own, so none replaces another: a replaced one does not
 show on a Mac's screen, only in its Notification Center.
 """
 function notification(c::Config, items)
@@ -100,8 +100,10 @@ function notification(c::Config, items)
                  "review" => "To review", "mine" => "Assigned to you")
     if length(items) == 1
         i = only(items)
+        # A question, or an answer, opens at the question on its task (`#KB-12/345`, see KBProjects.vue).
+        at = i["section"] in ("questions", "answered") ? "/" * last(split(i["key"], ':')) : ""
         return Dict("title" => "$(heads[i["section"]]) · $(i["ref"])", "body" => clip_line(i["text"], 240),
-                    "url" => page_path("projects#" * i["ref"]))
+                    "url" => page_path("projects#" * i["ref"] * at))
     end
     lines = ["$(i["ref"]) $(lowercase(heads[i["section"]])): $(clip_line(i["text"], 90))" for i in items]
     more = length(lines) > 4 ? "\n… and $(length(lines) - 4) more" : ""
