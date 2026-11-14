@@ -1539,7 +1539,7 @@ end
     rt = K.create_token!(kb, reader; name = "claude").token
     ct = K.create_token!(kb, curator; name = "claude").token
     narrow = K.create_token!(kb, curator; name = "read only", permissions = ["read"]).token
-    @test K.mcp_tools(K.token_caller(kb, rt)) == ["zemi.$t" for t in ("daily", "figure", "figures", "finding", "findings", "library", "milestones", "page", "paper", "papers", "projects", "read", "records", "references", "search",
+    @test K.mcp_tools(K.token_caller(kb, rt)) == ["zemi.$t" for t in ("daily", "figure", "figures", "finding", "findings", "library", "media", "milestones", "page", "paper", "papers", "projects", "read", "records", "references", "search",
                                                                           "similar", "status", "task", "task_diff", "task_match", "task_search", "task_status", "task_wait", "tasks")]
     @test "zemi.ingest" in K.mcp_tools(K.token_caller(kb, ct)) && "zemi.job_status" in K.mcp_tools(K.token_caller(kb, ct))
     @test K.mcp_tools(K.token_caller(kb, narrow)) == ["zemi.$t" for t in ("daily", "figure", "figures", "page", "paper", "papers", "read", "records", "references", "search", "similar", "status")]
