@@ -235,10 +235,9 @@ const who = (d: Doc) => byline(d.authors)
         </select>
       </div>
       <div v-if="state === 'mine'" class="kbm-intro">
-        <p>Your library: the notes and files you keep in step from a folder on your machine. Only you see them until
-          you share them. Select some to share them or contribute them to the group.</p>
-        <p v-if="!docs.length && !loading && !q">Nothing is in it yet. Keep a folder in step with it, an Obsidian vault say:
-          <code>{{ connectCommand }}</code></p>
+        <p>Notes and files synced from your machines, private until you share them. Select some to share or
+          contribute them.</p>
+        <p v-if="!docs.length && !loading && !q">Empty. To sync a folder, such as an Obsidian vault: <code>{{ connectCommand }}</code></p>
       </div>
       <p v-if="unavailable.length" class="kbm-dim kbm-unavailable">
         Unavailable here: {{ unavailable.join('; ') }}.

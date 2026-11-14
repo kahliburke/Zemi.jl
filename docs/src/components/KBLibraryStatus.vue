@@ -30,7 +30,7 @@ onMounted(async () => {
 onUnmounted(() => clearInterval(timer))
 
 async function disconnect(c: Connection) {
-  if (!confirm(`Sign ${machine(c)} out? Its zemi connect stops reaching your library until it signs in again.`)) return
+  if (!confirm(`Sign out ${machine(c)}? It stops syncing until it signs in again.`)) return
   try { await post(`/api/me/tokens/${c.id}/revoke`, '{}'); await load() } catch (e: any) { error.value = e.message }
 }
 
@@ -47,14 +47,14 @@ const command = computed(() => `zemi connect ${new URL(api.value || '/', locatio
 <template>
   <section class="kbl">
     <h2>Your library</h2>
-    <p class="kb-dim">Your notes and files, kept in step from folders on your machines. Only you see them until you share
-      them on <a :href="`${kbPage('manage')}?state=mine`">Documents</a>.</p>
+    <p class="kb-dim">Notes and files synced from your machines, private until you share them on
+      <a :href="`${kbPage('manage')}?state=mine`">Documents</a>.</p>
     <p v-if="error" class="kb-error">{{ error }}</p>
     <template v-if="lib">
       <div class="kbl-usage" :title="`${bytes(lib.used)} of ${bytes(lib.limit)}`">
         <div class="kbl-bar"><div :style="{ width: `${share}%` }" /></div>
         <span class="kb-dim">{{ bytes(lib.used) }} of {{ bytes(lib.limit) }}</span>
-        <span v-if="lib.reading" class="kbl-reading">reading what changed…</span>
+        <span v-if="lib.reading" class="kbl-reading">reading changes…</span>
       </div>
 
       <table v-if="lib.folders.length" class="kbl-table">
@@ -68,10 +68,10 @@ const command = computed(() => `zemi connect ${new URL(api.value || '/', locatio
           </tr>
         </tbody>
       </table>
-      <p v-else class="kb-dim">Nothing is in it yet.</p>
+      <p v-else class="kb-dim">Empty.</p>
 
       <h3>Machines</h3>
-      <p class="kb-dim">Signed in to keep folders in step. One syncs while <code>zemi connect</code> runs there.</p>
+      <p class="kb-dim">Each syncs while <code>zemi connect</code> runs on it.</p>
       <table v-if="lib.connections.length" class="kbl-table">
         <thead><tr><th>Machine</th><th>Now</th><th>Last synced</th><th>Signed in</th><th></th></tr></thead>
         <tbody>
@@ -84,9 +84,8 @@ const command = computed(() => `zemi connect ${new URL(api.value || '/', locatio
           </tr>
         </tbody>
       </table>
-      <p v-else class="kb-dim">No machine is signed in to keep a folder in step with it.</p>
-      <p class="kb-dim kbl-how">To keep a folder in step, an Obsidian vault say, run on your machine:
-        <code>{{ command }}</code></p>
+      <p v-else class="kb-dim">None signed in.</p>
+      <p class="kb-dim kbl-how">To sync a folder, such as an Obsidian vault: <code>{{ command }}</code></p>
     </template>
   </section>
 </template>
