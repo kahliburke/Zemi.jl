@@ -179,4 +179,9 @@ export write_site, site_paper, related_papers
 export project_map, read_project_map, remote_project_map, ProjectMap, Thread, threads, thread_state,
        glance_markdown, summary_markdown, activity_by_day, thread_tasks, finished, finished_markdown, done_at
 
+
+# The zemi app's entry, compiled into the package image so that a command starts at once rather than
+# compiling the commands it may run first.
+precompile(main, (Vector{String},))
+
 end # module Zemi
