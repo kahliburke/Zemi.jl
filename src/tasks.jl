@@ -374,6 +374,45 @@ function note_task!(kb::KB, ref::AbstractString, text::AbstractString; kind::Abs
 end
 
 """
+    remove_note!(kb, ref, note; by, maintainer = false)
+
+Remove note `note` from task `ref`'s activity, with its earlier texts, by whoever may edit it (see
+[`changed_note`](@ref)). The activity keeps that it was removed, and by whom, not what it said; the
+replies to it stay.
+"""
+function remove_note!(kb::KB, ref::AbstractString, note::Integer; by::Actor, maintainer::Bool = false)
+    id, e = changed_note(kb, ref, note, by; maintainer, what = "remove")
+    transaction(kb) do
+        execute!(kb, "DELETE FROM task_search WHERE event_id = ?", (note,))
+        execute!(kb, "DELETE FROM task_events WHERE id = ?", (note,))
+        execute!(kb, "UPDATE tasks SET updated_at = ? WHERE id = ?", (now_iso(), id))
+    end
+    record!(kb, id, by, "removed"; detail = Dict("kind" => e.kind, "note" => note))
+    return nothing
+end
+
+"""
+    changed_note(kb, ref, note, by; maintainer, what) -> (task id, row)
+
+Note `note` of task `ref` (a comment, progress report or question), refused unless `by` may change
+it (`what`, "edit" or "remove"): people their own notes and those of agents working for them, a
+project's maintainers (`maintainer`) any agent's, and an agent only its own.
+"""
+function changed_note(kb::KB, ref::AbstractString, note::Integer, by::Actor; maintainer::Bool, what::AbstractString)
+    id = task_ref(kb, ref)
+    rows = query(kb, "SELECT $(event_who("task_events")) AS who, by_agent, by_person, kind, text FROM task_events WHERE id = ? AND task_id = ?", (note, id))
+    isempty(rows) && not_found("No note $note on $(uppercase(strip(ref)))")
+    e = first(rows)
+    e.kind in SEARCHED_NOTES || error("Only comments, progress notes and questions are $(what == "edit" ? "edited" : "removed")")
+    # A person's own note is theirs by who they are, whatever they have been named since.
+    mine = (e.by_agent == 1) == by.agent && (by.agent || isempty(by.id) ? e.who == by.name : e.by_person == by.id)
+    their_agent = !by.agent && e.by_agent == 1 && (maintainer || (!isempty(by.id) && e.by_person == by.id))
+    mine || their_agent || error(by.agent ? "An agent $(what)s only its own notes" :
+        "A person $(what)s their own notes and those of agents working for them; a project's maintainers, any agent's")
+    return id, e
+end
+
+"""
     edit_note!(kb, ref, note, text; by, maintainer = false)
 
 Give note `note` (its number in task `ref`'s activity: a comment, progress report or question) the
@@ -383,17 +422,8 @@ agent edits only its own. The note keeps its place, kind and state (a question s
 answered); its references are linked, and search follows the new text.
 """
 function edit_note!(kb::KB, ref::AbstractString, note::Integer, text::AbstractString; by::Actor, maintainer::Bool = false)
-    id = task_ref(kb, ref)
     use_media!(kb, something(ref_project(ref)), text)
-    rows = query(kb, "SELECT $(event_who("task_events")) AS who, by_agent, by_person, kind, text FROM task_events WHERE id = ? AND task_id = ?", (note, id))
-    isempty(rows) && not_found("No note $note on $(uppercase(strip(ref)))")
-    e = first(rows)
-    e.kind in SEARCHED_NOTES || error("Only comments, progress notes and questions are edited")
-    # A person's own note is theirs by who they are, whatever they have been named since.
-    mine = (e.by_agent == 1) == by.agent && (by.agent || isempty(by.id) ? e.who == by.name : e.by_person == by.id)
-    their_agent = !by.agent && e.by_agent == 1 && (maintainer || (!isempty(by.id) && e.by_person == by.id))
-    mine || their_agent || error(by.agent ? "An agent edits only its own notes" :
-        "A person edits their own notes and those of agents working for them; a project's maintainers, any agent's")
+    id, e = changed_note(kb, ref, note, by; maintainer, what = "edit")
     text = strip(text)
     isempty(text) && error("A note needs text")
     text == e.text && return note

@@ -151,6 +151,10 @@ async function saveComment() {
   await change({ text: c.text }, `/comments/${c.id}`)
   if (!error.value) editingComment.value = null
 }
+async function removeComment(id: number) {
+  if (!confirm('Remove your comment? What it said goes with it.')) return
+  await change({}, `/comments/${id}/remove`)
+}
 const mine = (a: Activity) => a.kind === 'comment' && !a.by_agent && a.by_person === me.value?.id
 
 // Sources, grouped by kind; a finding's sources by how it relates to them.
@@ -321,6 +325,8 @@ onBeforeUnmount(() => { following = false })
                       <span class="kbf-dim">{{ when(a.at) }}{{ a.edited ? ' · edited' : '' }}</span>
                       <button v-if="editable && mine(a) && editingComment?.id !== a.id" class="kbf-x" title="Edit" aria-label="Edit your comment"
                               @click="editingComment = { id: a.id, text: a.text }"><KBIcon name="edit" :size="13" /></button>
+                      <button v-if="editable && mine(a) && editingComment?.id !== a.id" class="kbf-x" title="Remove" aria-label="Remove your comment"
+                              @click="removeComment(a.id)"><KBIcon name="trash" :size="13" /></button>
                     </div>
                     <form v-if="editingComment?.id === a.id" class="kbf-comment-form" @submit.prevent="saveComment">
                       <KBRefText v-model="editingComment.text" :project="key" multiline :rows="4" send="save" @submit="saveComment" />

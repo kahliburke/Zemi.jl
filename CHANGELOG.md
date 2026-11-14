@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Removing a note**: a comment, progress note or question is removed by whoever may edit it (on
+  the task's activity, or `task_note_remove` for an agent's own); the activity keeps that it was
+  removed. A comment on a finding is removed by its writer.
 - **Zotero groups are linked from a project's library**, by its maintainers: a group's address, and
   an API key for a private one, checked with Zotero and kept where the service alone reads it. Each
   group shows its items, when it was last read and any error; one group failing no longer stops the

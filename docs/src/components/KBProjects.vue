@@ -1208,6 +1208,11 @@ async function saveNote() {
     if (noteHistory.value?.id === n.id) showNoteHistory(n.id, true)
   } catch (e: any) { error.value = e.message }
 }
+// A note removed: gone with its earlier texts; the activity keeps that it was.
+async function removeNote(e: TaskEvent) {
+  if (!open.value || !confirm(`Remove this ${e.kind === 'progress' ? 'progress note' : e.kind}? What it said goes with it.`)) return
+  try { open.value = await post(`/api/tasks/${open.value.ref}/notes/${e.id}/remove`) } catch (err: any) { error.value = err.message }
+}
 async function showNoteHistory(id: number, again = false) {
   if (noteHistory.value?.id === id && !again) { noteHistory.value = null; return }
   try { noteHistory.value = { id, rows: await getJSON(`/api/tasks/${open.value!.ref}/notes/${id}/history`) } } catch (e: any) { error.value = e.message }
@@ -1229,6 +1234,7 @@ function eventText(e: TaskEvent) {
     case 'archived': return 'archived it'
     case 'unarchived': return 'brought it back from the archive'
     case 'created': return 'created it'
+    case 'removed': return `removed ${e.detail.kind === 'progress' ? 'a progress note' : `a ${e.detail.kind}`}`
     case 'comment': case 'progress': case 'question': return ''
     default: return e.kind
   }
@@ -1760,7 +1766,9 @@ function keepRecordsOpen(open: boolean) {
                       @click="showNoteHistory(e.id)">edited</button>
               <span class="kbp-spacer"></span>
               <button v-if="canEditNote(e) && editingNote?.id !== e.id" class="kbp-icon kbp-note-edit" title="Edit" aria-label="Edit this note"
-                      @click="editingNote = { id: e.id, text: e.text }"><KBIcon name="edit" :size="14" /></button></div>
+                      @click="editingNote = { id: e.id, text: e.text }"><KBIcon name="edit" :size="14" /></button>
+              <button v-if="canEditNote(e) && editingNote?.id !== e.id" class="kbp-icon kbp-note-edit" title="Remove" aria-label="Remove this note"
+                      @click="removeNote(e)"><KBIcon name="trash" :size="14" /></button></div>
             <form v-if="editingNote?.id === e.id" class="kbp-form kbp-note-editing" @submit.prevent="saveNote">
               <KBRefText :project="key" v-model="editingNote.text" multiline :rows="4" :draft="`note:${editingNote.id}`" send="save" @submit="saveNote" />
               <div class="kbp-comment-actions">

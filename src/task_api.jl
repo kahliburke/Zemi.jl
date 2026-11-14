@@ -305,6 +305,12 @@ route!("POST", "/api/tasks/:task/notes/:note"; need = "tasks.edit", project = CO
     task_reply(c, c[:task])
 end
 
+route!("POST", "/api/tasks/:task/notes/:note/remove"; need = "tasks.edit", project = CONTRIBUTE) do c
+    remove_note!(c.kb, c[:task], something(tryparse(Int, c[:note]), 0); by = person_of(c),
+                 maintainer = project_access(c.kb, c.caller, something(ref_project(c[:task]), "")) >= MAINTAIN)
+    task_reply(c, c[:task])
+end
+
 # A task linked to is one the caller may see: a link shows it on the task.
 route!("POST", "/api/tasks/:task/links"; need = "tasks.edit", project = CONTRIBUTE) do c
     d = json_body(c)
@@ -392,5 +398,10 @@ end
 
 route!("POST", "/api/findings/:finding/comments/:comment"; need = "tasks.edit", project = CONTRIBUTE) do c
     edit_finding_comment!(c.kb, c[:finding], something(tryparse(Int, c[:comment]), 0), get(json_body(c), "text", ""); by = person_of(c))
+    finding_reply(c, c[:finding])
+end
+
+route!("POST", "/api/findings/:finding/comments/:comment/remove"; need = "tasks.edit", project = CONTRIBUTE) do c
+    remove_finding_comment!(c.kb, c[:finding], something(tryparse(Int, c[:comment]), 0); by = person_of(c))
     finding_reply(c, c[:finding])
 end

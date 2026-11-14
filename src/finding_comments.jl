@@ -21,6 +21,30 @@ function comment_finding!(kb::KB, ref::AbstractString, text::AbstractString; by:
     return n
 end
 
+# Comment `n` on finding `ref`, refused unless `by` wrote it: one's own comment is one's by who one
+# is, whatever one has been named since.
+function own_comment(kb::KB, ref::AbstractString, n::Integer, by::Actor; what::AbstractString)
+    rows = query(kb, "SELECT $(COMMENTER) AS who, by_agent, by_person, text, earlier FROM finding_comments WHERE id = ? AND finding_id = ?",
+                 (n, finding_id(kb, ref)))
+    isempty(rows) && not_found("No comment $n on $(uppercase(strip(ref)))")
+    c = first(rows)
+    mine = (c.by_agent == 1) == by.agent && (by.agent || isempty(by.id) ? c.who == by.name : c.by_person == by.id)
+    mine || error("Only $(c.who) $what their comment")
+    return c
+end
+
+"""
+    remove_finding_comment!(kb, ref, n; by)
+
+Remove comment `n` on finding `ref`, with what it said before: only its writer does.
+"""
+function remove_finding_comment!(kb::KB, ref::AbstractString, n::Integer; by::Actor)
+    own_comment(kb, ref, n, by; what = "removes")
+    execute!(kb, "DELETE FROM finding_comments WHERE id = ?", (n,))
+    tasks_changed!()
+    return
+end
+
 """
     edit_finding_comment!(kb, ref, n, text; by)
 
@@ -28,13 +52,7 @@ Correct comment `n` on finding `ref`: only its writer does. What it said before 
 """
 function edit_finding_comment!(kb::KB, ref::AbstractString, n::Integer, text::AbstractString; by::Actor)
     isempty(strip(text)) && error("A comment needs text")
-    rows = query(kb, "SELECT $(COMMENTER) AS who, by_agent, by_person, text, earlier FROM finding_comments WHERE id = ? AND finding_id = ?",
-                 (n, finding_id(kb, ref)))
-    isempty(rows) && not_found("No comment $n on $(uppercase(strip(ref)))")
-    c = first(rows)
-    # One's own comment is one's by who one is, whatever one has been named since.
-    mine = (c.by_agent == 1) == by.agent && (by.agent || isempty(by.id) ? c.who == by.name : c.by_person == by.id)
-    mine || error("Only $(c.who) corrects their comment")
+    c = own_comment(kb, ref, n, by; what = "corrects")
     strip(text) == c.text && return
     use_media!(kb, something(ref_project(ref)), text)
     earlier = push!(JSON.parse(c.earlier), Dict("text" => c.text, "until" => now_iso()))

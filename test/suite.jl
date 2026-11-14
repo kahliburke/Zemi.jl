@@ -4931,7 +4931,7 @@ end
     @test Set(t.name for t in tools) ==
           Set(["search", "paper", "read", "figures", "figure", "page", "references", "similar", "ingest", "add_pdf", "ingest_code", "papers", "records", "status", "daily", "sync", "publish", "job_status",
                "projects", "tasks", "task", "next_task", "plan", "task_update", "task_note", "task_note_edit", "task_diff", "task_link", "project_create", "project_codebase", "library", "library_add", "milestones",
-               "milestone_create", "milestone_update", "milestone_activate", "milestone_done", "task_wait", "task_search", "task_match", "task_status", "task_attach", "media_upload", "media",
+               "milestone_create", "milestone_update", "milestone_activate", "milestone_done", "task_wait", "task_search", "task_match", "task_status", "task_attach", "media_upload", "media", "task_note_remove",
                "findings", "finding", "finding_draft", "finding_update", "finding_comment", "finding_evidence"])
     # Each says what it needs over /mcp; those that read the service's own disk are offered no one there.
     @test all(t -> t.need === nothing || t.need in K.PERMISSION_NAMES, K.TOOLS[])
@@ -5269,6 +5269,19 @@ end
     @test_throws "No note" K.edit_note!(kb, "NE-1", mine, "Elsewhere"; by = me)
     status = first(e.id for e in K.task(kb, "NE-2").activity if e.kind == "status")
     @test_throws "Only comments" K.edit_note!(kb, "NE-2", status, "Moved"; by = me)
+    # Removing a note: by whoever may edit it; it goes from the activity and search, its replies stay,
+    # and the activity keeps that it was removed.
+    asked = K.note_task!(kb, "NE-2", "Which seed did the stochastic runs use?"; kind = "question", by = me)
+    reply = K.note_task!(kb, "NE-2", "Seed 7."; kind = "comment", reply_to = asked, by = bot)
+    @test_throws "An agent removes only its own" K.remove_note!(kb, "NE-2", asked; by = bot)
+    @test_throws "their own notes" K.remove_note!(kb, "NE-2", asked; by = K.person("Bea"))
+    @test_throws "Only comments" K.remove_note!(kb, "NE-2", status; by = me)
+    K.remove_note!(kb, "NE-2", asked; by = me)
+    act = K.task(kb, "NE-2").activity
+    @test !any(e -> e.id == asked, act) && any(e -> e.id == reply, act) && last(act).kind == "removed" && last(act).detail["kind"] == "question"
+    @test occursin("removed a question (note $asked)", K.format_task(K.task(kb, "NE-2")))
+    @test !any(t -> t.ref == "NE-2", K.search_tasks(kb, "seed did"; meaning = nomeaning))
+    @test_throws "No note" K.remove_note!(kb, "NE-2", asked; by = me)
     # An edited question stays the question it was.
     asked = K.note_task!(kb, "NE-2", "Which runs?"; kind = "question", by = bot)
     K.edit_note!(kb, "NE-2", asked, "Which runs, deterministic or stochastic?"; by = bot)
@@ -6076,6 +6089,10 @@ end
     K.comment_finding!(kb, f, "Yes: see @ED-F2."; by = bot)
     @test_throws "Only Rowan corrects" K.edit_finding_comment!(kb, f, c, "Changed"; by = bot)
     K.edit_finding_comment!(kb, f, c, "Does this hold near the reef crest?"; by = me)
+    gone = K.comment_finding!(kb, f, "Posted twice."; by = me)
+    @test_throws "Only Rowan removes" K.remove_finding_comment!(kb, f, gone; by = bot)
+    K.remove_finding_comment!(kb, f, gone; by = me)
+    @test !any(a -> a.kind == "comment" && a.id == gone, K.finding_activity(kb, f))
     @test_throws "A comment needs text" K.comment_finding!(kb, f, "  "; by = me)
     act = K.finding_activity(kb, f)
     @test [a.kind for a in act] == ["created", "source", "source", "source", "revised", "status", "comment", "comment"]

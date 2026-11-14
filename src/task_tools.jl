@@ -477,6 +477,16 @@ task_note_edit_tool(ref::String, note::Int, text::String)::String =
 tool!("task_note_edit", task_note_edit_tool; need = "tasks.edit")
 
 """
+    task_note_remove(ref::String, note::Int) -> String
+
+Remove note `note` (its number in task `ref`'s activity) that you wrote: a comment, progress report or
+question written by mistake or no longer true. The activity keeps that it was removed.
+"""
+task_note_remove_tool(ref::String, note::Int)::String =
+    refusing(() -> (tool_needs(ref, CONTRIBUTE); remove_note!(kb(), ref, note; by = tool_actor()); "Removed note $note from $(uppercase(strip(ref)))."))
+tool!("task_note_remove", task_note_remove_tool; need = "tasks.edit")
+
+"""
     task_attach(ref::String; path::String="", media::String="", data::String="", name::String="", caption::String="") -> String
 
 Attach a file to task `ref`, as a note in its activity: an image or a movie shown inline (a figure
@@ -897,6 +907,7 @@ event_text(e) =
     e.kind == "link" ? "linked $(e.detail["kind"]) $(e.text)" :
     e.kind == "deleted" ? "deleted subtask $(e.text)" : e.kind in ("archived", "unarchived") ? "$(e.kind) it" :
     e.kind == "declined" ? "declined it" * (isempty(e.text) ? "" : ": " * e.text) : e.kind == "undeclined" ? "brought it back to Proposed" :
+    e.kind == "removed" ? "removed $(Dict("comment" => "a comment", "progress" => "a progress note", "question" => "a question")[e.detail["kind"]]) (note $(e.detail["note"]))" :
     e.kind == "created" ? "created it" : e.kind
 
 "What people did on a project's tasks (see `people_events`), for an agent that waited for it."
