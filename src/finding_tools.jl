@@ -19,9 +19,16 @@ tool!("findings", findings_tool; need = "tasks.view")
     finding(ref::String) -> String
 
 Finding `ref` (`KB-F3`) in full: its claim, status, write-up and sources (its evidence and what
-the write-up cites), and the findings that build on or contradict it.
+the write-up cites), and the findings that build on or contradict it. The newest images in it and its
+comments are shown, and the other files attached are listed (see `media`).
 """
-finding_tool(ref::String)::String = refusing(() -> (tool_needs(ref, VIEW); format_finding(ref)))
+finding_tool(ref::String)::String = refusing() do
+    tool_needs(ref, VIEW)
+    f = finding(kb(), ref)
+    texts = [f.claim; f.body; f.status_reason; [e.excerpt * " " * e.note for e in f.evidence]; [a.text for a in finding_activity(kb(), ref)]]
+    images, shown = attached_images(texts)
+    with_images(format_finding(ref) * attachments_text(texts, shown), images)
+end
 tool!("finding", finding_tool; need = "tasks.view")
 
 """

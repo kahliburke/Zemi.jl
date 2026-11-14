@@ -72,24 +72,153 @@ function attach_local_files(text::AbstractString, project)
     end)
 end
 
-"The newest images a task's plan and activity show, at most `n`, as `(; bytes, type)` an agent can be shown."
-function task_images(t; n::Integer = 4)
-    addresses = String[]
-    for text in [t.body; [coalesce(e.text, "") for e in t.activity]]
-        for m in eachmatch(MEDIA_ADDRESS, text)
-            m.match in addresses || push!(addresses, m.match)
-        end
-    end
+# ── Attached files, as agents see them ───────────────────────────────────────────────────────────
+
+const SHOWN_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
+"How large an image is shown as it is; larger ones, and other kinds of image, are drawn smaller."
+const SHOWN_BYTES = 4_500_000
+"How wide an image drawn for an agent is, in pixels: as much as one is shown at."
+const SHOWN_WIDTH = 1568
+
+"The files `texts` refer to, each once, in the order they first appear: `(; address, hash)`."
+function media_refs(texts)
     out = NamedTuple[]
-    for a in reverse(addresses)
-        f = media_file(kb(), match(MEDIA_ADDRESS, a)[1])
-        (f === nothing || !(f.type in ("image/png", "image/jpeg", "image/gif", "image/webp")) || f.size > 5 * 1024^2) && continue
-        path = media_path(kb().config, f.hash)
-        isfile(path) && push!(out, (; bytes = read(path), type = f.type))
-        length(out) >= n && break
+    for t in texts, m in eachmatch(MEDIA_ADDRESS, coalesce(t, ""))
+        any(r -> r.hash == m[1], out) || push!(out, (; address = String(m.match), hash = String(m[1])))
     end
-    return reverse(out)
+    return out
 end
+
+"File `hash` on disk under its name's extension, which MuPDF reads the kind of file from, for `f(path)`."
+function with_media_file(f, k::KB, file)
+    path = media_path(k.config, file.hash)
+    isfile(path) || restore_media!(k, file.hash)
+    isfile(path) || error("$(file.name) is not on this machine")
+    tmp = tempname() * lowercase(splitext(file.name)[2])
+    symlink(path, tmp)
+    try f(tmp) finally rm(tmp; force = true) end
+end
+
+"""
+    shown_image(kb, file) -> Union{NamedTuple,Nothing}
+
+Media `file` (see [`media_file`](@ref)) as an image an agent is shown, `(; bytes, type)`: as it is
+when small enough, else drawn at most `SHOWN_WIDTH` pixels wide (an SVG too); `nothing` for what is
+not an image.
+"""
+function shown_image(k::KB, file)
+    startswith(file.type, "image/") || return nothing
+    if file.type in SHOWN_TYPES && file.size <= SHOWN_BYTES
+        path = media_path(k.config, file.hash)
+        isfile(path) || restore_media!(k, file.hash)
+        return isfile(path) ? (; bytes = read(path), type = file.type) : nothing
+    end
+    png = with_media_file(p -> draw_png(k.config, p; width = SHOWN_WIDTH), k, file)
+    return png === nothing ? nothing : (; bytes = png, type = "image/png")
+end
+
+"""
+    attached_images(texts; n = 4) -> (images, shown)
+
+The newest images `texts` refer to, at most `n`, as an agent is shown them, oldest first; and the
+addresses of those shown.
+"""
+function attached_images(texts; n::Integer = 4)
+    images, shown = NamedTuple[], String[]
+    for r in reverse(media_refs(texts))
+        f = media_file(kb(), r.hash)
+        f === nothing && continue
+        img = try shown_image(kb(), f) catch; nothing end
+        img === nothing && continue
+        push!(images, img); push!(shown, r.address)
+        length(images) >= n && break
+    end
+    return reverse(images), shown
+end
+
+"""
+    attachments_text(texts, shown) -> String
+
+The files `texts` refer to that are not among those `shown`, each with what it is and how to see it
+(the `media` tool); empty when there are none.
+"""
+function attachments_text(texts, shown)
+    lines = String[]
+    for r in media_refs(texts)
+        r.address in shown && continue
+        f = media_file(kb(), r.hash)
+        f === nothing && continue
+        kind = f.type == "application/pdf" ? "a PDF" : startswith(f.type, "image/") ? "an image" : startswith(f.type, "video/") ? "a video" :
+               startswith(f.type, "text/") || f.type == "application/json" ? "text" : "a file"
+        push!(lines, "- `$(r.address)`: $kind, $(format_bytes(f.size))" *
+                     (startswith(f.type, "video/") || kind == "a file" ? "" : "; `media(\"$(r.address)\")` shows it"))
+    end
+    return isempty(lines) ? "" : "\n\n## Files attached, not shown here\n\n" * join(lines, "\n")
+end
+
+"A size in bytes as people read it."
+format_bytes(n::Integer) = n < 1024 ? "$n bytes" : n < 1024^2 ? "$(round(n / 1024; digits = 1)) KB" : "$(round(n / 1024^2; digits = 1)) MB"
+
+"A task's texts that files are attached in: its plan and its activity."
+task_texts(t) = [t.body; [coalesce(e.text, "") for e in t.activity]]
+
+"A task as `task` and `next_task` give it: in full, with its newest images, and the other files it has."
+function task_answer(t, head::AbstractString = "")
+    texts = task_texts(t)
+    images, shown = attached_images(texts)
+    with_images(head * format_task(t) * attachments_text(texts, shown), images)
+end
+
+"""
+    media(address::String; page::Int=0) -> String
+
+A file attached in a task, a note or a finding, by the address text names it by
+(`media/<hash>/<name>`): an image is shown; a PDF gives its text and shows its first page, or with
+`page` shows that page with its text; a text file (code, CSV, JSON) gives its text. Other kinds are
+described.
+"""
+media_tool(address::String; page::Int = 0)::String = refusing() do
+    m = match(MEDIA_ADDRESS, address)
+    m === nothing && error("A file is named media/<hash>/<name>, as text refers to it: $address")
+    hash = String(m[1])
+    f = media_file(kb(), hash)
+    (f === nothing || !media_visible(kb(), tool_caller(), hash)) && not_found("No file $address")
+    head = "$(f.name): $(f.type), $(format_bytes(f.size)), attached by $(f.added_by) on $(first(f.added_at, 10))."
+    if f.type == "application/pdf"
+        with_media_file(kb(), f) do pdf
+            n = pdf_pages(kb().config, pdf)
+            count = n === nothing ? "" : " $n page$(n == 1 ? "" : "s")."
+            if page == 0
+                text = first(pdf_text(kb().config, pdf), 40_000)
+                png = draw_png(kb().config, pdf, 1)
+                more = n !== nothing && n > 1 ? "\n\nThe first page is shown; `media(\"$(m.match)\"; page=N)` shows page N." : ""
+                with_images(head * count * more * "\n\n" * text, png === nothing ? [] : [(; bytes = png, type = "image/png")])
+            else
+                n === nothing || 1 <= page <= n || error("$(f.name) has no page $page: it has $n")
+                png = draw_png(kb().config, pdf, page)
+                png === nothing && error("$(f.name) has no page $page")
+                with_images(head * " Page $page of $(something(n, "?")).\n\n" * pdf_text(kb().config, pdf, page),
+                            [(; bytes = png, type = "image/png")])
+            end
+        end
+    elseif startswith(f.type, "image/")
+        img = shown_image(kb(), f)
+        img === nothing ? head * " It could not be drawn." : with_images(head, [img])
+    elseif startswith(f.type, "text/") || f.type in ("application/json",) || media_type(f.name) == "text/plain; charset=utf-8"
+        path = media_path(kb().config, hash)
+        isfile(path) || restore_media!(kb(), hash)
+        text = read(path, String)
+        cut = length(text) > 50_000 ? "\n\n(The first 50,000 characters of $(length(text)).)" : ""
+        head * "\n\n````\n" * first(text, 50_000) * "\n````" * cut
+    else
+        head * " A file of this kind is not shown here."
+    end
+end
+tool!("media", media_tool; need = "tasks.view")
+
+"The text of PDF `pdf`, or of its page `page`."
+pdf_text(c::Config, pdf::AbstractString, page::Integer = 0) =
+    try read(pipeline(`$(c.mutool) draw -q -F txt -o - $pdf $(page == 0 ? "1-N" : string(page))`; stderr = devnull), String) catch; "" end
 
 "A tool's answer of `text` followed by `images`, as MCP content blocks (see KaimonGate's `image_result`)."
 function with_images(text::AbstractString, images)
@@ -226,12 +355,12 @@ tool!("task_status", task_status_tool; need = "tasks.view")
     task(ref::String) -> String
 
 Task `ref` (KB-12) in full: its plan, subtasks, links, what blocks it, and its activity, where
-people's comments are.
+people's comments are. The newest images in it are shown, and the other files attached are listed:
+`media` shows each.
 """
 task_tool(ref::String)::String = refusing() do
     tool_needs(ref, VIEW)
-    t = task(kb(), ref)
-    with_images(format_task(t), task_images(t))
+    task_answer(task(kb(), ref))
 end
 tool!("task", task_tool; need = "tasks.view")
 
@@ -260,7 +389,7 @@ function next_task_tool(project::String; take::Bool = false)::String
             assigned = task(kb(), ref).assignee
             update_task!(kb(), ref; status = "in_progress", assignee = isempty(assigned) ? AGENT_ASSIGNEE : assigned, by = tool_actor())
         end
-        asked * (take ? "Taken: " : "Next: ") * format_task(task(kb(), ref))
+        task_answer(task(kb(), ref), asked * (take ? "Taken: " : "Next: "))
     end
 end
 tool!("next_task", next_task_tool; need = "tasks.edit")

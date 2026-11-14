@@ -256,10 +256,10 @@ knowledge base reads, and so do the subfolders and files `--skip` names.
 `zemi connect` with no arguments opens an app in the terminal: each folder with its state, files and
 when it last changed and was checked, and each file as it moves. Its keys add a folder (`a`, Tab
 completing the path), remove one (`d`: stop syncing it, or also remove its files from your library),
-choose what of it syncs from a tree of its files and folders (`e`: space switches one on or off), sync now (`s`), pause (`p`), open your library's page (`o`),
-hand the syncing to the background service (`b`) and quit (`q`). It syncs while open, unless the
-background service does; then it shows the service's progress, and the service takes up the folders
-it changes. Off a terminal, `zemi connect` prints a line for each change instead.
+choose what of it syncs from a tree of its files and folders (`e`: space switches one on or off),
+sync now (`s`), pause (`p`), open your library's page (`o`), hand the syncing to the background
+service (`b`) and quit (`q`). It syncs while open, unless the background service does; then it shows
+the service's progress, and the service takes up the folders it changes. Off a terminal, `zemi connect` prints a line for each change instead.
 
 `--background` has a service sync from now and at every login (a launch agent on a Mac, a systemd
 user service on Linux), its log in `~/.local/share/zemi/connect/connect.log`; `--status` says how

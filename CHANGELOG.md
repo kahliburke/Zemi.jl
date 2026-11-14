@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Agents see what is attached**: `media` opens a file attached in a task, note or finding by its
+  address (an image shown, a PDF's text and pages, a text file's text), to whoever may see it.
+  `task`, `next_task` and `finding` show the newest images and list the other files.
 - **Private libraries**: everyone signed in keeps their own notes and files in a space of their own
   in the site's library store (`[library]`, kept apart from the dataset), read for their searches and
   agents alone. A document can be private to the people who brought it in, whatever anyone's role.

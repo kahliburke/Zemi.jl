@@ -5758,6 +5758,31 @@ end
         seen = tools["task"]("DM-11")
         @test startswith(seen, K.kaimon().KaimonGate.MCP_CONTENT_SENTINEL) && occursin("\"mimeType\":\"image/png\"", seen)
         @test !startswith(tools["task"]("DM-1"), K.kaimon().KaimonGate.MCP_CONTENT_SENTINEL)          # none to show
+        # The files it has besides are listed with how to see them, and `media` opens each: a PDF's text and
+        # a page drawn, a text file's text, an SVG drawn; not one the caller may not have.
+        sentinel = K.kaimon().KaimonGate.MCP_CONTENT_SENTINEL
+        text_of(r) = startswith(r, sentinel) ? K.JSON.parse(r[ncodeunits(sentinel)+1:end])["content"][1]["text"] : r
+        dir = mktempdir()
+        page_file(n, text) = (f = joinpath(dir, "p$n.txt");
+                              write(f, "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 10 Tf 72 700 Td ($text) Tj ET\n"); f)
+        run(`mutool create -o $(joinpath(dir, "scan.pdf")) $(page_file(1, "Tide gauge readings.")) $(page_file(2, "Second page."))`)
+        pdf = K.add_media!(kb, read(joinpath(dir, "scan.pdf")), "scan.pdf"; by = "Ada", project = "DM")
+        csv = K.add_media!(kb, Vector{UInt8}("depth,temp\n1,12.5\n"), "readings.csv"; by = "Ada", project = "DM")
+        svg = K.add_media!(kb, Vector{UInt8}("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'><rect width='40' height='20' fill='red'/></svg>"),
+                           "box.svg"; by = "Ada", project = "DM")
+        tools["task_note"]("DM-11", "The readings: [scan]($(pdf.address)) and [table]($(csv.address))")
+        listed = text_of(tools["task"]("DM-11"))
+        @test occursin("## Files attached, not shown here", listed) && occursin("`$(pdf.address)`: a PDF", listed) &&
+              occursin("media(\"$(pdf.address)\")", listed) && occursin("`$(csv.address)`: text", listed)
+        opened = tools["media"](pdf.address)
+        @test occursin("Tide gauge readings.", text_of(opened)) && occursin("2 pages", text_of(opened)) && occursin("\"mimeType\":\"image/png\"", opened)
+        second = tools["media"](pdf.address; page = 2)
+        @test occursin("Page 2 of 2", text_of(second)) && occursin("Second page.", text_of(second)) && !occursin("Tide gauge", text_of(second))
+        @test startswith(tools["media"](pdf.address; page = 3), "⛔ scan.pdf has no page 3")
+        @test occursin("depth,temp\n1,12.5", tools["media"](csv.address))
+        @test occursin("\"mimeType\":\"image/png\"", tools["media"](svg.address))
+        @test startswith(as_ada(() -> tools["media"](hidden.address)), "⛔ No file")
+        @test startswith(tools["media"]("scan.pdf"), "⛔ A file is named media/")
 
         # Findings: an agent drafts one from its task, cites and adds sources; a person accepts it.
         @test as_ada(() -> tools["finding_draft"]("DM", "The key papers agree on the method"; task = "DM-11",
@@ -5803,6 +5828,10 @@ end
         out = tools["finding"]("DM-F1")
         @test occursin("## Activity", out) && occursin("Claude for Ada (agent): wrote [comment $n, edited]: A third paper agrees.", out) &&
               occursin("moved it from accepted to contested: Only two papers.", out)
+        # An image in a comment is shown with the finding, and a PDF listed.
+        tools["finding_comment"]("DM-F1", "The wave: ![wave]($(a.address)), and [the scan]($(pdf.address))")
+        out = tools["finding"]("DM-F1")
+        @test startswith(out, sentinel) && occursin("\"mimeType\":\"image/png\"", out) && occursin("`$(pdf.address)`: a PDF", text_of(out))
         # What the project found comes with its context for the next task.
         K.create_finding!(kb, "DM", "The survey covers the field"; by = bot)
         K.update_finding!(kb, "DM-F2"; status = "accepted", by = me)

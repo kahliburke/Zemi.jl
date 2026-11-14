@@ -619,15 +619,31 @@ function page_image(kb::KB, id::AbstractString, page::Integer; dpi::Integer = 11
     files = query(kb, "SELECT path FROM files WHERE paper_id = ?", (paper_id(kb, id),))
     (isempty(files) || !isfile(first(files).path)) && error("$id's PDF is not on this machine")
     pdf = first(files).path
-    pages = tryparse(Int, strip(read(pipeline(`$(kb.config.mutool) show $pdf trailer/Root/Pages/Count`; stderr = devnull), String)))
+    pages = pdf_pages(kb.config, pdf)
     pages === nothing || 1 <= page <= pages || error("$id has no page $page: it has $pages")
+    png = pdf_page_png(kb.config, pdf, page; dpi)
+    png === nothing && error("$id has no page $page")
+    return png
+end
+
+"How many pages PDF `pdf` has, or `nothing` when it does not say."
+pdf_pages(c::Config, pdf::AbstractString) =
+    tryparse(Int, strip(try read(pipeline(`$(c.mutool) show $pdf trailer/Root/Pages/Count`; stderr = devnull), String) catch; "" end))
+
+"""
+    draw_png(c, file, what; dpi = 110, width = 0) -> Union{Vector{UInt8},Nothing}
+
+`what` of `file` (a page of a PDF, or `1` for an image or SVG, which MuPDF reads as a one-page
+document) drawn as a PNG, at `dpi`, or at most `width` pixels wide; `nothing` when it cannot be.
+"""
+function draw_png(c::Config, file::AbstractString, what::Integer = 1; dpi::Integer = 110, width::Integer = 0)
     out = tempname() * ".png"
     try
-        err = IOBuffer()
-        ok = success(pipeline(`$(kb.config.mutool) draw -q -r $dpi -o $out $pdf $page`; stdout = devnull, stderr = err))
-        (ok && isfile(out)) || error("$id has no page $page")
-        return read(out)
+        size = width > 0 ? `-w $width` : `-r $dpi`
+        ok = success(pipeline(`$(c.mutool) draw -q $size -o $out $file $what`; stdout = devnull, stderr = devnull))
+        return ok && isfile(out) ? read(out) : nothing
     finally
         rm(out; force = true)
     end
 end
+pdf_page_png(c::Config, pdf::AbstractString, page::Integer; dpi::Integer = 110) = draw_png(c, pdf, page; dpi)
