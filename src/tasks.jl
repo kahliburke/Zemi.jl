@@ -118,7 +118,7 @@ What people (not agents) did on project `key`'s tasks after event `since`, oldes
 `(; id, ref, title, who, kind, text, detail)`, as in a task's activity.
 """
 function people_events(kb::KB, key::AbstractString, since::Integer)
-    rows = query(kb, """SELECT e.id, e.who, e.kind, e.text, e.detail, e.reply_to, e.to_whom, e.to_person, p.key || '-' || t.number AS ref, t.title
+    rows = query(kb, """SELECT e.id, $(event_who()) AS who, e.kind, e.text, e.detail, e.reply_to, e.to_whom, e.to_person, p.key || '-' || t.number AS ref, t.title
                         FROM task_events e JOIN tasks t ON t.id = e.task_id JOIN projects p ON p.id = t.project_id
                         WHERE p.key = ? AND e.id > ? AND e.by_agent = 0 ORDER BY e.id""", (uppercase(strip(key)), since))
     return [(; id = Int(r.id), ref = String(r.ref), title = String(r.title), who = String(r.who), kind = String(r.kind),
@@ -385,11 +385,12 @@ answered); its references are linked, and search follows the new text.
 function edit_note!(kb::KB, ref::AbstractString, note::Integer, text::AbstractString; by::Actor, maintainer::Bool = false)
     id = task_ref(kb, ref)
     use_media!(kb, something(ref_project(ref)), text)
-    rows = query(kb, "SELECT who, by_agent, by_person, kind, text FROM task_events WHERE id = ? AND task_id = ?", (note, id))
+    rows = query(kb, "SELECT $(event_who("task_events")) AS who, by_agent, by_person, kind, text FROM task_events WHERE id = ? AND task_id = ?", (note, id))
     isempty(rows) && not_found("No note $note on $(uppercase(strip(ref)))")
     e = first(rows)
     e.kind in SEARCHED_NOTES || error("Only comments, progress notes and questions are edited")
-    mine = e.who == by.name && (e.by_agent == 1) == by.agent
+    # A person's own note is theirs by who they are, whatever they have been named since.
+    mine = (e.by_agent == 1) == by.agent && (by.agent || isempty(by.id) ? e.who == by.name : e.by_person == by.id)
     their_agent = !by.agent && e.by_agent == 1 && (maintainer || (!isempty(by.id) && e.by_person == by.id))
     mine || their_agent || error(by.agent ? "An agent edits only its own notes" :
         "A person edits their own notes and those of agents working for them; a project's maintainers, any agent's")
@@ -471,7 +472,7 @@ function task_row(r)
        priority = Int(r.priority), assignee = r.assignee, milestone = coalesce(r.milestone, ""),
        parent = ismissing(r.parent_number) ? "" : "$(r.key)-$(r.parent_number)",
        subtasks = Int(r.subtasks), subtasks_done = Int(r.subtasks_done),
-       created_by = r.created_by, by_agent = r.by_agent == 1, created_at = r.created_at, updated_at = r.updated_at,
+       created_by = coalesce(r.creator, r.created_by), by_agent = r.by_agent == 1, created_at = r.created_at, updated_at = r.updated_at,
        archived_at = coalesce(r.archived_at, ""), declined_at = coalesce(r.declined_at, ""), sent_back = coalesce(r.sent_back, 0) == 1,
        asap_at = coalesce(r.asap_at, ""))
 end
@@ -493,7 +494,8 @@ const TASK_SELECT = """
     SELECT t.*, p.key, m.name AS milestone, pt.number AS parent_number,
            ($BELOW SELECT count(*) FROM below) AS subtasks,
            ($BELOW SELECT count(*) FROM below WHERE status = 'done') AS subtasks_done,
-           $SENT_BACK AS sent_back
+           $SENT_BACK AS sent_back,
+           (SELECT $(event_who("c")) FROM task_events c WHERE c.task_id = t.id AND c.kind = 'created' ORDER BY c.id LIMIT 1) AS creator
     FROM tasks t JOIN projects p ON p.id = t.project_id
     LEFT JOIN milestones m ON m.id = t.milestone_id LEFT JOIN tasks pt ON pt.id = t.parent_id"""
 
@@ -537,10 +539,10 @@ function task(kb::KB, ref::AbstractString)
         SELECT p.key || '-' || t.number AS ref FROM task_links l JOIN tasks t ON t.id = l.task_id JOIN projects p ON p.id = t.project_id
         WHERE l.kind = 'blocks' AND l.target = ?""", (task_row(r).ref,))]
     activity = with_question_states([
-        (; id = Int(e.id), at = e.at, who = e.who, by_agent = e.by_agent == 1, by_person = e.by_person, kind = e.kind, text = e.text,
+        (; id = Int(e.id), at = e.at, who = e.named, by_agent = e.by_agent == 1, by_person = e.by_person, kind = e.kind, text = e.text,
            detail = JSON.parse(e.detail), resolved_at = coalesce(e.resolved_at, ""), edited_at = coalesce(e.edited_at, ""),
            to_whom = e.to_whom, to_person = e.to_person, reply_to = coalesce(e.reply_to, 0))
-        for e in query(kb, "SELECT * FROM task_events WHERE task_id = ? ORDER BY id", (id,))]; labels = person_labels(kb, r.key))
+        for e in query(kb, "SELECT *, $(event_who("task_events")) AS named FROM task_events WHERE task_id = ? ORDER BY id", (id,))]; labels = person_labels(kb, r.key))
     commits = [Base.structdiff(c, (; root = "")) for c in task_commits(kb, id)]
     mentions = task_mentions(kb, id)
     found = findings_citing(kb, "task", task_row(r).ref)            # what the task's work concluded
@@ -715,7 +717,7 @@ too).
 function changed_by_others(kb::KB, key::AbstractString, me::AbstractString; days::Real = 7)
     since = iso(now(UTC) - Second(round(Int, days * 86400)))
     # (SQLite takes `who` from the row with the latest `at`.)
-    rows = query(kb, """SELECT p.key || '-' || t.number AS ref, max(e.at) AS at, e.who FROM task_events e
+    rows = query(kb, """SELECT p.key || '-' || t.number AS ref, max(e.at) AS at, $(event_who()) AS who FROM task_events e
                         JOIN tasks t ON t.id = e.task_id JOIN projects p ON p.id = t.project_id
                         WHERE e.at > ? AND p.key = ? AND NOT (e.by_agent = 0 AND e.by_person = ?) GROUP BY e.task_id""",
                  (since, uppercase(strip(key)), me))

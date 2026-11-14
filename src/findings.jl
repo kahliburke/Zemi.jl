@@ -30,6 +30,36 @@ migration!(5, ["""CREATE TABLE finding_evidence_new (
                "ALTER TABLE finding_evidence_new RENAME TO finding_evidence",
                "CREATE INDEX finding_evidence_finding ON finding_evidence (finding_id, id)"])
 
+# Who wrote each part of a finding, as a person (see `named_now`): its author, whoever set its status
+# and archived it, and the writers of its versions, sources and comments, each found from the name
+# written; an agent's, from the person it signed for ("Claude for Ada").
+function person_from(table, name, person; agent)
+    found(n) = "(SELECT u.email FROM users u WHERE u.name = $n OR u.email = $n ORDER BY u.id LIMIT 1)"
+    after_for = "substr($table.$name, instr($table.$name, ' for ') + 5)"
+    return ["UPDATE $table SET $person = coalesce($(found("$table.$name")), $table.$name) WHERE NOT ($agent) AND $table.$name != ''",
+            "UPDATE $table SET $person = coalesce($(found(after_for)), '') WHERE ($agent) AND instr($table.$name, ' for ') > 0"]
+end
+signed_for(col) = "instr($col, ' for ') > 0"
+migration!(19, ["ALTER TABLE findings ADD COLUMN created_person TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE findings ADD COLUMN status_person TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE findings ADD COLUMN archived_person TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE finding_versions ADD COLUMN by_person TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE finding_evidence ADD COLUMN by_person TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE finding_comments ADD COLUMN by_person TEXT NOT NULL DEFAULT ''",
+                person_from("findings", "created_by", "created_person"; agent = "findings.by_agent = 1")...,
+                person_from("findings", "status_by", "status_person"; agent = signed_for("findings.status_by"))...,
+                person_from("findings", "archived_by", "archived_person"; agent = signed_for("findings.archived_by"))...,
+                person_from("finding_versions", "changed_by", "by_person"; agent = "finding_versions.by_agent = 1")...,
+                person_from("finding_evidence", "added_by", "by_person"; agent = signed_for("finding_evidence.added_by"))...,
+                person_from("finding_comments", "who", "by_person"; agent = "finding_comments.by_agent = 1")...])
+
+# The names a finding's people go by now (see `named_now`), for `FINDING_SELECT`.
+const FINDING_NAMES = join(["$(named_now("f.created_by", "f.by_agent", "f.created_person")) AS created_now",
+                            "$(named_now("f.status_by", signed_for("f.status_by"), "f.status_person")) AS status_now",
+                            "$(named_now("f.archived_by", signed_for("f.archived_by"), "f.archived_person")) AS archived_now"], ", ")
+const EVIDENCE_ADDER = named_now("added_by", signed_for("added_by"), "by_person")
+const VERSION_CHANGER = named_now("changed_by", "by_agent", "by_person")
+
 "The id of finding `ref` (`KB-F3`)."
 function finding_id(kb::KB, ref::AbstractString)
     parts = finding_parts(ref)
@@ -56,8 +86,8 @@ function create_finding!(kb::KB, key::AbstractString, claim::AbstractString; bod
         n = Int(scalar(kb, "SELECT next_finding FROM projects WHERE id = ?", (pid,)))
         execute!(kb, "UPDATE projects SET next_finding = next_finding + 1 WHERE id = ?", (pid,))
         now = now_iso()
-        execute!(kb, """INSERT INTO findings (project_id, number, claim, body, created_by, by_agent, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (pid, n, strip(claim), strip(body), by.name, by.agent ? 1 : 0, now, now))
+        execute!(kb, """INSERT INTO findings (project_id, number, claim, body, created_by, by_agent, created_person, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", (pid, n, strip(claim), strip(body), by.name, by.agent ? 1 : 0, by.id, now, now))
         "$(uppercase(strip(key)))-F$n"
     end
     for e in evidence
@@ -80,7 +110,7 @@ what supersedes it, as `@KB-F5`), which stays with it while it has that status.
 function update_finding!(kb::KB, ref::AbstractString; claim = nothing, body = nothing, status = nothing, reason = nothing, by::Actor)
     id = finding_id(kb, ref)
     use_media!(kb, something(ref_project(ref)), claim, body, reason)
-    f = first(query(kb, "SELECT claim, body, status, status_reason, status_by FROM findings WHERE id = ?", (id,)))
+    f = first(query(kb, "SELECT claim, body, status, status_reason, status_by, status_person FROM findings WHERE id = ?", (id,)))
     new_claim = claim === nothing ? f.claim : String(strip(claim))
     new_body = body === nothing ? f.body : String(strip(body))
     new_status = status === nothing ? f.status : lowercase(strip(status))
@@ -95,13 +125,14 @@ function update_finding!(kb::KB, ref::AbstractString; claim = nothing, body = no
     new_status in ("contested", "superseded") && isempty(new_reason) &&
         error(new_status == "contested" ? "Say why it is contested" : "Say what supersedes it")
     (new_claim, new_body, new_status, new_reason) == (f.claim, f.body, f.status, f.status_reason) && return ref
-    status_by = (new_status, new_reason) == (f.status, f.status_reason) ? f.status_by : by.name
+    same = (new_status, new_reason) == (f.status, f.status_reason)
+    status_by, status_person = same ? (f.status_by, f.status_person) : (by.name, by.id)
     now = now_iso()
     transaction(kb) do
-        execute!(kb, """INSERT INTO finding_versions (finding_id, claim, body, status, status_reason, changed_by, by_agent, changed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (id, f.claim, f.body, f.status, f.status_reason, by.name, by.agent ? 1 : 0, now))
-        execute!(kb, "UPDATE findings SET claim = ?, body = ?, status = ?, status_reason = ?, status_by = ?, updated_at = ? WHERE id = ?",
-                 (new_claim, new_body, new_status, new_reason, status_by, now, id))
+        execute!(kb, """INSERT INTO finding_versions (finding_id, claim, body, status, status_reason, changed_by, by_agent, by_person, changed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", (id, f.claim, f.body, f.status, f.status_reason, by.name, by.agent ? 1 : 0, by.id, now))
+        execute!(kb, """UPDATE findings SET claim = ?, body = ?, status = ?, status_reason = ?, status_by = ?, status_person = ?, updated_at = ?
+                        WHERE id = ?""", (new_claim, new_body, new_status, new_reason, status_by, status_person, now, id))
     end
     tasks_changed!()
     return ref
@@ -282,9 +313,9 @@ function add_evidence!(kb::KB, ref::AbstractString; source::AbstractString = "",
         relation == "supports" && (relation = "builds_on")
     end
     kind == "finding" || relation != "builds_on" || error("Only a finding is built on")
-    eid = insert_row!(kb, """INSERT INTO finding_evidence (finding_id, kind, target, relation, excerpt, page, note, detail, added_by, added_at, basis)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                      (id, kind, target, relation, strip(excerpt), page, strip(note), JSON.json(detail), by.name, now_iso(),
+    eid = insert_row!(kb, """INSERT INTO finding_evidence (finding_id, kind, target, relation, excerpt, page, note, detail, added_by, by_person, added_at, basis)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                      (id, kind, target, relation, strip(excerpt), page, strip(note), JSON.json(detail), by.name, by.id, now_iso(),
                        evidence_basis(kb, kind, target)))
     execute!(kb, "UPDATE findings SET updated_at = ? WHERE id = ?", (now_iso(), id))
     tasks_changed!()
@@ -332,8 +363,9 @@ waits on people and what agents are given. `restore = true` brings it back. Only
 function archive_finding!(kb::KB, ref::AbstractString; restore::Bool = false, by::Actor)
     id = finding_id(kb, ref)
     by.agent && error("Only a person archives a finding")
-    restore ? execute!(kb, "UPDATE findings SET archived_at = NULL, archived_by = '' WHERE id = ?", (id,)) :
-              execute!(kb, "UPDATE findings SET archived_at = ?, archived_by = ? WHERE id = ? AND archived_at IS NULL", (now_iso(), by.name, id))
+    restore ? execute!(kb, "UPDATE findings SET archived_at = NULL, archived_by = '', archived_person = '' WHERE id = ?", (id,)) :
+              execute!(kb, "UPDATE findings SET archived_at = ?, archived_by = ?, archived_person = ? WHERE id = ? AND archived_at IS NULL",
+                       (now_iso(), by.name, by.id, id))
     tasks_changed!()
     return nothing
 end
@@ -396,13 +428,13 @@ function finding_sources(kb::KB, ref::AbstractString)
 end
 
 finding_row(r) = (; ref = finding_ref(r), project = String(r.key), claim = String(r.claim), body = String(r.body), status = String(r.status),
-                    status_reason = String(r.status_reason), status_by = String(r.status_by),
-                    archived_at = coalesce(r.archived_at, ""), archived_by = String(r.archived_by),
-                    created_by = String(r.created_by), by_agent = r.by_agent == 1, created_at = String(r.created_at),
+                    status_reason = String(r.status_reason), status_by = String(r.status_now),
+                    archived_at = coalesce(r.archived_at, ""), archived_by = String(r.archived_now),
+                    created_by = String(r.created_now), by_agent = r.by_agent == 1, created_at = String(r.created_at),
                     updated_at = String(r.updated_at), published_at = coalesce(r.published_at, ""),
                     recheck = String.(JSON.parse(r.recheck)))
 
-const FINDING_SELECT = "SELECT f.*, p.key FROM findings f JOIN projects p ON p.id = f.project_id"
+const FINDING_SELECT = "SELECT f.*, p.key, $FINDING_NAMES FROM findings f JOIN projects p ON p.id = f.project_id"
 
 """
     findings_citing(kb, kind, target) -> Vector{NamedTuple}
@@ -441,9 +473,9 @@ function finding(kb::KB, ref::AbstractString)
     id = finding_id(kb, ref)
     f = finding_row(first(query(kb, FINDING_SELECT * " WHERE f.id = ?", (id,))))
     evidence = [(; id = Int(e.id), kind = String(e.kind), target = String(e.target), relation = String(e.relation),
-                   excerpt = String(e.excerpt), page = Int(e.page), note = String(e.note), detail = JSON.parse(e.detail), added_by = String(e.added_by),
+                   excerpt = String(e.excerpt), page = Int(e.page), note = String(e.note), detail = JSON.parse(e.detail), added_by = String(e.added_now),
                    added_at = String(e.added_at))
-                for e in query(kb, "SELECT * FROM finding_evidence WHERE finding_id = ? ORDER BY id", (id,))]
+                for e in query(kb, "SELECT *, $(EVIDENCE_ADDER) AS added_now FROM finding_evidence WHERE finding_id = ? ORDER BY id", (id,))]
     versions = Int(scalar(kb, "SELECT count(*) FROM finding_versions WHERE finding_id = ?", (id,)))
     return merge(f, (; evidence, versions, used_by = findings_citing(kb, "finding", f.ref)))
 end
@@ -470,6 +502,6 @@ What each change to finding `ref` replaced, oldest first: `(; claim, body, statu
 changed_by, by_agent, changed_at)`.
 """
 finding_versions(kb::KB, ref::AbstractString) =
-    [(; claim = String(v.claim), body = String(v.body), status = String(v.status), status_reason = String(v.status_reason), changed_by = String(v.changed_by),
+    [(; claim = String(v.claim), body = String(v.body), status = String(v.status), status_reason = String(v.status_reason), changed_by = String(v.changed_now),
         by_agent = v.by_agent == 1, changed_at = String(v.changed_at))
-     for v in query(kb, "SELECT * FROM finding_versions WHERE finding_id = ? ORDER BY id", (finding_id(kb, ref),))]
+     for v in query(kb, "SELECT *, $(VERSION_CHANGER) AS changed_now FROM finding_versions WHERE finding_id = ? ORDER BY id", (finding_id(kb, ref),))]

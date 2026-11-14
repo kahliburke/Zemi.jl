@@ -105,6 +105,25 @@ caller_name(c::Caller) = isempty(c.name) ? something(local_user(), "") : c.name
 person_id(c::Caller) = c.via == :local ? caller_name(c) : c.email
 
 """
+    named_now(who, by_agent, person) -> String
+
+SQL for the name something written is shown under, from its columns (each an SQL expression): the
+name it was written under (`who`), whether an agent wrote it, and the person who wrote it or whom the
+agent worked for (`person`, as [`person_id`](@ref)). A person goes by the name their account has now,
+so renaming them renames what they wrote; an agent signing "Claude for Ada" is renamed in the part
+after "for". The name written stands where there is no account (run for one person, or one gone).
+"""
+named_now(who::AbstractString, by_agent::AbstractString, person::AbstractString) = """(CASE
+    WHEN $person = '' THEN $who
+    WHEN $by_agent = 0 THEN coalesce((SELECT nullif(u.name, '') FROM users u WHERE u.email = $person COLLATE NOCASE), $who)
+    WHEN instr($who, ' for ') > 0 THEN coalesce(substr($who, 1, instr($who, ' for ') + 4) ||
+                                                (SELECT nullif(u.name, '') FROM users u WHERE u.email = $person COLLATE NOCASE), $who)
+    ELSE $who END)"""
+
+"[`named_now`](@ref) for a task event, as table (or alias) `e`."
+event_who(e::AbstractString = "e") = named_now("$e.who", "$e.by_agent", "$e.by_person")
+
+"""
     ensure_roles!(kb)
 
 Create the default roles a shared service has not got yet. Roles already there, and changes made

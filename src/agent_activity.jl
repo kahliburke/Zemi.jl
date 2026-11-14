@@ -34,7 +34,7 @@ function agents_at_work(kb::KB, key::AbstractString)
     cutoff = time() - AGENT_ACTIVE_SECONDS
     latest = Dict{String,Tuple{String,Float64}}()
     keep!(ref, agent, t) = (t >= cutoff && t > get(latest, ref, ("", 0.0))[2]) && (latest[ref] = (agent, t))
-    for r in query(kb, """SELECT p.key || '-' || t.number AS ref, e.who, max(e.at) AS at FROM task_events e
+    for r in query(kb, """SELECT p.key || '-' || t.number AS ref, $(event_who()) AS who, max(e.at) AS at FROM task_events e
                           CROSS JOIN tasks t ON t.id = e.task_id JOIN projects p ON p.id = t.project_id
                           WHERE p.key = ? AND e.by_agent = 1 AND e.at >= ? GROUP BY t.id, e.who""", (k, iso(cutoff)))
         keep!(String(r.ref), String(r.who), datetime2unix(parse_iso(String(r.at))))

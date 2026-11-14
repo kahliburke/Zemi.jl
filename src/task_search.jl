@@ -165,7 +165,7 @@ end
 "What a task found by meaning alone shows: the start of the document that was nearest (see `task_documents`)."
 function meaning_match(kb::KB, key::AbstractString)
     if startswith(key, "e:")
-        e = first(query(kb, "SELECT text, who, at, kind FROM task_events WHERE id = ?", (parse(Int, key[3:end]),)))
+        e = first(query(kb, "SELECT text, $(event_who("task_events")) AS who, at, kind FROM task_events WHERE id = ?", (parse(Int, key[3:end]),)))
         return (; field = "note", snippet = first(String(e.text), 200), event = parse(Int, key[3:end]), who = String(e.who),
                   at = String(e.at), kind = String(e.kind))
     end
@@ -219,9 +219,10 @@ function person_tasks(kb::KB, people)
     for p in people
         names = unique([p.name, p.email])
         marks = in_marks(length(names))
-        rows = query(kb, """SELECT id, task_id, who, at, kind, text, detail FROM task_events
-                            WHERE who IN ($marks) OR who LIKE ? OR who LIKE ? ORDER BY id DESC""",
-                     Tuple([names; "% for " * p.name; "% for " * p.email]))
+        rows = query(kb, """SELECT id, task_id, $(event_who("task_events")) AS who, at, kind, text, detail FROM task_events
+                            WHERE (by_person = ? COLLATE NOCASE AND by_person != '') OR who IN ($marks) OR who LIKE ? OR who LIKE ?
+                            ORDER BY id DESC""",
+                     Tuple([p.email; names; "% for " * p.name; "% for " * p.email]))
         for r in rows
             e = (; kind = String(r.kind), text = coalesce(r.text, ""), detail = JSON.parse(coalesce(r.detail, "{}")))
             what = try event_text(e) catch; String(r.kind) end
@@ -334,7 +335,7 @@ function search_tasks(kb::KB, q::AbstractString; project::AbstractString = "", m
         took = [(; field = "person", snippet = x.what, event = x.event, who = x.who, at = x.at, kind = x.kind)
                 for x in first(unique(x -> x.event == 0 ? (x.who, x.kind) : x.event, did), 2)]
         matches = isempty(hits) && haskey(key_meaning, id) ? [meaning_match(kb, key_meaning[id])] : map(first(hits, 3)) do h
-            ev = ismissing(h.event_id) ? [] : query(kb, "SELECT who, at, kind FROM task_events WHERE id = ?", (h.event_id,))
+            ev = ismissing(h.event_id) ? [] : query(kb, "SELECT $(event_who("task_events")) AS who, at, kind FROM task_events WHERE id = ?", (h.event_id,))
             e = isempty(ev) ? nothing : first(ev)
             (; field = String(h.field), snippet = String(h.snip), event = ismissing(h.event_id) ? 0 : Int(h.event_id),
                who = e === nothing ? "" : String(e.who), at = e === nothing ? "" : String(e.at), kind = e === nothing ? "" : String(e.kind))
@@ -424,7 +425,7 @@ function match_tasks(kb::KB, items; project::AbstractString = "", limit::Integer
             score = meaning ? get(rrf, id, 0.0) : get(words, id, 0.0)
             hits = get(found, id, Any[])
             matches = isempty(hits) ? (haskey(key_meaning, id) ? [meaning_match(kb, key_meaning[id])] : NamedTuple[]) : map(first(hits, 2)) do h
-                e = ismissing(h.event_id) ? nothing : first(query(kb, "SELECT who, at, kind FROM task_events WHERE id = ?", (h.event_id,)))
+                e = ismissing(h.event_id) ? nothing : first(query(kb, "SELECT $(event_who("task_events")) AS who, at, kind FROM task_events WHERE id = ?", (h.event_id,)))
                 (; field = String(h.field), snippet = String(h.snip), event = ismissing(h.event_id) ? 0 : Int(h.event_id),
                    who = e === nothing ? "" : String(e.who), at = e === nothing ? "" : String(e.at), kind = e === nothing ? "" : String(e.kind))
             end

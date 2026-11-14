@@ -18,7 +18,7 @@ import KBProjectReview from './KBProjectReview.vue'
 import KBMembers from './KBMembers.vue'
 import KBRecordUpload from './KBRecordUpload.vue'
 import KBLibrary from './KBLibrary.vue'
-import { sourceHref, onTaskRef, setCodebase } from './kbRefs'
+import { sourceHref, onTaskRef, setCodebase, setPeople } from './kbRefs'
 import { findingHref, recordHref, kbPage, taskHref } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { plainLine } from './kbUtils'
@@ -89,6 +89,7 @@ const fromHash = () => { const m = location.hash.slice(1).toUpperCase().match(/^
 async function loadList() {
   const r = await getJSON('/api/projects'); list.value = r.projects; statuses.value = r.statuses
   people.value = await getJSON('/api/tasks/people')
+  setPeople(people.value)
   if (key.value) return
   const known = (k?: string | null) => (k && list.value.some(p => p.key === k) ? k : '')
   key.value = known(fromHash()?.key) || known(localStorage.getItem(LAST_PROJECT)) || list.value[0]?.key || ''
@@ -1195,7 +1196,7 @@ const label = (s: string) => statuses.value.find(x => x.id === s)?.label ?? s
 const NOTE_KINDS = ['comment', 'progress', 'question']
 // A person edits their own notes and those of agents working for them; a maintainer, any agent's.
 const canEditNote = (e: TaskEvent) => editable.value && NOTE_KINDS.includes(e.kind) &&
-  (e.by_agent ? e.by_person === myPersonId.value || board.value?.access === 'maintainer' : e.who === me.value?.name)
+  (e.by_agent ? e.by_person === myPersonId.value || board.value?.access === 'maintainer' : e.by_person === myPersonId.value)
 const editingNote = ref<{ id: number; text: string } | null>(null)
 const noteHistory = ref<{ id: number; rows: { at: string; who: string; by_agent: boolean; text: string }[] } | null>(null)
 async function saveNote() {

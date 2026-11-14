@@ -2148,6 +2148,43 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     close(kb)
 end
 
+@zset "renaming a person renames what they wrote" begin
+    sh = shared_config(sign_up = :open, default_role = "Learner")
+    kb = open_kb(temp_config(shared = sh, layers = Layer[]))
+    K.ensure_roles!(kb)
+    ada = K.sign_in!(kb, sh, "Campus", "ada@x.org"; email = "ada@x.org", name = "alovelace", verified = true)
+    K.set_roles!(kb, ada, ["Learner"])
+    me, bot = K.person("alovelace"; id = "ada@x.org"), K.agent("Claude for alovelace"; id = "ada@x.org")
+    try
+        K.create_project!(kb, "Tides"; key = "TD", owner = ada, by = me)
+        t = K.create_task!(kb, "TD", "Gauge the tides"; by = me)
+        note = K.note_task!(kb, t, "Starting with the north gauge."; by = me)
+        K.note_task!(kb, t, "Which gauge first?"; kind = "question", to = "anyone", by = me)
+        K.note_task!(kb, t, "Read the north gauge."; kind = "progress", by = bot)
+        f = K.create_finding!(kb, "TD", "Spring tides run higher"; by = me)
+        K.update_finding!(kb, f; status = "accepted", by = me)
+        c = K.comment_finding!(kb, f, "Checked against last year."; by = me)
+        K.set_name!(kb, ada, "Ada Lovelace")
+        # Everything she wrote goes by her name now, and what an agent did for her too.
+        task = K.task(kb, t)
+        @test task.created_by == "Ada Lovelace"
+        @test [e.who for e in task.activity if e.kind in ("comment", "question", "progress")] == ["Ada Lovelace", "Ada Lovelace", "Claude for Ada Lovelace"]
+        @test only(K.waiting_questions(kb; project = "TD")).asker == "Ada Lovelace"
+        @test all(e.who == "Ada Lovelace" for e in K.people_events(kb, "TD", 0))
+        fd = K.finding(kb, f)
+        @test fd.created_by == "Ada Lovelace" && fd.status_by == "Ada Lovelace"
+        @test all(a.who == "Ada Lovelace" for a in K.finding_activity(kb, f))
+        @test only(K.finding_versions(kb, f)).changed_by == "Ada Lovelace"
+        # Her notes and comments are still hers to edit, under her new name.
+        renamed = K.person("Ada Lovelace"; id = "ada@x.org")
+        @test K.edit_note!(kb, t, note, "Starting with the south gauge."; by = renamed) == note
+        @test K.edit_finding_comment!(kb, f, c, "Checked against two years."; by = renamed) === nothing
+        @test_throws "edits only its own" K.edit_note!(kb, t, note, "Not mine."; by = K.agent("Claude for Ada Lovelace"; id = "ada@x.org"))
+    finally
+        close(kb)
+    end
+end
+
 @zset "sharing and contributing what one holds" begin
     sh = shared_config(sign_up = :open, default_role = "Learner")
     kb = open_kb(temp_config(shared = sh, layers = Layer[]))

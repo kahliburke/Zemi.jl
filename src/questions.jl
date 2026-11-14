@@ -107,7 +107,7 @@ function waiting_questions(kb::KB; project::AbstractString = "")
     [(; note = Int(r.id), task_id = Int(r.task_id), ref = String(r.ref), status = String(r.status), text = String(r.text),
         asker = String(r.who), by_agent = r.by_agent == 1, by_person = String(r.by_person), to_whom = String(r.to_whom),
         to_person = String(r.to_person))
-     for r in query(kb, """SELECT e.id, e.task_id, p.key || '-' || t.number AS ref, t.status, e.text, e.who, e.by_agent, e.by_person,
+     for r in query(kb, """SELECT e.id, e.task_id, p.key || '-' || t.number AS ref, t.status, e.text, $(event_who()) AS who, e.by_agent, e.by_person,
                                   e.to_whom, e.to_person
                            FROM task_events e JOIN tasks t ON t.id = e.task_id JOIN projects p ON p.id = t.project_id
                            WHERE $WAITS_SQL AND t.archived_at IS NULL AND (? = '' OR p.key = ?) ORDER BY e.id""", (k, k))]
@@ -171,7 +171,7 @@ answers, not resolved, while they have not written on the task since the answer:
 function answered_questions(kb::KB, me::AbstractString)
     out = NamedTuple[]
     for q in query(kb, """
-            SELECT e.id, e.task_id, e.text, a.text AS answer, a.who AS answerer
+            SELECT e.id, e.task_id, e.text, a.text AS answer, $(event_who("a")) AS answerer
             FROM task_events e JOIN tasks t ON t.id = e.task_id
             JOIN task_events a ON a.id = (SELECT min(r.id) FROM task_events r WHERE r.reply_to = e.id AND r.kind = 'comment')
             WHERE e.kind = 'question' AND e.by_person = ? AND e.resolved_at IS NULL AND t.archived_at IS NULL
@@ -195,7 +195,7 @@ own questions.
 """
 function resolve_question!(kb::KB, ref::AbstractString, note::Integer = 0; by::Actor)
     id = task_ref(kb, ref)
-    rows = query(kb, "SELECT id, who, by_agent FROM task_events WHERE task_id = ? AND kind = 'question' AND resolved_at IS NULL" *
+    rows = query(kb, "SELECT id, $(event_who("task_events")) AS who, by_agent FROM task_events WHERE task_id = ? AND kind = 'question' AND resolved_at IS NULL" *
                      (note > 0 ? " AND id = ?" : ""), note > 0 ? (id, note) : (id,))
     note > 0 && isempty(rows) && not_found("No open question $note on $(uppercase(strip(ref)))")
     for r in rows

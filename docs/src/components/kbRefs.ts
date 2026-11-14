@@ -26,6 +26,15 @@ export type RefMatch = { kind: string; target: string; label: string; detail: st
 let codebase = ''
 export const setCodebase = (id: string) => { codebase = id }
 
+// The names people go by now, by their id (see setPeople): a mention shows the person's name as it is,
+// not as it was when the mention was written.
+const names = new Map<string, string>()
+export const setPeople = (people: { id: string; label: string; agent?: boolean }[]) => {
+  names.clear()
+  for (const p of people) if (!p.agent) names.set(p.id.toLowerCase(), p.label)
+}
+const personName = (target: string, label: string) => names.get(target.toLowerCase()) ?? label
+
 // A reference as the picker writes one: the short form where there is one. Code is named in the
 // project's codebase, so a target's codebase (`code-kb:path`) is left out.
 export function refFor(kind: string, target: string, label = target): string {
@@ -49,7 +58,8 @@ export function refsToMarkdown(text: string, titles: ReadonlyMap<string, string>
     return title ? link(title, 'paper', id) : `[arXiv:${id}](https://arxiv.org/abs/${id})`
   }).join('; ') + ')'
   let out = '', i = 0
-  const prose = (s: string) => s.replace(FULL, (_, label, kind, target) => link(label.trim(), kind, target.trim()))
+  const prose = (s: string) => s.replace(FULL, (_, label, kind, target) =>
+      link(kind === 'person' ? personName(target.trim(), label.trim()) : label.trim(), kind, target.trim()))
     .replace(FINDING, (_, ref) => link(ref.toUpperCase(), 'finding', ref.toUpperCase()))
     .replace(TASK, (_, ref) => link(ref, 'task', ref))
     .replace(PAPER, (_, id) => link(`arXiv:${id}`, 'paper', id))

@@ -27,7 +27,7 @@ type Source = { kind: string; target: string; label: string; relation: string; e
 type Finding = Row & { project: string; body: string; created_at: string; status_reason: string; status_by: string; archived_at: string;
                        archived_by: string; sources: Source[]; versions: number; activity: Activity[];
                        used_by: { ref: string; claim: string; status: string; relation: string }[] }
-type Activity = { kind: string; id: number; who: string; by_agent: boolean; at: string; text: string; edited: boolean }
+type Activity = { kind: string; id: number; who: string; by_person?: string; by_agent: boolean; at: string; text: string; edited: boolean }
 type Version = { claim: string; body: string; status: string; status_reason: string; changed_by: string; by_agent: boolean; changed_at: string }
 const STATUSES = ['draft', 'accepted', 'contested', 'superseded']
 
@@ -151,7 +151,7 @@ async function saveComment() {
   await change({ text: c.text }, `/comments/${c.id}`)
   if (!error.value) editingComment.value = null
 }
-const mine = (a: Activity) => a.kind === 'comment' && !a.by_agent && a.who === me.value?.name
+const mine = (a: Activity) => a.kind === 'comment' && !a.by_agent && a.by_person === me.value?.id
 
 // Sources, grouped by kind; a finding's sources by how it relates to them.
 const GROUPS: [string, string, (s: Source) => boolean][] = [
