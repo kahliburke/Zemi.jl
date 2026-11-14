@@ -16,6 +16,14 @@ export const shortDay = (s: string) =>
 export const when = (s: string | null | undefined, none = '') =>
   s ? new Date(s).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : none
 
+/** A moment as a list of recent things shows it: its time today, else its day and time. */
+export const clock = (s: string | null | undefined, none = '') => {
+  if (!s) return none
+  const d = new Date(s)
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString(undefined, { timeStyle: 'medium' }) : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 /** Today in UTC, as the papers of the day are dated. */
 export const todayUtc = (now = new Date()) => now.toISOString().slice(0, 10)
 

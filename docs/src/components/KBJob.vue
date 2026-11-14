@@ -1,7 +1,9 @@
-<!-- One background job: how it stands, how long it has run, what it is doing, and how it ended on request. -->
+<!-- One background job: how it stands, when it started and finished and how long it took, what it is
+  doing, and how it ended on request. -->
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { Job } from './kbApi'
+import { clock, when } from './kbFormat'
 
 withDefaults(defineProps<{ job: Job; named?: boolean }>(), { named: true })
 const open = ref(false)
@@ -11,7 +13,9 @@ const open = ref(false)
   <div class="kbjob">
     <span :class="['kbjob-status', job.status]">{{ job.status }}</span>
     <span v-if="named" class="kbjob-name">{{ job.name }}</span>
-    <span class="kbjob-dim">{{ job.elapsed }}</span>
+    <span class="kbjob-dim" :title="`Started ${when(job.started)}${job.finished ? `, finished ${when(job.finished)}` : ''}`">
+      {{ job.finished ? `${clock(job.started)}–${clock(job.finished)}, ${job.elapsed}` : `since ${clock(job.started)}, ${job.elapsed}` }}</span>
+    <span v-if="job.ids.length" class="kbjob-dim">{{ job.ids.length }} changed</span>
     <button v-if="job.result || job.error" type="button" class="kb-link" @click="open = !open">{{ open ? 'hide' : 'details' }}</button>
     <div v-if="job.status === 'running'" class="kbjob-dim kbjob-message">{{ job.message }}</div>
     <pre v-if="open" class="kbjob-detail">{{ job.error ?? job.result }}</pre>

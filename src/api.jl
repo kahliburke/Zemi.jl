@@ -511,7 +511,7 @@ function job_json(j::Job)
              j.result isa AbstractVector && !isempty(j.result) && first(j.result) isa NamedTuple && haskey(first(j.result), :ok) ?
                  format_ingest(j.result) : string(j.result)
     Dict("id" => j.id, "name" => j.name, "status" => string(j.status), "message" => j.message,
-         "elapsed" => elapsed(j), "ids" => j.ids, "result" => result, "error" => j.error === nothing ? nothing : first(j.error, 1500))
+         "started" => iso(j.started), "finished" => j.finished === nothing ? nothing : iso(j.finished), "elapsed" => elapsed(j), "ids" => j.ids, "result" => result, "error" => j.error === nothing ? nothing : first(j.error, 1500))
 end
 
 """

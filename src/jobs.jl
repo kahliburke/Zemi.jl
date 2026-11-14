@@ -10,7 +10,7 @@ mutable struct Job
     name::String
     status::Symbol
     message::String
-    started::DateTime
+    started::DateTime                       # in UTC, as `finished`
     finished::Union{DateTime,Nothing}
     result::Any
     error::Union{String,Nothing}
@@ -68,7 +68,7 @@ const JOB_COUNTER = Threads.Atomic{Int}(0)
 const JOB_KEEP = Hour(24)
 
 # Finished jobs past `JOB_KEEP` are forgotten; called with `JOBS_LOCK` held.
-function forget_old_jobs!(at::DateTime = now())
+function forget_old_jobs!(at::DateTime = now(UTC))
     for (id, j) in collect(JOBS)
         j.finished !== nothing && at - j.finished > JOB_KEEP || continue
         delete!(JOBS, id)
@@ -110,7 +110,7 @@ schedule that found nothing to do.
 """
 function start_job(f, name::AbstractString; ids = String[], changes::Union{String,Nothing} = nothing, forget_idle::Bool = false)
     id = "j$(Threads.atomic_add!(JOB_COUNTER, 1) + 1)"
-    job = Job(id, name, :running, "starting", now(), nothing, nothing, nothing, Threads.Atomic{Bool}(false),
+    job = Job(id, name, :running, "starting", now(UTC), nothing, nothing, nothing, Threads.Atomic{Bool}(false),
               String.(ids), Base.Event())
     starter = get(task_local_storage(), :kb_caller, nothing)
     lock(JOBS_LOCK) do
@@ -132,7 +132,7 @@ function start_job(f, name::AbstractString; ids = String[], changes::Union{Strin
             # The documents it worked on are noted before the stamp moves, for the refresh it starts.
             changes === nothing || idle || (note_changes!(job.ids); try touch(changes) catch end)
             idle && lock(() -> (delete!(JOBS, id); delete!(JOB_STARTERS, id)), JOBS_LOCK)
-            job.finished = now()
+            job.finished = now(UTC)
             notify(job.done)
         end
     end
@@ -171,6 +171,6 @@ get_job(id::AbstractString) = lock(() -> get(JOBS, id, nothing), JOBS_LOCK)
 list_jobs() = lock(() -> sort!(collect(values(JOBS)); by = j -> j.started, rev = true), JOBS_LOCK)
 
 function elapsed(job::Job)
-    s = round(Int, (something(job.finished, now()) - job.started).value / 1000)
+    s = round(Int, (something(job.finished, now(UTC)) - job.started).value / 1000)
     return s < 60 ? "$(s)s" : "$(s ÷ 60)m$(lpad(s % 60, 2, '0'))s"
 end

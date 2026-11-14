@@ -8,7 +8,7 @@
 import KBNeedsService from './KBNeedsService.vue'
 import { ref, computed } from 'vue'
 import { getJSON, post, can, me, onLive, every, type Job } from './kbApi'
-import { when, bytes } from './kbFormat'
+import { when, clock, bytes } from './kbFormat'
 
 type Agent = { id: string; status: string; model: string; turn: number; doing: string | null; purpose: string; mine: boolean;
                usage: Record<string, number>; last_activity: number | null }
@@ -37,6 +37,8 @@ const ms = (x: number | null) => x === null ? '—' : x >= 1000 ? `${(x / 1000).
 const agents = ref<Agent[]>([])
 const agentError = ref('')
 const error = ref('')
+// The job whose result or error is shown.
+const shownJob = ref('')
 const note = ref('')
 const snapshots = ref<Snapshot[] | null>(null)
 async function listSnapshots() {
@@ -164,13 +166,20 @@ const tokens = (u: Record<string, number>) => {
 
         <h2>Jobs</h2>
         <table v-if="ops.jobs.length" class="kbo-table">
-          <thead><tr><th>Job</th><th>Status</th><th>Doing</th><th>Time</th><th></th></tr></thead>
+          <thead><tr><th>Job</th><th>Status</th><th>Doing</th><th>Started</th><th>Finished</th><th>Took</th><th></th></tr></thead>
           <tbody>
-            <tr v-for="j in ops.jobs.slice(0, 25)" :key="j.id">
-              <td>{{ j.name }}</td><td :class="'kbo-st-' + j.status">{{ j.status }}</td>
-              <td class="kbo-s">{{ j.error ?? j.message }}</td><td>{{ j.elapsed }}</td>
-              <td><button v-if="j.status === 'running' && can('jobs.control')" class="kb-link kbo-link" @click="act(`/api/jobs/${j.id}/cancel`, `Cancelling ${j.name}.`)">cancel</button></td>
-            </tr>
+            <template v-for="j in ops.jobs.slice(0, 25)" :key="j.id">
+              <tr>
+                <td>{{ j.name }}</td><td :class="'kbo-st-' + j.status">{{ j.status }}</td>
+                <td class="kbo-s">{{ j.error ? 'failed' : j.message }}<span v-if="j.ids.length" class="kbo-dim"> · {{ j.ids.length }} changed</span></td>
+                <td :title="when(j.started)">{{ clock(j.started) }}</td>
+                <td :title="when(j.finished, '')">{{ clock(j.finished, '—') }}</td>
+                <td>{{ j.elapsed }}</td>
+                <td><button v-if="j.result || j.error" class="kb-link kbo-link" @click="shownJob = shownJob === j.id ? '' : j.id">{{ shownJob === j.id ? 'hide' : 'details' }}</button>
+                  <button v-if="j.status === 'running' && can('jobs.control')" class="kb-link kbo-link" @click="act(`/api/jobs/${j.id}/cancel`, `Cancelling ${j.name}.`)">cancel</button></td>
+              </tr>
+              <tr v-if="shownJob === j.id"><td colspan="7"><pre class="kbo-job-detail">{{ j.error ?? j.result }}</pre></td></tr>
+            </template>
           </tbody>
         </table>
         <p v-else class="kbo-dim">No jobs.</p>
@@ -254,4 +263,5 @@ const tokens = (u: Record<string, number>) => {
 .kbo-st-failed, .kbo-st-dead { color: var(--vp-c-danger-1); }
 .kbo-st-cancelled { color: var(--vp-c-text-2); }
 .kbo-agent-actions { white-space: nowrap; }
+.kbo-job-detail { margin: 0; padding: 0.5rem; font-size: 0.78rem; white-space: pre-wrap; background: var(--vp-c-bg-soft); border-radius: 6px; }
 </style>

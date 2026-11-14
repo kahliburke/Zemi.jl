@@ -3216,6 +3216,9 @@ end
     @test slow.finished === nothing
     notify(gate)
     @test wait(slow).result == 7 && slow.finished !== nothing
+    # When it started and finished, in UTC, as the pages are told it.
+    shown = K.job_json(slow)
+    @test endswith(shown["started"], "Z") && shown["started"] <= shown["finished"] && abs(K.parse_iso(shown["finished"]) - K.Dates.now(K.Dates.UTC)) < K.Dates.Minute(1)
     # A finished job is kept for a day, for whoever follows it, then forgotten.
     lock(K.JOBS_LOCK) do
         K.forget_old_jobs!(slow.finished + K.JOB_KEEP - K.Dates.Minute(1))

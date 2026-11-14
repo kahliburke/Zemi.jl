@@ -182,7 +182,7 @@ export function every(ms: number | (() => number), step: () => Promise<unknown> 
 
 // ── Jobs ─────────────────────────────────────────────────────────────────────────────────────────
 
-export type Job = { id: string; name: string; status: string; message: string; elapsed: string; ids: string[];
+export type Job = { id: string; name: string; status: string; message: string; started: string; finished: string | null; elapsed: string; ids: string[];
                     result: string | null; error: string | null }
 export const jobs = ref<Job[]>([])
 // Bumped whenever a job finishes, so lists of documents know to load again.

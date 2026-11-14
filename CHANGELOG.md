@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Jobs show when they ran**: when each started and finished, how long it took and how many
+  documents it changed; the Operations page also shows a job's result or error.
 - **Removing a note**: a comment, progress note or question is removed by whoever may edit it (on
   the task's activity, or `task_note_remove` for an agent's own); the activity keeps that it was
   removed. A comment on a finding is removed by its writer.
