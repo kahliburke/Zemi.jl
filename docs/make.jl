@@ -104,7 +104,7 @@ DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
     [(name = n, import_path = "@/$n.vue") for n in ("KBSearch", "KBSettings", "KBUpload", "KBManager", "KBCodeTree", "KBSync", "KBLandscape",
                                                       "KBDownload", "KBBibliography", "KBMissing", "KBWatch", "KBDaily", "KBInLibraries", "KBAuthors", "KBAccount",
                                                       "KBSources", "KBServices",
-                                                      "KBAccountPage", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate",
+                                                      "KBAccountPage", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate", "KBPalette",
                                                       "KBProjects", "KBFindings", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
                                                       "KBStatusTables", "KBCodeFilePage", "KBCodebasePage", "KBCodebases", "KBDayPage",
                                                       "KBRecordPage", "KBRecords", "KBResourcePage", "KBResources",
@@ -237,7 +237,8 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     config = replace(config, opensource => ""; count = 1)
     marker = "...navTemp.nav,"
     occursin(marker, config) || (@warn "No `$marker` in the VitePress config; the search settings button is left out"; return config)
-    return replace(config, marker => marker * "\n  { component: 'KBSettings' },\n  { component: 'KBAccount' },\n  { component: 'KBUpdate' },"; count = 1)
+    # The palette (Cmd-K) is in the top bar so that it is on every page; it shows nothing until opened.
+    return replace(config, marker => marker * "\n  { component: 'KBSettings' },\n  { component: 'KBAccount' },\n  { component: 'KBUpdate' },\n  { component: 'KBPalette' },"; count = 1)
 end
 
 # The service's own pages (service/*.md) are built but not listed: the top bar's menu (KBAccount.vue)

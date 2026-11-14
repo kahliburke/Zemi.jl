@@ -48,7 +48,8 @@ async function start(retry = false) {
     } catch { error.value = 'Paper list unavailable.' }
   }
 }
-onMounted(() => start())
+// A search asked for by its address (`?q=…`, as the palette does), run as the page opens.
+onMounted(() => { const asked = new URLSearchParams(location.search).get('q'); if (asked) query.value = asked; start() })
 
 // Words of two or more letters or digits, lower-cased.
 const words = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [])

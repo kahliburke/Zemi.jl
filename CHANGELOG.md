@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Cmd-K palette**: anywhere on the site, it finds the knowledge base's tasks, findings, papers,
+  records, notebooks and code as one types, goes to any page or project, searches the knowledge base
+  for the words, adds a paper by its arXiv id, DOI or address, syncs, and switches the theme. A static
+  copy of the site keeps VitePress's search. The Search page takes its query from `?q=`.
 - **Questions and answers open where they are**: from Waiting on you, Focus, what others did lately
   and notifications, a task opens scrolled to the note, marked for a moment (`#KB-12/345` links to one).
 - **Jobs show when they ran**: when each started and finished, how long it took and how many
