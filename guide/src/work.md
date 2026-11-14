@@ -317,6 +317,9 @@ Select documents to act on them:
   leave. A paper becomes the group's. A note is copied into a record the group owns; contributing it
   again brings that copy up to date, keeping its links and the findings citing it. While your note is
   as you contributed it, your searches show the group's copy alone.
+- **Remove from my library**: a PDF of yours goes from your library, and a document you no longer
+  hold goes when no one else holds it. A note from a vault is deleted in the vault, and goes at the
+  next sync. Removing one others see takes it from them, so contributing it first is offered.
 
 Removing your library (`POST /api/library/remove`) takes its files and everything held for you alone,
 shared or not. What you contributed stays, and so does what others hold too.

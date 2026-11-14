@@ -102,6 +102,27 @@ function superseded_documents(kb::KB, caller::Caller)
         JOIN document_holders h ON h.paper_id = p.id WHERE h.user_id = ? AND x.content_sha = c.content_sha""", (caller.user_id,)))
 end
 
+"""
+    remove_held!(kb, caller, id) -> String
+
+One of the holders of document `id` (`caller`) takes it out of their library: a PDF of their space
+goes from the space, and they no longer hold the document, which goes when no one else does and no
+one else sees it (see [`release!`](@ref)). A note from a vault is refused: deleted from the vault, it
+goes at the next sync, and deleted here it would be deleted from the vault. Returns what was done.
+"""
+function remove_held!(kb::KB, caller::Caller, id::AbstractString)
+    held_document(kb, caller, id)
+    source = scalar(kb, "SELECT r.source FROM records r JOIN papers p ON p.id = r.paper_id WHERE p.doc_id = ?", (id,))
+    coalesce(source, "") == "obsidian" && error("$id is a note in your vault: delete it there, and it goes at the next sync")
+    space = library_space(caller)
+    files = [String(p) for (p, e) in get(load_library_state(kb, space), "pdfs", Dict()) if e["id"] == id]
+    foreach(p -> delete_library_file!(kb, space, p), files)
+    release!(kb, id, caller.user_id)
+    gone = ismissing(paper_id(kb, id))
+    return (isempty(files) ? "" : "$(join(files, ", ")) removed from your library; ") *
+           (gone ? "$id is gone" : "you no longer hold $id; others still have it")
+end
+
 "What `caller` is not to find: what they may not see (see [`hidden_documents`](@ref)), and their notes their contributions stand for."
 unfound_documents(kb::KB, caller::Caller) = union(hidden_documents(kb, caller), superseded_documents(kb, caller))
 
@@ -144,6 +165,11 @@ end
 route!("POST", "/api/documents/:id/contribute"; need = "library") do c
     access, projects = sharing_body(c)
     Dict("id" => contribute_document!(c.kb, c.caller, c[:id]; access = isempty(access) ? "open" : access, projects))
+end
+
+# A document taken out of one's library (see `remove_held!`).
+route!("POST", "/api/documents/:id/remove-held"; need = "library") do c
+    Dict("said" => remove_held!(c.kb, c.caller, c[:id]))
 end
 
 # Leaving: one's library removed, what one contributed kept (`{"confirm": true}`).

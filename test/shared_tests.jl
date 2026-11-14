@@ -2440,6 +2440,13 @@ end
         @test isempty(K.superseded_documents(kb, as(ada)))
         @test K.contribute_document!(kb, as(ada), note) == c && access(c) == "open" && sees(cy, c)
         @test occursin("both sides", join((s["text"] for s in K.record_document(kb, c)["sections"]), " "))
+        # Taking one out of one's library: it goes when no one else holds it; a vault's note is deleted in the vault.
+        mine = only(K.add_papers!(kb, ["2609.00005"]; holder = ada))
+        K.add_papers!(kb, [mine]; holder = bea)
+        @test occursin("others still have it", K.remove_held!(kb, as(ada), mine)) && K.document_holders(kb, mine) == [bea]
+        @test_throws "No document" K.remove_held!(kb, as(ada), mine)
+        @test occursin("is gone", K.remove_held!(kb, as(bea), mine)) && ismissing(K.paper_id(kb, mine))
+        @test_throws "a note in your vault" K.remove_held!(kb, as(ada), note)
         # Leaving: what is hers alone goes, shared or not; what she contributed, and what others hold too, stays.
         shared = only(K.add_papers!(kb, ["2609.00003"]; holder = ada))
         K.share_document!(kb, as(ada), shared, "open")

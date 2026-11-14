@@ -32,6 +32,8 @@ const docs = ref<Doc[]>([])
 const selected = ref<Set<string>>(new Set())
 const loading = ref(false)
 const error = ref('')
+// What an action on one's library did, said until dismissed.
+const notice = ref('')
 
 // `code`: what the action does for a codebase, where that differs; `access`: who sees a document,
 // for kinds with access only (see src/document_access.jl).
@@ -58,6 +60,7 @@ const LIBRARY: Action[] = [
   { name: 'share-all', label: 'Share with everyone', help: 'Every reader sees it. It stays yours: they see your changes, and it goes if you remove it' },
   { name: 'share-projects', label: 'Share with projects…', help: 'The members of the projects you choose see it. It stays yours' },
   { name: 'contribute', label: 'Contribute…', help: 'Give the group a version of it, which stays when you leave' },
+  { name: 'remove-held', label: 'Remove from my library', help: 'Take it out of your library: a PDF of yours goes, and a document no one else has goes with it' },
 ]
 const mine = (ids: string[]) => ids.length > 0 && ids.every(id => docs.value.find(d => d.id === id)?.held)
 // The command that keeps a folder in step with one's library here (see src/connect.jl).
@@ -131,11 +134,25 @@ function toggleAll() {
   selected.value = s
 }
 
+// Taken out of one's library: what others see of it goes with it, so contributing it first is offered.
+async function removeHeld(ids: string[]) {
+  const seen = ids.filter(id => docs.value.find(d => d.id === id)?.access !== 'private')
+  const ask = seen.length ? `Others see ${seen.length === 1 ? seen[0] : `${seen.length} of these`}: removing takes it from them too. ` +
+                            'Contribute it first to leave the group a copy. Remove anyway?' : `Remove ${ids.length === 1 ? ids[0] : `${ids.length} documents`} from your library?`
+  if (!confirm(ask)) return
+  error.value = ''
+  const said: string[] = []
+  try { for (const id of ids) said.push((await post(`/api/documents/${encodeURIComponent(id)}/remove-held`)).said) }
+  catch (e: any) { error.value = e.message ?? String(e) }
+  if (said.length) notice.value = said.join('. ') + '.'
+  return load()
+}
 async function run(action: string, ids: string[], why = '') {
   if (!ids.length) return
   if (action === 'drop' && !dropping.value) { dropping.value = ids; reason.value = ''; return }
   if (action === 'private') return share(action, ids, 'private')
   if (action === 'share-all') return share(action, ids, 'open')
+  if (action === 'remove-held') return removeHeld(ids)
   if (action === 'share-projects' || action === 'contribute') {
     sharing.value = { action, ids, to: action === 'contribute' ? 'open' : 'projects', keys: [] }
     return
@@ -275,6 +292,7 @@ const who = (d: Doc) => byline(d.authors)
           </template>
         </div>
         <p v-if="error" class="kb-error kbm-error">{{ error }}</p>
+        <p v-if="notice" class="kbm-dim kbm-notice">{{ notice }} <button type="button" class="kb-link" @click="notice = ''">ok</button></p>
         <KBJobs />
         <table class="kbm-table">
           <thead>
