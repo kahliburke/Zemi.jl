@@ -2198,6 +2198,17 @@ end
             draw()
             @test TK.find_text(tb, "Notes") !== nothing && TK.find_text(tb, "in step") !== nothing && TK.find_text(tb, "Not sent") !== nothing && TK.find_text(tb, "Private") !== nothing
             @test TK.find_text(tb, "sent") !== nothing && TK.find_text(tb, "Tides.md") !== nothing
+            # Narrow, the table and the activity stay within their panes; the mouse resizes the panes.
+            small = TK.TestBackend(50, 16)
+            TK.view(m, TK.Frame(small.buf, TK.Rect(1, 1, 50, 16), TK.GraphicsRegion[], TK.PixelSnapshot[]))
+            @test all(y -> TK.char_at(small, 50, y) in ('│', '╮', '╯'), 1:16)
+            @test TK.find_text(small, "Notes") !== nothing
+            border = TK.bottom(m.layout.rects[1])
+            TK.update!(m, TK.MouseEvent(5, border, TK.mouse_left, TK.mouse_press, false, false, false))
+            TK.update!(m, TK.MouseEvent(5, border + 2, TK.mouse_left, TK.mouse_drag, false, false, false))
+            TK.update!(m, TK.MouseEvent(5, border + 2, TK.mouse_left, TK.mouse_release, false, false, false))
+            draw()
+            @test TK.bottom(m.layout.rects[1]) != border
             TK.update!(m, TK.KeyEvent('a'))
             @test m.dialog == :add_path && TK.find_text(draw(), "Add a folder") !== nothing
             TK.set_text!(m.input, joinpath(home, "Oth"))
@@ -2208,7 +2219,7 @@ end
             TK.update!(m, TK.KeyEvent(:enter))
             @test m.dialog == :none && [f["name"] for f in K.load_connect_config()["folders"]] == ["Notes", "Other"]
             K.refresh!(m)
-            m.selected = 1
+            m.table.selected = 1
             TK.update!(m, TK.KeyEvent('d'))
             @test m.dialog == :remove && TK.find_text(draw(), "also remove its files from your library") !== nothing
             TK.update!(m, TK.KeyEvent('r'))

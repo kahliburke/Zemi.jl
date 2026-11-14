@@ -6,7 +6,8 @@
 # service reads.
 #
 #   ↑/↓ choose a folder · a add · d remove · e skipped subfolders · s sync now · p pause · o the
-#   library's page · b background · q quit
+#   library's page · b background · q quit. The mouse resizes the panes and the table's columns,
+#   sorts by a column, and scrolls the activity.
 
 import Tachikoma as TK
 
@@ -18,7 +19,10 @@ import Tachikoma as TK
     remote::Union{LibraryRemote,Nothing} = nothing   # the library, when not the config's site (tests)
     status::Dict{String,Any} = empty_status()
     config::Dict{String,Any} = Dict{String,Any}()
-    selected::Int = 1
+    layout::TK.ResizableLayout = TK.ResizableLayout(TK.Vertical, [TK.Fixed(9), TK.Fill()]; min_pane_size = 5)  # the folders over the activity
+    table::TK.DataTable = TK.DataTable(TK.DataColumn[]; block = TK.Block(; title = "Folders"))
+    activity::TK.ScrollPane = TK.ScrollPane(Vector{TK.Span}[]; following = true, block = TK.Block(; title = "Activity"))
+    activity_shown::Tuple{Int,String} = (0, "")      # the activity in the pane: how much, and the latest's time
     busy::Bool = false                                # a pass of this process's runs
     next_pass::Float64 = 0.0
     who::String = ""                                  # who is signed in
@@ -54,8 +58,7 @@ function refresh!(m::ConnectApp)
     m.config = load_connect_config()
     m.syncer === nothing && syncing_pid() === nothing && (m.syncer = claim_syncing())
     m.status = m.syncer === nothing ? read_connect_status() : status_copy(m.syncer)
-    n = length(get(m.config, "folders", Any[]))
-    m.selected = clamp(m.selected, 1, max(n, 1))
+    show_status!(m)
     if m.syncer !== nothing && !m.busy && !isempty(get(m.config, "site", "")) &&
        (time() >= m.next_pass || isfile(connect_request_path()))
         rm(connect_request_path(); force = true)
@@ -72,7 +75,7 @@ function TK.update!(m::ConnectApp, e::TK.TaskEvent)
         m.busy = false
         m.next_pass = time() + CONNECT_EVERY
         e.value isa Exception && tell!(m, failure_message(e.value); error = true)
-        m.syncer === nothing || (m.status = status_copy(m.syncer))
+        m.syncer === nothing || (m.status = status_copy(m.syncer); show_status!(m))
     elseif e.id == :who
         e.value isa AbstractString && (m.who = e.value)
     elseif e.id == :signed_in
@@ -96,17 +99,30 @@ function TK.update!(m::ConnectApp, e::TK.TaskEvent)
     return nothing
 end
 
-# ── Keys ──────────────────────────────────────────────────────────────────────────────────────────
+# ── Keys and the mouse ────────────────────────────────────────────────────────────────────────────
+
+function TK.update!(m::ConnectApp, e::TK.MouseEvent)
+    m.dialog == :none || return nothing
+    TK.handle_resize!(m.layout, e) || TK.handle_mouse!(m.table, e) || TK.handle_mouse!(m.activity, e)
+    return nothing
+end
+
+"The folder chosen in the table (its row, through the table's sort), or `nothing`."
+function chosen_folder(m::ConnectApp)
+    folders, t = app_folders(m), m.table
+    1 <= t.selected <= length(t.sort_perm) || return nothing
+    i = t.sort_perm[t.selected]
+    return i <= length(folders) ? folders[i] : nothing
+end
+
+const TABLE_KEYS = (:up, :down, :pageup, :pagedown, :home, :end_key, :left, :right)
 
 function TK.update!(m::ConnectApp, e::TK.KeyEvent)
     m.dialog == :none || return dialog_key!(m, e)
-    folders = app_folders(m)
-    chosen = isempty(folders) ? nothing : folders[clamp(m.selected, 1, length(folders))]
+    chosen = chosen_folder(m)
     k, c = e.key, e.char
-    if k == :up
-        m.selected = max(1, m.selected - 1)
-    elseif k == :down
-        m.selected = min(max(length(folders), 1), m.selected + 1)
+    if k in TABLE_KEYS
+        TK.handle_key!(m.table, e)
     elseif k == :escape || (k == :char && c == 'q')
         m.quit = true
     elseif k == :char && c == 'a'
@@ -270,53 +286,76 @@ function syncing_line(m::ConnectApp)
     return background_installed() ? "the background service syncs" : "process $pid syncs"
 end
 
+"The table's columns for `folders`."
+function folder_columns(m::ConnectApp, folders)
+    spin = SPINNER[m.tick ÷ 6 % length(SPINNER) + 1]
+    state(f) = TK.Span(f["state"] == "syncing" ? "syncing $spin" : f["state"], state_style(f["state"]))
+    return [TK.DataColumn("Folder", [f["name"] for f in folders]),
+            TK.DataColumn("State", [state(f) for f in folders]),
+            TK.DataColumn("Files", [f["files"] for f in folders]; align = TK.col_right),
+            TK.DataColumn("Changed", [shown_time(f["changed"]) for f in folders]),
+            TK.DataColumn("Checked", [shown_time(f["checked"]) for f in folders]),
+            TK.DataColumn("Not sent", [isempty(f["skip"]) ? "—" : join(f["skip"], ", ") for f in folders]),
+            TK.DataColumn("Path", [f["path"] for f in folders])]
+end
+
+"Put the status in the table and the activity pane, keeping the table's sort, choice and column widths."
+function show_status!(m::ConnectApp)
+    folders, t = app_folders(m), m.table
+    t.columns = folder_columns(m, folders)
+    n = length(folders)
+    t.sort_perm = t.sort_col == 0 || t.sort_dir == TK.sort_none ? collect(1:n) :
+                  sortperm([(v = t.columns[t.sort_col].values[i]; v isa TK.Span ? v.content : string(v)) for i in 1:n];
+                           rev = t.sort_dir == TK.sort_desc)
+    t.selected = n == 0 ? 0 : clamp(max(t.selected, 1), 1, n)
+    acts = m.status["activity"]
+    shown = (length(acts), isempty(acts) ? "" : acts[end]["at"])
+    shown == m.activity_shown && return
+    m.activity_shown = shown
+    wide = maximum((length(e["folder"]) for e in acts); init = 0)
+    TK.set_content!(m.activity, isempty(acts) ? [[TK.Span("Nothing moved yet.", TK.tstyle(:text_dim))]] :
+                                                [activity_spans(e, wide) for e in acts])
+end
+
+function activity_spans(e, wide::Integer)
+    what = e["what"] == "error" ? TK.tstyle(:error) : e["what"] == "waits" ? TK.tstyle(:warning) : TK.tstyle(:success)
+    return [TK.Span(rpad(shown_time(e["at"]), 10), TK.tstyle(:text_dim)), TK.Span(rpad(e["folder"], wide + 2), TK.tstyle(:accent)),
+            TK.Span(rpad(e["what"], 15), what), TK.Span(e["path"], TK.tstyle(:text))]
+end
+
 function TK.view(m::ConnectApp, f::TK.Frame)
     m.tick += 1
     buf, area = f.buffer, f.area
     site = get(m.config, "site", "")
     title = "zemi connect ── " * (isempty(site) ? "no site yet" : site) * (isempty(m.who) ? "" : " ── $(m.who)") * " ── " * syncing_line(m)
-    inner = TK.render(TK.Block(; title, border_style = TK.tstyle(:border), title_style = TK.tstyle(:title, bold = true)), area, buf)
-    folders = app_folders(m)
-    rows = TK.split_layout(TK.Layout(TK.Vertical, [TK.Fixed(max(length(folders), 1) + 4), TK.Fill(), TK.Fixed(1), TK.Fixed(1)]), inner)
-    length(rows) < 4 && return
-    draw_folders(m, folders, rows[1], buf)
-    draw_activity(m, rows[2], buf)
+    inner = TK.render(TK.Block(; title = first(title, max(area.width - 6, 0)), border_style = TK.tstyle(:border),
+                               title_style = TK.tstyle(:title, bold = true)), area, buf)
+    rows = TK.split_layout(TK.Layout(TK.Vertical, [TK.Fill(), TK.Fixed(1), TK.Fixed(1)]), inner)
+    length(rows) < 3 && return
+    panes = TK.split_layout(m.layout, rows[1])
+    if length(panes) == 2
+        if isempty(m.table.sort_perm)
+            r = TK.render(TK.Block(; title = "Folders"), panes[1], buf)
+            TK.render(TK.Paragraph("No folders yet. Press a to add one, an Obsidian vault say."; style = TK.tstyle(:text_dim)), r, buf)
+        else
+            m.table.tick = m.tick
+            TK.render(m.table, panes[1], buf)
+        end
+        m.activity.tick = m.tick
+        TK.render(m.activity, panes[2], buf)
+        TK.render_resize_handles!(buf, m.layout)
+    end
     # What was last said, else what stopped the last pass, else the chosen folder's note.
-    note = isempty(folders) ? "" : (f = folders[clamp(m.selected, 1, length(folders))]; isempty(f["message"]) ? "" : "$(f["name"]): $(f["message"])")
+    c = chosen_folder(m)
+    note = c === nothing || isempty(c["message"]) ? "" : "$(c["name"]): $(c["message"])"
     msg, err = !isempty(m.message) ? (m.message, m.message_error) : !isempty(m.status["error"]) ? (m.status["error"], true) :
-               (note, !isempty(note) && folders[clamp(m.selected, 1, length(folders))]["state"] in ("error", "missing"))
-    TK.set_string!(buf, rows[3].x + 1, rows[3].y, first(msg, max(rows[3].width - 2, 0)), err ? TK.tstyle(:error) : TK.tstyle(:text))
-    keys = "↑↓ folder · a add · d remove · e skipped · s sync now · p $(get(m.config, "paused", false) === true ? "resume" : "pause") · o library · b background · q quit"
-    TK.set_string!(buf, rows[4].x + 1, rows[4].y, first(keys, max(rows[4].width - 2, 0)), TK.tstyle(:text_dim))
+               (note, c !== nothing && c["state"] in ("error", "missing"))
+    TK.render(TK.Paragraph(msg; style = err ? TK.tstyle(:error) : TK.tstyle(:text)), rows[2], buf)
+    paused = get(m.config, "paused", false) === true
+    keys = "a add · d remove · e skipped · s sync now · p $(paused ? "resume" : "pause") · o library · b background · q quit"
+    TK.render(TK.StatusBar(; left = [TK.Span(" " * keys, TK.tstyle(:text_dim))]), rows[3], buf)
     m.dialog == :none || draw_dialog(m, inner, buf)
     return nothing
-end
-
-function draw_folders(m::ConnectApp, folders, r, buf)
-    if isempty(folders)
-        TK.set_string!(buf, r.x + 1, r.y + 1, "No folders yet. Press a to add one, an Obsidian vault say.", TK.tstyle(:text_dim))
-        return
-    end
-    header = ["Folder", "State", "Files", "Changed", "Checked", "Not sent", "Path"]
-    cells = [[f["name"], f["state"] == "syncing" ? "syncing $(SPINNER[m.tick ÷ 6 % length(SPINNER) + 1])" : f["state"],
-              string(f["files"]), shown_time(f["changed"]), shown_time(f["checked"]),
-              isempty(f["skip"]) ? "—" : join(f["skip"], ", "), f["path"]]
-             for f in folders]
-    TK.render(TK.Table(header, cells; block = TK.Block(; title = "Folders"), selected = clamp(m.selected, 1, length(folders)),
-                       row_styles = [state_style(f["state"]) for f in folders]), r, buf)
-end
-
-function draw_activity(m::ConnectApp, r, buf)
-    inner = TK.render(TK.Block(; title = "Activity"), r, buf)
-    lines = m.status["activity"]
-    shown = lines[max(1, end - inner.height + 1):end]
-    isempty(shown) && TK.set_string!(buf, inner.x + 1, inner.y, "Nothing moved yet.", TK.tstyle(:text_dim))
-    wide = maximum((length(e["folder"]) for e in shown); init = 0)
-    for (i, e) in enumerate(shown)
-        style = e["what"] == "error" ? TK.tstyle(:error) : e["what"] == "waits" ? TK.tstyle(:warning) : TK.tstyle(:text)
-        line = rpad(shown_time(e["at"]), 9) * rpad(e["folder"], wide + 2) * rpad(e["what"], 15) * e["path"]
-        TK.set_string!(buf, inner.x + 1, inner.y + i - 1, first(line, max(inner.width - 2, 0)), style)
-    end
 end
 
 const DIALOG_TITLES = Dict(:site => "The knowledge base to sync with", :signing_in => "Signing in", :add_path => "Add a folder",
@@ -330,42 +369,25 @@ const DIALOG_HINTS = Dict(
 )
 
 function draw_dialog(m::ConnectApp, area, buf)
-    w, h = min(area.width - 4, 76), 7
+    w, h = min(area.width - 2, 76), min(area.height - 2, 8)
+    (w < 20 || h < 5) && return
     r = TK.center(area, w, h)
-    for y in r.y:r.y+h-1, x in r.x:r.x+w-1
+    for y in r.y:TK.bottom(r), x in r.x:TK.right(r)
         TK.set_char!(buf, x, y, ' ', TK.tstyle(:text))
     end
     inner = TK.render(TK.Block(; title = DIALOG_TITLES[m.dialog], border_style = TK.tstyle(:accent), box = TK.BOX_ROUNDED), r, buf)
+    line(i, text, style) = i < inner.height && TK.render(TK.Paragraph(text; style), TK.Rect(inner.x + 1, inner.y + i, inner.width - 2, 1), buf)
     if m.dialog == :remove
         name = m.pending["name"]
-        TK.set_string!(buf, inner.x + 1, inner.y, "Stop syncing $name?", TK.tstyle(:text, bold = true))
-        TK.set_string!(buf, inner.x + 1, inner.y + 2, "s  stop syncing it; its files stay in your library", TK.tstyle(:text))
-        TK.set_string!(buf, inner.x + 1, inner.y + 3, "r  also remove its files from your library", TK.tstyle(:warning))
-        TK.set_string!(buf, inner.x + 1, inner.y + 4, "Esc  keep it. The folder on this machine is left as it is.", TK.tstyle(:text_dim))
+        line(0, "Stop syncing $name?", TK.tstyle(:text, bold = true))
+        line(2, "s    stop syncing it; its files stay in your library", TK.tstyle(:text))
+        line(3, "r    also remove its files from your library", TK.tstyle(:warning))
+        line(4, "Esc  keep it. The folder on this machine is left as it is.", TK.tstyle(:text_dim))
         return
     end
     m.input === nothing || (m.input.tick = m.tick; TK.render(m.input, TK.Rect(inner.x + 1, inner.y + 1, inner.width - 2, 1), buf))
-    hint = DIALOG_HINTS[m.dialog]
-    for (i, line) in enumerate(wrap_words(hint, inner.width - 2))
-        i > 2 && break
-        TK.set_string!(buf, inner.x + 1, inner.y + 2 + i, line, TK.tstyle(:text_dim))
-    end
-end
-
-"`text` broken into lines of at most `width` characters, at spaces."
-function wrap_words(text::AbstractString, width::Integer)
-    lines, line = String[], ""
-    for w in split(text)
-        if isempty(line)
-            line = String(w)
-        elseif length(line) + 1 + length(w) <= width
-            line *= " " * w
-        else
-            push!(lines, line); line = String(w)
-        end
-    end
-    isempty(line) || push!(lines, line)
-    return lines
+    inner.height > 3 && TK.render(TK.Paragraph(DIALOG_HINTS[m.dialog]; style = TK.tstyle(:text_dim), wrap = TK.word_wrap),
+                                  TK.Rect(inner.x + 1, inner.y + 3, inner.width - 2, inner.height - 3), buf)
 end
 
 # ── Running it ────────────────────────────────────────────────────────────────────────────────────

@@ -17,3 +17,4 @@ guide/package-lock.json
 guide/src/assets/screenshots/
 deploy/config/
 deploy/service.env
+LocalPreferences.toml
