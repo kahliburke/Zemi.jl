@@ -27,6 +27,14 @@
   (`summarized = false`), and say what their records are (`about`), as agents are told.
 - **A project's codebase** can be linked by a folder's path, or a repository's address, from its board.
   A shared service reads a folder of its machine in place; only someone with `config.edit` adds one.
+- **Names follow renames**: notes, questions, activity, tasks, findings and their comments show each
+  person by the name their account has now, agents' notes by the name of whom they work for, and a
+  person's own notes stay theirs to edit after a rename. Mentions show the current name, in task
+  titles and notifications as `@Name`.
+- **`zemi` starts in about a second**: the app's entry is compiled into the package image.
+- **Signing in a client** (`zemi connect`, an MCP client) shows pages in the site's colors, light or
+  dark, and says when an approval was denied.
+- **The Documents page** says what one's library is, and how to fill it while it is empty.
 
 ## 0.3.2 (2026-11-10)
 
