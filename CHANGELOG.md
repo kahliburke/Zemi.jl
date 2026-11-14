@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Zotero groups are linked from a project's library**, by its maintainers: a group's address, and
+  an API key for a private one, checked with Zotero and kept where the service alone reads it. Each
+  group shows its items, when it was last read and any error; one group failing no longer stops the
+  others. The Configuration page lists the groups and sets whether items are sorted first.
 - **Agents see what is attached**: `media` opens a file attached in a task, note or finding by its
   address (an image shown, a PDF's text and pages, a text file's text), to whoever may see it.
   `task`, `next_task` and `finding` show the newest images and list the other files.

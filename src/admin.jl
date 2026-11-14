@@ -45,6 +45,8 @@ const EDITABLE_SETTINGS = [
     (key = "dataset.check_hours", kind = "float", label = "Check interval (h, 0 = off)", help = "How often to look for newly published streams."),
     (key = "dataset.autosync_hours", kind = "float", label = "Autosync interval (h, 0 = off)", help = "How often a publisher syncs and publishes."),
     (key = "dataset.read_unread", kind = "bool", label = "Autosync reads unread papers", help = "Also read papers recorded but not read in full."),
+    (key = "sources.zotero.prescreen", kind = "bool", label = "Sort Zotero items first",
+     help = "A model sorts each new item as a paper, a resource or nothing to bring in. Off, Zotero's types are taken as they are."),
     (key = "shared.sign_up", kind = "sign_up", label = "Sign-up", help = "Invitation only, or open to anyone who can sign in."),
     (key = "shared.default_role", kind = "role", label = "Default role", help = "Given on first sign-in when sign-up is open."),
     (key = "shared.session_days", kind = "int", label = "Session length (days)", help = "Days before a sign-in expires."),
@@ -63,6 +65,7 @@ function current_setting(c::Config, key::AbstractString)
     startswith(key, "group.") && return getfield(c.group, Symbol(key[7:end]))
     startswith(key, "dataset.") && (v = getfield(c.dataset, Symbol(key[9:end])); return v isa Symbol ? string(v) : v)
     startswith(key, "shared.") && (v = getfield(c.shared, Symbol(key[8:end])); return v isa Symbol ? string(v) : v)
+    key == "sources.zotero.prescreen" && return get(get(c.sources, "zotero", Dict()), "prescreen", true) !== false
     return getfield(c, Symbol(key))
 end
 

@@ -1188,6 +1188,10 @@ end
         K.save_settings!(kb, Dict("tutor" => "deepseek-v4.1-flash", "watch.categories" => "physics.ao-ph, nlin.CD",
                                   "tutor_effort" => "low", "search.keyword" => false))
         @test kb.config.tutor == "deepseek-v4.1-flash" && K.purpose(kb.config, :tutor).name == "deepseek-v4.1-flash"
+        # A source's setting: whether Zotero's items are sorted by a model first.
+        @test K.current_setting(kb.config, "sources.zotero.prescreen") == true
+        K.save_settings!(kb, Dict("sources.zotero.prescreen" => false))
+        @test K.current_setting(kb.config, "sources.zotero.prescreen") == false && kb.config.sources["zotero"]["prescreen"] == false
         @test kb.config.watch_categories == ["physics.ao-ph", "nlin.CD"] && !kb.config.search_keyword
         @test K.load_config().tutor_effort == "low"                                  # it is in the file too
         before = read(K.settings_path(), String)
@@ -2252,6 +2256,91 @@ end
         end
     finally
         K.READ_LIBRARIES[] = true
+        close(kb)
+    end
+end
+
+@zset "linking Zotero groups from the site" begin
+    HTTP, JSON = K.HTTP, K.JSON
+    # A stand-in Zotero: group 7 public, group 8 private (read with its key alone); each holds one data set.
+    item(key, title) = Dict("key" => key, "version" => 1,
+                            "data" => Dict("key" => key, "itemType" => "dataset", "title" => title, "creators" => [], "date" => "2026"))
+    held = Dict("7" => [item("A1", "Reef temperature logs")], "8" => [item("B1", "Private survey grids")])
+    names = Dict("7" => "Reef papers", "8" => "Survey team")
+    port = 18000 + rand(0:999)
+    server = HTTP.serve!("127.0.0.1", port) do req
+        m = match(r"^/groups/(\d+)(/.*)?$", HTTP.URI(req.target).path)
+        m === nothing || !haskey(held, m[1]) && return HTTP.Response(404, "")
+        m[1] == "8" && HTTP.header(req, "Zotero-API-Key", "") != "k-secret" && return HTTP.Response(403, "")
+        m[2] === nothing && return HTTP.Response(200, JSON.json(Dict("data" => Dict("name" => names[m[1]]))))
+        HTTP.Response(200, ["Last-Modified-Version" => "1", "Total-Results" => string(length(held[m[1]]))], JSON.json(held[m[1]]))
+    end
+    saved = (K.ZOTERO_API[], K.ZOTERO_PRESCREEN[])
+    K.ZOTERO_API[] = "http://127.0.0.1:$port"
+    K.ZOTERO_PRESCREEN[] = (kb, items, notes) -> Dict(String(it["key"]) => (; as = "resource", type = "dataset", sure = true, why = "a data set")
+                                                      for it in items)
+    home = mktempdir()
+    sh = shared_config(sign_up = :open, default_role = "Learner")
+    kb = open_kb(temp_config(shared = sh, layers = Layer[]))
+    K.ensure_roles!(kb)
+    account(email, roles) = (uid = K.sign_in!(kb, sh, "Campus", email; email, verified = true); K.set_roles!(kb, uid, roles); uid)
+    as(uid) = K.session_caller(kb, K.start_session!(kb, uid, sh))
+    ada, bea, cy = account("ada@x.org", ["Learner"]), account("bea@x.org", ["Learner"]), account("cy@x.org", ["Admin"])
+    settled() = timedwait(() -> !K.source_running("zotero"), 60)
+    titles() = sort([String(r.title) for r in K.query(kb, "SELECT title FROM papers WHERE kind = 'resource'")])
+    try
+        withenv("ZEMI_CONFIG" => joinpath(home, "config.toml")) do
+            K.create_project!(kb, "Reefs"; key = "RF", owner = ada, by = K.person("Ada"))
+            K.create_project!(kb, "Surveys"; key = "SV", owner = ada, by = K.person("Ada"))
+            K.set_member!(kb, "RF", bea, "contributor"; by = "ada@x.org")
+            @test !K.used_here(kb, K.registered_source("zotero"))                   # nothing linked, nothing configured
+            # A contributor may not link a group; the project's maintainer may, by its address.
+            @test_throws "manage the project" K.link_zotero!(kb, as(bea), "RF", "7")
+            r = K.link_zotero!(kb, as(ada), "RF", "https://www.zotero.org/groups/7/reef-papers")
+            @test r == (; group = "7", name = "Reef papers", items = 1)
+            settled()
+            @test K.used_here(kb, K.registered_source("zotero")) && titles() == ["Reef temperature logs"]
+            @test only(x.target for x in K.library(kb, "RF")) |> id -> K.paper_row(kb, id).title == "Reef temperature logs"
+            g = only(K.zotero_links_json(kb, "RF"))
+            @test g["name"] == "Reef papers" && g["items"] == 1 && isempty(g["error"]) && !g["private"] && g["linked_by"] == "ada@x.org"
+            # A group is linked to one project; a private one needs a key Zotero accepts, kept where the service alone reads it.
+            @test_throws "linked to RF already" K.link_zotero!(kb, as(cy), "SV", "7")
+            @test_throws "is private" K.link_zotero!(kb, as(cy), "SV", "8")
+            @test_throws "refused that key" K.link_zotero!(kb, as(cy), "SV", "8"; key = "wrong")
+            @test_throws "Zotero has no group 9" K.link_zotero!(kb, as(cy), "SV", "9")
+            @test_throws "Give a Zotero group's address" K.link_zotero!(kb, as(cy), "SV", "reefs")
+            @test K.link_zotero!(kb, as(cy), "SV", "8"; key = "k-secret").name == "Survey team"          # an admin, for any project
+            file = joinpath(home, "zotero-keys", "8.key")
+            @test strip(read(file, String)) == "k-secret" && filemode(file) & 0o777 == 0o600
+            settled()
+            @test titles() == ["Private survey grids", "Reef temperature logs"]
+            @test only(K.zotero_links_json(kb, "SV"))["private"] && !occursin("k-secret", JSON.json(K.zotero_links_json(kb)))
+            # A key revoked: that group's reading fails and says so, the other's goes on.
+            write(file, "revoked\n")
+            push!(held["7"], item("A2", "Reef light loggers"))
+            held["7"][1]["version"] = 2; held["7"][2]["version"] = 2
+            K.zotero_poll(K.SourceRun(kb, K.registered_source("zotero")))
+            @test occursin("refused", only(K.zotero_links_json(kb, "SV"))["error"]) && "Reef light loggers" in titles()
+            # Unlinked: its key goes and it is no longer read; what it brought in stays.
+            @test_throws "manage the project" K.unlink_zotero!(kb, as(bea), "RF", "7")
+            K.unlink_zotero!(kb, as(cy), "SV", "8")
+            @test !isfile(file) && isempty(K.zotero_links_json(kb, "SV")) && "Private survey grids" in titles()
+            # Through the API: the project's groups, and whether the caller may link one.
+            serve(uid, method, target; body = "") =
+                K.respond_service(kb, HTTP.Request(method, target, ["Cookie" => "kb_session=$(K.start_session!(kb, uid, sh))", "X-Zemi" => "1"], body);
+                                  shared = true)
+            listed = JSON.parse(String(serve(bea, "GET", "/api/projects/RF/zotero").body))
+            @test only(listed["groups"])["group"] == "7" && listed["may_link"] == false
+            @test JSON.parse(String(serve(ada, "GET", "/api/projects/RF/zotero").body))["may_link"] == true
+            # The Configuration page: every group read, and whether items are sorted first.
+            all_groups = JSON.parse(String(serve(cy, "GET", "/api/zotero").body))
+            @test only(all_groups["groups"])["project"] == "RF" && all_groups["prescreen"] == true
+            @test serve(bea, "GET", "/api/zotero").status == 403
+            @test serve(ada, "POST", "/api/projects/RF/zotero/7/unlink").status == 200 && isempty(K.zotero_links_json(kb))
+        end
+    finally
+        K.ZOTERO_API[], K.ZOTERO_PRESCREEN[] = saved
+        close(server)
         close(kb)
     end
 end

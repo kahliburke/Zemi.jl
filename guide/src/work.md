@@ -195,7 +195,15 @@ libraries and listed on the Resources page. It is not summarized. In the bibliog
 it is the entry its type calls for: an article in its journal or newspaper, a book, a chapter, a
 report of its institution, and anything else a `misc` naming where it appeared and when it was accessed.
 
-A Zotero group's library is kept in step with the knowledge base by the Zotero source:
+A Zotero group's library is kept in step with a project's library by the Zotero source. A project's
+maintainers link a group from the project's library: its address on zotero.org (or its number), and
+for a private group an API key that may read it (from zotero.org/settings/keys). Zotero is asked
+whether the group can be read so before it is linked; the key is kept in the config folder, in
+`zotero-keys/`, readable by the service alone, and is not shown again. A group is linked to one
+project, and is read as soon as it is linked. Unlinking it stops reading it; what it brought in
+stays. The Configuration page lists every group read, and sets whether items are sorted first.
+
+Groups can also be named in the config, with one key for all of them:
 
 ```toml
 [sources.zotero]

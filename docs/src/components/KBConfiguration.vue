@@ -12,6 +12,7 @@ import KBModelChoice, { type ModelInfo, type Choice } from './KBModelChoice.vue'
 import { ref, computed, onMounted } from 'vue'
 import { mode, connect, getJSON, post, can, shared, api } from './kbApi'
 import { plainCopy } from './kbUtils'
+import { when } from './kbFormat'
 
 type Setting = { key: string; kind: string; label: string; help: string; value: any; follows?: boolean }
 type Conf = { settings: Setting[]; summarizers: { name: string; kind: string; model: string }[]; layers: string[]; roles: string[]; file: string; config: string }
@@ -31,6 +32,7 @@ const groups = computed(() => [
   { title: 'Sharing', keys: ['dataset.role', 'dataset.stream', 'dataset.content', 'dataset.store', 'dataset.endpoint', 'dataset.bucket',
                              'dataset.prefix', 'dataset.credentials', 'dataset.check_hours', 'dataset.autosync_hours', 'dataset.read_unread'] },
   { title: 'Codebases', keys: ['shared.nightly_ingest', 'shared.timezone'] },
+  { title: 'Zotero', keys: ['sources.zotero.prescreen'] },
   { title: 'Signing in', keys: ['shared.sign_up', 'shared.default_role', 'shared.session_days'] },
 ].map(g => ({ ...g, settings: shown.value.filter(s => g.keys.includes(s.key)) })).filter(g => g.settings.length))
 
@@ -120,7 +122,11 @@ async function settle(c: Conflict, take: boolean) {
   catch (e: any) { error.value = e.message }
 }
 const options = (q: any) => q.options.join('\n')
-onMounted(async () => { await connect(); if (mode.value === 'live') await load() })
+// The Zotero groups read, from the config and linked on projects' libraries (see src/zotero_links.jl).
+type ZoteroGroup = { group: string; name: string; project: string; linked_by: string; configured: boolean; read: string; items: number; error: string }
+const zotero = ref<ZoteroGroup[]>([])
+const loadZotero = async () => { try { zotero.value = (await getJSON('/api/zotero')).groups } catch { /* shown as none */ } }
+onMounted(async () => { await connect(); if (mode.value === 'live') { await load(); loadZotero() } })
 
 const changes = computed(() => Object.fromEntries((conf.value?.settings ?? [])
   .filter(s => JSON.stringify(s.value) !== JSON.stringify(draft.value[s.key])).map(s => [s.key, draft.value[s.key]])))
@@ -244,6 +250,15 @@ const moveUp = (list: unknown[], i: number) => list.splice(i - 1, 0, ...list.spl
               <textarea v-else-if="s.kind === 'text'" :id="s.key" v-model="draft[s.key]" rows="5" :disabled="!editable"></textarea>
               <input v-else :id="s.key" v-model="draft[s.key]" :disabled="!editable" />
               <span v-if="s.follows" class="kbcf-help-line">Set by the dataset</span>
+            </div>
+          </div>
+          <div v-if="g.title === 'Zotero'" class="kbcf-zotero">
+            <p v-if="!zotero.length" class="kb-dim">No Zotero group is read. A project's maintainers link one from its library.</p>
+            <div v-for="z in zotero" :key="z.group" class="kbcf-row">
+              <span><a :href="`https://www.zotero.org/groups/${z.group}`" target="_blank" rel="noopener">{{ z.name || `Group ${z.group}` }}</a>
+                <span class="kb-dim"> · {{ z.project || 'no project' }} · {{ z.read ? `${z.items} items, read ${when(z.read)}` : 'not read yet' }}
+                  {{ z.configured ? '· in the config file' : z.linked_by ? `· linked by ${z.linked_by}` : '' }}</span></span>
+              <span v-if="z.error" class="kb-error">{{ z.error }}</span>
             </div>
           </div>
         </section>

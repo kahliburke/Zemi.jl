@@ -1,4 +1,5 @@
-# Zotero: a group's library, read through Zotero's web API and kept in step. Each item comes in as what
+# Zotero: a group's library, read through Zotero's web API and kept in step. Groups are linked to
+# projects from the site (see zotero_links.jl) or named in the config. Each item comes in as what
 # it is: a work with a DOI and a copy to read (see `add_doi!`) as the knowledge base's paper, a
 # repository as its codebase, and anything else, a work with no copy to read among them, as a resource
 # (see resources.jl). Each is kept in the library of the project its group is mapped to:
@@ -243,103 +244,119 @@ the prescreen's verdict on each item at its version.
 """
 function zotero_poll(run)
     d = settings(run)
-    groups = get(d, "groups", Dict())
-    key = haskey(d, "key") ? secret(run, "key") : ""
+    groups = zotero_groups(run.kb)
+    config_key = haskey(d, "key") ? secret(run, "key") : ""
     st = state(run)
     versions = get(st, "reading", 1) < ZOTERO_READING ? Dict{String,Any}() : Dict{String,Any}(get(st, "versions", Dict()))
     made = Dict{String,Any}(get(st, "items", Dict()))
     titled = Dict{String,Any}(get(st, "titles", Dict()))
     again = Dict{String,Any}(get(st, "retry", Dict()))
     sorted = Dict{String,Any}(get(st, "sorted", Dict()))
+    status = Dict{String,Any}(get(st, "status", Dict()))
     screen = get(d, "prescreen", true) !== false
     kb = run.kb
-    for (group, project) in groups
-        group, project = string(group), String(project)
-        isempty(project) || project_id(kb, project)
-        got = zotero_items(group, Int(get(versions, group, 0)); key)
-        retry = String.(get(again, group, String[]))
-        # The items whose documents were dropped and are restored since: read again.
-        restored = restored_documents(kb)
-        back = [last(split(k, '/'; limit = 2)) for (k, id) in made
-                if startswith(k, "$group/") && id in restored && ismissing(paper_id(kb, id))]
-        listed = Set(String(it["key"]) for it in got.items)
-        for ks in Iterators.partition(filter(!in(listed), unique([retry; back])), 50)
-            append!(got.items, zotero_items(group, 0; key, keys = collect(ks)).items)
-        end
-        failed = String[]
-        notes = Dict{String,Vector{String}}()
-        for it in got.items
-            p = get(it["data"], "parentItem", "")
-            it["data"]["itemType"] == "note" && !isempty(p) && push!(get!(Vector{String}, notes, p), note_text(it["data"]["note"]))
-        end
-        tops = [it for it in got.items if !(it["data"]["itemType"] in ("note", "attachment", "annotation"))]
-        progress(run, "group $group: $(length(tops)) items changed")
-        # The prescreen sorts each item not sorted at its version yet; one it could not is tried again in the next run.
-        verdict(it) = (v = get(sorted, "$group/$(it["key"])", nothing);
-                       v === nothing || v["version"] != it["version"] ? nothing : (; as = v["as"], type = v["type"], sure = v["sure"], why = v["why"]))
-        unsorted = screen ? [it for it in tops if verdict(it) === nothing] : []
-        if !isempty(unsorted)
-            progress(run, "group $group: sorting $(length(unsorted)) items")
-            try
-                versions_of = Dict(String(it["key"]) => it["version"] for it in unsorted)
-                for (k, v) in ZOTERO_PRESCREEN[](kb, unsorted, notes)
-                    sorted["$group/$k"] = Dict("version" => versions_of[k], "as" => v.as, "type" => v.type, "sure" => v.sure, "why" => v.why)
+    # Only the groups read now are remembered: one unlinked meanwhile is read from the start if linked again.
+    reading = Set(g.group for g in groups)
+    filter!(((g, _),) -> g in reading, versions); filter!(((g, _),) -> g in reading, status)
+    save() = save_state!(run, Dict("versions" => versions, "items" => made, "titles" => titled, "retry" => again, "sorted" => sorted,
+                                   "status" => status, "reading" => ZOTERO_READING))
+    for g in groups
+        group, project = g.group, g.project
+        try
+            key = isempty(g.key) ? config_key : resolve_key(g.key, "Zotero group $group's key")
+            isempty(project) || project_id(kb, project)
+            got = zotero_items(group, Int(get(versions, group, 0)); key)
+            retry = String.(get(again, group, String[]))
+            # The items whose documents were dropped and are restored since: read again.
+            restored = restored_documents(kb)
+            back = [last(split(k, '/'; limit = 2)) for (k, id) in made
+                    if startswith(k, "$group/") && id in restored && ismissing(paper_id(kb, id))]
+            listed = Set(String(it["key"]) for it in got.items)
+            for ks in Iterators.partition(filter(!in(listed), unique([retry; back])), 50)
+                append!(got.items, zotero_items(group, 0; key, keys = collect(ks)).items)
+            end
+            failed = String[]
+            notes = Dict{String,Vector{String}}()
+            for it in got.items
+                p = get(it["data"], "parentItem", "")
+                it["data"]["itemType"] == "note" && !isempty(p) && push!(get!(Vector{String}, notes, p), note_text(it["data"]["note"]))
+            end
+            tops = [it for it in got.items if !(it["data"]["itemType"] in ("note", "attachment", "annotation"))]
+            progress(run, "group $group: $(length(tops)) items changed")
+            # The prescreen sorts each item not sorted at its version yet; one it could not is tried again in the next run.
+            verdict(it) = (v = get(sorted, "$group/$(it["key"])", nothing);
+                           v === nothing || v["version"] != it["version"] ? nothing : (; as = v["as"], type = v["type"], sure = v["sure"], why = v["why"]))
+            unsorted = screen ? [it for it in tops if verdict(it) === nothing] : []
+            if !isempty(unsorted)
+                progress(run, "group $group: sorting $(length(unsorted)) items")
+                try
+                    versions_of = Dict(String(it["key"]) => it["version"] for it in unsorted)
+                    for (k, v) in ZOTERO_PRESCREEN[](kb, unsorted, notes)
+                        sorted["$group/$k"] = Dict("version" => versions_of[k], "as" => v.as, "type" => v.type, "sure" => v.sure, "why" => v.why)
+                    end
+                catch e
+                    e isa InterruptException && rethrow()
+                    @warn "The Zotero prescreen could not sort group $group's items; they are tried again in the next run" exception = e
                 end
-            catch e
-                e isa InterruptException && rethrow()
-                @warn "The Zotero prescreen could not sort group $group's items; they are tried again in the next run" exception = e
             end
-        end
-        for it in tops
-            cancelled(run) && break
-            k = "$group/$(it["key"])"
-            # Become another document since (a resource read in full): that one; removed or dropped here: not
-            # brought in again, unless its drop is restored.
-            was = get(made, k, nothing)
-            was === nothing || (made[k] = current_document(kb, was))
-            if haskey(made, k) && ismissing(paper_id(kb, made[k])) && !(made[k] in restored)
-                dropped_as(kb; id = made[k]) === nothing || (run.dropped += 1)
-                continue
-            end
-            # Read in full since from a PDF uploaded here: the paper it became stays what it is.
-            if was !== nothing && made[k] != was
-                isempty(project) || library_add!(kb, project, made[k]; by = Actor("zotero", false))
-                continue
-            end
-            # The same work as an item seen before: by its DOI, or by its title where it has none.
-            doi = normalize_doi(strip(get(it["data"], "DOI", "")))
-            t = isempty(doi) ? "title:" * normalize_title(get(it["data"], "title", "")) : "doi:" * doi
-            haskey(titled, t) && (titled[t] = current_document(kb, titled[t]))
-            # Its own resource, read again, is brought up to date instead.
-            if haskey(titled, t) && !ismissing(paper_id(kb, titled[t])) && !own_resource(kb, titled[t], it["key"])
-                isempty(project) || library_add!(kb, project, titled[t]; by = Actor("zotero", false))
-                made[k] = titled[t]
-                continue
-            end
-            v = screen ? verdict(it) : nothing
-            screen && v === nothing && (push!(failed, String(it["key"])); continue)
-            id = try
-                zotero_item!(kb, it, get(notes, it["key"], String[]); project, sorted = v)
-            catch e
-                e isa InterruptException && rethrow()
-                # Dropped here: kept out, and brought in once the drop is restored.
-                if e isa DroppedError
-                    made[k] = e.drop.id
-                    run.dropped += 1
+            for it in tops
+                cancelled(run) && break
+                k = "$group/$(it["key"])"
+                # Become another document since (a resource read in full): that one; removed or dropped here: not
+                # brought in again, unless its drop is restored.
+                was = get(made, k, nothing)
+                was === nothing || (made[k] = current_document(kb, was))
+                if haskey(made, k) && ismissing(paper_id(kb, made[k])) && !(made[k] in restored)
+                    dropped_as(kb; id = made[k]) === nothing || (run.dropped += 1)
                     continue
                 end
-                @warn "Zotero item $k could not be brought in; it is tried again in the next run" exception = e
-                push!(failed, String(it["key"]))
-                continue
+                # Read in full since from a PDF uploaded here: the paper it became stays what it is.
+                if was !== nothing && made[k] != was
+                    isempty(project) || library_add!(kb, project, made[k]; by = Actor("zotero", false))
+                    continue
+                end
+                # The same work as an item seen before: by its DOI, or by its title where it has none.
+                doi = normalize_doi(strip(get(it["data"], "DOI", "")))
+                t = isempty(doi) ? "title:" * normalize_title(get(it["data"], "title", "")) : "doi:" * doi
+                haskey(titled, t) && (titled[t] = current_document(kb, titled[t]))
+                # Its own resource, read again, is brought up to date instead.
+                if haskey(titled, t) && !ismissing(paper_id(kb, titled[t])) && !own_resource(kb, titled[t], it["key"])
+                    isempty(project) || library_add!(kb, project, titled[t]; by = Actor("zotero", false))
+                    made[k] = titled[t]
+                    continue
+                end
+                v = screen ? verdict(it) : nothing
+                screen && v === nothing && (push!(failed, String(it["key"])); continue)
+                id = try
+                    zotero_item!(kb, it, get(notes, it["key"], String[]); project, sorted = v)
+                catch e
+                    e isa InterruptException && rethrow()
+                    # Dropped here: kept out, and brought in once the drop is restored.
+                    if e isa DroppedError
+                        made[k] = e.drop.id
+                        run.dropped += 1
+                        continue
+                    end
+                    @warn "Zotero item $k could not be brought in; it is tried again in the next run" exception = e
+                    push!(failed, String(it["key"]))
+                    continue
+                end
+                id === nothing && continue
+                made[k] = titled[t] = id
+                is_resource(id) || is_codebase(id) || READ_PUT[] && queue_reading!(kb, [id])
             end
-            id === nothing && continue
-            made[k] = titled[t] = id
-            is_resource(id) || is_codebase(id) || READ_PUT[] && queue_reading!(kb, [id])
+            cancelled(run) || (versions[group] = got.version)
+            again[group] = failed
+            status[group] = Dict("read" => now_iso(), "items" => count(k -> startswith(k, "$group/"), keys(made)),
+                                 "error" => isempty(failed) ? "" : "$(length(failed)) items to try again")
+            save()
+        catch e
+            e isa InterruptException && rethrow()
+            # One group failing (a key revoked, Zotero refusing) leaves the others read.
+            @warn "Zotero group $group could not be read; it is tried again in the next run" exception = e
+            status[group] = Dict("read" => now_iso(), "items" => count(k -> startswith(k, "$group/"), keys(made)), "error" => failure_message(e))
+            save()
         end
-        cancelled(run) || (versions[group] = got.version)
-        again[group] = failed
-        save_state!(run, Dict("versions" => versions, "items" => made, "titles" => titled, "retry" => again, "sorted" => sorted,
-                               "reading" => ZOTERO_READING))
     end
 end
 
@@ -347,5 +364,5 @@ end
 own_resource(kb::KB, id::AbstractString, key::AbstractString) =
     is_resource(id) && (r = resource_row(kb, id); r !== nothing && r.key == key)
 
-record_source!("zotero"; label = "From a Zotero library", every = 3600, poll = zotero_poll, configured = true,
+record_source!("zotero"; label = "From a Zotero library", every = 3600, poll = zotero_poll, configured = true, used = kb -> zotero_linked(kb),
                budget = (; seconds = 3600.0), api = PLUGIN_API)

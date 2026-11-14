@@ -16,7 +16,8 @@ const SOURCE_MODES = (:local, :shared)
 
 """
 A source of records, as [`record_source!`](@ref) registered it: `every` in seconds (0 for one that
-does not poll), `configured` whether it runs only where the config has its section, `summarized`
+does not poll), `configured` whether it runs only where the config has its section (or `used`
+says it is in use), `summarized`
 whether its records are summarized, `about` what its records are as readers and agents are told,
 and `plugin` the package that registered it, empty for Zemi's own.
 """
@@ -30,6 +31,7 @@ struct RecordSource
     read::Union{Function,Nothing}
     budget::typeof(DEFAULT_BUDGET)
     configured::Bool
+    used::Union{Function,Nothing}
     summarized::Bool
     about::String
     plugin::String
@@ -41,7 +43,7 @@ const SOURCES_LOCK = ReentrantLock()
 
 """
     record_source!(name; label, modes = (:local, :shared), every = nothing, poll = nothing,
-                   accepts = nothing, read = nothing, budget = (;), configured = false,
+                   accepts = nothing, read = nothing, budget = (;), configured = false, used = nothing,
                    summarized = true, about = RECORD_ABOUT, api) -> RecordSource
 
 Register a source of records, or replace the one of that name. A source is code that reads another
@@ -56,7 +58,8 @@ writes, labels and guards what it hands in.
 - `poll(run)`, run every `every` (a period, or seconds): its scheduled work
 - `accepts(path)` and `read(run, path)`: a file someone uploads that it knows how to read
 - `configured`: it runs, and is listed among the sources, only where the config has its section
-  (`[sources.<name>]`): one Zemi has that only some knowledge bases use
+  (`[sources.<name>]`): one Zemi has that only some knowledge bases use; `used(kb)`, given, also
+  says it is in use (set up on the site rather than in the config)
 - `summarized`: its records are summarized as records are; `false`, they are read and embedded for
   searching without a model writing summaries of them (a person's many short notes, say)
 - `about`: what its records are, as readers and agents are told wherever one is given them ("a
@@ -72,7 +75,7 @@ to their methods to the source as registered.
 function record_source!(name::AbstractString; label::AbstractString, modes = SOURCE_MODES, every = nothing,
                         poll::Union{Function,Nothing} = nothing, accepts::Union{Function,Nothing} = nothing,
                         read::Union{Function,Nothing} = nothing, budget = (;), configured::Bool = false,
-                        summarized::Bool = true, about::AbstractString = RECORD_ABOUT, api::Integer)
+                        used::Union{Function,Nothing} = nothing, summarized::Bool = true, about::AbstractString = RECORD_ABOUT, api::Integer)
     api == PLUGIN_API ||
         error("Source $name is written for Zemi's plugin interface $api, and this Zemi's is $PLUGIN_API: update the one or the other")
     name = record_source(name)
@@ -90,7 +93,7 @@ function record_source!(name::AbstractString; label::AbstractString, modes = SOU
     isempty(extra) || error("Source $name's budget is $(join(keys(DEFAULT_BUDGET), ", ")), not $(join(extra, ", "))")
     b = (; (k => convert(fieldtype(typeof(DEFAULT_BUDGET), k), get(budget, k, DEFAULT_BUDGET[k])) for k in keys(DEFAULT_BUDGET))...)
     all(>(0), values(b)) || error("Source $name's budget is positive: $b")
-    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, configured, summarized, about,
+    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, configured, used, summarized, about,
                      get(task_local_storage(), :zemi_plugin, ""))
     lock(SOURCES_LOCK) do
         i = findfirst(x -> x.name == name, SOURCES[])
@@ -108,8 +111,8 @@ serving_mode() = SHARED_MODE[] ? :shared : :local
 "Whether source `s` runs in this process's mode."
 runs_here(s::RecordSource) = serving_mode() in s.modes
 
-"Whether source `s` is one this knowledge base uses: any, but one `configured` only where the config has its section."
-used_here(kb::KB, s::RecordSource) = !s.configured || haskey(kb.config.sources, s.name)
+"Whether source `s` is one this knowledge base uses: any, but one `configured` only where the config has its section or it says it is used."
+used_here(kb::KB, s::RecordSource) = !s.configured || haskey(kb.config.sources, s.name) || (s.used !== nothing && s.used(kb) === true)
 
 # ── A run ─────────────────────────────────────────────────────────────────────────────────────────
 

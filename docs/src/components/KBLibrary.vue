@@ -6,6 +6,7 @@
 -->
 <script setup lang="ts">
 import KBTitle from './KBTitle.vue'
+import KBZoteroGroups from './KBZoteroGroups.vue'
 import { ref, computed, onMounted } from 'vue'
 import { findingHref } from './kbLinks'
 import { day } from './kbFormat'
@@ -96,6 +97,7 @@ const empty = computed(() => !proposed.value.length && !groups.value.length)
         </div>
       </form>
 
+      <KBZoteroGroups :project="project" @read="load" />
       <p v-if="error" class="kb-error kbl-error">{{ error }}</p>
       <p v-if="!items" class="kb-dim kbl-dim kbl-loading">Reading the library…</p>
       <template v-else>
