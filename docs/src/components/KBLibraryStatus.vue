@@ -19,21 +19,27 @@ const error = ref('')
 async function load() {
   try { lib.value = await getJSON('/api/library') } catch (e: any) { error.value = e.message }
 }
-// While it is being read, look again now and then, to show when it is done.
+// Looked at again now and then: while it is being read, to show when it is done, and to keep which
+// machines are syncing current.
 let timer: ReturnType<typeof setInterval> | undefined
+let ticks = 0
 onMounted(async () => {
   await load()
-  timer = setInterval(() => { if (lib.value?.reading) load() }, 5000)
+  timer = setInterval(() => { ticks++; if (lib.value?.reading || ticks % 6 === 0) load() }, 5000)
 })
 onUnmounted(() => clearInterval(timer))
 
 async function disconnect(c: Connection) {
-  if (!confirm(`Disconnect ${c.name}? It stops keeping its folders in step until it signs in again.`)) return
+  if (!confirm(`Sign ${machine(c)} out? Its zemi connect stops reaching your library until it signs in again.`)) return
   try { await post(`/api/me/tokens/${c.id}/revoke`, '{}'); await load() } catch (e: any) { error.value = e.message }
 }
 
 // The machine a sign-in is from, as zemi connect names it ("zemi connect on <machine>").
 const machine = (c: Connection) => c.name.replace(/^zemi connect on /, '').replace(/ \(connected\)$/, '')
+// A running zemi connect reaches the library every 10 seconds, which is recorded to the minute: one
+// heard from in the last two minutes is syncing now.
+const RUNNING_MS = 2 * 60 * 1000
+const syncing = (c: Connection) => !!c.last_used && Date.now() - new Date(c.last_used).getTime() < RUNNING_MS
 const share = computed(() => lib.value && lib.value.limit ? Math.min(100, (100 * lib.value.used) / lib.value.limit) : 0)
 const command = computed(() => `zemi connect ${new URL(api.value || '/', location.href).origin} ~/Documents/Notes`)
 </script>
@@ -64,19 +70,21 @@ const command = computed(() => `zemi connect ${new URL(api.value || '/', locatio
       </table>
       <p v-else class="kb-dim">Nothing is in it yet.</p>
 
-      <h3>Connected</h3>
+      <h3>Machines</h3>
+      <p class="kb-dim">Signed in to keep folders in step. One syncs while <code>zemi connect</code> runs there.</p>
       <table v-if="lib.connections.length" class="kbl-table">
-        <thead><tr><th>Machine</th><th>Connected</th><th>Last synced</th><th></th></tr></thead>
+        <thead><tr><th>Machine</th><th>Now</th><th>Last synced</th><th>Signed in</th><th></th></tr></thead>
         <tbody>
           <tr v-for="c in lib.connections" :key="c.id">
             <td>{{ machine(c) }}</td>
-            <td>{{ when(c.created_at, '—') }}</td>
+            <td><span :class="['kbl-state', { on: syncing(c) }]">{{ syncing(c) ? 'syncing' : 'not running' }}</span></td>
             <td>{{ when(c.last_used, 'never') }}</td>
-            <td><button class="kb-link" @click="disconnect(c)">disconnect</button></td>
+            <td>{{ when(c.created_at, '—') }}</td>
+            <td><button class="kb-link" :title="`Revoke ${machine(c)}'s sign-in`" @click="disconnect(c)">sign out</button></td>
           </tr>
         </tbody>
       </table>
-      <p v-else class="kb-dim">No machine keeps a folder in step with it.</p>
+      <p v-else class="kb-dim">No machine is signed in to keep a folder in step with it.</p>
       <p class="kb-dim kbl-how">To keep a folder in step, an Obsidian vault say, run on your machine:
         <code>{{ command }}</code></p>
     </template>
@@ -92,6 +100,11 @@ const command = computed(() => `zemi connect ${new URL(api.value || '/', locatio
 .kbl-table { width: 100%; font-size: 0.88rem; }
 .kbl-tag { margin-left: 0.5rem; padding: 0.05rem 0.4rem; border-radius: 4px; font-size: 0.75rem;
   background: var(--vp-c-default-soft); color: var(--vp-c-text-2); }
+.kbl-state { color: var(--vp-c-text-3); }
+.kbl-state::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 0.4rem; border-radius: 50%;
+  background: var(--vp-c-text-3); vertical-align: 0.05em; }
+.kbl-state.on { color: var(--vp-c-text-1); }
+.kbl-state.on::before { background: var(--vp-c-brand-1); }
 .kbl-how { margin-top: 0.8rem; }
 .kbl-how code { overflow-wrap: anywhere; }
 </style>
