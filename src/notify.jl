@@ -62,7 +62,9 @@ function waiting_items(kb::KB, caller::Caller)
     sees(ref) = get!(() -> (k = ref_project(ref); k !== nothing && project_access(kb, caller, k) >= VIEW), seen, ref)
     w = waiting(kb; me)
     out = NamedTuple[]
-    item(section, key, t, text; theirs = false) = push!(out, (; key, section, ref = String(t.ref), title = String(t.title), text, theirs))
+    item(section, key, t, text; theirs = false) =
+        push!(out, (; key, section, ref = String(t.ref), title = readable_at_references(kb, t.title),
+                      text = readable_at_references(kb, text), theirs))
     for t in w.proposed
         sees(t.ref) && t.concerns && item("proposed", "proposed:$(t.ref)", t, t.title; theirs = changed_by(kb, task_ref(kb, t.ref), me))
     end

@@ -7,6 +7,7 @@
 import { ref, onMounted } from 'vue'
 import { connect, mode, can, getJSON } from './kbApi'
 import { taskHref } from './kbLinks'
+import { plainRefs } from './kbRefs'
 import { statusLabel } from './kbLabels'
 import { day, plural } from './kbFormat'
 
@@ -27,7 +28,7 @@ onMounted(async () => {
     <h2>Work on this file</h2>
     <ul>
       <li v-for="w in work" :key="w.ref">
-        <a :href="taskHref(w.ref)" class="kbfw-ref">{{ w.ref }}</a> {{ w.title }}
+        <a :href="taskHref(w.ref)" class="kbfw-ref">{{ w.ref }}</a> {{ plainRefs(w.title) }}
         <span class="kb-dim kbfw-dim">{{ statusLabel(w.status) }} · {{ plural(w.commits, 'commit') }} · {{ day(w.at) }}</span>
       </li>
     </ul>

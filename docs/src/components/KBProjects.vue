@@ -18,7 +18,7 @@ import KBProjectReview from './KBProjectReview.vue'
 import KBMembers from './KBMembers.vue'
 import KBRecordUpload from './KBRecordUpload.vue'
 import KBLibrary from './KBLibrary.vue'
-import { sourceHref, onTaskRef, setCodebase, setPeople } from './kbRefs'
+import { sourceHref, onTaskRef, setCodebase, setPeople, plainRefs } from './kbRefs'
 import { findingHref, recordHref, kbPage, taskHref } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { plainLine } from './kbUtils'
@@ -212,7 +212,7 @@ const toggleMenu = (m: 'people' | 'agents' | 'more') => { menu.value = menu.valu
 const closeMenu = (e: MouseEvent) => { if (menu.value && !(e.target as HTMLElement).closest('.kbp-pop')) menu.value = '' }
 onMounted(() => document.addEventListener('mousedown', closeMenu))
 onBeforeUnmount(() => document.removeEventListener('mousedown', closeMenu))
-const taskTitle = (ref: string) => board.value?.tasks.find(t => t.ref === ref)?.title ?? ''
+const taskTitle = (ref: string) => plainRefs(board.value?.tasks.find(t => t.ref === ref)?.title ?? '')
 const agentsSummary = computed(() => {
   const names = [...new Set(workedDirectly.value.map(a => agentName(a.agent)))]
   const n = workedDirectly.value.length
@@ -514,7 +514,7 @@ onBeforeUnmount(() => { inkOn = false })
 const initials = (name: string) => name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('')
 const hereTitle = (p: Viewer) => `${p.name} · ${p.planning ? (p.open ? `planning, on ${p.open} ${taskTitle(p.open)}` : 'planning, on the board') : 'here'}`
 function actionText(e: Action) {
-  const t = `${e.ref} ${e.title}`
+  const t = `${e.ref} ${plainRefs(e.title)}`
   switch (e.kind) {
     case 'created': return `created ${t}`
     case 'status': return `moved ${t} to ${label(e.detail.to)}`
@@ -1421,7 +1421,7 @@ function keepRecordsOpen(open: boolean) {
             <template v-if="t.claim !== undefined"><a class="kbp-reflink" :href="findingHref(t.ref)">{{ t.ref }}</a>
               <span v-if="t.recheck?.length" class="kbp-tag" title="Its evidence changed">re-check</span> {{ t.claim }}
               <span class="kb-dim kbp-dim">{{ t.created_by }}</span></template>
-            <template v-else><button class="kbp-reflink" @click="openWaiting(t)">{{ t.ref }}</button> {{ t.title }}
+            <template v-else><button class="kbp-reflink" @click="openWaiting(t)">{{ t.ref }}</button> {{ plainRefs(t.title) }}
               <span class="kb-dim kbp-dim">{{ label(t.status) }}<template v-if="t.parent"> · in {{ t.parent }}</template></span></template>
             <button v-if="waitingOpen === 'review' && editable" class="kbp-small kbp-dismiss-wide" @click="startSendBack(t.ref)">Send back</button>
             <button v-if="waitingOpen === 'answered'" class="kbp-icon kbp-dismiss" title="Resolved: answered to your satisfaction"
@@ -1471,7 +1471,7 @@ function keepRecordsOpen(open: boolean) {
         <h3>Declined <span class="kb-dim kbp-dim">{{ declined.length }}</span></h3>
         <p v-if="!declined.length" class="kb-dim kbp-dim">Nothing declined.</p>
         <ul class="kbp-waiting-list">
-          <li v-for="t in declined" :key="t.ref"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ t.title }}
+          <li v-for="t in declined" :key="t.ref"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ plainRefs(t.title) }}
             <span class="kb-dim kbp-dim">declined {{ when(t.declined_at) }}</span>
             <button v-if="editable" class="kbp-small kbp-dismiss-wide" :disabled="busy(`task:${t.ref}`)" @click="decline(t.ref, true)">Bring back</button>
             <div v-if="t.reason" class="kbp-question-line">{{ t.reason }}</div></li>
@@ -1489,7 +1489,7 @@ function keepRecordsOpen(open: boolean) {
           <h3 class="kbp-focus-head asking">For you to answer</h3>
           <ul class="kbp-focus-list">
             <li v-for="t in focused.questions" :key="`q${t.note}`">
-              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ t.title }}</div>
+              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ plainRefs(t.title) }}</div>
               <div class="kbp-question-line"><b v-if="t.asker">{{ t.asker }}:</b> {{ t.question }}</div>
               <button v-if="editable" class="kbp-small" @click="openWaiting(t, 'questions')">Answer</button>
             </li>
@@ -1499,7 +1499,7 @@ function keepRecordsOpen(open: boolean) {
           <h3 class="kbp-focus-head answered">Answers to your questions</h3>
           <ul class="kbp-focus-list">
             <li v-for="t in focused.answered" :key="`a${t.note}`">
-              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ t.title }}</div>
+              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ plainRefs(t.title) }}</div>
               <div class="kbp-question-line">{{ t.question }}</div>
               <div class="kbp-question-line kbp-answer-line"><b v-if="t.answerer">{{ t.answerer }}:</b> {{ plainLine(t.answer ?? '') }}</div>
               <button class="kbp-small" :disabled="busy(`resolve:${t.ref}:${t.note}`)" title="Answered to your satisfaction"
@@ -1517,7 +1517,7 @@ function keepRecordsOpen(open: boolean) {
                   <span v-if="t.priority === 0" class="kbp-tag asap">ASAP</span><span v-else-if="t.priority === 1" class="kbp-tag high">high</span>
                   <span v-if="t.blocked" class="kbp-tag blocked" :title="t.blocked">blocked</span>
                   <span v-if="t.sent_back" class="kbp-tag sent">sent back</span>
-                  <span v-if="askingMe.has(t.ref)" class="kbp-tag asking" title="A question here waits on your answer">your answer</span> {{ t.title }}</div>
+                  <span v-if="askingMe.has(t.ref)" class="kbp-tag asking" title="A question here waits on your answer">your answer</span> {{ plainRefs(t.title) }}</div>
                 <div class="kbp-meta"><span v-if="t.milestone">{{ t.milestone }}</span>
                   <span v-if="t.subtasks">{{ t.subtasks_done }}/{{ t.subtasks }} subtasks</span><span v-if="t.parent">in {{ t.parent }}</span></div>
               </li>
@@ -1528,7 +1528,7 @@ function keepRecordsOpen(open: boolean) {
           <h3 class="kbp-focus-head">Waiting on your decision</h3>
           <ul class="kbp-focus-list">
             <li v-for="t in [...focused.approve, ...focused.review]" :key="`d${t.ref}`" class="kbp-focus-card" @click="show(t)">
-              <div class="kbp-focus-task"><span class="kbp-ref">{{ t.ref }}</span> {{ t.title }}</div>
+              <div class="kbp-focus-task"><span class="kbp-ref">{{ t.ref }}</span> {{ plainRefs(t.title) }}</div>
               <div class="kbp-meta"><span>{{ t.status === 'proposed' ? 'to approve' : 'to review' }}</span>
                 <span>by {{ t.created_by }}{{ t.by_agent ? ' (agent)' : '' }}</span></div>
             </li>
@@ -1538,7 +1538,7 @@ function keepRecordsOpen(open: boolean) {
           <h3 class="kbp-focus-head">Your questions, waiting for an answer</h3>
           <ul class="kbp-focus-list">
             <li v-for="t in focused.asked" :key="`w${t.note}`">
-              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ t.title }}</div>
+              <div class="kbp-focus-task"><button class="kbp-reflink" @click="show(t)">{{ t.ref }}</button> {{ plainRefs(t.title) }}</div>
               <div class="kbp-question-line">{{ t.question }} <span class="kb-dim kbp-dim">· asked of {{ askedOf(t) }}</span></div>
             </li>
           </ul>
@@ -1593,7 +1593,7 @@ function keepRecordsOpen(open: boolean) {
               <span v-else-if="answeredMe.has(t.ref)" class="kbp-tag answered" title="Your question here has an answer">answered</span>
               <span v-if="hints(t).fresh || hints(t).recent" class="kbp-changed-dot" :class="{ fresh: hints(t).fresh }" :title="changeTitle(t)"
                     :aria-label="changeTitle(t)" role="img"></span></div>
-            <div class="kbp-title">{{ t.title }}</div>
+            <div class="kbp-title">{{ plainRefs(t.title) }}</div>
             <div class="kbp-meta">
               <span v-if="t.milestone">{{ t.milestone }}</span>
               <span v-if="t.subtasks">{{ t.subtasks_done }}/{{ t.subtasks }} subtasks</span>
@@ -1605,7 +1605,7 @@ function keepRecordsOpen(open: boolean) {
                   :class="{ done: n.t.status === 'done', open: open?.ref === n.t.ref, match: only && n.t.status === only }"
                   :draggable="editable" @dragstart.stop="startDrag(n.t.ref)" @dragend="dragEnded" @click.stop="show(n.t)">
                 <span class="kbp-ref">{{ n.t.ref }}</span> <span v-if="atWork.has(n.t.ref)" class="kbp-working" :title="workTitle(n.t.ref)"></span>
-                <span class="kbp-sub-title" :title="n.t.title">{{ n.t.title }}</span>
+                <span class="kbp-sub-title" :title="plainRefs(n.t.title)">{{ plainRefs(n.t.title) }}</span>
                 <span class="kbp-sub-status">{{ label(n.t.status) }}</span>
               </li>
             </ul>
@@ -1637,7 +1637,7 @@ function keepRecordsOpen(open: boolean) {
           </button>
         </template>
         <div class="kbp-panel" @click="followRef" @keydown="followRef">
-        <h2 class="kbp-panel-title">{{ open.title }}</h2>
+        <h2 class="kbp-panel-title">{{ plainRefs(open.title) }}</h2>
         <p class="kb-dim kbp-dim">By {{ open.created_by }}{{ open.by_agent ? ' (agent)' : '' }}, {{ when(open.created_at) }}<template v-if="open.parent"> · part of <button class="kbp-reflink" @click="show({ ref: open.parent })">{{ open.parent }}</button></template></p>
         <p v-if="atWork.has(open.ref)" class="kbp-at-work"><span class="kbp-working"></span> At work: {{ workTitle(open.ref) }}</p>
         <div v-if="open.archived_at" class="kbp-proposal">
@@ -1687,7 +1687,7 @@ function keepRecordsOpen(open: boolean) {
                 :draggable="editable" @dragstart="startDrag(s.ref)" @dragend="dragEnded" title="Drag onto a column to make it a task of its own">
               <input v-if="editable" type="checkbox" :data-control="`subtask:${s.ref}`" :checked="s.status === 'done'"
                      @change="($event.target as HTMLInputElement).checked = s.status === 'done'; change(s.ref, { status: s.status === 'done' ? 'backlog' : 'done' })" />
-              <button class="kbp-reflink" @click="show(s)">{{ s.ref }}</button> {{ s.title }}
+              <button class="kbp-reflink" @click="show(s)">{{ s.ref }}</button> {{ plainRefs(s.title) }}
               <span class="kb-dim kbp-dim">{{ label(s.status) }}<template v-if="s.assignee"> · {{ personLabel(s.assignee) }}</template></span>
               <span v-if="open.status === 'proposed' && s.status !== 'proposed'" class="kbp-tag alone" title="Approved on its own, while this task is still proposed">approved alone</span>
             </li>
@@ -1831,7 +1831,7 @@ function keepRecordsOpen(open: boolean) {
           <ul class="kbp-settle">
             <li v-for="r in completing.rows" :key="r.t.ref">
               <span class="kbp-ref">{{ r.t.ref }}</span>
-              <span class="kbp-settle-title">{{ r.t.title }}<span v-if="r.t.subtasks" class="kb-dim kbp-dim"> · {{ r.t.subtasks_done }}/{{ r.t.subtasks }} subtasks</span></span>
+              <span class="kbp-settle-title">{{ plainRefs(r.t.title) }}<span v-if="r.t.subtasks" class="kb-dim kbp-dim"> · {{ r.t.subtasks_done }}/{{ r.t.subtasks }} subtasks</span></span>
               <span class="kbp-tag">{{ label(r.t.status) }}</span>
               <select v-model="r.action" class="kbp-select" :aria-label="`What happens to ${r.t.ref}`">
                 <option value="done">Mark done</option><option value="backlog">Move to backlog</option></select>
@@ -1879,7 +1879,7 @@ function keepRecordsOpen(open: boolean) {
           <p class="kb-dim kbp-dim">Also marks done:</p>
           <ul class="kbp-tree">
             <li v-for="n in flat(doneAsk.tree)" :key="n.t.ref" :class="{ done: n.t.status === 'done' }" :style="{ paddingLeft: `${n.d * 1.3}rem` }">
-              <span class="kbp-ref">{{ n.t.ref }}</span> <span class="kbp-tree-title">{{ n.t.title }}</span>
+              <span class="kbp-ref">{{ n.t.ref }}</span> <span class="kbp-tree-title">{{ plainRefs(n.t.title) }}</span>
               <span class="kbp-tag">{{ label(n.t.status) }}</span>
             </li>
           </ul>

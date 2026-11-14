@@ -35,6 +35,12 @@ export const setPeople = (people: { id: string; label: string; agent?: boolean }
 }
 const personName = (target: string, label: string) => names.get(target.toLowerCase()) ?? label
 
+// Text shown as plain text (a task's title): each `@[label](kind:target)` as `@label`, a task or
+// finding as its reference, a person by the name they go by now.
+export const plainRefs = (text: string) => text.replace(FULL, (_, label, kind, target) =>
+  kind === 'person' ? `@${personName(target.trim(), label.trim())}` :
+  kind === 'task' || kind === 'finding' ? `@${target.trim().toUpperCase()}` : `@${label.trim()}`)
+
 // A reference as the picker writes one: the short form where there is one. Code is named in the
 // project's codebase, so a target's codebase (`code-kb:path`) is left out.
 export function refFor(kind: string, target: string, label = target): string {

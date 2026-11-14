@@ -2175,6 +2175,9 @@ end
         @test fd.created_by == "Ada Lovelace" && fd.status_by == "Ada Lovelace"
         @test all(a.who == "Ada Lovelace" for a in K.finding_activity(kb, f))
         @test only(K.finding_versions(kb, f)).changed_by == "Ada Lovelace"
+        # A mention of her in plain text (a notification) is written with her name as it is now.
+        @test K.readable_at_references(kb, "@[alovelace](person:ada@x.org) checks @[the gauge task](task:td-1), `@[x](person:ada@x.org)`") ==
+              "@Ada Lovelace checks @TD-1, `@[x](person:ada@x.org)`"
         # Her notes and comments are still hers to edit, under her new name.
         renamed = K.person("Ada Lovelace"; id = "ada@x.org")
         @test K.edit_note!(kb, t, note, "Starting with the south gauge."; by = renamed) == note

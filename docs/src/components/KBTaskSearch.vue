@@ -8,7 +8,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { getJSON } from './kbApi'
-import { findReferences } from './kbRefs'
+import { findReferences, plainRefs } from './kbRefs'
 import { markedSnippet, plainLine } from './kbUtils'
 import { statusLabel } from './kbLabels'
 import { shortDay } from './kbFormat'
@@ -171,7 +171,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onSlash, true))
       <li v-if="!hits.length && !absent" class="kbts-none">{{ busy ? 'Searching…' : 'Nothing matches.' }}</li>
       <li v-for="(h, i) in hits" :key="h.ref" :class="{ on: i === chosen }" role="option" :aria-selected="i === chosen"
           @mousedown.prevent="choose(h)" @mouseenter="chosen = i">
-        <div class="kbts-head"><span class="kbts-ref">{{ h.ref }}</span> <span class="kbts-title">{{ h.title }}</span>
+        <div class="kbts-head"><span class="kbts-ref">{{ h.ref }}</span> <span class="kbts-title">{{ plainRefs(h.title) }}</span>
           <span class="kbts-status">{{ statusLabel(h.status) }}</span></div>
         <div v-for="(m, j) in h.matches.filter(m => m.field !== 'title')" :key="j" class="kbts-snip">
           <span class="kbts-where">{{ where(m) }}</span> <span v-if="m.field === 'person'" class="kbts-did">{{ m.snippet }}</span>

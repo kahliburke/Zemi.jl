@@ -118,6 +118,22 @@ plain_at_references(text::AbstractString) = join(prose ? replace(piece, AT_FULL 
             "@$label ($kind $target)"
     end) : piece for (piece, prose) in prose_pieces(text))
 
+"""
+    readable_at_references(kb, text) -> String
+
+`text` with its references as a person reads them in plain text (a notification, say): a task or
+finding as its reference (`@KB-12`), a person by the name their account has now, the others by
+their label. Code is left as written.
+"""
+readable_at_references(kb::KB, text::AbstractString) = join(prose ? replace(piece, AT_FULL => function (s)
+        m = match(AT_FULL, s)
+        kind, target, label = m[2], strip(m[3]), strip(m[1])
+        kind in ("task", "finding") && return "@$(uppercase(target))"
+        kind == "person" || return "@$label"
+        name = scalar(kb, "SELECT nullif(name, '') FROM users WHERE email = ? COLLATE NOCASE", (target,))
+        return "@" * (ismissing(name) ? label : String(name))
+    end) : piece for (piece, prose) in prose_pieces(text))
+
 # A codebase's files and named definitions, `(; path, name, line)` (`name` empty for a file), kept
 # for the picker until the codebase is read again.
 const CODE_NAMES = LockedDict{String,Tuple{String,Vector{NamedTuple{(:path, :name, :line),Tuple{String,String,Int}}}}}()
