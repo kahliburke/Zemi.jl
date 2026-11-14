@@ -104,7 +104,7 @@ function read_space!(kb::KB, space::AbstractString; job::Union{Job,Nothing} = no
 end
 
 "The spaces waiting to be read, and the job reading them."
-const LIBRARY_READING = (; spaces = Set{String}(), job = Ref{Union{Job,Nothing}}(nothing), lock = ReentrantLock())
+const LIBRARY_READING = (; spaces = Set{String}(), job = Ref{Union{Job,Nothing}}(nothing), reading = Ref(""), lock = ReentrantLock())
 
 """
     queue_library!(kb, spaces) -> Job
@@ -126,11 +126,14 @@ function queue_library!(kb::KB, spaces)
                 end
                 space === nothing && return "$n read"
                 report!(job, "reading a library")
+                LIBRARY_READING.reading[] = space
                 try
                     read_space!(kb, space; job)
                 catch e
                     e isa InterruptException && rethrow()
                     e isa SourceStopped || @warn "A library could not be read; it is read again when it changes" exception = e
+                finally
+                    LIBRARY_READING.reading[] = ""
                 end
                 n += 1
             end
@@ -142,3 +145,44 @@ end
 
 "Read every library, catching up with what changed while the service was not running."
 catch_up_libraries!(kb::KB) = (s = library_spaces(kb); isempty(s) ? nothing : queue_library!(kb, s))
+
+"Whether space `space` is being read, or waits to be."
+being_read(space::AbstractString) =
+    lock(() -> space in LIBRARY_READING.spaces || LIBRARY_READING.reading[] == space, LIBRARY_READING.lock)
+
+"""
+    library_overview(kb, caller) -> Dict
+
+What `caller`'s library holds and what keeps it in step: each folder (its files, bytes, whether it is a
+vault, the documents read from it and when it last changed), how much the space uses of its limit,
+whether it is being read, and the `zemi connect` sign-ins that reach it (tokens of scope `library`).
+"""
+function library_overview(kb::KB, caller::Caller)
+    space = library_space(caller)
+    files, changes = library_files(kb, space), library_changes(kb, space)
+    state = load_library_state(kb, space)
+    vaults = Set(get(state, "vaults", String[]))
+    pdfs = get(state, "pdfs", Dict{String,Any}())
+    folders = Dict{String,Any}[]
+    byfolder = Dict{String,Vector{eltype(files)}}()
+    foreach(f -> push!(get!(byfolder, library_folder(f.path), eltype(files)[]), f), files)
+    for (name, fs) in sort!(collect(byfolder); by = first)
+        prefix = isempty(name) ? "$space/" : "$space/$name/"
+        notes = scalar(kb, "SELECT count(*) FROM records WHERE source = 'obsidian' AND substr(key, 1, ?) = ?", (length(prefix), prefix))
+        push!(folders, Dict("name" => name, "files" => length(fs), "bytes" => sum(f.size for f in fs),
+                            "vault" => name in vaults, "documents" => Int(notes) + count(p -> library_folder(p) == name, keys(pdfs)),
+                            "changed" => get(changes, name, maximum(f.modified for f in fs))))
+    end
+    connections = caller.user_id === nothing ? Dict{String,Any}[] :
+        [Dict("id" => Int(t.id), "name" => String(t.name), "created_at" => String(t.created_at), "last_used" => coalesce(t.last_used, ""))
+         for t in query(kb, """SELECT id, name, created_at, last_used FROM api_tokens WHERE user_id = ? AND scope = 'library'
+                               AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC""",
+                        (caller.user_id, now_iso()))]
+    return Dict("folders" => folders, "used" => library_usage(kb, space), "limit" => library_limit(kb.config),
+                "reading" => being_read(space), "connections" => connections)
+end
+
+# What one's library holds, and what keeps it in step.
+route!("GET", "/api/library"; need = "library") do c
+    library_overview(c.kb, c.caller)
+end

@@ -116,7 +116,8 @@ function remove_library!(kb::KB, uid::Integer)
     space = "people/$uid"
     files = library_files(kb, space)
     foreach(f -> delete_library_file!(kb, space, f.path), files)
-    execute!(kb, "DELETE FROM kv WHERE key = ? OR key LIKE ?", (library_state_key(space), source_state_key("obsidian") * ":" * space * ":%"))
+    execute!(kb, "DELETE FROM kv WHERE key IN (?, ?) OR key LIKE ?",
+             (library_state_key(space), changes_key(space), source_state_key("obsidian") * ":" * space * ":%"))
     held = [String(r.doc_id) for r in query(kb, """SELECT p.doc_id FROM document_holders h JOIN papers p ON p.id = h.paper_id
                                                     WHERE h.user_id = ?""", (uid,))]
     gone = 0

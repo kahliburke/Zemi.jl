@@ -397,7 +397,8 @@ user_json(u) = Dict("id" => u.id, "email" => u.email, "name" => u.name, "created
                     "disabled" => u.disabled, "roles" => u.roles, "sign_ins" => u.sign_ins)
 token_json(t) = Dict("id" => t.id, "email" => t.email, "name" => t.name, "prefix" => t.prefix, "permissions" => t.permissions,
                      "projects" => t.projects,
-                     "created_at" => t.created_at, "expires_at" => t.expires_at, "last_used" => t.last_used, "revoked" => t.revoked)
+                     "created_at" => t.created_at, "expires_at" => t.expires_at, "last_used" => t.last_used, "revoked" => t.revoked,
+                     "scope" => t.scope)
 
 ok_json() = Dict("ok" => true)
 

@@ -253,6 +253,11 @@ both, your machine's stands. Hidden files stay on your machine, but for a vault'
 knowledge base reads, and so do the folders `--skip` names. `zemi connect` with no arguments keeps
 every folder in step until stopped, `--once` once.
 
+**Your library** on the account page shows each folder in your library (its files, the documents read
+from it, whether it is a vault, when it last changed), how much of your space it uses, and each
+machine `zemi connect` keeps it in step from, with when it last synced. Disconnecting a machine there
+revokes its sign-in.
+
 **An Obsidian vault** in a library (a folder holding `.obsidian`) is read as notes. Each note is a
 record: its title the `title` property, else its first heading, else its file's name; its date a date
 property, else a daily note's day (by the vault's daily notes' folder and format), else when its file

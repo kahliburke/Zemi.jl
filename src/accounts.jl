@@ -411,7 +411,8 @@ function tokens(kb::KB; uid = nothing)
     return [(; id = t.id, user_id = t.user_id, email = t.email, name = t.name, prefix = t.prefix,
                permissions = String.(JSON.parse(t.permissions)), projects = ismissing(t.projects) ? nothing : String.(JSON.parse(t.projects)),
                created_at = t.created_at,
-               expires_at = coalesce(t.expires_at, ""), last_used = coalesce(t.last_used, ""), revoked = !ismissing(t.revoked_at))
+               expires_at = coalesce(t.expires_at, ""), last_used = coalesce(t.last_used, ""), revoked = !ismissing(t.revoked_at),
+               scope = coalesce(t.scope, ""))
             for t in rows]
 end
 

@@ -2123,6 +2123,12 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
         K.READ_PUT[] = true
     end
     @test !isnothing(K.source_record(kb, "obsidian", "people/$ada/Notes/Reading/Tidal mixing.md"))
+    # What the account page shows of it: the folder, read as a vault, and the sign-in keeping it in step.
+    lib = js(serve("GET", "/api/library"; headers = ["Authorization" => "Bearer $(t2["access_token"])"]))
+    @test only(lib["folders"])["name"] == "Notes" && only(lib["folders"])["vault"] && only(lib["folders"])["files"] == 3 &&
+          only(lib["folders"])["documents"] == 1 && !isempty(only(lib["folders"])["changed"])
+    @test only(lib["connections"])["name"] == "zemi connect (connected)" && lib["used"] > 0
+    @test only(t for t in js(serve("GET", "/api/me"; headers = ck))["tokens"] if t["scope"] == "library")["revoked"] == false
     r = K.sync_folder!(remote, dir, "Notes", state)
     @test r.down == 1 && occursin("zemi: \"2401.00001\"", read(tidal, String))
     @test K.sync_folder!(remote, dir, "Notes", state) == (; up = 0, down = 0, removed_here = 0, removed_there = 0, waiting = 0, full = false)

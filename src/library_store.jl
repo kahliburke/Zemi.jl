@@ -76,6 +76,17 @@ function check_base(row, base, path)
     now == base || throw(Refusal(409, "$path has changed since it was read: read it again"))
 end
 
+"A space's folder that `path` is in: its first part, or empty for a file at the top."
+library_folder(path::AbstractString) = (i = findfirst('/', path); i === nothing ? "" : path[1:prevind(path, i)])
+
+# When each folder of a space last changed, by its name (see `library_folder`), kept in `kv`.
+changes_key(space::AbstractString) = "library_changed:" * space
+library_changes(kb::KB, space::AbstractString) =
+    Dict{String,String}(JSON.parse(coalesce(scalar(kb, "SELECT value FROM kv WHERE key = ?", (changes_key(space),)), "{}")))
+changed!(kb::KB, space::AbstractString, path::AbstractString) =
+    execute!(kb, "INSERT OR REPLACE INTO kv VALUES (?, ?)",
+             (changes_key(space), JSON.json(merge(library_changes(kb, space), Dict(library_folder(path) => now_iso())))))
+
 """
     put_library_file!(kb, space, path, bytes; base = nothing, modified = nothing) -> NamedTuple
 
@@ -96,6 +107,7 @@ function put_library_file!(kb::KB, space::AbstractString, path::AbstractString, 
         library_usage(kb, space) - (row === nothing ? 0 : row.size) + length(bytes) > limit &&
             throw(Refusal(413, "A library holds at most $(round(limit / 1e9; digits = 1)) GB: remove something first"))
         write_object!(library_store(kb.config), "$space/$path", bytes)
+        changed!(kb, space, path)
         at = iso(something(modified, now(UTC)))
         execute!(kb, """INSERT INTO library_files (space, path, size, sha256, modified) VALUES (?, ?, ?, ?, ?)
                         ON CONFLICT (space, path) DO UPDATE SET size = excluded.size, sha256 = excluded.sha256, modified = excluded.modified""",
@@ -125,6 +137,7 @@ function delete_library_file!(kb::KB, space::AbstractString, path::AbstractStrin
         row === nothing && return false
         delete_object!(library_store(kb.config), "$space/$path")
         execute!(kb, "DELETE FROM library_files WHERE space = ? AND path = ?", (space, path))
+        changed!(kb, space, path)
         return true
     end
 end

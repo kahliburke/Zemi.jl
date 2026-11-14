@@ -1,19 +1,20 @@
 <!--
   A person's own account in the shared service: who they are (the name they are shown by, theirs to
   change), their roles, what they may do and
-  today's allowances, and their API tokens, for scripts and for Claude: made with the permissions
+  today's allowances, their library (KBLibraryStatus), and their API tokens, for scripts and for Claude: made with the permissions
   chosen (never more than their own), shown once, and revoked here.
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
 import KBNotifications from './KBNotifications.vue'
+import KBLibraryStatus from './KBLibraryStatus.vue'
 import KBPermissionPicker, { type PermissionGroup } from './KBPermissionPicker.vue'
 import { ref, computed, onMounted } from 'vue'
 import { mode, connect, getJSON, post } from './kbApi'
 import { day } from './kbFormat'
 
 type Token = { id: number; name: string; prefix: string; permissions: string[]; created_at: string; expires_at: string;
-               last_used: string; revoked: boolean }
+               last_used: string; revoked: boolean; scope: string }
 type Account = { name: string; email: string; via: string; permissions: string[]; quotas: Record<string, number | null>;
                  accounts: boolean; roles: string[]; tokens: Token[]; permission_groups: PermissionGroup[] }
 const acct = ref<Account | null>(null)
@@ -82,7 +83,8 @@ const lines = computed(() => made.value ? [
   { key: 'mcp', label: 'Claude Code', text: `claude mcp add --transport http kb ${origin.value}/mcp --header "Authorization: Bearer ${made.value.token}"` },
   { key: 'curl', label: 'curl', text: `curl -H "Authorization: Bearer ${made.value.token}" ${origin.value}/api/status` },
 ] : [])
-const live = computed(() => (acct.value?.tokens ?? []).filter(t => !t.revoked))
+// zemi connect's sign-ins are under Your library.
+const live = computed(() => (acct.value?.tokens ?? []).filter(t => !t.revoked && t.scope !== 'library'))
 </script>
 
 <template>
@@ -101,6 +103,8 @@ const live = computed(() => (acct.value?.tokens ?? []).filter(t => !t.revoked))
         </details>
 
         <KBNotifications />
+
+        <KBLibraryStatus v-if="acct.permissions.includes('library')" />
 
         <h2>Tokens</h2>
         <p class="kb-dim">Keep secret.</p>
