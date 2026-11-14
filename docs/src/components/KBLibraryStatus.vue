@@ -8,7 +8,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getJSON, post, api } from './kbApi'
 import { kbPage } from './kbLinks'
-import { bytes, plural, when } from './kbFormat'
+import { bytes, when } from './kbFormat'
 
 type Folder = { name: string; files: number; bytes: number; vault: boolean; documents: number; changed: string }
 type Connection = { id: number; name: string; created_at: string; last_used: string }

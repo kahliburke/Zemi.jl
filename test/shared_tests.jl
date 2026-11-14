@@ -907,7 +907,7 @@ end
         @test isempty(K.ink_since(as(rowan), "PU", 0; timeout = 0).strokes)                    # not outside the session
         @test_throws "in a session" K.add_ink!(as(rowan), "PU", "s2", "[]")
         empty!(K.PRESENCE_BOARDS); empty!(K.INK)
-        made = K.create_task!(kb, "PU", "Check the seals"; by = K.person("Ada Lovelace"))
+        made = K.create_task!(kb, "PU", "Check the seals"; by = K.person("Ada Lovelace"; id = "ada@x.org"))
         did = K.people_did(kb, "PU", as(boss))
         @test first(did).who == "Ada Lovelace" && first(did).kind == "created" && first(did).ref == made && first(did).title == "Check the seals"
         ada_named = K.Caller(as(ada).user_id, "Ada Lovelace", "ada@x.org", Set(["tasks.view"]), :session, nothing, nothing, nothing)
