@@ -1,25 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-14)
 
-- **Cmd-K palette**: anywhere on the site, it finds the knowledge base's tasks, findings, papers,
-  records, notebooks and code as one types, goes to any page or project, searches the knowledge base
-  for the words, adds a paper by its arXiv id, DOI or address, syncs, and switches the theme. A static
-  copy of the site keeps VitePress's search. The Search page takes its query from `?q=`.
-- **Questions and answers open where they are**: from Waiting on you, Focus, what others did lately
-  and notifications, a task opens scrolled to the note, marked for a moment (`#KB-12/345` links to one).
-- **Jobs show when they ran**: when each started and finished, how long it took and how many
-  documents it changed; the Operations page also shows a job's result or error.
-- **Removing a note**: a comment, progress note or question is removed by whoever may edit it (on
-  the task's activity, or `task_note_remove` for an agent's own); the activity keeps that it was
-  removed. A comment on a finding is removed by its writer.
-- **Zotero groups are linked from a project's library**, by its maintainers: a group's address, and
-  an API key for a private one, checked with Zotero and kept where the service alone reads it. Each
-  group shows its items, when it was last read and any error; one group failing no longer stops the
-  others. The Configuration page lists the groups and sets whether items are sorted first.
-- **Agents see what is attached**: `media` opens a file attached in a task, note or finding by its
-  address (an image shown, a PDF's text and pages, a text file's text), to whoever may see it.
-  `task`, `next_task` and `finding` show the newest images and list the other files.
+### Breaking
+
+- The database moves from schema 14 to 20 on first start, keeping a snapshot first
+  (`data.backups/kept/before-schema-20`); 0.3 cannot read it afterwards.
+- `zemi connect` with no arguments opens the terminal app on a terminal, and prints a line for each
+  change elsewhere, rather than syncing in the foreground silently; `--install` is now `--background`
+  (the old name still works).
+
+### Changes
+
 - **Private libraries**: everyone signed in keeps their own notes and files in a space of their own
   in the site's library store (`[library]`, kept apart from the dataset), read for their searches and
   agents alone. A document can be private to the people who brought it in, whatever anyone's role.
@@ -30,23 +22,40 @@
   documents.
 - **Sharing and contributing** what one holds, from the Documents page: shared, a document stays its
   holder's and live; contributed, the group gets a version that stays; removed from one's library,
-  it goes once no one holds it. Project access applies to any
-  kind of document.
+  it goes once no one holds it. Project access applies to any kind of document.
 - **`zemi connect`** keeps a folder (an Obsidian vault) in step with one's library, signed in through
   the browser for a token that reaches the library alone (OAuth scope `library`), or to the knowledge
   base on the same machine. `zemi connect` alone opens a terminal app that shows the folders, what
   moves, and adds, removes and pauses them; `--background` syncs from every login (`--status`,
   `--stop`). The account page shows the library's folders and the machines keeping them in step,
   each signed out there.
-- **Sources** can remove a record whose item is gone (`Zemi.remove!`), follow one that moved
-  (`Zemi.rekey!`), and have their records embedded for searching without summarizing them
-  (`summarized = false`), and say what their records are (`about`), as agents are told.
-- **A project's codebase** can be linked by a folder's path, or a repository's address, from its board.
-  A shared service reads a folder of its machine in place; only someone with `config.edit` adds one.
+- **Zotero groups are linked from a project's library**, by its maintainers: a group's address, and
+  an API key for a private one, checked with Zotero and kept where the service alone reads it. Each
+  group shows its items, when it was last read and any error; one group failing no longer stops the
+  others. The Configuration page lists the groups and sets whether items are sorted first.
+- **Cmd-K palette**: anywhere on the site, it finds the knowledge base's tasks, findings, papers,
+  records, notebooks and code as one types, goes to any page or project, searches the knowledge base
+  for the words, adds a paper by its arXiv id, DOI or address, syncs, and switches the theme. A static
+  copy of the site keeps VitePress's search. The Search page takes its query from `?q=`.
+- **Agents see what is attached**: `media` opens a file attached in a task, note or finding by its
+  address (an image shown, a PDF's text and pages, a text file's text), to whoever may see it.
+  `task`, `next_task` and `finding` show the newest images and list the other files.
 - **Names follow renames**: notes, questions, activity, tasks, findings and their comments show each
   person by the name their account has now, agents' notes by the name of whom they work for, and a
   person's own notes stay theirs to edit after a rename. Mentions show the current name, in task
   titles and notifications as `@Name`.
+- **Questions and answers open where they are**: from Waiting on you, Focus, what others did lately
+  and notifications, a task opens scrolled to the note, marked for a moment (`#KB-12/345` links to one).
+- **Removing a note**: a comment, progress note or question is removed by whoever may edit it (on
+  the task's activity, or `task_note_remove` for an agent's own); the activity keeps that it was
+  removed. A comment on a finding is removed by its writer.
+- **Jobs show when they ran**: when each started and finished, how long it took and how many
+  documents it changed; the Operations page also shows a job's result or error.
+- **A project's codebase** can be linked by a folder's path, or a repository's address, from its board.
+  A shared service reads a folder of its machine in place; only someone with `config.edit` adds one.
+- **Sources** can remove a record whose item is gone (`Zemi.remove!`), follow one that moved
+  (`Zemi.rekey!`), and have their records embedded for searching without summarizing them
+  (`summarized = false`), and say what their records are (`about`), as agents are told.
 - **`zemi` starts in about a second**: the app's entry is compiled into the package image.
 - **Signing in a client** (`zemi connect`, an MCP client) shows pages in the site's colors, light or
   dark, and says when an approval was denied.

@@ -1,6 +1,6 @@
 name = "Zemi"
 uuid = "0e5eba47-1706-456b-9465-8f454330c072"
-version = "0.3.2"
+version = "0.4.0"
 authors = ["Kahli Burke <kahli@kahliburke.com>"]
 
 [deps]
