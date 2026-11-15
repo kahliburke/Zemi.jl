@@ -7,13 +7,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useTemplatedPage } from './kbTemplates'
-import { manageHref, projectHref } from './kbLinks'
+import { manageHref, projectHref, kbPage } from './kbLinks'
 import { api, mode, connect, can, post, getJSON } from './kbApi'
 import KBChat from './KBChat.vue'
 import KBPaperFindings from './KBPaperFindings.vue'
 import KBCite from './KBCite.vue'
 
-type Access = 'open' | 'projects'
+type Access = 'open' | 'projects' | 'private'
 type Project = { key: string; name: string }
 type Segment = { speaker: string; start: number; end: number; text: string }
 type Record = { id: string; slug: string; title: string; date: string; day: string; people: string[]; label: string; source: string
@@ -78,13 +78,16 @@ async function link(key: string, remove = false) {
         <span v-for="k in linked" :key="k" class="kbr-project"><a :href="projectHref(k)">{{ name(k) }}</a>
           <button v-if="manages" type="button" class="kb-link" :title="`Unlink ${k}`" @click="link(k, true)">×</button></span>
       </template>
+      <template v-else-if="access === 'private'">Private: in your library alone.
+        <a :href="`${kbPage('manage')}?state=mine`">Share it</a> from Documents.</template>
+      <template v-else-if="access === 'open'">No project; seen by every reader.</template>
       <template v-else>No project: visible to document managers only.</template>
-      <select v-if="manages" class="kbr-select" @change="link(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''">
+      <select v-if="manages && access !== 'private'" class="kbr-select" @change="link(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''">
         <option value="">link to a project…</option>
         <option v-for="p in all.filter(p => !linked.includes(p.key))" :key="p.key" :value="p.key">{{ p.name }} ({{ p.key }})</option>
       </select>
     </p>
-    <p v-if="manages" class="kbr-projects">
+    <p v-if="manages && access !== 'private'" class="kbr-projects">
       <label>Seen by
         <select class="kbr-select" :value="access" @change="choose(($event.target as HTMLSelectElement).value as Access)">
           <option value="open">every reader</option>

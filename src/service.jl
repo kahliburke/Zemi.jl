@@ -115,8 +115,9 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             # What a phone installs the site as, which on an iPhone notifications need. To anyone,
             # like the icons it names: browsers ask for it without signing in.
             HTTP.Response(200, ["Content-Type" => "application/manifest+json"], JSON.json(web_manifest(kb.config)))
-        elseif !isempty(DEV_URL[])
-            # Under `zemi dev` the pages come from the development server.
+        elseif !isempty(DEV_URL[]) && !startswith(uri.path, "/kb-data/")
+            # Under `zemi dev` the pages come from the development server, which sends here the
+            # data it has no file for (a record's, say), answered below to those who may see it.
             redirect(DEV_URL[] * req.target)
         elseif haskey(ICON_PATHS, uri.path) && isfile(site_icon(kb.config, ICON_PATHS[uri.path]))
             # The site's icon, to anyone, and to be shown on other sites: browsers and MCP clients

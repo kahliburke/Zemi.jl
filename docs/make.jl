@@ -161,7 +161,31 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     if DEV
         target = repr(get(ENV, "ZEMI_DEV_API", "http://127.0.0.1:8000"))
         # Folders, with their slash, so a page's own files (authors.json) stay the development server's.
-        config = replace(config, vite => vite * "\n    server: { proxy: { '/api/': $target, '/auth/': $target, '^/mcp(\\\\?|\$)': $target } },"; count = 1)
+        # The site's data a page has no file for (a record's, a closed paper's or codebase's) is the
+        # service's, to those who may see it.
+        data = "{ target: $target, bypass: req => kbExists(path.join(__dirname, '../public', decodeURIComponent(req.url.split('?')[0]))) ? req.url : undefined }"
+        config = replace(config, vite => vite * "\n    server: { proxy: { '/api/': $target, '/auth/': $target, '^/mcp(\\\\?|\$)': $target, '/kb-data/': $data } },"; count = 1)
+        # A page made from a template that has no page of its own here is its kind's template, as
+        # the built site answers it (see kbTemplates.ts): the router asks for the page's `.md`.
+        kinds = KBase.JSON.json([Dict("folder" => t.folder, "template" => t.template) for (_, t) in KBase.TEMPLATED])
+        plugins = "plugins: ["
+        occursin(plugins, config) || error("No `$plugins` in the VitePress config to serve templated pages in development from")
+        config = replace(config, plugins => plugins * raw"""
+      {
+        name: 'kb-templated-pages',
+        configureServer(server) {
+          const kinds = """ * kinds * raw""".map(k => ({
+            pattern: new RegExp('^/' + k.folder.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]+') + '/[^/]+\\.md$'),
+            template: '/' + k.template + '.md' }))
+          server.middlewares.use((req, res, next) => {
+            const [page, query] = req.url.split('?')
+            const kind = kinds.find(k => k.pattern.test(page))
+            if (kind && !kbExists(path.join(__dirname, '..', decodeURIComponent(page)))) req.url = kind.template + (query ? '?' + query : '')
+            next()
+          })
+        },
+      },"""; count = 1)
+        config = "import { existsSync as kbExists } from 'node:fs'\n" * config
     end
     # The components read the knowledge base API's address from `__KB_API__`, link to the site's pages
     # as the config has them (kbLinks.ts), and know the pages made from a template (kbTemplates.ts)
