@@ -264,7 +264,7 @@ the service's progress, and the service takes up the folders it changes. Off a t
 
 ```@raw html
 <figure class="shot">
-  <img src="./assets/connect-app.svg" alt="zemi connect's app: the folders synced, with their state, and the files as they move">
+  <img src="./assets/connect-app.png" alt="zemi connect's app: the folders synced, with their state, and the files as they move">
 </figure>
 ```
 

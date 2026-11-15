@@ -1,12 +1,18 @@
-# The guide's picture of `zemi connect`'s app (guide/src/assets/connect-app.svg): the app drawn as it
-# shows two folders in step and the files it moved, written as an SVG of the terminal's screen.
-# `julia --project=. demo/connect_app.jl`.
+# The guide's picture of `zemi connect`'s app (guide/src/assets/connect-app.png): the app drawn as it
+# shows two folders in step and the files it moved, its cells drawn in a monospaced font at twice
+# the pixels: `julia demo/connect_app.jl`. It makes an environment of its own, with the font
+# packages Tachikoma draws images with.
 
-using Zemi, Dates
+using Pkg
+Pkg.activate(; temp = true, io = devnull)
+Pkg.develop(path = dirname(@__DIR__); io = devnull)
+Pkg.add(["Tachikoma", "FreeTypeAbstraction", "ColorTypes"]; io = devnull)
+
+using Zemi, Dates, FreeTypeAbstraction, ColorTypes
 import Tachikoma as TK
 const K = Zemi
 
-const OUT = joinpath(dirname(@__DIR__), "guide", "src", "assets", "connect-app.svg")
+const OUT = joinpath(dirname(@__DIR__), "guide", "src", "assets", "connect-app.png")
 const W, H = 100, 19
 
 "The app's screen at a quarter to six, as Rowan's machine keeps their field notes and papers in step."
@@ -36,12 +42,21 @@ function connect_screen()
     return copy(tb.buf.content)
 end
 
-# One frame, always shown, with a margin around the screen.
-TK.export_svg(OUT, W, H, [connect_screen()], [0.0])
-svg = read(OUT, String)
-w, h = 8W, 16H
-svg = replace(svg, "<g visibility=\"hidden\">" => "<g>", r"\n\s*<animate attributeName=\"visibility\"[^\n]*" => "",
-              "width=\"$w\" height=\"$h\" viewBox=\"0 0 $w $h\"" => "width=\"$(w + 32)\" height=\"$(h + 32)\" viewBox=\"-16 -16 $(w + 32) $(h + 32)\"",
-              "<rect width=\"$w\" height=\"$h\" fill=\"#" => "<rect x=\"-16\" y=\"-16\" width=\"$(w + 32)\" height=\"$(h + 32)\" rx=\"10\" fill=\"#")
-write(OUT, svg)
+"A monospaced font here, the first of those a terminal is likely to use."
+function mono_font()
+    fonts = TK.discover_mono_fonts()
+    for name in ["MesloLGS Nerd Font Mono", "MesloLGM Nerd Font Mono", "JetBrains Mono", "Menlo", "DejaVu Sans Mono"]
+        key = lowercase(replace(name, " " => ""))
+        i = findfirst(f -> occursin(key, lowercase(replace(f.name, " " => ""))), fonts)
+        i === nothing || return fonts[i].path
+    end
+    i = findfirst(f -> !isempty(f.path), fonts)
+    i === nothing ? error("No monospaced font found") : fonts[i].path
+end
+
+TK.enable_gif()
+# One frame: a still PNG.
+Base.invokelatest(TK.export_apng_from_snapshots, OUT, W, H, [connect_screen()], [0.0];
+                  font_path = mono_font(), cell_w = 20, cell_h = 40, font_size = 32)
+K.PNGFiles.save(OUT, K.PNGFiles.load(OUT))                              # compressed, which the export is not
 println(OUT)
