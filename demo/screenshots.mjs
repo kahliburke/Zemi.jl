@@ -50,9 +50,15 @@ async function circle(page, sel) {
   await page.mouse.up()
 }
 
+// The page scrolled so what is at `sel` is at the top, below the top bar.
+async function scrollTo(page, sel) {
+  const b = await page.locator(sel).first().boundingBox()
+  await page.evaluate(y => window.scrollBy(0, y), b.y - 90)
+}
+
 // name, page, what to wait for before taking it, anything to do on the page first, the part of the
-// page to take (all of what is in view when none), and how long to let it settle (1.5 s when not
-// given).
+// page to take (all of what is in view when none; a selector takes that element whole; a function
+// gives the part), and how long to let it settle (1.5 s when not given).
 const SHOTS = [
   ['front', '/', '.VPHero'],
   ['paper', '/generated/kb/papers/2203-05645', '.kb-paper-head'],
@@ -79,7 +85,33 @@ const SHOTS = [
   ['finding', '/findings#LS-F1', 'text=Millimetre-scale ridges'],
   ['admin', '/service/administration', '.kbad-chip'],
   ['menu', '/', '.kba-menu', async page => { await page.click('.kba-button') }, { x: 1440 - 480, y: 0, width: 480, height: 300 }],
+  // The service's own pages, where a group sets itself up.
+  ['setup', '/service/setup', '.kbsu-steps'],
+  ['configuration', '/service/configuration', '.kbcf h2'],
+  ['configuration-group', '/service/configuration', '.kbcf h2', page => scrollTo(page, '.kbcf h2:text-is("The group")')],
+  ['models', '/service/configuration', '#model input', page => scrollTo(page, '#model h2')],
+  ['operations', '/service/operations', 'text=Jobs', undefined, 'h2:text-is("Jobs") + table'],
+  // A project's library with its Zotero group; Rowan's library on the account page and the Documents page.
+  ['zotero', '/projects#RB', '.kbz', async page => { await page.click('.kbp-view:has-text("Library")'); await page.mouse.move(0, 0) },
+   async page => { const b = await page.locator('.kbl-box').boundingBox(); return { ...b, height: 420 } }],
+  ['library-account', '/service/account', '.kbl-table', undefined, 'section.kbl'],
+  ['documents-sharing', '/generated/kb/manage?state=mine', '.kbm-intro', async page => {
+    await page.waitForSelector('.kbm input[type=checkbox]', { timeout: 30_000 })
+    await page.locator('.kbm tbody tr:has-text("Scoring turf") input[type=checkbox]').check()
+    await page.addStyleTag({ content: '.kbj { display: none }' })        // the service's jobs, not the library's
+    await scrollTo(page, 'h2:has-text("Find and manage")')
+    await page.mouse.move(0, 0)
+  }],
+  // The palette, finding the knowledge base's things as one types.
+  ['palette', '/projects#RB', '.kbpal-item', async page => {
+    await page.waitForSelector('.kbp-card')
+    await page.keyboard.press('ControlOrMeta+k')
+    await page.locator('.kbpal-input').fill('recover')
+    await page.waitForSelector('.kbpal-group:has-text("In the knowledge base")')
+  }],
 ]
+// ZEMI_SHOTS=setup,palette takes those alone.
+const ONLY = process.env.ZEMI_SHOTS ? new Set(process.env.ZEMI_SHOTS.split(',')) : null
 
 // What a page saw, for a shot that went wrong: its top bar, who the service says is asking, and the
 // browser's errors.
@@ -103,6 +135,7 @@ for (const theme of ['light', 'dark']) {
   // VitePress keeps the reader's choice in localStorage, over the system's.
   await context.addInitScript(t => localStorage.setItem('vitepress-theme-appearance', t), theme)
   for (const [name, path, ready, act, clip, settle = 1500] of SHOTS) {
+    if (ONLY && !ONLY.has(name)) continue
     const page = await context.newPage()
     const errors = []
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
@@ -121,7 +154,9 @@ for (const theme of ['light', 'dark']) {
     }
     await page.waitForSelector(ready, { timeout: 30_000 }).catch(async () => { console.warn(`${name}: no ${ready}`); await explain(page, errors) })
     await page.waitForTimeout(settle)           // charts and fonts settle
-    await page.screenshot({ path: `${OUT}/${name}-${theme}.png`, clip })
+    const path_ = `${OUT}/${name}-${theme}.png`
+    await (typeof clip === 'string' ? page.locator(clip).first().screenshot({ path: path_ })
+           : page.screenshot({ path: path_, clip: typeof clip === 'function' ? await clip(page) : clip }))
     await page.close()
     console.log(`${name}-${theme}.png`)
   }

@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="832" height="336" viewBox="-16 -16 832 336" style="background:#11131e;color-scheme:dark">
+<defs>
+<pattern id="stip1" width="4" height="2" patternUnits="userSpaceOnUse"><rect x="0" y="0" width="1" height="1" fill="white"/><rect x="2" y="1" width="1" height="1" fill="white"/></pattern>
+<pattern id="stip2" width="2" height="2" patternUnits="userSpaceOnUse"><rect x="0" y="0" width="1" height="1" fill="white"/><rect x="1" y="1" width="1" height="1" fill="white"/></pattern>
+<pattern id="stip3" width="4" height="2" patternUnits="userSpaceOnUse"><rect width="4" height="2" fill="white"/><rect x="0" y="0" width="1" height="1" fill="black"/><rect x="2" y="1" width="1" height="1" fill="black"/></pattern>
+<mask id="m1"><rect width="800" height="304" fill="url(#stip1)"/></mask>
+<mask id="m2"><rect width="800" height="304" fill="url(#stip2)"/></mask>
+<mask id="m3"><rect width="800" height="304" fill="url(#stip3)"/></mask>
+</defs>
+<style>
+text{font-family:'MesloLGS NF','MesloLGM NF','JetBrains Mono','Menlo','DejaVu Sans Mono','Consolas',monospace;font-size:14px;white-space:pre;}
+</style>
+<rect x="-16" y="-16" width="832" height="336" rx="10" fill="#11131e"/>
+<g>
+  <text y="13">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">╭─</tspan>
+    <tspan x="16" textLength="680" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4"> zemi connect ── https://kb.example.org ── Rowan (rowan@example.org) ── syncing here </tspan>
+    <tspan x="696" textLength="104" lengthAdjust="spacingAndGlyphs" fill="#5f8787">────────────╮</tspan>
+  </text>
+  <text y="29">
+    <tspan x="0" textLength="24" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│╭─</tspan>
+    <tspan x="24" textLength="72" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4"> Folders </tspan>
+    <tspan x="96" textLength="704" lengthAdjust="spacingAndGlyphs" fill="#5f8787">──────────────────────────────────────────────────────────────────────────────────────╮│</tspan>
+  </text>
+  <text y="45">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="24" textLength="48" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4">Folder</tspan>
+    <tspan x="120" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="128" textLength="40" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4">State</tspan>
+    <tspan x="192" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="200" textLength="40" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4">Files</tspan>
+    <tspan x="248" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="256" textLength="56" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4">Changed</tspan>
+    <tspan x="360" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="368" textLength="56" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4">Checked</tspan>
+    <tspan x="440" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="448" textLength="64" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4">Not sent</tspan>
+    <tspan x="520" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="528" textLength="32" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4">Path</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="61">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="24" textLength="776" lengthAdjust="spacingAndGlyphs" fill="#5f8787">────────────┼────────┼──────┼─────────────┼─────────┼─────────┼────────────────────────────────││</tspan>
+  </text>
+  <text y="77">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="16" textLength="96" lengthAdjust="spacingAndGlyphs" fill="#8bd8ff" font-weight="bold" stroke="#8bd8ff" stroke-width="0.4">▸Field notes</tspan>
+    <tspan x="120" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="128" textLength="56" lengthAdjust="spacingAndGlyphs" fill="#8bd8ff" font-weight="bold" stroke="#8bd8ff" stroke-width="0.4">in step</tspan>
+    <tspan x="192" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="224" textLength="24" lengthAdjust="spacingAndGlyphs" fill="#8bd8ff" font-weight="bold" stroke="#8bd8ff" stroke-width="0.4">214</tspan>
+    <tspan x="248" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="256" textLength="64" lengthAdjust="spacingAndGlyphs" fill="#8bd8ff" font-weight="bold" stroke="#8bd8ff" stroke-width="0.4">17:39:00</tspan>
+    <tspan x="360" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="368" textLength="64" lengthAdjust="spacingAndGlyphs" fill="#8bd8ff" font-weight="bold" stroke="#8bd8ff" stroke-width="0.4">17:42:00</tspan>
+    <tspan x="440" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="448" textLength="56" lengthAdjust="spacingAndGlyphs" fill="#8bd8ff" font-weight="bold" stroke="#8bd8ff" stroke-width="0.4">Private</tspan>
+    <tspan x="520" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="528" textLength="256" lengthAdjust="spacingAndGlyphs" fill="#8bd8ff" font-weight="bold" stroke="#8bd8ff" stroke-width="0.4">~/Documents/Obsidian/Field notes</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="93">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="24" textLength="48" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0" opacity="0.5">Papers</tspan>
+    <tspan x="120" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="128" textLength="56" lengthAdjust="spacingAndGlyphs" fill="#87d787">in step</tspan>
+    <tspan x="192" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="232" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0" opacity="0.5">37</tspan>
+    <tspan x="248" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="256" textLength="96" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0" opacity="0.5">Nov 13 15:42</tspan>
+    <tspan x="360" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="368" textLength="64" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0" opacity="0.5">17:42:00</tspan>
+    <tspan x="440" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="448" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0" opacity="0.5">—</tspan>
+    <tspan x="520" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="528" textLength="144" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0" opacity="0.5">~/Documents/Papers</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="109">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="125">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="141">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="157">
+    <tspan x="0" textLength="800" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│╰────────────────────────────────────────────────────────────────────────────────────────────────╯│</tspan>
+  </text>
+  <text y="173">
+    <tspan x="0" textLength="24" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│╭─</tspan>
+    <tspan x="24" textLength="80" lengthAdjust="spacingAndGlyphs" fill="#5fd7ff" font-weight="bold" stroke="#5fd7ff" stroke-width="0.4"> Activity </tspan>
+    <tspan x="104" textLength="696" lengthAdjust="spacingAndGlyphs" fill="#5f8787">─────────────────────────────────────────────────────────────────────────────────────╮│</tspan>
+  </text>
+  <text y="189">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="16" textLength="80" lengthAdjust="spacingAndGlyphs" fill="#6c6c6c">17:01:00  </tspan>
+    <tspan x="96" textLength="104" lengthAdjust="spacingAndGlyphs" fill="#87d7ff">Papers       </tspan>
+    <tspan x="200" textLength="120" lengthAdjust="spacingAndGlyphs" fill="#87d787">sent           </tspan>
+    <tspan x="320" textLength="296" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0">Larval settlement on ridged tiles.pdf</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="205">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="16" textLength="80" lengthAdjust="spacingAndGlyphs" fill="#6c6c6c">17:30:00  </tspan>
+    <tspan x="96" textLength="104" lengthAdjust="spacingAndGlyphs" fill="#87d7ff">Field notes  </tspan>
+    <tspan x="200" textLength="120" lengthAdjust="spacingAndGlyphs" fill="#87d787">received       </tspan>
+    <tspan x="320" textLength="176" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0">Sites/North channel.md</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="221">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="16" textLength="80" lengthAdjust="spacingAndGlyphs" fill="#6c6c6c">17:33:00  </tspan>
+    <tspan x="96" textLength="104" lengthAdjust="spacingAndGlyphs" fill="#87d7ff">Field notes  </tspan>
+    <tspan x="200" textLength="120" lengthAdjust="spacingAndGlyphs" fill="#87d787">sent           </tspan>
+    <tspan x="320" textLength="184" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0">Methods/Scoring turf.md</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="237">
+    <tspan x="0" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+    <tspan x="16" textLength="80" lengthAdjust="spacingAndGlyphs" fill="#6c6c6c">17:39:00  </tspan>
+    <tspan x="96" textLength="104" lengthAdjust="spacingAndGlyphs" fill="#87d7ff">Field notes  </tspan>
+    <tspan x="200" textLength="120" lengthAdjust="spacingAndGlyphs" fill="#87d787">sent           </tspan>
+    <tspan x="320" textLength="152" lengthAdjust="spacingAndGlyphs" fill="#d0d0d0">Daily/2026-11-14.md</tspan>
+    <tspan x="784" textLength="16" lengthAdjust="spacingAndGlyphs" fill="#5f8787">││</tspan>
+  </text>
+  <text y="253">
+    <tspan x="0" textLength="800" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│╰────────────────────────────────────────────────────────────────────────────────────────────────╯│</tspan>
+  </text>
+  <text y="269">
+    <tspan x="0" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="792" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+  </text>
+  <text y="285">
+    <tspan x="0" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+    <tspan x="8" textLength="784" lengthAdjust="spacingAndGlyphs" fill="#6c6c6c"> a add · d remove · e what syncs · s sync now · p pause · o library · b background · q quit       </tspan>
+    <tspan x="792" textLength="8" lengthAdjust="spacingAndGlyphs" fill="#5f8787">│</tspan>
+  </text>
+  <text y="301">
+    <tspan x="0" textLength="800" lengthAdjust="spacingAndGlyphs" fill="#5f8787">╰──────────────────────────────────────────────────────────────────────────────────────────────────╯</tspan>
+  </text>
+</g>
+</svg>

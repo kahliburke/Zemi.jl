@@ -28,6 +28,31 @@ tokens), Administration and Sign out, each for the roles that allow it. Open sou
 </figure>
 ```
 
+**Cmd-K** (Ctrl-K) anywhere on the site opens a palette while the service answers. Typing finds what
+the knowledge base has, each for whoever may see it: tasks, findings, papers and resources, records,
+notebooks and code. It also opens a project or a page, adds the paper an arXiv id, DOI or address
+names, switches the theme, syncs, or searches for the words on the Search page. With nothing typed it
+lists what was opened from it lately. A static copy keeps VitePress's own search on Cmd-K.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/palette-light.png" alt="The palette, finding a task and a finding as one types">
+  <img class="dark-only" src="./assets/screenshots/palette-dark.png" alt="The palette, finding a task and a finding as one types">
+</figure>
+```
+
+**Operations** shows how the service is doing: memory, disk, the database, the services it needs,
+the site's builds and the backups; its jobs, each with when it started and finished and how long it
+took; the agents and what each is doing; and the requests it has answered. Those whose roles allow it
+cancel a job, interrupt or close an agent, rebuild the site, back up now and reload the config.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/operations-light.png" alt="The Operations page's jobs">
+  <img class="dark-only" src="./assets/screenshots/operations-dark.png" alt="The Operations page's jobs">
+</figure>
+```
+
 !!! warning "Projects, records and findings need a server"
     They are stored in the knowledge base's database and edited through the API. On a static copy
     their pages show only "Needs a running Zemi server."

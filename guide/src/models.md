@@ -5,25 +5,34 @@
 `qwen3-embedding:4b` through Ollama, in five layers: paper (title and abstract), section, passage,
 section summary, paper summary. Search fuses the rankings from each layer and a keyword index.
 
-## Summarizers
+## The model that reads papers
 
-Summaries, classification and judging are done by summarizers named in the config:
-
-```toml
-summarizer = "deepseek-v4.1-flash"       # summaries and classification
-code_summarizer = "deepseek-v4.1-flash"  # codebases
-record_summarizer = ""                   # records; default: summarizer
-judge = "opus-agent-pdf"                 # comparing summarizers
-tutor = ""                               # the tutor; default: summarizer
-tutor_effort = "medium"                  # how hard it thinks: low, medium, high
-notebooker = ""                          # the agent making notebooks; default: summarizer
-analyst = ""                             # writes about the paper of the day; default: summarizer
-
-[watch]
-judge = ""                               # rates new arXiv papers, picks the paper of the day; default: summarizer
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/models-light.png" alt="Choosing the model that reads papers on the Configuration page">
+  <img class="dark-only" src="./assets/screenshots/models-dark.png" alt="Choosing the model that reads papers on the Configuration page">
+</figure>
 ```
 
-Two kinds:
+One model, the summarizer, summarizes papers, codebases and records, sorts what is added, and picks
+the paper of the day. Setup's Model step and the Configuration page choose it by where it runs: a
+service (OpenCode Zen, OpenAI, or another OpenAI-compatible API by its address, model and key), Claude
+on your subscription through Kaimon, or Ollama on this machine. Each choice says what it needs here (a
+key, Kaimon's agents, Ollama and a model) and whether it has it. Zen's models are listed with their
+cost per paper, from Zen's prices.
+
+**Try** has the choice summarize a section as each section of a paper is summarized: a section of a
+paper here, a sample one before there are any, or a passage pasted. Each answer stays beside the
+others to compare, with how many words it made of how many and how long it took; a failure is said
+plainly (a key refused or expired, a model not pulled, nothing answering).
+
+For a local model, they recommend one for the machine's memory and free disk, and pull it into
+Ollama, refusing when the disk would keep less than 5 GB free. When the summarizer keeps failing (at
+once for a refused key), the front page says so to those who may change it.
+
+Changing the summarizer marks existing summaries out of date; the next sync rewrites them.
+
+Two kinds of model:
 
 - **API**: one request per section to an OpenAI-compatible endpoint (OpenCode Zen, OpenAI, Ollama's
   `/v1`).
@@ -40,20 +49,29 @@ Built in:
 - `opus-agent-pdf`, `opus-agent-text`, `opus-agent-code`, `sonnet-agent-pdf`, `sonnet-agent-code`:
   Claude through a Claude subscription.
 
-Setup's Model step and the Configuration page choose among these by where the model runs (a
-service, Claude through Kaimon, or Ollama on this machine), with what each needs here: a key, Kaimon's
-agents, Ollama and a model. Zen's models are listed with their cost per paper, from Zen's prices.
+## Who does what
 
-**Try** has the choice summarize a section as each section of a paper is summarized: a section of a
-paper here, a sample one before there are any, or a passage pasted. Each answer stays beside the
-others to compare, with how many words it made of how many and how long it took; a failure is said
-plainly (a key refused or expired, a model not pulled, nothing answering).
+The Configuration page's **Who does what** gives other jobs a model of their own; left empty, the
+summarizer does them. In the config file:
 
-For a local model, they recommend one for the machine's memory and free disk, and pull it into
-Ollama, refusing when the disk would keep less than 5 GB free. When the summarizer keeps failing (at
-once for a refused key), the front page says so to those who may change it.
+```toml
+summarizer = "deepseek-v4.1-flash"       # summaries and classification
+code_summarizer = "deepseek-v4.1-flash"  # codebases
+record_summarizer = ""                   # records
+judge = "opus-agent-pdf"                 # comparing summarizers
+tutor = ""                               # the tutor
+tutor_effort = "medium"                  # how hard it thinks: low, medium, high
+notebooker = ""                          # the agent making notebooks
+analyst = ""                             # writes about the paper of the day
 
-Add others:
+[watch]
+judge = ""                               # rates new arXiv papers, picks the paper of the day
+```
+
+## A model of your own
+
+An agent other than Claude, or an API with its own request settings and prices, is added in the
+config file, and can then be chosen under **Who does what**:
 
 ```toml
 [[summarizers]]
@@ -72,4 +90,3 @@ price_in = 0                    # dollars per million tokens, for the cost estim
 price_out = 0
 ```
 
-Changing `summarizer` marks existing summaries out of date; the next sync rewrites them.

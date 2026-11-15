@@ -203,7 +203,15 @@ whether the group can be read so before it is linked; the key is kept in the con
 project, and is read as soon as it is linked. Unlinking it stops reading it; what it brought in
 stays. The Configuration page lists every group read, and sets whether items are sorted first.
 
-Groups can also be named in the config, with one key for all of them:
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/zotero-light.png" alt="A project's library with its linked Zotero group">
+  <img class="dark-only" src="./assets/screenshots/zotero-dark.png" alt="A project's library with its linked Zotero group">
+</figure>
+```
+
+Those who run the server can name groups in the config file instead, with one key for all of them;
+the site shows them as set there, and they are changed there:
 
 ```toml
 [sources.zotero]
@@ -231,21 +239,6 @@ like any other document, for their searches and agents alone. Nobody else sees w
 their role, until its owner shares it. It is private as a private repository is: kept from the other
 members, not hidden from those who run the service.
 
-What a library holds is kept in the site's library store, in a space of each person's own:
-
-```toml
-[library]
-store = "s3"               # or "dir:<path>"; without, a folder in the data directory
-endpoint = "https://<account>.r2.cloudflarestorage.com"
-bucket = "group-libraries"
-credentials = "~/.config/zemi/library-credentials.toml"
-max_gb = 10                # the most each person's space holds
-```
-
-Only the service reads the store; people reach their own space through the API (`/api/library/files`,
-permission `library`). The store is kept apart from the dataset's, which others read: one that
-overlaps it is refused.
-
 **`zemi connect`** keeps a folder on your machine in step with your library, an Obsidian vault say:
 
 ```sh
@@ -269,6 +262,12 @@ sync now (`s`), pause (`p`), open your library's page (`o`), hand the syncing to
 service (`b`) and quit (`q`). It syncs while open, unless the background service does; then it shows
 the service's progress, and the service takes up the folders it changes. Off a terminal, `zemi connect` prints a line for each change instead.
 
+```@raw html
+<figure class="shot">
+  <img src="./assets/connect-app.svg" alt="zemi connect's app: the folders synced, with their state, and the files as they move">
+</figure>
+```
+
 `--background` has a service sync from now and at every login (a launch agent on a Mac, a systemd
 user service on Linux), its log in `~/.local/share/zemi/connect/connect.log`; `--status` says how
 the folders stand, and `--stop` stops it. `--once` syncs once.
@@ -277,6 +276,13 @@ the folders stand, and `--stop` stops it. `--once` syncs once.
 from it, whether it is a vault, when it last changed), how much of your space it uses, and each
 machine signed in to keep it in step: whether `zemi connect` is syncing there now, and when it last
 synced. Signing a machine out there revokes its sign-in.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/library-account-light.png" alt="Your library on the account page: its folders and the machines keeping it in step">
+  <img class="dark-only" src="./assets/screenshots/library-account-dark.png" alt="Your library on the account page: its folders and the machines keeping it in step">
+</figure>
+```
 
 **An Obsidian vault** in a library (a folder holding `.obsidian`) is read as notes. Each note is a
 record: its title the `title` property, else its first heading, else its file's name; its date a date
@@ -311,6 +317,13 @@ to every reader.
 theirs there), with who sees each document: private, shared with projects, or shared with everyone.
 Select documents to act on them:
 
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/documents-sharing-light.png" alt="Your library on the Documents page, with who sees each document">
+  <img class="dark-only" src="./assets/screenshots/documents-sharing-dark.png" alt="Your library on the Documents page, with who sees each document">
+</figure>
+```
+
 - **Share with everyone**, or **with projects** you work in: they see it, and it stays yours. They see
   your changes as you make them, you can make it private again, and it goes when you remove it.
 - **Contribute**: give the group a version of it, open to everyone or to projects, which stays when you
@@ -323,6 +336,22 @@ Select documents to act on them:
 
 Removing your library (`POST /api/library/remove`) takes its files and everything held for you alone,
 shared or not. What you contributed stays, and so does what others hold too.
+
+**For those who run the server.** What libraries hold is kept in the site's library store, in a
+space of each person's own:
+
+```toml
+[library]
+store = "s3"               # or "dir:<path>"; without, a folder in the data directory
+endpoint = "https://<account>.r2.cloudflarestorage.com"
+bucket = "group-libraries"
+credentials = "~/.config/zemi/library-credentials.toml"
+max_gb = 10                # the most each person's space holds
+```
+
+Only the service reads the store; people reach their own space through the API (`/api/library/files`,
+permission `library`). The store is kept apart from the dataset's, which others read: one that
+overlaps it is refused.
 
 ## Dropping a document
 
