@@ -3,6 +3,11 @@
 Members who read papers publish the results (parses, summaries, vectors) as a dataset; the others
 import it instead of reading the papers themselves.
 
+Setup's last step joins a dataset with the key file a member was sent, or starts one in a folder or a
+bucket. The Configuration page's **Sharing** section changes it after: publish and import, import
+only, or neither; the stream's name; whether pages, studies and notebooks are shared too; the store;
+and how often to import and to sync and publish. They are the `[dataset]` keys below.
+
 ## Storage
 
 A directory or an S3-compatible bucket (Cloudflare R2, AWS S3, Backblaze B2, MinIO). Objects are
