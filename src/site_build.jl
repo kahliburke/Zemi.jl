@@ -23,7 +23,7 @@ function current_site(c::Config)
     f = current_file(c)
     islink(f) && return link_target(f)
     isfile(f) || return nothing
-    return joinpath(site_root(c), strip(read(f, String)))
+    return joinpath(site_root(c), split(strip(read(f, String)), '/')...)
 end
 
 "How the site's builds stand: one running, one asked for meanwhile, the last error, the build served."
