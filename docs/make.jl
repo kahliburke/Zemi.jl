@@ -155,6 +155,9 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     config = replace(config, r"^\s*editLink: \{[^\n]*\},?\n"m => "")
     # The template's GitHub link would lead every knowledge base's site to the package's repository.
     config = replace(config, r"^\s*socialLinks: \[[^\]]*\],?\n"m => "")
+    # A page's last change would come from git, but the pages are written into a build folder outside
+    # any repository, and a machine may have no git at all.
+    config = replace(config, r"^\s*lastUpdated: true,?\n"m => "")
     vite = "vite: {"
     occursin(vite, config) || @warn "No `$vite` in the VitePress config; Vite keeps its chunk size warning at 500 kB"
     config = replace(config, vite => vite * "\n    build: { chunkSizeWarningLimit: 2000 },"; count = 1)
