@@ -272,7 +272,7 @@ function agent_summarize_paper!(kb::KB, s::Summarizer, doc_id::AbstractString; p
     if reads == :pdf
         f = query(kb, "SELECT path FROM files WHERE paper_id = ?", (p.id,))
         (isempty(f) || !isfile(first(f).path)) && error("$doc_id has no PDF for $(s.name) to read")
-        symlink(first(f).path, joinpath(dir, "paper.pdf"))
+        link_file(first(f).path, joinpath(dir, "paper.pdf"))
     end
     progress("$(s.model) agent reading the paper")
     with_agent(s, dir; system = prompts.agent_system(kb.config)) do id
@@ -403,7 +403,7 @@ function ask(s::Summarizer, system::AbstractString, prompt::AbstractString;
             push!(notes, "preamble.txt holds material for this question: read it first.")
         end
         for f in pdfs
-            symlink(abspath(f), joinpath(dir, basename(f)))
+            link_file(f, joinpath(dir, basename(f)))
             push!(notes, "$(basename(f)) is attached; read it with the Read tool.")
         end
         text = isempty(notes) ? prompt : join(notes, "\n") * "\n\n" * prompt
@@ -501,7 +501,7 @@ function agent_summarize_code!(kb::KB, s::Summarizer, id::AbstractString; batch_
         dir = agents_dir(s.name, id)
         rm(dir; force = true, recursive = true)
         mkpath(dir)
-        symlink(root, joinpath(dir, "repo"))
+        link_dir(root, joinpath(dir, "repo"))
         write(joinpath(dir, "BRIEF-files.md"), CODE_FILES_BRIEF)
         write(joinpath(dir, "BRIEF-tree.md"), CODE_TREE_BRIEF)
         # Files, in batches of at most `batch_chars` of source.

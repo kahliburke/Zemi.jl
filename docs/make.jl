@@ -273,7 +273,8 @@ pages = !isempty(ONLY) ? ONLY :
 
 # The site's packages, beside the build folder (the development server's are written as it starts).
 const BUILD = get(ENV, "ZEMI_SITE_BUILD", "build")
-DEV || KBase.site_packages!(dirname(isabspath(BUILD) ? BUILD : joinpath(DOCS, BUILD)))
+const BUILD_DIR = isabspath(BUILD) ? BUILD : joinpath(DOCS, BUILD)
+DEV || KBase.site_packages!(dirname(BUILD_DIR))
 
 # Notebook bundles are build output (git-ignored, under docs/slate/): each build renders a notebook
 # whose bundle is missing or older than the notebook, through the Slate hub on this machine.
@@ -286,9 +287,9 @@ makedocs(;
     # The shared service builds each version of the site into a folder of its own (see `build_site!`).
     build = BUILD,
     # Outside CI there is nothing to deploy: saying so directly spares the warning Documenter gives
-    # when it cannot find a CI system to ask.
+    # when it cannot find a CI system to ask. VitePress is run below, the same way on every system.
     format = MarkdownVitepress(; repo = "github.com/kahliburke/Zemi.jl", devbranch = "main",
-                               devurl = "dev", build_vitepress = !DEV,
+                               devurl = "dev", build_vitepress = false,
                                deploy_decision = haskey(ENV, "CI") ? nothing : Documenter.DeployDecision(; all_ok = false)),
     # `never`: the notebooks' bundles as the dataset brought them (see src/site_publish.jl).
     plugins = [SlateDocs(; render = Symbol(get(ENV, "ZEMI_SLATE_RENDER", "auto"))), KnowledgeBaseSite()],
@@ -297,10 +298,14 @@ makedocs(;
     pagesonly = !isempty(ONLY),
     warnonly = !isempty(ONLY),
 )
-step_time("ran Documenter and VitePress", t_docs)
+step_time("ran Documenter", t_docs)
 # Each templated page, a copy of its kind's built template.
 if !DEV
-    site_dir = joinpath(isabspath(BUILD) ? BUILD : joinpath(DOCS, BUILD), "1")
+    t = time()
+    KBase.vitepress(DocumenterVitepress.node, BUILD_DIR, "build")
+    site_dir = joinpath(BUILD_DIR, "1")
+    write(joinpath(site_dir, "siteinfo.js"), "var DOCUMENTER_CURRENT_VERSION = \"\";\n")
+    step_time("ran VitePress", t)
     t = time()
     n = KBase.stamp_templates!(site_dir)
     step_time("copied the templates to $n pages", t)

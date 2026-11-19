@@ -27,9 +27,9 @@ function say_line(io::IO, text::AbstractString = "")
     println(io)
 end
 
-"A labelled value under the headline, the labels lined up, the value in colour, with a note after it."
+"A labelled value under the headline, the labels lined up (a longer one is set apart by two spaces), the value in colour, with a note after it."
 function say_field(io::IO, label::AbstractString, value::AbstractString, note::AbstractString = "")
-    print(io, "  ", rpad(label, 12))
+    print(io, "  ", rpad(label, 10), "  ")
     printstyled(io, value; color = :cyan)
     isempty(note) || printstyled(io, "   ", note; color = :light_black)
     println(io)

@@ -1462,6 +1462,38 @@ end
     @test !K.shared_write_allowed(sh, K.HTTP.Request("POST", "/api/tasks", ["Origin" => "http://localhost:5173", "X-Zemi" => "1"]))
 end
 
+@zset "the build served" begin
+    c = temp_config()
+    @test K.current_site(c) === nothing
+    old, new = (joinpath(K.builds_dir(c), id, "1") for id in ("20261001T000000", "20261002T000000"))
+    mkpath(old); mkpath(new)
+    # Named in a file, relative to the site's folder, which a switch replaces in one step.
+    K.switch_site!(c, old)
+    @test K.current_site(c) == old && read(K.current_file(c), String) == "builds/20261001T000000/1"
+    K.switch_site!(c, new)
+    @test K.current_site(c) == new && !ispath(K.current_file(c) * ".new")
+    # A link to it, as earlier versions made, is read, and the next switch replaces it with the file.
+    rm(K.current_file(c))
+    symlink(old, K.current_file(c))
+    @test K.current_site(c) == old
+    K.switch_site!(c, new)
+    @test !islink(K.current_file(c)) && K.current_site(c) == new
+end
+
+@zset "links" begin
+    dir = realpath(mktempdir())
+    write(joinpath(dir, "paper.pdf"), "%PDF")
+    mkpath(joinpath(dir, "notes"))
+    K.link_file(joinpath(dir, "paper.pdf"), joinpath(dir, "linked.pdf"))
+    @test read(joinpath(dir, "linked.pdf"), String) == "%PDF"
+    # A folder is linked by its absolute path, as a junction needs on Windows.
+    cd(() -> K.link_dir("notes", joinpath(dir, "linked")), dir)
+    @test isabspath(readlink(joinpath(dir, "linked"))) && isdir(joinpath(dir, "linked"))
+    @test K.link_target(joinpath(dir, "linked")) == joinpath(dir, "notes")
+    symlink(joinpath(dir, "notes") * "/", joinpath(dir, "slashed"))
+    @test K.link_target(joinpath(dir, "slashed")) == joinpath(dir, "notes")
+end
+
 @zset "old site builds are removed" begin
     # The builds that built (each with its record) are kept, the newest two and the one served; one that
     # failed goes, its leftover sources too, and one newer than them all, running still, stays.
@@ -1471,7 +1503,7 @@ end
     foreach(id -> (mkpath(joinpath(b, id, "1")); write(joinpath(b, id * ".log"), "")), ids)
     foreach(i -> write(joinpath(b, ids[i] * ".json"), "{}"), (1, 2, 4, 5))
     mkpath(joinpath(b, "node_modules")); mkpath(joinpath(b, ids[3] * ".docs")); mkpath(joinpath(b, ids[6] * ".docs"))
-    symlink(joinpath(b, ids[1], "1"), K.current_link(c))                   # an old build is the one served
+    K.switch_site!(c, joinpath(b, ids[1], "1"))                           # an old build is the one served
     K.prune_builds!(c)
     @test sort(filter(d -> !endswith(d, ".log") && !endswith(d, ".json"), readdir(b))) ==
           [ids[1], ids[4], ids[5], ids[6], ids[6] * ".docs", "node_modules"]

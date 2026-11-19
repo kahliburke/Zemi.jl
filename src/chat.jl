@@ -129,7 +129,7 @@ function chat_folder(kb::KB, chat::AbstractString, id::AbstractString)
     write(joinpath(dir, "paper.txt"), read_paper(kb, id; max_chars = typemax(Int)))
     f = query(kb, "SELECT path FROM files WHERE paper_id = ?", (paper_id(kb, id),))
     pdf = joinpath(dir, "paper.pdf")
-    isempty(f) || ispath(pdf) || symlink(first(f).path, pdf)
+    isempty(f) || ispath(pdf) || link_file(first(f).path, pdf)
     return dir
 end
 

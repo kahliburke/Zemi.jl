@@ -6664,4 +6664,7 @@ end
     io = IOBuffer()
     K.say(:ok, "Done", "run `zemi open`", ("The site", "http://localhost:8000", "a note"); io)
     @test String(take!(io)) == "✓ Done\n  run zemi open\n  The site    http://localhost:8000   a note\n"
+    # A label longer than the others is still set apart from its value.
+    K.say(:ok, "Done", ("A browser new to it", "http://localhost:8000/x"); io)
+    @test String(take!(io)) == "✓ Done\n  A browser new to it  http://localhost:8000/x\n"
 end

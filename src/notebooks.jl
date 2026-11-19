@@ -151,7 +151,7 @@ function make_notebook!(kb::KB, id::AbstractString; idea::AbstractString = "", p
         rm(dir; force = true, recursive = true)
         mkpath(dir)
         write(joinpath(dir, "preamble.txt"), preamble)
-        symlink(pdf, joinpath(dir, "paper.pdf"))
+        link_file(pdf, joinpath(dir, "paper.pdf"))
         progress("an agent is making a notebook from $id")
         prompt = notebook_prompt(path, idea; others = [o.title for o in others])
         # Progress as it goes: the agent's latest step, and how many cells it has added, run and changed.

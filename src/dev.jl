@@ -67,8 +67,8 @@ function write_changed_pages!(kb::KB, docs::AbstractString, dir::AbstractString,
             cp(joinpath(src, rel), joinpath(only, "src", rel))
         end
         # The paths the pages reach the notebooks by, as in the full sources.
-        symlink(content_path(kb.config, "notebooks"), joinpath(only, "notebooks"))
-        symlink(slate_dir(kb.config), joinpath(only, "slate"))
+        link_dir(content_path(kb.config, "notebooks"), joinpath(only, "notebooks"))
+        link_dir(slate_dir(kb.config), joinpath(only, "slate"))
         list = joinpath(only, "pages.txt")
         write(list, join(pages, "\n"))
         write_pages(kb.config, dir, Dict("ZEMI_SITE_BUILD" => joinpath(only, "build"), "ZEMI_SITE_DOCS" => only,
@@ -162,10 +162,10 @@ function link_sources!(docs::AbstractString, md::AbstractString)
              SERVICE_WORKER => joinpath(md, "public", basename(SERVICE_WORKER))]
     for (from, to) in pairs
         isfile(from) || continue
-        islink(to) && readlink(to) == from && continue
+        islink(to) && link_target(to) == from && continue
         mkpath(dirname(to))
         rm(to; force = true)
-        symlink(from, to)
+        link_file(from, to)
     end
 end
 
@@ -181,12 +181,8 @@ function start_dev_server!(c::Config; port::Integer)
     build = joinpath(dev_dir(c), "build")
     site_packages!(dev_dir(c))
     script = """
-        using DocumenterVitepress
-        const V = DocumenterVitepress
-        dir = dirname(ARGS[1])
-        isdir(joinpath(dir, "node_modules")) ||
-            cd(() -> V.node(_ -> run(`\$(V.npm) install --no-audit --no-fund`); adjust_PATH = true, adjust_LIBPATH = true), dir)
-        V.run_vitepress_command(ARGS[1], "dev"; kwargs = Cmd(["--port", ARGS[2], "--strictPort"]))
+        import DocumenterVitepress, Zemi
+        Zemi.vitepress(DocumenterVitepress.node, ARGS[1], "dev", "--port", ARGS[2], "--strictPort"; install = false)
         """
     cmd = setenv(`$(Base.julia_cmd()) --project=$(site_env(c)) -e $script $build $port`, build_env())
     log = joinpath(dev_dir(c), "server.log")

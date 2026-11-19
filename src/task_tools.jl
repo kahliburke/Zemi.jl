@@ -95,7 +95,7 @@ function with_media_file(f, k::KB, file)
     isfile(path) || restore_media!(k, file.hash)
     isfile(path) || error("$(file.name) is not on this machine")
     tmp = tempname() * lowercase(splitext(file.name)[2])
-    symlink(path, tmp)
+    link_file(path, tmp)
     try f(tmp) finally rm(tmp; force = true) end
 end
 

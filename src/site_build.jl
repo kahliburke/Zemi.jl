@@ -3,8 +3,8 @@
 # build's assets.
 
 """
-Where the shared service keeps its builds of the site, and the `current` link to the one it serves:
-by its real path (see [`real_path`](@ref)), since VitePress takes each page's address relative to
+Where the shared service keeps its builds of the site, and the `current` file naming the one it
+serves: by its real path (see [`real_path`](@ref)), since VitePress takes each page's address relative to
 the folder it builds in after resolving the page's file through links.
 """
 site_root(c::Config) = real_path(joinpath(c.data_dir, "site"))
@@ -13,10 +13,18 @@ site_root(c::Config) = real_path(joinpath(c.data_dir, "site"))
 real_path(path::AbstractString) = ispath(path) ? realpath(path) :
     (d = dirname(path); d == path ? path : joinpath(real_path(d), basename(path)))
 builds_dir(c::Config) = joinpath(site_root(c), "builds")
-current_link(c::Config) = joinpath(site_root(c), "current")
+current_file(c::Config) = joinpath(site_root(c), "current")
 
-"The build being served, as a folder, or `nothing` before the first."
-current_site(c::Config) = (l = current_link(c); islink(l) ? readlink(l) : nothing)
+"""
+The build being served, as a folder, or `nothing` before the first. The `current` file names it
+relative to the site's folder; a `current` link to it, as earlier versions made, is read too.
+"""
+function current_site(c::Config)
+    f = current_file(c)
+    islink(f) && return link_target(f)
+    isfile(f) || return nothing
+    return joinpath(site_root(c), strip(read(f, String)))
+end
 
 "How the site's builds stand: one running, one asked for meanwhile, the last error, the build served."
 Base.@kwdef mutable struct SiteState
@@ -78,7 +86,7 @@ duration(s::Real) = s < 60 ? "$(round(Int, s)) s" : "$(floor(Int, s / 60)) min $
 
 # The lines of a build's output worth showing as it runs: Documenter's and DocumenterSlate's steps,
 # VitePress's, and anything that went wrong. The rest goes to the build's log only.
-const BUILD_STAGE = r"^\[ Info: (SiteStep|SetupBuildDirectory|Doctest|ExpandTemplates|CrossReferences|CheckDocument|Populate|RenderDocument|DocumenterVitepress|render_doc_bundle|SlateDocs)|vitepress v|building client|rendering pages|build complete|^(┌ )?(Warning|Error)|ERROR"
+const BUILD_STAGE = r"^\[ Info: (SiteStep|SetupBuildDirectory|Doctest|ExpandTemplates|CrossReferences|CheckDocument|Populate|RenderDocument|DocumenterVitepress(?!: did not build)|render_doc_bundle|SlateDocs)|vitepress v|building client|rendering pages|build complete|^(┌ )?(Warning|Error)|ERROR"
 
 "Run `cmd`, its output to `io` and its stage lines (see `BUILD_STAGE`) to the log as it goes."
 function run_logged(cmd::Cmd, io::IO; pid_file = nothing)
@@ -103,12 +111,17 @@ function run_logged(cmd::Cmd, io::IO; pid_file = nothing)
     return success(p)
 end
 
-"Point the `current` link at `site`, replacing it in one step (a rename)."
+"""
+Serve the build in the folder `site`: the `current` file is replaced in one step (a rename), so a
+reader finds the old build or the new. A file rather than a link, which Windows would not let
+a person without admin rights replace.
+"""
 function switch_site!(c::Config, site::AbstractString)
-    tmp = current_link(c) * ".new"
-    ispath(tmp) && rm(tmp)
-    symlink(site, tmp)
-    Base.Filesystem.rename(tmp, current_link(c))
+    f = current_file(c)
+    tmp = f * ".new"
+    write(tmp, join(splitpath(relpath(site, site_root(c))), "/"))
+    islink(f) && rm(f)                                      # an earlier version's link
+    Base.Filesystem.rename(tmp, f)
 end
 
 "The site build running, so stopping the service can stop it too."
@@ -242,9 +255,9 @@ function site_sources(c::Config, dir::AbstractString)
     overlay!(content_path(c, "assets"), joinpath(dir, "src", "assets"))
     isfile(content_path(c, "pages", "index.md")) || write(joinpath(dir, "src", "index.md"), front_page(c))
     mkpath(content_path(c, "notebooks"))
-    symlink(content_path(c, "notebooks"), joinpath(dir, "notebooks"))
+    link_dir(content_path(c, "notebooks"), joinpath(dir, "notebooks"))
     mkpath(slate_dir(c))
-    symlink(slate_dir(c), joinpath(dir, "slate"))
+    link_dir(slate_dir(c), joinpath(dir, "slate"))
     return dir
 end
 
