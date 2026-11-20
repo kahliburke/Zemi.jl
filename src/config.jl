@@ -652,7 +652,11 @@ function landscape_layer(c::Config)
     return candidates[something(i, 1)]
 end
 
-xdg_home(var, fallback) = get(ENV, var, joinpath(homedir(), fallback))
+"An XDG base folder: `var`, else `fallback` (written with `/`) in the home folder, in the system's separators."
+xdg_home(var, fallback) = normpath(get(ENV, var, joinpath(homedir(), fallback)))
+
+"Whether paths `a` and `b` name the same place, however each is written."
+same_path(a::AbstractString, b::AbstractString) = normpath(abspath(a)) == normpath(abspath(b))
 
 "`path` with a leading `~` made this account's home folder; Julia's `expanduser` leaves paths alone on Windows."
 expand_home(path::AbstractString) =

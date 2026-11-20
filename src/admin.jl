@@ -194,7 +194,7 @@ function save_overlay!(kb::KB, over::AbstractDict; path::AbstractString = config
     old = isfile(file) ? read(file, String) : nothing
     c = write_settings!(over; path)
     # What a running knowledge base cannot take on: where its data and vectors are.
-    if !(c.data_dir == kb.config.data_dir && c.collection_prefix == kb.config.collection_prefix)
+    if !(same_path(c.data_dir, kb.config.data_dir) && c.collection_prefix == kb.config.collection_prefix)
         old === nothing ? rm(file; force = true) : write(file, old)
         error("The data directory and collections cannot change while the knowledge base runs")
     end
@@ -567,7 +567,7 @@ route!(c -> (delete_backup!(c.kb.config, c[:name]); ok_json()), "POST", "/api/op
 
 route!("POST", "/api/ops/reload"; need = "server.control") do c
     config = validate(load_config())
-    config.data_dir == c.kb.config.data_dir || error("The data directory cannot change while the knowledge base runs")
+    same_path(config.data_dir, c.kb.config.data_dir) || error("The data directory cannot change while the knowledge base runs")
     c.kb.config = config
     ok_json()
 end

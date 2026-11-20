@@ -1502,6 +1502,10 @@ end
     # Free space where a folder would be: its nearest existing folder's, for a relative path too.
     @test K.disk_free(joinpath("no", "such", "folder")) > 0
     @test isabspath(K.ollama_store())
+    # A folder written with / and in the system's separators is the same folder.
+    @test K.xdg_home("ZEMI_TEST_UNSET", ".local/share") == joinpath(homedir(), ".local", "share")
+    @test K.same_path(joinpath(homedir(), ".local/share", "zemi"), joinpath(homedir(), ".local", "share", "zemi", ""))
+    @test !K.same_path(joinpath(homedir(), "a"), joinpath(homedir(), "b"))
 end
 
 @zset "processes" begin
