@@ -135,34 +135,28 @@ $Done += 'Kaimon', 'Zemi'
 
 Step 'Kaimon settings'
 # The answers to Kaimon's first-run setup, for one person on their own machine: only this account's
-# programs reach it, with no keys, and it searches code through llama.cpp and a Qdrant it runs itself.
+# programs reach it, with no keys. It searches code through Ollama, its default, and a Qdrant it runs.
 # Settings already there are left as they are.
-$kaimonConfig = Join-Path $env:APPDATA 'Kaimon'
-$kaimonCache = Join-Path $env:LOCALAPPDATA 'Kaimon'
-New-Item -ItemType Directory -Force $kaimonConfig | Out-Null
-function Write-Settings($name, $value) {
-    $path = Join-Path $kaimonConfig $name
-    if (Test-Path $path) { Write-Host "Found $path"; return }
-    [IO.File]::WriteAllText($path, ($value | ConvertTo-Json -Depth 5))   # UTF-8 without a byte order mark
-    Write-Host "Wrote $path"
+$settings = Join-Path $env:APPDATA 'Kaimon\config.json'
+if (Test-Path $settings) { Write-Host "Found $settings" } else {
+    New-Item -ItemType Directory -Force (Split-Path $settings) | Out-Null
+    $json = [ordered]@{
+        mode = 'lax'; api_keys = @(); allowed_ips = @('127.0.0.1', '::1'); port = 2828
+        created_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); editor = 'vscode'
+        gate_setup_version = 1                               # other Julia sessions are left alone
+    } | ConvertTo-Json
+    [IO.File]::WriteAllText($settings, $json)                # UTF-8 without a byte order mark
+    Write-Host "Wrote $settings"
 }
-Write-Settings 'config.json' ([ordered]@{
-    mode = 'lax'; api_keys = @(); allowed_ips = @('127.0.0.1', '::1'); port = 2828
-    created_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); editor = 'vscode'
-    gate_setup_version = 1                                   # other Julia sessions are left alone
-})
-Write-Settings 'search.json' @{ embedding = @{ backend = 'llamacpp' } }
-# Qdrant and llama.cpp, in the environments Kaimon runs them from.
-$script = Join-Path $Work 'services.jl'
+# Qdrant, in the environment Kaimon runs it from.
+$script = Join-Path $Work 'qdrant.jl'
 Set-Content $script @"
 import Pkg
-for (dir, jll) in ((raw"$kaimonCache\service-env", "Qdrant_jll"), (raw"$kaimonCache\service-env-llamacpp", "llama_cpp_jll"))
-    Pkg.activate(dir)
-    haskey(Pkg.project().dependencies, jll) || Pkg.add(jll)
-end
+Pkg.activate(raw"$(Join-Path $env:LOCALAPPDATA 'Kaimon\service-env')")
+haskey(Pkg.project().dependencies, "Qdrant_jll") || Pkg.add("Qdrant_jll")
 "@
 & julia --startup-file=no $script
-if ($LASTEXITCODE -ne 0) { throw "Installing Qdrant and llama.cpp for Kaimon failed" }
+if ($LASTEXITCODE -ne 0) { throw "Installing Qdrant for Kaimon failed" }
 & zemi kaimon
 if ($LASTEXITCODE -ne 0) { throw "Adding Zemi to Kaimon failed" }
 
