@@ -48,9 +48,6 @@ cache folder of its own (the service's Kaimon's, see [`start_embedded!`](@ref)),
 """
 pin_qdrant_storage!() = (ENV["KAIMON_QDRANT_STORAGE"] = kaimon_qdrant_storage(); nothing)
 
-"Whether process `pid` is running here."
-pid_alive(pid::Integer) = pid > 0 && (Sys.iswindows() ? true : success(pipeline(`kill -0 $pid`; stderr = devnull)))
-
 """
     kaimon_qdrant() -> Union{Tuple{String,String},Nothing}
 
