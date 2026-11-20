@@ -35,7 +35,7 @@ configuration and scripts, and skipping manifests, data and build output.
 """
 function code_files(root::AbstractString)
     files = isdir(joinpath(root, ".git")) ?
-        split(read(`git -C $root ls-files -z`, String), '\0'; keepempty = false) :
+        split(git_read(root, `ls-files -z`), '\0'; keepempty = false) :
         [join(splitpath(relpath(joinpath(d, f), root)), '/') for (d, _, fs) in walkdir(root) for f in fs]
     keep(f) = !occursin(CODE_SKIP, f) && readable_file(root, f) && filesize(joinpath(root, f)) <= CODE_MAX_BYTES &&
               (lowercase(splitext(f)[2]) in CODE_EXTENSIONS || script(joinpath(root, f)))

@@ -212,6 +212,14 @@ function fetch_codebases!(kb::KB)
     return count(id -> fetch_codebase!(kb, id), filter(id -> codebase_dir(kb, id) == clone_dir(kb.config, id), ids))
 end
 
+"What git prints for `args` run in the repository at `root`; an error gives what git said."
+function git_read(root::AbstractString, args::Cmd)
+    out, err = IOBuffer(), IOBuffer()
+    ok = success(pipeline(`git -C $root $args`; stdout = out, stderr = err))
+    ok || error("git in $root: ", strip(String(take!(err))))
+    return String(take!(out))
+end
+
 "Run git with `env` added to its environment, never asking for a password; an error gives what git said."
 function git!(env::AbstractDict, args::Cmd)
     err = IOBuffer()

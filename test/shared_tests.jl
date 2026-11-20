@@ -1517,6 +1517,13 @@ end
     @test !K.within_folder(K.full_folder(dir) * "x", K.full_folder(dir))
 end
 
+@zset "git's errors" begin
+    # A folder git will not read: the error is git's own.
+    dir = mktempdir()
+    mkpath(joinpath(dir, ".git"))
+    @test_throws r"git in .*: fatal: not a git repository" K.code_files(dir)
+end
+
 @zset "processes" begin
     p = run(`$(Base.julia_cmd()) --startup-file=no -e "sleep(60)"`; wait = false)
     pid = getpid(p)
