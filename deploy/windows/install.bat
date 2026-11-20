@@ -166,6 +166,16 @@ haskey(Pkg.project().dependencies, "Qdrant_jll") || Pkg.add("Qdrant_jll")
 "@
 & julia --startup-file=no $script
 if ($LASTEXITCODE -ne 0) { throw "Installing Qdrant for Kaimon failed" }
+# Claude Code reaches Kaimon's tools, and the knowledge base's among them, at Kaimon's address: with
+# no key while Kaimon takes none from this machine's programs.
+$kaimon = Get-Content -Raw $settings | ConvertFrom-Json
+if ($kaimon.mode -eq 'lax' -and (Have claude)) {
+    & cmd /c 'claude mcp get kaimon >nul 2>&1'
+    if ($LASTEXITCODE -ne 0) {
+        & cmd /c "claude mcp add --scope user --transport http kaimon http://localhost:$($kaimon.port)/mcp 2>&1"
+        if ($LASTEXITCODE -ne 0) { throw 'Connecting Claude Code to Kaimon failed' }
+    }
+}
 & zemi kaimon
 if ($LASTEXITCODE -ne 0) { throw "Adding Zemi to Kaimon failed" }
 
