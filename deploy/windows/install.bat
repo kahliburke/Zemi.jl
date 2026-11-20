@@ -94,6 +94,15 @@ if (Test-Path $app) {
     }
     if (-not (Get-Process 'ollama app' -ErrorAction SilentlyContinue)) { Start-Process $app }
 }
+# The embedding models Zemi's search and Kaimon's code search use by default. Ollama's own server
+# serves the downloads when its tray program has not started one.
+function Ollama-Up { try { Invoke-RestMethod http://127.0.0.1:11434/api/version | Out-Null; $true } catch { $false } }
+for ($i = 0; $i -lt 15 -and -not (Ollama-Up); $i++) { Start-Sleep 2 }
+if (-not (Ollama-Up)) { Start-Process -WindowStyle Hidden ollama serve; for ($i = 0; $i -lt 15 -and -not (Ollama-Up); $i++) { Start-Sleep 2 } }
+foreach ($model in 'qwen3-embedding:4b', 'qwen3-embedding:0.6b') {
+    & ollama pull $model
+    if ($LASTEXITCODE -ne 0) { throw "Downloading $model failed" }
+}
 
 Step 'Git'
 # Claude Code runs its commands in Git's bash.
