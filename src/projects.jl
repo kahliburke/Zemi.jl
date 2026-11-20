@@ -137,7 +137,7 @@ function projects(kb::KB; path::AbstractString = "", archived::Bool = false)
                active_milestone = coalesce(r.active_milestone, "")) for r in rows]
     isempty(path) && return list
     dir = full_folder(path)
-    holds(root) = !isempty(root) && within_folder(dir, full_folder(root))
+    holds(root) = !isempty(root) && within_dir(dir, root)
     return sort!(filter(p -> holds(p.root), list); by = p -> -length(p.root))
 end
 

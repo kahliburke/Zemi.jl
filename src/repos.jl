@@ -40,10 +40,6 @@ function full_folder(path::AbstractString)
     return isempty(q) || endswith(q, ':') ? p : String(q)
 end
 
-"Whether folder `dir` is folder `root` or within it, both written in full."
-within_folder(dir::AbstractString, root::AbstractString) =
-    dir == root || startswith(dir, rstrip(root, ('/', '\\')) * (Sys.iswindows() ? '\\' : '/'))
-
 "The `origin` remote of the repository at `root`, as it is configured, or `\"\"` for none."
 function git_origin(root::AbstractString)
     (isempty(root) || !isdir(root)) && return ""

@@ -1512,9 +1512,10 @@ end
     dir = mktempdir()
     @test K.full_folder(dir * "/") == K.full_folder(dir) == normpath(abspath(dir))
     @test K.full_folder(joinpath(dir, "a", "..", "b")) == joinpath(K.full_folder(dir), "b")
-    @test K.within_folder(joinpath(K.full_folder(dir), "src"), K.full_folder(dir))
-    @test K.within_folder(K.full_folder(dir), K.full_folder(dir))
-    @test !K.within_folder(K.full_folder(dir) * "x", K.full_folder(dir))
+    # A codebase's files are read wherever its folder is, in the system's separators.
+    mkpath(joinpath(dir, "src")); write(joinpath(dir, "src", "a.jl"), "f() = 1\n"); write(joinpath(dir, "notes.md"), "# Notes\n")
+    @test K.code_files(dir) == ["notes.md", "src/a.jl"]
+    @test K.readable_file(dir, "src/a.jl") && !K.readable_file(dir, "src")
 end
 
 @zset "git's errors" begin

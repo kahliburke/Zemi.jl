@@ -51,7 +51,7 @@ function readable_file(root::AbstractString, f::AbstractString)
     islink(path) && return false
     isfile(path) || return false
     real, top = realpath(path), realpath(root)
-    return startswith(real, top * "/")
+    return real != top && within_dir(real, top)
 end
 
 script(path) = isfile(path) && isempty(splitext(path)[2]) && startswith(String(read(path, 2)), "#!")

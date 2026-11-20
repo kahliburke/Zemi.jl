@@ -144,7 +144,7 @@ function chat_file(kb::KB, chat::AbstractString, name::AbstractString)
     (isempty(name) || name != basename(name) || startswith(name, ".")) && return nothing
     dir = joinpath(agents_dir("chats", chat), "files")
     path = joinpath(dir, name)
-    isfile(path) && startswith(realpath(path), realpath(dir) * "/") || return nothing
+    isfile(path) && within_dir(realpath(path), realpath(dir)) || return nothing
     return path
 end
 
