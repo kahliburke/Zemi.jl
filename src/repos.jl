@@ -27,8 +27,22 @@ end
 "Whether `s` names a repository rather than a codebase: an address with a scheme, or a `git@` one."
 is_repository(s::AbstractString) = occursin(r"^[a-z][a-z0-9+.-]*://|^git@"i, strip(s))
 
-"Whether `s` names a folder rather than a codebase or repository: a path from the root, home or here."
-is_folder(s::AbstractString) = occursin(r"^(/|~(/|$)|\.\.?(/|$))", strip(s))
+"Whether `s` names a folder rather than a codebase or repository: a path from the root, a drive, home or here."
+is_folder(s::AbstractString) = occursin(r"^(/|~([/\\]|$)|\.\.?([/\\]|$)|[A-Za-z]:[/\\]|\\\\)", strip(s))
+
+"""
+Folder `path` written in full, the one way it is recorded: from the root, in the system's
+separators, without a trailing one (except the root's own, `/` or `C:\\`).
+"""
+function full_folder(path::AbstractString)
+    p = normpath(abspath(expand_home(strip(path))))
+    q = rstrip(p, ('/', '\\'))
+    return isempty(q) || endswith(q, ':') ? p : String(q)
+end
+
+"Whether folder `dir` is folder `root` or within it, both written in full."
+within_folder(dir::AbstractString, root::AbstractString) =
+    dir == root || startswith(dir, rstrip(root, ('/', '\\')) * (Sys.iswindows() ? '\\' : '/'))
 
 "The `origin` remote of the repository at `root`, as it is configured, or `\"\"` for none."
 function git_origin(root::AbstractString)

@@ -36,7 +36,7 @@ configuration and scripts, and skipping manifests, data and build output.
 function code_files(root::AbstractString)
     files = isdir(joinpath(root, ".git")) ?
         split(read(`git -C $root ls-files -z`, String), '\0'; keepempty = false) :
-        [relpath(joinpath(d, f), root) for (d, _, fs) in walkdir(root) for f in fs]
+        [join(splitpath(relpath(joinpath(d, f), root)), '/') for (d, _, fs) in walkdir(root) for f in fs]
     keep(f) = !occursin(CODE_SKIP, f) && readable_file(root, f) && filesize(joinpath(root, f)) <= CODE_MAX_BYTES &&
               (lowercase(splitext(f)[2]) in CODE_EXTENSIONS || script(joinpath(root, f)))
     return sort!(filter(keep, files))
@@ -264,9 +264,9 @@ Record a codebase to be read from the directory `root`, and the repository it is
 so again after the code changes redoes only what changed. One a person dropped is refused with a
 [`DroppedError`](@ref), unless `anyway`, which restores it (`by` the person adding it).
 """
-function add_codebase!(kb::KB, root::AbstractString; name::AbstractString = basename(rstrip(abspath(root), '/')), by = nothing,
+function add_codebase!(kb::KB, root::AbstractString; name::AbstractString = basename(full_folder(root)), by = nothing,
                        anyway::Bool = false)
-    root = abspath(expand_home(root))
+    root = full_folder(root)
     isdir(root) || error("No directory $root")
     # Another folder of the same name is another codebase.
     id = free_code_id(kb, name, basename(dirname(root)); same = r -> coalesce(r.source_path, root) == root)

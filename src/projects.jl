@@ -58,7 +58,7 @@ function codebase_id(kb::KB, codebase::AbstractString; add::Bool = true, caller:
         return paper_id(kb, link_repository!(kb, codebase))
     end
     if is_folder(codebase)
-        root = (r = abspath(expand_home(codebase)); r == "/" ? r : String(rstrip(r, '/')))
+        root = full_folder(codebase)
         known = query(kb, "SELECT id, doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND source_path = ?", (root,))
         isempty(known) || (linkable(first(known).doc_id); return Int(first(known).id))
         add || not_permitted("Not permitted: a folder the knowledge base does not have yet is added by someone with paper.add")
@@ -136,8 +136,8 @@ function projects(kb::KB; path::AbstractString = "", archived::Bool = false)
                root = coalesce(r.root, ""), tasks = Int(r.tasks), open = Int(r.open),
                active_milestone = coalesce(r.active_milestone, "")) for r in rows]
     isempty(path) && return list
-    dir = rstrip(abspath(expand_home(path)), '/')
-    holds(root) = !isempty(root) && (dir == rstrip(root, '/') || startswith(dir, rstrip(root, '/') * "/"))
+    dir = full_folder(path)
+    holds(root) = !isempty(root) && within_folder(dir, full_folder(root))
     return sort!(filter(p -> holds(p.root), list); by = p -> -length(p.root))
 end
 

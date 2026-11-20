@@ -1506,6 +1506,15 @@ end
     @test K.xdg_home("ZEMI_TEST_UNSET", ".local/share") == joinpath(homedir(), ".local", "share")
     @test K.same_path(joinpath(homedir(), ".local/share", "zemi"), joinpath(homedir(), ".local", "share", "zemi", ""))
     @test !K.same_path(joinpath(homedir(), "a"), joinpath(homedir(), "b"))
+    # Folders named for a codebase, on any system, and written one way.
+    @test all(K.is_folder, ["/srv/code", "~/code", "~", "./code", "..", "C:\\Users\\ada\\code", "D:/code", "\\\\server\\share"])
+    @test !any(K.is_folder, ["code-orbits", "https://example.org/a.git", "orbits"])
+    dir = mktempdir()
+    @test K.full_folder(dir * "/") == K.full_folder(dir) == normpath(abspath(dir))
+    @test K.full_folder(joinpath(dir, "a", "..", "b")) == joinpath(K.full_folder(dir), "b")
+    @test K.within_folder(joinpath(K.full_folder(dir), "src"), K.full_folder(dir))
+    @test K.within_folder(K.full_folder(dir), K.full_folder(dir))
+    @test !K.within_folder(K.full_folder(dir) * "x", K.full_folder(dir))
 end
 
 @zset "processes" begin
