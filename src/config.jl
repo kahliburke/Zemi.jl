@@ -101,7 +101,7 @@ function resolve_key(spec::AbstractString, who::AbstractString)
         isempty(k) && error("$who: environment variable $(spec[5:end]) is not set")
         return k
     elseif startswith(spec, "file:")
-        path = expanduser(spec[6:end])
+        path = expand_home(spec[6:end])
         isfile(path) || error("$who: no key file at $path")
         lines = [strip(l) for l in eachline(path) if !isempty(strip(l)) && !startswith(strip(l), '#')]
         isempty(lines) && error("$who: no key in $path")
@@ -203,7 +203,7 @@ end
 "A store as configured, `dir:<path>` with its path resolved by `path`."
 store_path(store::AbstractString, path) = startswith(store, "dir:") && length(store) > 4 ? "dir:" * path(store[5:end]) : store
 
-store_config(t::AbstractDict; path = expanduser) = StoreConfig(; store = store_path(get(t, "store", ""), path), endpoint = get(t, "endpoint", ""),
+store_config(t::AbstractDict; path = expand_home) = StoreConfig(; store = store_path(get(t, "store", ""), path), endpoint = get(t, "endpoint", ""),
     bucket = get(t, "bucket", ""), prefix = get(t, "prefix", ""), region = get(t, "region", "auto"),
     credentials = (c = get(t, "credentials", ""); isempty(c) ? c : path(c)))
 
@@ -231,7 +231,7 @@ Base.@kwdef struct BackupConfig
     max_gb::Float64 = 0.0
 end
 
-function backup_config(t::AbstractDict; path = expanduser)
+function backup_config(t::AbstractDict; path = expand_home)
     d = BackupConfig()
     num(k) = Float64(get(t, k, getfield(d, Symbol(k))))
     dir = String(get(t, "dir", ""))
@@ -324,7 +324,7 @@ Base.@kwdef struct SharedConfig
     confine_agents::Bool = true
 end
 
-function shared_config(t::AbstractDict; path = expanduser)
+function shared_config(t::AbstractDict; path = expand_home)
     d = SharedConfig()
     app = get(t, "github_app", Dict())
     providers = map(get(t, "providers", [])) do p
@@ -654,6 +654,10 @@ end
 
 xdg_home(var, fallback) = get(ENV, var, joinpath(homedir(), fallback))
 
+"`path` with a leading `~` made this account's home folder; Julia's `expanduser` leaves paths alone on Windows."
+expand_home(path::AbstractString) =
+    path == "~" ? homedir() : occursin(r"^~[/\\]", path) ? joinpath(homedir(), path[3:end]) : String(path)
+
 "The config file: `ZEMI_CONFIG` names one (a shared service's, say), else `~/.config/zemi/config.toml`."
 config_path() = get(ENV, "ZEMI_CONFIG", default_config_path())
 default_config_path() = joinpath(xdg_home("XDG_CONFIG_HOME", ".config"), "zemi", "config.toml")
@@ -741,7 +745,7 @@ function load_config(path::AbstractString = config_path())
     end : default_layers(summarizer; field = group.field)
     ranking = get(t, "ranking", Dict())
     # Folders and files named relative to the config file are its folder's.
-    here(p) = abspath(joinpath(dirname(abspath(path)), expanduser(p)))
+    here(p) = abspath(joinpath(dirname(abspath(path)), expand_home(p)))
     data_dir = here(get(t, "data_dir", d.data_dir))
     c = Config(;
         data_dir, content_dir = here(get(t, "content_dir", joinpath(data_dir, "content"))),
@@ -785,7 +789,7 @@ function load_config(path::AbstractString = config_path())
     return c.dataset.role == :none ? c : follow_profile(c)
 end
 
-function dataset_config(t::AbstractDict; path = expanduser)
+function dataset_config(t::AbstractDict; path = expand_home)
     d = DatasetConfig()
     file(k) = (f = get(t, k, getfield(d, Symbol(k))); isempty(f) ? f : path(f))
     return DatasetConfig(; role = Symbol(get(t, "role", "none")), stream = get(t, "stream", d.stream),

@@ -19,7 +19,7 @@ it and its settings, the dataset's credentials, its Cloudflare token and the Git
 function key_files(c::Config; path::AbstractString = config_path())
     files = String[]
     found(x) = nothing
-    found(x::AbstractString) = startswith(x, "file:") && push!(files, expanduser(x[6:end]))
+    found(x::AbstractString) = startswith(x, "file:") && push!(files, expand_home(x[6:end]))
     found(x::AbstractVector) = foreach(found, x)
     found(x::AbstractDict) = foreach(found, values(x))
     for f in (path, settings_path(path))

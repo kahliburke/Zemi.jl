@@ -133,7 +133,7 @@ function sync_pass!(s::Syncer; remote::Union{LibraryRemote,Nothing} = nothing)
         isempty(site) && error("No folders yet: add one")
         remote === nothing && !paused && (remote = library_remote(site))
         for (f, e) in zip(folders, entries)
-            dir, name = abspath(expanduser(f["path"])), String(f["name"])
+            dir, name = abspath(expand_home(f["path"])), String(f["name"])
             if get(f, "remove", "") == "library"
                 remote === nothing && continue
                 remove_from_library!(s, remote, site, dir, name)
@@ -186,7 +186,7 @@ function remove_from_library!(s::Syncer, remote::LibraryRemote, site, dir, name)
     end
     rm(folder_state_path(site, dir); force = true)
     c = load_connect_config()
-    c["folders"] = [f for f in get(c, "folders", Any[]) if !(f["name"] == name && abspath(expanduser(f["path"])) == dir)]
+    c["folders"] = [f for f in get(c, "folders", Any[]) if !(f["name"] == name && abspath(expand_home(f["path"])) == dir)]
     save_connect_config!(c)
     lock(() -> filter!(f -> f["name"] != name, s.status["folders"]), s.guard)
     note!(s, name, :removed, "")
@@ -211,14 +211,14 @@ known of the folder from before is forgotten, so a folder added again is merged 
 machine's files standing) rather than taken for one whose files were removed.
 """
 function add_folder!(site::AbstractString, dir::AbstractString; name::Union{AbstractString,Nothing} = nothing, skip = String[])
-    dir = abspath(expanduser(dir))
+    dir = abspath(expand_home(dir))
     isdir(dir) || error("$dir is not a folder here")
     c = load_connect_config()
     get(c, "site", site) == site || error("zemi connect keeps folders in step with $(c["site"]) already")
     name = String(strip(something(name, basename(rstrip(dir, '/')))))
     isempty(name) && error("A folder needs a name in the library")
     occursin('/', name) && error("A folder's name in the library has no /: $name")
-    others = [f for f in get(c, "folders", Any[]) if abspath(expanduser(f["path"])) != dir]
+    others = [f for f in get(c, "folders", Any[]) if abspath(expand_home(f["path"])) != dir]
     any(f -> f["name"] == name, others) && error("Another folder is $name/ in the library already: give this one another name")
     rm(folder_state_path(site, dir); force = true)
     f = Dict{String,Any}("path" => contractuser(dir), "name" => name, "skip" => String.(skip))
@@ -241,7 +241,7 @@ function remove_folder!(name::AbstractString; from_library::Bool = false)
     if from_library
         folders[i]["remove"] = "library"
     else
-        rm(folder_state_path(c["site"], abspath(expanduser(folders[i]["path"]))); force = true)
+        rm(folder_state_path(c["site"], abspath(expand_home(folders[i]["path"]))); force = true)
         deleteat!(folders, i)
     end
     c["folders"] = folders
@@ -438,7 +438,7 @@ function connect_cli(args::AbstractVector{<:AbstractString})
     plain = [a for (j, a) in enumerate(args) if !startswith(a, "--") && !(j in valued)]
     if length(plain) == 2
         site = plain[1] == "local" ? "local" : site_address(plain[1])
-        dir = abspath(expanduser(plain[2]))
+        dir = abspath(expand_home(plain[2]))
         isdir(dir) || error("$dir is not a folder here")
         c = load_connect_config()
         get(c, "site", site) == site || error("zemi connect keeps folders in step with $(c["site"]) already")

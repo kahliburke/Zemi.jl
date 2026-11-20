@@ -113,11 +113,11 @@ ollama_chat_models(c::Config) = sort!([m.name for m in something(ollama_tags(c),
 ollama_here(c::Config) = occursin(r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?/?$", c.ollama_url)
 
 "Where Ollama keeps its models here."
-ollama_store() = expanduser(get(ENV, "OLLAMA_MODELS", joinpath("~", ".ollama", "models")))
+ollama_store() = expand_home(get(ENV, "OLLAMA_MODELS", joinpath(homedir(), ".ollama", "models")))
 
 "The bytes free on the disk at `path`, or on the nearest folder above it that exists."
 function disk_free(path::AbstractString)
-    p = path
+    p = abspath(path)
     while !ispath(p) && dirname(p) != p
         p = dirname(p)
     end

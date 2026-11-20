@@ -6342,7 +6342,7 @@ end
     cfg = joinpath(mktempdir(), "config.toml")
     write(cfg, "data_dir = \"$(kb.config.data_dir)\"\n[media.backup]\nstore = \"s3\"\nendpoint = \"https://r2.example\"\nbucket = \"kb-files\"\ncredentials = \"~/keys/files\"\n")
     c = K.load_config(cfg)
-    @test c.media_backup.bucket == "kb-files" && c.media_backup.credentials == expanduser("~/keys/files")
+    @test c.media_backup.bucket == "kb-files" && c.media_backup.credentials == joinpath(homedir(), "keys/files")
     @test_throws "[media.backup] credentials" K.media_backup(c)
     # Files and folders named relative to the config are in its folder, wherever it is started from.
     home = mktempdir()

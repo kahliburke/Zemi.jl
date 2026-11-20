@@ -41,7 +41,7 @@ config's, so one `ZEMI_CONFIG` names elsewhere is another knowledge base, served
 """
 function kaimon_serves(args)
     ("--here" in args || !kaimon_runs_zemi()) && return false
-    abspath(expanduser(config_path())) == abspath(default_config_path()) || return false
+    abspath(expand_home(config_path())) == abspath(default_config_path()) || return false
     c = try load_config() catch; nothing end
     where = c === nothing ? () : (("Served at", served_address(c), "zemi open, with the key"),)
     say(:info, "Kaimon runs this knowledge base",

@@ -73,7 +73,7 @@ function add_codebase_from!(kb::KB, what::AbstractString; by = nothing, anyway::
     occursin(r"^[a-z]+://|^[\w.-]+@[\w.-]+:", w) && return link_repository!(kb, w; by, anyway)
     SHARED_MODE[] && !can(caller, "config.edit") &&
         not_permitted("Not permitted (config.edit): a folder on the service's machine is added by someone who changes its configuration; give the repository's address")
-    root = expanduser(w)
+    root = expand_home(w)
     isdir(root) || error("No folder at $w")
     return add_codebase!(kb, root; by, anyway)
 end

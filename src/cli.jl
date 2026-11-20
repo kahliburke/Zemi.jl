@@ -123,7 +123,7 @@ function cli(args::AbstractVector{<:AbstractString})
             if isempty(rest)
                 print(text)
             else
-                write(expanduser(rest[1]), text)
+                write(expand_home(rest[1]), text)
                 println("Wrote $(count(startswith("@"), split(text, '\n'))) entries to $(rest[1])")
             end
         elseif cmd == "backup"
@@ -155,14 +155,14 @@ function cli(args::AbstractVector{<:AbstractString})
                 out === nothing && error("say where to save the key with --out FILE: the secret is not printed")
                 can_write = "--write" in rest
                 key = issue_key(c, rest[2]; write = can_write)
-                path = write_private(abspath(expanduser(out)), key_file(c, key; write = can_write, who = rest[2]))
+                path = write_private(abspath(expand_home(out)), key_file(c, key; write = can_write, who = rest[2]))
                 println("Issued $(key.name) ($(can_write ? "read and write" : "read-only")), saved to $path")
             elseif sub == "list"
                 issued = list_keys(c)
                 isempty(issued) && println("No keys issued.")
                 foreach(k -> println(k.name, "  ", k.status), issued)
             elseif sub == "add" && length(rest) >= 2
-                println(install_key(expanduser(rest[2])))
+                println(install_key(expand_home(rest[2])))
             elseif sub == "issuer"
                 token = Base.getpass("Cloudflare API token (Account API Tokens: Edit)")
                 println("Saved to $(save_issuer_token(read(seekstart(token), String), c)).")

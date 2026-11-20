@@ -40,7 +40,7 @@ end
 
 "Where the Kaimon here keeps the Qdrant it runs (`qdrant.storage_dir`, by default in its cache folder)."
 kaimon_qdrant_storage() =
-    abspath(expanduser(String(kaimon_setting("qdrant", "storage_dir", "KAIMON_QDRANT_STORAGE", joinpath(kaimon_cache_dir(), "qdrant")))))
+    abspath(expand_home(String(kaimon_setting("qdrant", "storage_dir", "KAIMON_QDRANT_STORAGE", joinpath(kaimon_cache_dir(), "qdrant")))))
 
 """
 Keep this process on the Qdrant it found, through `KAIMON_QDRANT_STORAGE`, before it moves to a

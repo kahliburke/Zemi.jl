@@ -273,7 +273,7 @@ the PDF shows; `authors` is comma-separated; `added_by` records who added it.
 function add_pdf_tool(path::String; title::String = "", authors::String = "", added_by::String = "",
                       ingest::Bool = true)::String
     k = kb()
-    id = add_pdf!(k, expanduser(path); title = isempty(title) ? nothing : title,
+    id = add_pdf!(k, expand_home(path); title = isempty(title) ? nothing : title,
         authors = String.(filter(!isempty, strip.(split(authors, ',')))),
         added_by = isempty(added_by) ? nothing : added_by)
     ingest || return "Added $id. Process it with `ingest(papers=\"$id\")`."
@@ -291,7 +291,7 @@ code changes redoes only the files that changed. `name` defaults to the director
 Runs as a background job unless `wait=true`.
 """
 function ingest_code_tool(path::String; name::String = "", wait::Bool = false)::String
-    root = expanduser(path)
+    root = expand_home(path)
     id = add_codebase!(kb(), root; name = isempty(name) ? basename(rstrip(abspath(root), '/')) : name)
     wait && return format_ingest(ingest!(kb(), [id]; progress = tool_progress))
     job = start_job("ingest $id"; ids = [id], changes = changes_stamp(kb().config)) do job

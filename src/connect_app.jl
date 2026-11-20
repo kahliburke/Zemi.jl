@@ -135,7 +135,7 @@ function TK.update!(m::ConnectApp, e::TK.KeyEvent)
         if chosen === nothing
             tell!(m, "No folder to change")
         else
-            dir = abspath(expanduser(chosen["path"]))
+            dir = abspath(expand_home(chosen["path"]))
             isdir(dir) ? (m.chooser = Chooser(chosen["name"], dir, chosen["skip"]); m.dialog = :choose) :
                          tell!(m, "$(chosen["path"]) is not a folder here"; error = true)
         end
@@ -206,7 +206,7 @@ function submit!(m::ConnectApp, value::AbstractString)
                 TK.spawn_task!(() -> sign_in_library(site; open_browser = open_quietly), m.tq, :signed_in)
             end
         elseif m.dialog == :add_path
-            dir = abspath(expanduser(value))
+            dir = abspath(expand_home(value))
             isdir(dir) || error("$value is not a folder here")
             m.pending = Dict{String,Any}("path" => dir)
             ask!(m, :add_name, "Name in the library: ", basename(rstrip(dir, '/')))
@@ -223,7 +223,7 @@ end
 
 "`text` (a path being typed) completed as far as the folders it may name agree."
 function complete_path(text::AbstractString)
-    full = expanduser(text)
+    full = expand_home(text)
     dir, part = endswith(full, '/') ? (full, "") : (dirname(full), basename(full))
     isdir(dir) || return text
     names = sort([n for n in readdir(dir) if startswith(n, part) && (startswith(part, ".") || !startswith(n, ".")) && isdir(joinpath(dir, n))])

@@ -153,7 +153,7 @@ function stores_overlap(a, b)
     adir, bdir = startswith(a.store, "dir:"), startswith(b.store, "dir:")
     adir != bdir && return false
     if adir
-        x, y = normpath(expanduser(a.store[5:end])), normpath(expanduser(b.store[5:end]))
+        x, y = normpath(expand_home(a.store[5:end])), normpath(expand_home(b.store[5:end]))
         return x == y || within_dir(x, y) || within_dir(y, x)
     end
     same = rstrip(lowercase(a.endpoint), '/') == rstrip(lowercase(b.endpoint), '/') && a.bucket == b.bucket

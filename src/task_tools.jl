@@ -63,12 +63,12 @@ function attach_local_files(text::AbstractString, project)
         error("$(join(paths, ", ")) $(length(paths) == 1 ? "is a path" : "are paths") on your machine, which the knowledge base cannot read. " *
               "Upload each with media_upload and link it by the media/… reference it gives, then send this again.")
     end
-    missing_files = filter(p -> !isfile(expanduser(p)), paths)
+    missing_files = filter(p -> !isfile(expand_home(p)), paths)
     isempty(missing_files) || error("No file $(join(missing_files, ", ")): link files that exist, then send this again.")
     return replace(text, LOCAL_FILE_LINK => function (s)
         m = match(LOCAL_FILE_LINK, s)
         machine_path(m[2]) || return s
-        m[1] * add_media!(kb(), read(expanduser(m[2])), basename(m[2]); by = tool_actor().name, project).address * m[3]
+        m[1] * add_media!(kb(), read(expand_home(m[2])), basename(m[2]); by = tool_actor().name, project).address * m[3]
     end)
 end
 
@@ -515,7 +515,7 @@ function task_attach_tool(ref::String; path::String = "", media::String = "", da
         bytes, file = if !isempty(path)
             agent_on_this_machine() || error("A path is read on the knowledge base's machine: upload the file with media_upload, " *
                                              "and attach it with media=\"media/…\" (or let media_upload post it)")
-            p = expanduser(path)
+            p = expand_home(path)
             isfile(p) || not_found("No file $path")
             (read(p), isempty(name) ? basename(p) : name)
         elseif !isempty(data)

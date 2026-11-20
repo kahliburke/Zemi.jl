@@ -41,7 +41,7 @@ end
 The store `s` names; `table`, the config table it came from, for the errors.
 """
 function open_store(d::StoreConfig; table::AbstractString)
-    startswith(d.store, "dir:") && return DirStore(expanduser(d.store[5:end]))
+    startswith(d.store, "dir:") && return DirStore(expand_home(d.store[5:end]))
     d.store in ("s3", "r2") || error("$table store must be \"dir:<path>\" or \"s3\", got \"$(d.store)\"")
     (isempty(d.endpoint) || isempty(d.bucket)) && error("$table needs an endpoint and a bucket")
     isfile(d.credentials) || error("$table credentials: no file at $(d.credentials)")

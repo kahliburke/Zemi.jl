@@ -266,7 +266,7 @@ so again after the code changes redoes only what changed. One a person dropped i
 """
 function add_codebase!(kb::KB, root::AbstractString; name::AbstractString = basename(rstrip(abspath(root), '/')), by = nothing,
                        anyway::Bool = false)
-    root = abspath(expanduser(root))
+    root = abspath(expand_home(root))
     isdir(root) || error("No directory $root")
     # Another folder of the same name is another codebase.
     id = free_code_id(kb, name, basename(dirname(root)); same = r -> coalesce(r.source_path, root) == root)

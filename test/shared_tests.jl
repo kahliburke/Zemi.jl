@@ -1494,6 +1494,27 @@ end
     @test K.link_target(joinpath(dir, "slashed")) == joinpath(dir, "notes")
 end
 
+@zset "home folder paths" begin
+    @test K.expand_home("~") == homedir()
+    @test K.expand_home("~/papers/a.pdf") == joinpath(homedir(), "papers/a.pdf")
+    @test K.expand_home("~\\papers") == joinpath(homedir(), "papers")
+    @test K.expand_home("~ada/x") == "~ada/x" && K.expand_home("data") == "data"
+    # Free space where a folder would be: its nearest existing folder's, for a relative path too.
+    @test K.disk_free(joinpath("no", "such", "folder")) > 0
+    @test isabspath(K.ollama_store())
+end
+
+@zset "processes" begin
+    p = run(`$(Base.julia_cmd()) --startup-file=no -e "sleep(60)"`; wait = false)
+    pid = getpid(p)
+    @test K.pid_alive(pid) && !K.pid_alive(0)
+    file = joinpath(mktempdir(), "test.pid")
+    write(file, string(pid))
+    K.reap_pid_file!(file; matches = _ -> true, what = "test", seconds = 5)
+    wait(p)
+    @test !K.pid_alive(pid) && !isfile(file)
+end
+
 @zset "old site builds are removed" begin
     # The builds that built (each with its record) are kept, the newest two and the one served; one that
     # failed goes, its leftover sources too, and one newer than them all, running still, stays.
