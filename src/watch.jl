@@ -2,6 +2,28 @@
 # each placed against the focus areas and the library as the landscape places papers, and kept with
 # the library papers nearest it, so a reader sees why it was picked.
 
+# A group without focus areas places papers by the library alone: their area and its score are NULL.
+migration!(21, ["""CREATE TABLE watch_new (
+                       doc_id TEXT PRIMARY KEY,
+                       title TEXT NOT NULL,
+                       authors TEXT NOT NULL,
+                       abstract TEXT NOT NULL,
+                       published TEXT NOT NULL,
+                       category TEXT NOT NULL,
+                       score REAL NOT NULL,
+                       area TEXT,
+                       area_score REAL,
+                       nearest TEXT NOT NULL,
+                       found_at TEXT NOT NULL,
+                       relevance INTEGER,
+                       reason TEXT,
+                       judged_by TEXT,
+                       taken TEXT,
+                       taken_at TEXT)""",
+                "INSERT INTO watch_new SELECT * FROM watch",
+                "DROP TABLE watch",
+                "ALTER TABLE watch_new RENAME TO watch"])
+
 """
     watch!(kb; list = list_new_papers, now = now(UTC), progress, cancelled) -> Int
 
@@ -141,7 +163,8 @@ watch_taken_json(kb::KB) = [Dict("id" => t.id, "slug" => page_slug(t.id), "title
 
 The watched papers not in the knowledge base, best placed first: `(; id, title, authors, abstract,
 published, category, score, area, area_score, nearest, relevance, reason)`, `nearest` the library
-papers nearest each (`(; id, title, score)`), `relevance` the judge's 0–3 (`missing` until judged).
+papers nearest each (`(; id, title, score)`), `area` and `area_score` `missing` where the group has
+no focus areas, `relevance` the judge's 0–3 (`missing` until judged).
 """
 function watched(kb::KB)
     rows = query(kb, """SELECT * FROM watch WHERE doc_id NOT IN (SELECT doc_id FROM papers) ORDER BY score DESC""")
@@ -156,8 +179,8 @@ end
 
 "The watched papers as the site's list shows them (see [`watched`](@ref))."
 watch_json(kb::KB) = [Dict("id" => w.id, "title" => w.title, "authors" => first(w.authors, 6), "abstract" => w.abstract,
-                           "published" => w.published, "category" => w.category, "score" => w.score, "area" => w.area,
-                           "area_score" => w.area_score, "relevance" => coalesce(w.relevance, nothing), "reason" => w.reason,
+                           "published" => w.published, "category" => w.category, "score" => w.score, "area" => coalesce(w.area, nothing),
+                           "area_score" => coalesce(w.area_score, nothing), "relevance" => coalesce(w.relevance, nothing), "reason" => w.reason,
                            "nearest" => [Dict("id" => n.id, "slug" => page_slug(n.id), "title" => n.title, "score" => n.score)
                                          for n in w.nearest])
                       for w in watched(kb)]

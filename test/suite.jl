@@ -2744,6 +2744,13 @@ end
         @test !ismissing(K.scalar(wkb, "SELECT value FROM kv WHERE key = 'watch_checked_at'"))   # and checked, so not again at once
         add_papers!(kb, ["2610.00001"])
         @test [p.id for p in watched(wkb)] == ["2610.00002"]                # once added, not new any more
+        # A group without focus areas places them by the library alone.
+        bare = K.KB(K.with_config(w; group = K.Group()), kb.db, kb.lock)
+        posted = [meta("2610.00003", "Another coral coral design", "2026-10-01")]
+        @test watch!(bare; list, now) == 1
+        lone = only(p for p in watched(bare) if p.id == "2610.00003")
+        @test ismissing(lone.area) && ismissing(lone.area_score) && lone.score == first(lone.nearest).score
+        @test only(x for x in K.watch_json(bare) if x["id"] == "2610.00003")["area"] === nothing
         close(kb); close(con)
     finally
         restore_qdrant!(saved)

@@ -16,7 +16,7 @@ import KBJobs from './KBJobs.vue'
 
 type Near = { id: string; slug: string; title: string; score: number }
 type Paper = { id: string; title: string; authors: string[]; abstract: string; published: string; category: string;
-               score: number; area: string; area_score: number; nearest: Near[]; relevance: number | null; reason: string }
+               score: number; area: string | null; area_score: number | null; nearest: Near[]; relevance: number | null; reason: string }
 type Taken = { id: string; slug: string; title: string; relevance: number; reason: string; taken: string; taken_at: string; read: boolean }
 type Watch = { checked: string | null; categories: string[]; days: number; papers: Paper[]; taken?: Taken[] }
 const data = ref<Watch | null>(null)
@@ -39,7 +39,7 @@ watch(finishedJobs, () => load())
 // Those the judge rated related (2) or central (3) to the group's work, most relevant first.
 const promoted = computed(() => (data.value?.papers ?? []).filter(p => (p.relevance ?? 0) >= 2)
   .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0) || b.score - a.score))
-const areas = computed(() => [...new Set((data.value?.papers ?? []).map(p => p.area))].sort())
+const areas = computed(() => [...new Set((data.value?.papers ?? []).map(p => p.area).filter((a): a is string => !!a))].sort())
 const filtered = computed(() => (data.value?.papers ?? []).filter(p => !area.value || p.area === area.value))
 const visible = computed(() => filtered.value.slice(0, shown.value))
 const addable = computed(() => visible.value.filter(p => !added.value.has(p.id)))
@@ -106,7 +106,7 @@ async function add(ps: Paper[]) {
         <span :class="['kbw-rel', { central: p.relevance === 3 }]">{{ RELEVANCE[p.relevance ?? 0] }}</span>
         <div>
           <a :href="`https://arxiv.org/abs/${p.id}`" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
-          <span class="kbw-meta"> · {{ p.area }}</span>
+          <span v-if="p.area" class="kbw-meta"> · {{ p.area }}</span>
           <button v-if="canAdd" type="button" class="kb-outline kbw-add" :disabled="added.has(p.id)" @click="add([p])">{{ added.has(p.id) ? 'Added' : 'Add' }}</button>
           <div class="kbw-reason">{{ p.reason }}</div>
         </div>
@@ -124,11 +124,11 @@ async function add(ps: Paper[]) {
     <p v-if="data && !data.papers.length" class="kbw-dim">{{ data.checked ? 'Nothing new.' : 'Not checked yet.' }}</p>
     <div v-for="p in visible" :key="p.id" class="kbw-paper">
       <div class="kbw-head">
-        <span class="kbw-score" :title="`${p.area} ${p.area_score.toFixed(2)} · nearest paper ${(p.nearest[0]?.score ?? 0).toFixed(2)}`">{{ p.score.toFixed(2) }}</span>
+        <span class="kbw-score" :title="`${p.area ? `${p.area} ${(p.area_score ?? 0).toFixed(2)} · ` : ''}nearest paper ${(p.nearest[0]?.score ?? 0).toFixed(2)}`">{{ p.score.toFixed(2) }}</span>
         <div>
           <a :href="`https://arxiv.org/abs/${p.id}`" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
           <div class="kbw-meta">{{ byline(p.authors, 4) }} · {{ p.published }} · {{ p.category }}
-            · <span class="kbw-area">{{ p.area }}</span>
+            <template v-if="p.area"> · <span class="kbw-area">{{ p.area }}</span></template>
             <button type="button" class="kb-link" @click="toggle(p.id)">{{ open.has(p.id) ? 'hide abstract' : 'abstract' }}</button>
             <button v-if="canAdd" type="button" class="kb-outline kbw-add" :disabled="added.has(p.id)" @click="add([p])">{{ added.has(p.id) ? 'Added' : 'Add' }}</button>
           </div>
