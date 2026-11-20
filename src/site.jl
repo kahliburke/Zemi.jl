@@ -444,13 +444,13 @@ function stamp_templates!(site::AbstractString)
         own(bytes, page) = own_script(bytes, template, page)
         # Each page's slug, from its data file's path: `<page>`, or `<name>/<page>` in a folder with `*`.
         data = joinpath(site, "kb-data", kind)
-        slugs = Set{String}(isdir(data) ? [relpath(joinpath(r, f[1:end-5]), data) for (r, _, fs) in walkdir(data) for f in fs if endswith(f, ".json")] :
+        slugs = Set{String}(isdir(data) ? [slash_relpath(joinpath(r, f[1:end-5]), data) for (r, _, fs) in walkdir(data) for f in fs if endswith(f, ".json")] :
                                           String[])
         nested = occursin('*', folder)
         # The folders of the kind's pages, each with the slug its pages' names are prefixed with.
         folders = if nested
             before, after = rstrip(first(split(folder, '*')), '/'), lstrip(last(split(folder, '*')), '/')
-            named(d) = isempty(after) ? joinpath(before, d) : joinpath(before, d, after)
+            named(d) = isempty(after) ? "$before/$d" : "$before/$d/$after"
             names = isdir(joinpath(site, before)) ? readdir(joinpath(site, before)) : String[]
             union([named(d) => d * "/" for d in names if isdir(joinpath(site, named(d)))],
                   [named(dirname(s)) => dirname(s) * "/" for s in slugs])
@@ -462,7 +462,7 @@ function stamp_templates!(site::AbstractString)
             names = replace(dir, "/" => "_") * "_"
             for page in mine
                 files = [joinpath(site, dir, page * ".html") => html;
-                         [joinpath(assets, names * page * ".md" * copy_tail(tail)) => own(bytes, joinpath(dir, page)) for (tail, bytes) in scripts]]
+                         [joinpath(assets, names * page * ".md" * copy_tail(tail)) => own(bytes, "$dir/$page") for (tail, bytes) in scripts]]
                 all(((f, b),) -> same(f, b), files) && continue
                 mkpath(joinpath(site, dir))
                 foreach(((f, b),) -> same(f, b) || write_atomic(f, b), files)
@@ -476,7 +476,7 @@ function stamp_templates!(site::AbstractString)
             end
             for f in (isdir(assets) ? readdir(assets) : String[])
                 m = startswith(f, names) ? match(nested ? r"^(.+)\.md(\..+\.js)$" : r"^([^_]+)\.md(\..+\.js)$", f[ncodeunits(names)+1:end]) : nothing
-                if m !== nothing && !(m[1] in keep) && any(((t, b),) -> copy_tail(t) == m[2] && same(joinpath(assets, f), own(b, joinpath(dir, m[1]))), scripts)
+                if m !== nothing && !(m[1] in keep) && any(((t, b),) -> copy_tail(t) == m[2] && same(joinpath(assets, f), own(b, "$dir/$(m[1])")), scripts)
                     rm(joinpath(assets, f))
                 end
             end
@@ -630,7 +630,7 @@ stubs of templated pages (see `TEMPLATED`): a refresh that changes it needs a bu
 function built_pages_digest(dir::AbstractString)
     stubs = Set(template_markdown(k) for (k, _) in TEMPLATED)
     pages = isdir(dir) ? sort!([joinpath(r, f) for (r, _, fs) in walkdir(dir) for f in fs if endswith(f, ".md")]) : String[]
-    texts = ((relpath(f, dir), read(f, String)) for f in pages)
+    texts = ((slash_relpath(f, dir), read(f, String)) for f in pages)
     return bytes2hex(sha256(join((p * "\n" * t for (p, t) in texts if !(t in stubs)), "\0")))
 end
 

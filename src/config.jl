@@ -661,6 +661,9 @@ function same_path(a::AbstractString, b::AbstractString)
     return whole(a) == whole(b)
 end
 
+"`path` relative to `root` with `/` between its parts on every system, as an address or a name shared between machines is."
+slash_relpath(path::AbstractString, root::AbstractString) = join(splitpath(relpath(path, root)), '/')
+
 "`path` with a leading `~` made this account's home folder; Julia's `expanduser` leaves paths alone on Windows."
 expand_home(path::AbstractString) =
     path == "~" ? homedir() : occursin(r"^~[/\\]", path) ? joinpath(homedir(), path[3:end]) : String(path)

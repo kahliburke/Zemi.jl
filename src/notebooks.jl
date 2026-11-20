@@ -41,7 +41,7 @@ function paper_notebooks(kb::KB, id::AbstractString)
     if isdir(dir)
         for f in sort!(readdir(dir))
             endswith(f, ".jl") || continue
-            path = relpath(joinpath(dir, f), kb.config.content_dir)
+            path = slash_relpath(joinpath(dir, f), kb.config.content_dir)
             path in known || push!(out, (; path, title = notebook_title(joinpath(dir, f)), kind = "shared", summary = "",
                                            added_by = "", idea = ""))
         end
@@ -123,7 +123,7 @@ function make_notebook!(kb::KB, id::AbstractString; idea::AbstractString = "", p
     rel = if !isempty(failed)
         first(failed).path
     else
-        relpath(free_notebook_file(kb, notebook_dir(kb.config, id), "computed"; numbered = true), kb.config.content_dir)
+        slash_relpath(free_notebook_file(kb, notebook_dir(kb.config, id), "computed"; numbered = true), kb.config.content_dir)
     end
     path = content_path(kb.config, rel)
     mkpath(dirname(path))
@@ -217,7 +217,7 @@ function add_notebook!(kb::KB, id::AbstractString, text::AbstractString; name::A
     dir = mkpath(notebook_dir(kb.config, id))
     file = free_notebook_file(kb, dir, base)
     write(file, text)
-    rel = relpath(file, kb.config.content_dir)
+    rel = slash_relpath(file, kb.config.content_dir)
     title = isempty(strip(title)) ? notebook_title(file) : strip(title)
     execute!(kb, """INSERT INTO notebooks (doc_id, path, kind, title, status, added_by, started_at, done_at)
                     VALUES (?, ?, 'upload', ?, 'done', ?, ?, ?)""", (id, rel, title, added_by, now_iso(), now_iso()))

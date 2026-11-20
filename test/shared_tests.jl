@@ -1506,6 +1506,7 @@ end
     @test K.xdg_home("ZEMI_TEST_UNSET", ".local/share") == joinpath(homedir(), ".local", "share")
     @test K.same_path(joinpath(homedir(), ".local/share", "zemi"), joinpath(homedir(), ".local", "share", "zemi", ""))
     @test !K.same_path(joinpath(homedir(), "a"), joinpath(homedir(), "b"))
+    @test K.slash_relpath(joinpath(homedir(), "site", "code", "x", "index"), joinpath(homedir(), "site")) == "code/x/index"
     # Folders named for a codebase, on any system, and written one way.
     @test all(K.is_folder, ["/srv/code", "~/code", "~", "./code", "..", "C:\\Users\\ada\\code", "D:/code", "\\\\server\\share"])
     @test !any(K.is_folder, ["code-orbits", "https://example.org/a.git", "orbits"])

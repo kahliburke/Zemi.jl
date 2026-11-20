@@ -113,7 +113,7 @@ end
 function all_files(dir::AbstractString)
     out = String[]
     for (d, _, fs) in walkdir(dir), f in fs                 # nothing pruned, so walkdir's listing holds
-        push!(out, join(splitpath(relpath(joinpath(d, f), dir)), '/'))
+        push!(out, slash_relpath(joinpath(d, f), dir))
     end
     return sort!(out)
 end

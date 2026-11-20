@@ -161,7 +161,7 @@ function copy_files!(c::Config, dest::AbstractString, previous)
                 path = joinpath(dir, f)
                 st = lstat(path)
                 isfile(st) || continue
-                rel = join(splitpath(relpath(path, c.data_dir)), '/')
+                rel = slash_relpath(path, c.data_dir)
                 to = joinpath(dest, "files", rel)
                 mkpath(dirname(to))
                 linked = get(before, rel, nothing) == (Int(st.size), st.mtime) &&

@@ -69,8 +69,8 @@ function site_source_files(c::Config; package::AbstractString = pkgdir(@__MODULE
         isfile(p) && push!(files, p)
     end
     own = tree_files(c.content_dir)
-    return [["zemi/" * relpath(f, package) => f for f in files if !env_manifest(f)];
-            ["content/" * relpath(f, c.content_dir) => f for f in own if !env_manifest(f)]]
+    return [["zemi/" * slash_relpath(f, package) => f for f in files if !env_manifest(f)];
+            ["content/" * slash_relpath(f, c.content_dir) => f for f in own if !env_manifest(f)]]
 end
 
 """

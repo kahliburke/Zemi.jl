@@ -119,7 +119,7 @@ a person without admin rights replace.
 function switch_site!(c::Config, site::AbstractString)
     f = current_file(c)
     tmp = f * ".new"
-    write(tmp, join(splitpath(relpath(site, site_root(c))), "/"))
+    write(tmp, slash_relpath(site, site_root(c)))
     islink(f) && rm(f)                                      # an earlier version's link
     Base.Filesystem.rename(tmp, f)
 end

@@ -18,7 +18,7 @@ notebook environments' manifests left out.
 """
 function content_files(c::Config)
     root = c.content_dir
-    return Dict(join(splitpath(relpath(f, root)), '/') => bytes2hex(open(sha256, f)) for f in tree_files(root) if !env_manifest(f))
+    return Dict(slash_relpath(f, root) => bytes2hex(open(sha256, f)) for f in tree_files(root) if !env_manifest(f))
 end
 
 "Whether `path` can name a content file: relative, within the content, and not hidden."
