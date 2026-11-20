@@ -656,7 +656,10 @@ end
 xdg_home(var, fallback) = normpath(get(ENV, var, joinpath(homedir(), fallback)))
 
 "Whether paths `a` and `b` name the same place, however each is written."
-same_path(a::AbstractString, b::AbstractString) = normpath(abspath(a)) == normpath(abspath(b))
+function same_path(a::AbstractString, b::AbstractString)
+    whole(p) = rstrip(normpath(abspath(p)), ('/', '\\'))
+    return whole(a) == whole(b)
+end
 
 "`path` with a leading `~` made this account's home folder; Julia's `expanduser` leaves paths alone on Windows."
 expand_home(path::AbstractString) =
