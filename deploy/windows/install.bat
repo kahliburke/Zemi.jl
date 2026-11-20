@@ -6,7 +6,8 @@ rem   install.bat BRANCH        Zemi from a branch of github.com/kahliburke/Zemi
 rem   install.bat C:\path\Zemi  Zemi from a checkout on this machine
 rem
 rem Each part is skipped where this account already has it: Julia, MuPDF's mutool (reads papers),
-rem Ollama (search by meaning), Git and Claude Code (agents that summarize), then Kaimon and Zemi.
+rem Ollama (search by meaning), Git and Claude Code (agents that summarize), then Kaimon and Zemi,
+rem with Kaimon set up to run Zemi: the questions of its first run answered for one person's machine.
 rem Programs go in %LOCALAPPDATA%\Programs, and their folders on this account's PATH.
 rem The rest of this file is PowerShell, run as a command rather than a script file, which policies
 rem against running scripts leave alone.
@@ -82,6 +83,17 @@ if (Have ollama) { Write-Host "Found $((Get-Command ollama).Source)" } else {
     Add-Path (Join-Path $Programs 'Ollama')
     $Done += 'Ollama'
 }
+# Ollama serves from its tray program: started now, and at each sign-in from this account's Startup folder.
+$app = Join-Path (Split-Path (Get-Command ollama).Source) 'ollama app.exe'
+if (Test-Path $app) {
+    $startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'Ollama.lnk'
+    if (-not (Test-Path $startup)) {
+        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($startup)
+        $link.TargetPath = $app
+        $link.Save()
+    }
+    if (-not (Get-Process 'ollama app' -ErrorAction SilentlyContinue)) { Start-Process $app }
+}
 
 Step 'Git'
 # Claude Code runs its commands in Git's bash.
@@ -121,11 +133,43 @@ Set-Content $script "using Pkg`nPkg.Apps.add(`"Kaimon`")`n$zemi`n"
 if ($LASTEXITCODE -ne 0) { throw "Installing Kaimon and Zemi failed" }
 $Done += 'Kaimon', 'Zemi'
 
+Step 'Kaimon settings'
+# The answers to Kaimon's first-run setup, for one person on their own machine: only this account's
+# programs reach it, with no keys, and it searches code through llama.cpp and a Qdrant it runs itself.
+# Settings already there are left as they are.
+$kaimonConfig = Join-Path $env:APPDATA 'Kaimon'
+$kaimonCache = Join-Path $env:LOCALAPPDATA 'Kaimon'
+New-Item -ItemType Directory -Force $kaimonConfig | Out-Null
+function Write-Settings($name, $value) {
+    $path = Join-Path $kaimonConfig $name
+    if (Test-Path $path) { Write-Host "Found $path"; return }
+    [IO.File]::WriteAllText($path, ($value | ConvertTo-Json -Depth 5))   # UTF-8 without a byte order mark
+    Write-Host "Wrote $path"
+}
+Write-Settings 'config.json' ([ordered]@{
+    mode = 'lax'; api_keys = @(); allowed_ips = @('127.0.0.1', '::1'); port = 2828
+    created_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); editor = 'vscode'
+    gate_setup_version = 1                                   # other Julia sessions are left alone
+})
+Write-Settings 'search.json' @{ embedding = @{ backend = 'llamacpp' } }
+# Qdrant and llama.cpp, in the environments Kaimon runs them from.
+$script = Join-Path $Work 'services.jl'
+Set-Content $script @"
+import Pkg
+for (dir, jll) in ((raw"$kaimonCache\service-env", "Qdrant_jll"), (raw"$kaimonCache\service-env-llamacpp", "llama_cpp_jll"))
+    Pkg.activate(dir)
+    haskey(Pkg.project().dependencies, jll) || Pkg.add(jll)
+end
+"@
+& julia --startup-file=no $script
+if ($LASTEXITCODE -ne 0) { throw "Installing Qdrant and llama.cpp for Kaimon failed" }
+& zemi kaimon
+if ($LASTEXITCODE -ne 0) { throw "Adding Zemi to Kaimon failed" }
+
 Write-Host "`nInstalled: $(if ($Done) { $Done -join ', ' } else { 'nothing new' })" -ForegroundColor Green
 Write-Host @"
 
 In a new terminal, which has the PATH this set:
   claude        once, to sign in to Claude Code, for agents that summarize
-  kaimon        once, to set it up; then
-  zemi kaimon   to have Kaimon run the knowledge base, or zemi to run it on its own
+  kaimon        to run Kaimon, which runs the knowledge base
 "@
