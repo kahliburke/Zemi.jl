@@ -157,14 +157,10 @@ if (Test-Path $settings) { Write-Host "Found $settings" } else {
     [IO.File]::WriteAllText($settings, $json)                # UTF-8 without a byte order mark
     Write-Host "Wrote $settings"
 }
-# Qdrant, in the environment Kaimon runs it from.
+# Qdrant, where Kaimon runs it from, installed as Kaimon installs it.
 $script = Join-Path $Work 'qdrant.jl'
-Set-Content $script @"
-import Pkg
-Pkg.activate(raw"$(Join-Path $env:LOCALAPPDATA 'Kaimon\service-env')")
-haskey(Pkg.project().dependencies, "Qdrant_jll") || Pkg.add("Qdrant_jll")
-"@
-& julia --startup-file=no $script
+Set-Content $script 'import Kaimon; Kaimon.managed_qdrant_installed() || run(Kaimon.qdrant_install_command())'
+& julia --startup-file=no "--project=$(Join-Path $HOME '.julia\environments\apps\Kaimon')" $script
 if ($LASTEXITCODE -ne 0) { throw "Installing Qdrant for Kaimon failed" }
 # Claude Code reaches Kaimon's tools, and the knowledge base's among them, at Kaimon's address: with
 # no key while Kaimon takes none from this machine's programs.

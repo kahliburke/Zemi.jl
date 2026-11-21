@@ -1,5 +1,47 @@
 # Installation
 
+## In one step
+
+An installer sets up everything below for your account and connects it:
+- Julia;
+- MuPDF's `mutool`;
+- Ollama, started when you log in, with the embedding models pulled;
+- Git;
+- Claude Code;
+- Kaimon, with Zemi added as one of its extensions.
+
+Kaimon's first-run questions are answered for one person's machine: only programs running as you can
+reach it, and it needs no key. It runs its own Qdrant and searches code through Ollama. Claude Code is
+connected to Kaimon's tools, which include the knowledge base's. Anything already installed is left
+as it is, so the installer can be run again.
+
+On macOS or Linux:
+
+```
+curl -fsSL https://raw.githubusercontent.com/kahliburke/Zemi.jl/main/deploy/install-personal.sh | bash
+```
+
+On macOS it installs through [Homebrew](https://brew.sh), which it needs. On Linux it uses the
+system's packages where you may use `sudo`. Otherwise it installs into `~/.local`, and builds
+`mutool` there if your system's version is too old, which needs a C compiler.
+
+On Windows, without administrator rights, in a Command Prompt:
+
+```
+curl -fsSLO https://raw.githubusercontent.com/kahliburke/Zemi.jl/main/deploy/windows/install.bat
+install.bat
+```
+
+Programs go in `%LOCALAPPDATA%\Programs`, and their folders go on your account's `PATH`.
+
+Both installers take an argument: a branch of the repository, or a checkout of Zemi.jl to install
+from. Afterwards, in a new terminal, run `claude` once to sign in. Then run `kaimon`, which starts the
+knowledge base at `http://localhost:8000`. Continue with [Setting up](#Setting-up).
+
+For a group's shared server, see [Deployment](deployment.md) instead.
+
+The sections below are the manual steps the installers take.
+
 ## Requirements
 
 - [Julia](https://julialang.org/downloads/) 1.12 or later

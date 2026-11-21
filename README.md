@@ -35,7 +35,17 @@ after the ゼミ (*zemi*), a Japanese university research seminar.
 
 ## Quick start
 
-Julia 1.12+, and `mutool` to read papers
+On macOS or Linux, one step installs Zemi with what it uses (Julia, MuPDF, Ollama, Claude Code and
+Kaimon) for your account, set up and connected:
+
+```
+curl -fsSL https://raw.githubusercontent.com/kahliburke/Zemi.jl/main/deploy/install-personal.sh | bash
+```
+
+On Windows, `deploy/windows/install.bat` does the same without administrator rights (see
+[Installation](https://kahliburke.github.io/Zemi.jl/installation)).
+
+By hand: Julia 1.12+, and `mutool` to read papers
 ([requirements](https://kahliburke.github.io/Zemi.jl/installation)). With
 [Kaimon](https://github.com/kahliburke/Kaimon.jl), which runs it for you along with Qdrant and the
 agents:
