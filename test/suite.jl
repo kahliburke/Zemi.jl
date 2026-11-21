@@ -1616,14 +1616,14 @@ end
     rate("2610.00011", 3, "The group's own question."); rate("2610.00012", 2, "Bears on the reef work.")
     rate("2610.00013", 1, "Tangential."); rate("2610.00014", 0, "Another field.")
     read, recorded = String[], String[]
-    took = K.take_watched!(kb; read_in_full = ids -> append!(read, ids), record = ids -> append!(recorded, ids))
+    took = K.take_watched!(kb; read_in_full = (ids, _) -> append!(read, ids), record = ids -> append!(recorded, ids))
     # Central and related read in full, peripheral recorded, unrelated let go.
     @test took.read == read == ["2610.00011", "2610.00012"] && took.recorded == recorded == ["2610.00013"]
     @test ismissing(K.paper_id(kb, "2610.00014"))
     @test only(K.mentions(kb, "2610.00011")).source == "watch" && only(K.mentions(kb, "2610.00011")).message == "central: The group's own question."
     @test [(t.id, t.taken, t.read) for t in K.watch_taken(kb)][1:3] ==
           [("2610.00011", "read", false), ("2610.00012", "read", false), ("2610.00013", "recorded", false)]
-    @test isempty(K.take_watched!(kb; read_in_full = ids -> error("again"), record = ids -> error("again")).read)   # each once
+    @test isempty(K.take_watched!(kb; read_in_full = (ids, _) -> error("again"), record = ids -> error("again")).read)   # each once
     # Taken in, they are still the paper of the day's candidates; their pages say how they came.
     @test [c.id for c in K.daily_candidates(kb)][1:2] == ["2610.00011", "2610.00012"]
     K.execute!(kb, "UPDATE papers SET metadata_at = ?, title = 'Paper 2610.00011' WHERE doc_id = '2610.00011'", (K.now_iso(),))
@@ -1633,14 +1633,22 @@ end
     # Removed, it leaves the list and is not taken in again.
     K.remove_paper!(kb, "2610.00013")
     @test "2610.00013" ∉ [t.id for t in K.watch_taken(kb)]
-    @test K.take_watched!(kb; read_in_full = ids -> error("again"), record = ids -> error("again")).recorded == String[]
+    @test K.take_watched!(kb; read_in_full = (ids, _) -> error("again"), record = ids -> error("again")).recorded == String[]
     close(kb)
     # Thresholds above 3 take nothing in.
     kb = open_kb(temp_config(layers = Layer[], watch_read_from = 4, watch_record_from = 4))
     K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score, nearest, found_at, relevance)
                       VALUES ('2610.00021', 'P', '[]', '', '2026-10-10', 'x', 0.5, 'A', 0.5, '[]', ?, 3)""", (K.now_iso(),))
-    @test K.take_watched!(kb; read_in_full = ids -> error("none"), record = ids -> error("none")) == (; read = String[], recorded = String[])
+    @test K.take_watched!(kb; read_in_full = (ids, _) -> error("none"), record = ids -> error("none")) == (; read = String[], recorded = String[])
     @test ismissing(K.paper_id(kb, "2610.00021"))
+    close(kb)
+    # Cancelled, the watch stops between papers, and the next takes in the rest.
+    kb = open_kb(temp_config(layers = Layer[]))
+    rate("2610.00031", 3, "First."); rate("2610.00032", 3, "Second.")
+    read = String[]
+    took = K.take_watched!(kb; read_in_full = (ids, _) -> append!(read, ids), record = ids -> nothing, cancelled = () -> !isempty(read))
+    @test took.read == read == ["2610.00031"] && ismissing(K.paper_id(kb, "2610.00032"))
+    @test K.take_watched!(kb; read_in_full = (ids, _) -> append!(read, ids), record = ids -> nothing).read == ["2610.00032"]
     close(kb)
 end
 
@@ -4327,7 +4335,7 @@ end
         K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score,
                           nearest, found_at, relevance, reason) VALUES ('2609.00002', 'P', '[]', '', '2026-10-10', 'x', 0.5, 'A', 0.5,
                           '[]', ?, 3, 'Central')""", (K.now_iso(),))
-        @test K.take_watched!(kb; read_in_full = ids -> error("none"), record = ids -> error("none")) == (; read = String[], recorded = String[])
+        @test K.take_watched!(kb; read_in_full = (ids, _) -> error("none"), record = ids -> error("none")) == (; read = String[], recorded = String[])
         @test "2609.00002" ∉ [c.id for c in K.daily_candidates(kb)]
 
         # Through the API: dropping with a reason, the list, a refusal that says why, restoring.

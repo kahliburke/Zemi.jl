@@ -171,14 +171,15 @@ end
     take_watched!(kb; progress, cancelled, read_in_full, record) -> (; read, recorded)
 
 Take the judged watched papers into the knowledge base by their rating: those rated at least
-`watch_read_from` read in full (see [`ingest!`](@ref)), those rated at least `watch_record_from`
-recorded (the arXiv record fetched, the title and abstract embedded, see [`embed_records!`](@ref)).
+`watch_read_from` read in full (see [`ingest!`](@ref)) one by one, until `cancelled()` leaves the
+rest to the next watch, and those rated at least `watch_record_from` recorded (the arXiv record
+fetched, the title and abstract embedded, see [`embed_records!`](@ref)).
 Each arrives as "added from the arXiv watch", with its rating and the judge's sentence. Where papers
-cannot be read here they are recorded instead. Returns the ids taken each way. `read_in_full(ids)`
+cannot be read here they are recorded instead. Returns the ids taken each way. `read_in_full(ids, progress)`
 and `record(ids)` do the reading and recording (stand-ins in tests, which reach no arXiv).
 """
 function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> false,
-                       read_in_full = ids -> ingest!(kb, ids; progress, cancelled, source = "watch"),
+                       read_in_full = (ids, step) -> ingest!(kb, ids; progress = step, cancelled, source = "watch"),
                        record = ids -> (refresh_metadata!(kb, ids);
                                         isempty(cannot_run(kb, "embed", ids)) && embed_records!(kb, ids; progress, cancelled)))
     c = kb.config
@@ -206,12 +207,15 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
         arrived!(recorded, "recorded")
         record(recorded)
     end
-    if !isempty(read) && !cancelled()
-        progress("reading $(length(read)) new paper(s) in full")
-        arrived!(read, "read")
-        read_in_full(read)
+    # One at a time, so that a cancelled watch leaves the rest to be taken by the next.
+    done = String[]
+    for (i, id) in enumerate(read)
+        cancelled() && break
+        arrived!([id], "read")
+        read_in_full([id], m -> progress("reading new paper $i of $(length(read)) in full: $m"))
+        push!(done, id)
     end
-    return (; read, recorded)
+    return (; read = done, recorded)
 end
 
 """

@@ -732,7 +732,7 @@ function ingest!(kb::KB, ids::AbstractVector{<:AbstractString};
     results = []
     for (i, id) in enumerate(ids)
         cancelled() && break
-        step(msg) = progress("[$i/$(length(ids))] $id: $msg")
+        step(msg) = progress(length(ids) == 1 ? "$id: $msg" : "[$i/$(length(ids))] $id: $msg")
         t0 = time()
         try
             r = lock(() -> ingest_paper!(kb, id, layers; force_parse, step), paper_lock(id))
