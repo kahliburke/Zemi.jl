@@ -516,14 +516,20 @@ end
 """
 Give every piece its section. Pieces before the first heading are front matter (section 0);
 paragraphs under a references heading, or that read as references wherever they are (see
-[`reads_as_references`](@ref)), become `:reference`. When a paper has no headings at all, its
-text is kept as body paragraphs rather than front matter.
+[`reads_as_references`](@ref)), become `:reference`. A paper with no headings at all is one
+section, "Full text", of everything but its title, so it is searched and summarized by section
+like any other.
 """
 function assign_sections(pieces::Vector{Piece}, npages)
     has_headings = any(p -> p.kind == :heading, pieces)
     sections = Section[]
     stack = Section[]
     current, in_refs = 0, false
+    body = [p for p in pieces if p.kind != :title]
+    if !has_headings && !isempty(body)
+        push!(sections, Section(1, 1, "", "Full text", "Full text", minimum(p.page for p in body), maximum(p.page for p in body)))
+        current = 1
+    end
     out = Piece[]
     for p in pieces
         if p.kind == :heading
@@ -545,7 +551,7 @@ function assign_sections(pieces::Vector{Piece}, npages)
         elseif kind == :paragraph && (in_refs || reads_as_references(p.text))
             kind = :reference
         end
-        push!(out, Piece(kind, p.page, p.bbox, p.text, current, p.level, p.number))
+        push!(out, Piece(kind, p.page, p.bbox, p.text, kind == :title && !has_headings ? 0 : current, p.level, p.number))
     end
     # A section runs to the page where the next one starts.
     for (i, s) in enumerate(sections)

@@ -2442,6 +2442,13 @@ end
                            piece(:paragraph, bib)], 1)
     @test [x.kind for x in p.pieces if x.kind != :heading] == [:paragraph, :paragraph, :reference]
     @test !any(c -> occursin("del-Monte", c.text), K.chunk_paper(p))
+    # A paper with no headings is one section of everything but its title, its passages in it.
+    paged(kind, text, page) = K.Piece(kind, page, (0.0, 0.0, 0.0, 0.0), text, 0, 0, "")
+    flat = K.assign_sections([paged(:title, "On larval supply", 1), paged(:paragraph, body, 1), paged(:paragraph, body, 3)], 3)
+    s = only(flat.sections)
+    @test s.title == "Full text" && (s.page_start, s.page_end) == (1, 3)
+    @test [x.section for x in flat.pieces] == [0, 1, 1]
+    @test all(c -> c.section == 1, K.chunk_paper(flat))
 end
 
 @zset "references" begin
