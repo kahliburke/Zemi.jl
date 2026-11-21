@@ -24,6 +24,8 @@
   a medium, demi, heavy or black weight are recognized.
 - **An agent's question to anyone** also reaches the person it works for, as on a knowledge base of
   one.
+- **An agent taking a codebase task** is told how its commits name it (`Tasks: KB-12`, or
+  `Fixes KB-12` in the one that finishes it), so they are recorded as the task's work.
 - **Record pages** are served under `zemi dev`, and a private record's page says it is private.
 - **A codebase whose files cannot be listed** shows what Git said.
 - **The guide** starts with the site's Setup and Configuration pages, with screenshots.
