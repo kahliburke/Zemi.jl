@@ -584,8 +584,10 @@ end
 route!(c -> settings_json(c.kb), "GET", "/api/config"; need = "config.view")
 route!("POST", "/api/config"; need = "config.edit") do c
     changes = Dict{String,Any}(get(json_body(c), "changes", Dict()))
+    group = any(startswith("group."), keys(changes))
+    group && note_watch_basis!(c.kb)        # what the watched papers were judged against, before the change
     save_settings!(c.kb, changes)
-    if any(startswith("group."), keys(changes))
+    if group
         rebuild_site!(c.kb)                 # the site's title, front page and questions
         watch_regrouped!(c.kb)              # the watched papers, placed and judged for the group as it is now
     end

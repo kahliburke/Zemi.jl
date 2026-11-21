@@ -2787,6 +2787,10 @@ end
         @test K.replace_watched!(bare) == 0 && K.watch_regrouped!(bare) === nothing
         @test all(p -> p.relevance == 1 && p.area !== missing, watched(bare))
         @test K.scalar(kb, "SELECT value FROM kv WHERE key = 'watch_basis'") == K.watch_basis(bare.config)
+        # Recorded before a change to the group (as the Configuration page saves one), the change is seen.
+        K.execute!(kb, "DELETE FROM kv WHERE key = 'watch_basis'")
+        K.note_watch_basis!(bare); K.note_watch_basis!(wkb)               # the first recorded stands
+        @test K.replace_watched!(wkb) == length(watched(wkb)) && all(p -> ismissing(p.relevance), watched(wkb))
         close(kb); close(con)
     finally
         restore_qdrant!(saved)

@@ -114,6 +114,15 @@ vector_blob(u::AbstractVector) = collect(reinterpret(UInt8, Float32.(u)))
 blob_vector(b::AbstractVector{UInt8}) = Float64.(reinterpret(Float32, b))
 
 """
+    note_watch_basis!(kb)
+
+Record the group as it is now as what the watched papers were placed and judged against, where no
+basis is recorded yet (see [`replace_watched!`](@ref)): before a change to the group, so the change
+is seen as one.
+"""
+note_watch_basis!(kb::KB) = execute!(kb, "INSERT OR IGNORE INTO kv VALUES ('watch_basis', ?)", (watch_basis(kb.config),))
+
+"""
     replace_watched!(kb; progress) -> Int
 
 When the group has changed since the watched papers were placed and judged (see [`watch_basis`](@ref)),
@@ -261,6 +270,7 @@ embedded here; `nothing` otherwise.
 function watch_regrouped!(kb::KB)
     stored = scalar(kb, "SELECT value FROM kv WHERE key = 'watch_basis'")
     (ismissing(stored) || stored == watch_basis(kb.config)) && return nothing
+    ismissing(scalar(kb, "SELECT 1 FROM watch WHERE taken IS NULL LIMIT 1")) && return nothing
     isempty(cannot_run(kb, "embed", String[])) || return nothing
     return start_watch(kb)
 end
