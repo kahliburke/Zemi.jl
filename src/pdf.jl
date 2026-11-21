@@ -220,8 +220,16 @@ function argmax_weight(key, weight, items)
     return first(argmax(last, collect(tally)))
 end
 
-styled(b::RawBlock, body) = any(l -> any(s -> s.bold || s.italic || occursin(r"CSC|SC\d|Caps|Bold|Italic|-Bd|-It"i, s.font) ||
-                                                     s.size > 1.05 * body, l.spans), b.lines)
+"""
+A font name that says it is set apart from body text: small caps, italic, or a weight heavier than
+regular, which some families name other than Bold (Nimbus Roman's `Medi`, `Demi`, `Heavy`,
+`Black`) and MuPDF does not mark as bold. Most families' `Medium` is lighter than their bold, and
+sets text such as affiliations, so it is not one.
+"""
+const EMPHASIS_FONT = r"CSC|SC\d|Caps|Bold|Italic|-Bd|-It|-Medi$|Demi|Heavy|Black"i
+
+styled(b::RawBlock, body) = any(l -> any(s -> s.bold || s.italic || occursin(EMPHASIS_FONT, s.font) || s.size > 1.05 * body,
+                                         l.spans), b.lines)
 
 # ── Classification ──────────────────────────────────────────────────────────
 

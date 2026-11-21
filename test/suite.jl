@@ -240,6 +240,20 @@ end
     @test any(t -> occursin("Cartan-Kähler", t), texts)
     @test !("3" in texts)
 
+    # Headings in a family's heavier weight named other than Bold, which MuPDF does not mark as bold,
+    # set in small capitals a little below the body's size; the same words in the body's weight are text.
+    regu(y, t; size = 9.0) = span(60, y, t; size, font = "NimbusRomNo9L-Regu")
+    medi(y, t) = span(60, y, t; size = 8.0, font = "NimbusRomNo9L-Medi")
+    weights = [block(1, line(medi(100, "I. INTRODUCTION"))),
+               block(1, line(regu(120, "Halos are where galaxies form, and their mass is mostly dark.")),
+                        line(regu(132, "The rotation of disks constrains how it is spread."))),
+               block(1, line(regu(160, "A. Note on the data"))),
+               block(2, line(medi(100, "II. THE MODEL"))),
+               block(2, line(regu(120, "The model adds one term to the field equations, fixed by the data.")),
+                        line(regu(132, "Its strength is set once, for every scale.")))]
+    w = parse_blocks(weights, sizes[1:2])
+    @test [s.title for s in w.sections] == ["I. INTRODUCTION", "II. THE MODEL"]
+
     # A journal's front page: its masthead names the journal larger than the title, and a header line
     # cites the paper. The title is the paper's, and the citation is where it appeared.
     front = [
