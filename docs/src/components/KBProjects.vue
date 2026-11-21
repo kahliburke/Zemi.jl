@@ -1216,7 +1216,7 @@ async function saveNote() {
 }
 // A note removed: gone with its earlier texts; the activity keeps that it was.
 async function removeNote(e: TaskEvent) {
-  if (!open.value || !confirm(`Remove this ${e.kind === 'progress' ? 'progress note' : e.kind}? What it said goes with it.`)) return
+  if (!open.value || !confirm(`Remove this ${e.kind === 'progress' ? 'progress note' : e.kind}?`)) return
   try { open.value = await post(`/api/tasks/${open.value.ref}/notes/${e.id}/remove`) } catch (err: any) { error.value = err.message }
 }
 async function showNoteHistory(id: number, again = false) {

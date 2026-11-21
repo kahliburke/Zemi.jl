@@ -127,7 +127,7 @@ async function setStatus(status: string, reason?: string) {
 }
 // A draft made by mistake is deleted; any finding can be archived, and brought back.
 async function remove() {
-  if (!f.value || !confirm(`Delete ${f.value.ref}? Its history goes with it.`)) return
+  if (!f.value || !confirm(`Delete ${f.value.ref}?`)) return
   try { await post(`/api/findings/${f.value.ref}/delete`, '{}'); f.value = null; await loadList(); go(key.value) }
   catch (e: any) { error.value = e.message }
 }
@@ -152,7 +152,7 @@ async function saveComment() {
   if (!error.value) editingComment.value = null
 }
 async function removeComment(id: number) {
-  if (!confirm('Remove your comment? What it said goes with it.')) return
+  if (!confirm('Remove your comment?')) return
   await change({}, `/comments/${id}/remove`)
 }
 const mine = (a: Activity) => a.kind === 'comment' && !a.by_agent && a.by_person === me.value?.id
