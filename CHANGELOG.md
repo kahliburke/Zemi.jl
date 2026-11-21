@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.0 (2026-11-21)
+
+### Breaking
+
+- The database moves from schema 20 to 22 on first start, keeping a snapshot first
+  (`data.backups/kept/before-schema-22`); 0.4 cannot read it afterwards.
+
+### Changes
+
+- **Windows**: Zemi runs for one account without administrator rights. It builds and serves the
+  site, reads codebases, recognizes and stops its own processes, and takes Windows paths (and a
+  leading `~`) wherever it takes paths. `deploy/windows/install.bat` installs it with Julia, MuPDF,
+  Ollama, Git, Claude Code and Kaimon, set up and connected.
+- **One-step install on macOS and Linux**: `deploy/install-personal.sh` does the same for one
+  account, through Homebrew on macOS, and on Linux through the system's packages where `sudo` is
+  allowed, or into `~/.local`. Both installers pull `qwen3-embedding:4b` alone, and set Kaimon's
+  code search to it.
+- **The arXiv watch** places papers for a group without focus areas. When the group's description
+  or focus areas change, the watched papers not yet taken in are placed and judged again. A
+  cancelled watch stops between papers and leaves the rest to the next.
+- **Papers without headings** are read as one section, Full text, rather than none; headings set in
+  a medium, demi, heavy or black weight are recognized.
+- **An agent's question to anyone** also reaches the person it works for, as on a knowledge base of
+  one.
+- **Record pages** are served under `zemi dev`, and a private record's page says it is private.
+- **A codebase whose files cannot be listed** shows what Git said.
+- **The guide** starts with the site's Setup and Configuration pages, with screenshots.
+
 ## 0.4.0 (2026-11-14)
 
 ### Breaking
