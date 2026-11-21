@@ -6717,15 +6717,17 @@ end
 end
 
 @zset "the personal installers agree" begin
-    # The Windows and the macOS/Linux installers pull the embedding models Zemi's default layers and
-    # Kaimon's code search use, and answer Kaimon's first run alike.
+    # The Windows and the macOS/Linux installers pull the embedding model Zemi's default layers use, set
+    # Kaimon's code search to it, and answer Kaimon's first run alike.
     kaimon = Base.require(Base.PkgId(Base.UUID("d3856c55-31fd-4246-b7e8-380411123c01"), "Kaimon"))
     bat = read(joinpath(pkgdir(K), "deploy", "windows", "install.bat"), String)
     sh = read(joinpath(pkgdir(K), "deploy", "install-personal.sh"), String)
     pulled_bat = [m.captures[1] for m in eachmatch(r"'([\w.-]+:[\w.-]+)'", match(r"foreach \(\$model in ([^)]*)\)", bat).captures[1])]
     pulled_sh = split(match(r"for model in ([^;]*); do ollama pull", sh).captures[1])
-    wanted = unique([[l.model for l in K.default_layers()]; kaimon.DEFAULT_EMBEDDING_MODEL])
+    wanted = unique(l.model for l in K.default_layers())
     @test Set(pulled_bat) == Set(pulled_sh) == Set(wanted)
+    @test occursin("embedding_model = '$(only(wanted))'", bat) && occursin("\"embedding_model\": \"$(only(wanted))\"", sh)
+    @test occursin("backend = 'ollama'", bat) && occursin("{\"backend\": \"ollama\"}", sh)
     # The same first-run answers: lax, this machine only, Kaimon's port, the gate setup done.
     @test occursin("mode = 'lax'", bat) && occursin("\"mode\": \"lax\"", sh)
     @test occursin("allowed_ips = @('127.0.0.1', '::1')", bat) && occursin("\"allowed_ips\": [\"127.0.0.1\", \"::1\"]", sh)

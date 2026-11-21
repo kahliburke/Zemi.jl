@@ -5,13 +5,13 @@
 An installer sets up everything below for your account and connects it:
 - Julia;
 - MuPDF's `mutool`;
-- Ollama, started when you log in, with the embedding models pulled;
+- Ollama, started when you log in, with `qwen3-embedding:4b` pulled;
 - Git;
 - Claude Code;
 - Kaimon, with Zemi added as one of its extensions.
 
 Kaimon's first-run questions are answered for one person's machine: only programs running as you can
-reach it, and it needs no key. It runs its own Qdrant and searches code through Ollama. Claude Code is
+reach it, and it needs no key. It runs its own Qdrant and searches code through Ollama, with the same model Zemi uses. Claude Code is
 connected to Kaimon's tools, which include the knowledge base's. Anything already installed is left
 as it is, so the installer can be run again.
 

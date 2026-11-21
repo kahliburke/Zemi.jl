@@ -94,12 +94,12 @@ if (Test-Path $app) {
     }
     if (-not (Get-Process 'ollama app' -ErrorAction SilentlyContinue)) { Start-Process $app }
 }
-# The embedding models Zemi's search and Kaimon's code search use by default. Ollama's own server
-# serves the downloads when its tray program has not started one.
+# The embedding model Zemi's search uses by default, which Kaimon's code search is set to use too.
+# Ollama's own server serves the download when its tray program has not started one.
 function Ollama-Up { try { Invoke-RestMethod http://127.0.0.1:11434/api/version | Out-Null; $true } catch { $false } }
 for ($i = 0; $i -lt 15 -and -not (Ollama-Up); $i++) { Start-Sleep 2 }
 if (-not (Ollama-Up)) { Start-Process -WindowStyle Hidden ollama serve; for ($i = 0; $i -lt 15 -and -not (Ollama-Up); $i++) { Start-Sleep 2 } }
-foreach ($model in 'qwen3-embedding:4b', 'qwen3-embedding:0.6b') {
+foreach ($model in 'qwen3-embedding:4b') {
     & ollama pull $model
     if ($LASTEXITCODE -ne 0) { throw "Downloading $model failed" }
 }
@@ -144,7 +144,7 @@ $Done += 'Kaimon', 'Zemi'
 
 Step 'Kaimon settings'
 # The answers to Kaimon's first-run setup, for one person on their own machine: only this account's
-# programs reach it, with no keys. It searches code through Ollama, its default, and a Qdrant it runs.
+# programs reach it, with no keys. It searches code through Ollama and a Qdrant it runs.
 # Settings already there are left as they are.
 $settings = Join-Path $env:APPDATA 'Kaimon\config.json'
 if (Test-Path $settings) { Write-Host "Found $settings" } else {
@@ -156,6 +156,13 @@ if (Test-Path $settings) { Write-Host "Found $settings" } else {
     } | ConvertTo-Json
     [IO.File]::WriteAllText($settings, $json)                # UTF-8 without a byte order mark
     Write-Host "Wrote $settings"
+}
+# Code search through Ollama with the model Zemi uses, so one model serves both.
+$search = Join-Path (Split-Path $settings) 'search.json'
+if (Test-Path $search) { Write-Host "Found $search" } else {
+    $json = [ordered]@{ version = 1; projects = @{}; embedding_model = 'qwen3-embedding:4b'; embedding = @{ backend = 'ollama' } } | ConvertTo-Json
+    [IO.File]::WriteAllText($search, $json)
+    Write-Host "Wrote $search"
 }
 # Qdrant, where Kaimon runs it from, installed as Kaimon installs it.
 $script = Join-Path $Work 'qdrant.jl'

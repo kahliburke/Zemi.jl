@@ -94,7 +94,10 @@ if ! have pdftoppm; then
 fi
 
 step "Ollama"
-ollama_up() { curl -fsS -m 2 http://127.0.0.1:11434/api/version >/dev/null 2>&1; }
+# Where Ollama listens, as its own commands read it.
+ollama_at=${OLLAMA_HOST:-127.0.0.1:11434}
+case "$ollama_at" in http://*|https://*) ;; *) ollama_at="http://$ollama_at" ;; esac
+ollama_up() { curl -fsS -m 2 "$ollama_at/api/version" >/dev/null 2>&1; }
 if [ "$os" = Darwin ]; then
     have ollama && found ollama || { brew install ollama; installed+=("Ollama"); }
     # Served at each login by Homebrew's launch agent, unless an Ollama app already serves it.
@@ -127,8 +130,8 @@ if [ "$os" = Linux ] && ! ollama_up && [ "$(command -v ollama)" = "$HOME/.local/
 fi
 for i in $(seq 1 30); do ollama_up && break; sleep 1; done
 ollama_up || fail "Ollama did not start."
-# The embedding models Zemi's search and Kaimon's code search use by default.
-for model in qwen3-embedding:4b qwen3-embedding:0.6b; do ollama pull "$model"; done
+# The embedding model Zemi's search uses by default, which Kaimon's code search is set to use too.
+for model in qwen3-embedding:4b; do ollama pull "$model"; done
 
 step "Git"
 # Claude Code works in a repository through git, and Zemi reads codebases with it.
@@ -159,7 +162,7 @@ installed+=("Kaimon" "Zemi")
 
 step "Kaimon settings"
 # The answers to Kaimon's first-run setup, for one person on their own machine: only this account's
-# programs reach it, with no keys. It searches code through Ollama, its default, and a Qdrant it runs.
+# programs reach it, with no keys. It searches code through Ollama and a Qdrant it runs.
 # Settings already there are left as they are.
 settings=${KAIMON_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/kaimon}/config.json
 if [ -f "$settings" ]; then echo "Found $settings"
@@ -170,6 +173,13 @@ else
         "$(date +%s)" > "$settings"
     chmod 600 "$settings"
     echo "Wrote $settings"
+fi
+# Code search through Ollama with the model Zemi uses, so one model serves both.
+search="$(dirname "$settings")/search.json"
+if [ -f "$search" ]; then echo "Found $search"
+else
+    printf '{\n  "version": 1,\n  "projects": {},\n  "embedding_model": "qwen3-embedding:4b",\n  "embedding": {"backend": "ollama"}\n}\n' > "$search"
+    echo "Wrote $search"
 fi
 # Qdrant, where Kaimon runs it from, installed as Kaimon installs it.
 julia --startup-file=no --project="$HOME/.julia/environments/apps/Kaimon" \
