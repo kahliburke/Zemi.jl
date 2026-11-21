@@ -24,6 +24,10 @@ migration!(21, ["""CREATE TABLE watch_new (
                 "DROP TABLE watch",
                 "ALTER TABLE watch_new RENAME TO watch"])
 
+# Each watched paper's embedding by title and abstract, unit length, as `Float32`s: placed again
+# against changed focus areas without embedding it again.
+migration!(22, ["ALTER TABLE watch ADD COLUMN vector BLOB"])
+
 """
     watch!(kb; list = list_new_papers, now = now(UTC), progress, cancelled) -> Int
 
@@ -32,8 +36,9 @@ config)`, by default from OAI-PMH, see [`list_new_papers`](@ref)), and place tho
 `watch_days` that are neither in the knowledge base nor already watched: embedded by title
 and abstract in the landscape layer (see [`landscape_layer`](@ref)), each is scored by its nearest
 focus area and by its nearest paper of the library, its score the mean of the two. They are kept in
-the `watch` table, and entries older than four times `watch_days` are let go. Returns how many new
-papers were placed.
+the `watch` table, and entries older than four times `watch_days` are let go. Those watched already
+are placed again first when the group has changed (see [`replace_watched!`](@ref)). Returns how many
+new papers were placed.
 """
 function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c; patience = WATCH_PATIENCE), now::DateTime = Dates.now(UTC),
                 progress = msg -> nothing, cancelled = () -> false)
@@ -41,6 +46,7 @@ function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c;
     l = landscape_layer(c)
     since = Date(now) - Day(c.watch_days)
     execute!(kb, "DELETE FROM watch WHERE published < ?", (string(Date(now) - Day(4 * c.watch_days)),))
+    replace_watched!(kb; progress)
     seen = Set{String}(r.id for r in query(kb, "SELECT doc_id AS id FROM papers UNION SELECT doc_id FROM watch"))
     found = []
     for cat in c.watch_categories
@@ -56,39 +62,99 @@ function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c;
     checked() = execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('watch_checked_at', ?)", (now_iso(),))
     isempty(found) && (checked(); return 0)
     progress("placing $(length(found)) new papers against the focus areas and the library")
-    prep(text) = first(l.doc_prefix * text, l.max_chars)
-    vectors = reduce(vcat, (embed(c, l, [prep("$(m.title)\n\n$(m.abstract)") for m in batch])
-                            for batch in Iterators.partition(found, 32)))
-    focus = c.group.focus_areas
-    areas = isempty(focus) ? nothing : unit_columns(reduce(hcat, [Float64.(query_vector(c, l, f.description)) for f in focus]))
+    vectors = watch_vectors(c, l, [(m.title, m.abstract) for m in found])
+    areas = focus_vectors(c, l)
     coll = collection_name(c, l)
     # Placed first, then written in one short transaction: the searches are not made holding the lock.
-    placed = map(zip(found, vectors)) do (m, v)
-        u = Float64.(v) ./ max(norm(v), eps())
+    placed = map(zip(found, vectors)) do (m, u)
         near = [(id = String(split(h.key, ':'; limit = 2)[2]), score = round(h.score; digits = 4))
                 for h in vector_search(coll, u; limit = 3)]
-        library = isempty(near) ? 0.0 : first(near).score
-        # Without focus areas a paper is placed by the library alone.
-        area, fit = if areas === nothing
-            missing, missing
-        else
-            f = areas' * u
-            a = argmax(f)
-            focus[a].name, round(f[a]; digits = 4)
-        end
-        score = round(fit === missing ? library : (fit + library) / 2; digits = 4)
-        (; m, near, area, fit, score)
+        (; m, near, u, place_watched(c, areas, u, isempty(near) ? 0.0 : first(near).score)...)
     end
     transaction(kb) do
-        for (; m, near, area, fit, score) in placed
+        for (; m, near, u, area, fit, score) in placed
             execute!(kb, """INSERT OR REPLACE INTO watch (doc_id, title, authors, abstract, published, category,
-                                score, area, area_score, nearest, found_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                score, area, area_score, nearest, found_at, vector) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (m.doc_id, m.title, JSON.json(m.authors), m.abstract, m.published, m.primary_category,
-                 score, area, fit, JSON.json(near), now_iso()))
+                 score, area, fit, JSON.json(near), now_iso(), vector_blob(u)))
         end
     end
     checked()
     return length(found)
+end
+
+"What the watched papers are placed and judged against: the group as agents are told of it (see [`group_brief`](@ref))."
+watch_basis(c::Config) = bytes2hex(sha256(group_brief(c)))
+
+"Papers' embeddings by title and abstract in layer `l`, each of unit length."
+function watch_vectors(c::Config, l::Layer, papers::AbstractVector)
+    prep(title, abstract) = first(l.doc_prefix * "$title\n\n$abstract", l.max_chars)
+    vs = reduce(vcat, (embed(c, l, [prep(p...) for p in batch]) for batch in Iterators.partition(papers, 32)); init = Vector{Float64}[])
+    return [Float64.(v) ./ max(norm(v), eps()) for v in vs]
+end
+
+"The focus areas' embeddings in layer `l` as unit columns; `nothing` when the group has none."
+focus_vectors(c::Config, l::Layer) = isempty(c.group.focus_areas) ? nothing :
+    unit_columns(reduce(hcat, [Float64.(query_vector(c, l, f.description)) for f in c.group.focus_areas]))
+
+"""
+A watched paper's place, from its unit embedding `u` and the score of its nearest library paper:
+`(; area, fit, score)`, its nearest focus area and how near, and its score, the mean of the two
+nearnesses. Without focus areas a paper is placed by the library alone, its area `missing`.
+"""
+function place_watched(c::Config, areas, u::AbstractVector, library::Real)
+    areas === nothing && return (; area = missing, fit = missing, score = round(library; digits = 4))
+    f = areas' * u
+    a = argmax(f)
+    fit = round(f[a]; digits = 4)
+    return (; area = c.group.focus_areas[a].name, fit, score = round((fit + library) / 2; digits = 4))
+end
+
+vector_blob(u::AbstractVector) = collect(reinterpret(UInt8, Float32.(u)))
+blob_vector(b::AbstractVector{UInt8}) = Float64.(reinterpret(Float32, b))
+
+"""
+    replace_watched!(kb; progress) -> Int
+
+When the group has changed since the watched papers were placed and judged (see [`watch_basis`](@ref)),
+place those not taken in again against its focus areas, from their stored embeddings (embedding any
+stored without one), and clear their ratings for the judge to rate them again (see
+[`judge_watched!`](@ref)). A knowledge base that recorded no basis yet takes the group as it is now
+as what its papers were judged against. Returns how many were placed again.
+"""
+function replace_watched!(kb::KB; progress = msg -> nothing)
+    c = kb.config
+    basis = watch_basis(c)
+    stored = scalar(kb, "SELECT value FROM kv WHERE key = 'watch_basis'")
+    record() = execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('watch_basis', ?)", (basis,))
+    ismissing(stored) && (record(); return 0)
+    stored == basis && return 0
+    rows = query(kb, "SELECT doc_id, title, abstract, nearest, vector FROM watch WHERE taken IS NULL")
+    isempty(rows) && (record(); return 0)
+    progress("placing the $(length(rows)) watched papers again for the group as it is now")
+    l = landscape_layer(c)
+    areas = focus_vectors(c, l)
+    vectors = Dict(r.doc_id => blob_vector(r.vector) for r in rows if !ismissing(r.vector))
+    if areas !== nothing
+        bare = [r for r in rows if !haskey(vectors, r.doc_id)]
+        for (r, u) in zip(bare, watch_vectors(c, l, [(r.title, r.abstract) for r in bare]))
+            vectors[r.doc_id] = u
+        end
+    end
+    placed = map(rows) do r
+        near = JSON.parse(r.nearest)
+        library = isempty(near) ? 0.0 : Float64(first(near)["score"])
+        u = get(vectors, r.doc_id, nothing)
+        (; id = r.doc_id, u, (u === nothing ? place_watched(c, nothing, Float64[], library) : place_watched(c, areas, u, library))...)
+    end
+    transaction(kb) do
+        for (; id, u, area, fit, score) in placed
+            execute!(kb, """UPDATE watch SET area = ?, area_score = ?, score = ?, vector = ?, relevance = NULL, reason = NULL,
+                                judged_by = NULL WHERE doc_id = ?""", (area, fit, score, u === nothing ? missing : vector_blob(u), id))
+        end
+        record()
+    end
+    return length(placed)
 end
 
 """
@@ -184,6 +250,20 @@ watch_json(kb::KB) = [Dict("id" => w.id, "title" => w.title, "authors" => first(
                            "nearest" => [Dict("id" => n.id, "slug" => page_slug(n.id), "title" => n.title, "score" => n.score)
                                          for n in w.nearest])
                       for w in watched(kb)]
+
+"""
+    watch_regrouped!(kb) -> Union{Job,Nothing}
+
+A watch job (see [`start_watch`](@ref)) when the group has changed since the watched papers were
+placed and judged, to place and judge them again (see [`replace_watched!`](@ref)), where they can be
+embedded here; `nothing` otherwise.
+"""
+function watch_regrouped!(kb::KB)
+    stored = scalar(kb, "SELECT value FROM kv WHERE key = 'watch_basis'")
+    (ismissing(stored) || stored == watch_basis(kb.config)) && return nothing
+    isempty(cannot_run(kb, "embed", String[])) || return nothing
+    return start_watch(kb)
+end
 
 """
     start_watch(kb) -> Job

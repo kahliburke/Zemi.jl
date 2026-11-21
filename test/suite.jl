@@ -2765,6 +2765,21 @@ end
         lone = only(p for p in watched(bare) if p.id == "2610.00003")
         @test ismissing(lone.area) && ismissing(lone.area_score) && lone.score == first(lone.nearest).score
         @test only(x for x in K.watch_json(bare) if x["id"] == "2610.00003")["area"] === nothing
+        # Those watched before the group changed are placed again for it, and rated again.
+        @test ismissing(only(p for p in watched(bare) if p.id == "2610.00002").area)
+        @test K.watch_regrouped!(bare) === nothing                         # placed for this group already
+        K.execute!(kb, "UPDATE watch SET relevance = 1, reason = 'Peripheral.', judged_by = 'j'")
+        @test watch!(wkb; list, now) == 0
+        again = Dict(p.id => p for p in watched(wkb))
+        @test again["2610.00002"].area == "Engineering" && again["2610.00003"].area == "Corals"
+        @test all(p -> ismissing(p.relevance) && p.reason == "", values(again))
+        @test again["2610.00003"].score == round((again["2610.00003"].area_score + first(again["2610.00003"].nearest).score) / 2; digits = 4)
+        # One that recorded no basis takes its papers as judged for the group as it is.
+        K.execute!(kb, "UPDATE watch SET relevance = 1")
+        K.execute!(kb, "DELETE FROM kv WHERE key = 'watch_basis'")
+        @test K.replace_watched!(bare) == 0 && K.watch_regrouped!(bare) === nothing
+        @test all(p -> p.relevance == 1 && p.area !== missing, watched(bare))
+        @test K.scalar(kb, "SELECT value FROM kv WHERE key = 'watch_basis'") == K.watch_basis(bare.config)
         close(kb); close(con)
     finally
         restore_qdrant!(saved)
