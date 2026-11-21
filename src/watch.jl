@@ -126,7 +126,7 @@ note_watch_basis!(kb::KB) = execute!(kb, "INSERT OR IGNORE INTO kv VALUES ('watc
     replace_watched!(kb; progress) -> Int
 
 When the group has changed since the watched papers were placed and judged (see [`watch_basis`](@ref)),
-place those not taken in again against its focus areas, from their stored embeddings (embedding any
+place those not in the knowledge base again against its focus areas, from their stored embeddings (embedding any
 stored without one), and clear their ratings for the judge to rate them again (see
 [`judge_watched!`](@ref)). A knowledge base that recorded no basis yet takes the group as it is now
 as what its papers were judged against. Returns how many were placed again.
@@ -138,7 +138,8 @@ function replace_watched!(kb::KB; progress = msg -> nothing)
     record() = execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('watch_basis', ?)", (basis,))
     ismissing(stored) && (record(); return 0)
     stored == basis && return 0
-    rows = query(kb, "SELECT doc_id, title, abstract, nearest, vector FROM watch WHERE taken IS NULL")
+    rows = query(kb, """SELECT doc_id, title, abstract, nearest, vector FROM watch
+                        WHERE taken IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers)""")
     isempty(rows) && (record(); return 0)
     progress("placing the $(length(rows)) watched papers again for the group as it is now")
     l = landscape_layer(c)
@@ -270,7 +271,7 @@ embedded here; `nothing` otherwise.
 function watch_regrouped!(kb::KB)
     stored = scalar(kb, "SELECT value FROM kv WHERE key = 'watch_basis'")
     (ismissing(stored) || stored == watch_basis(kb.config)) && return nothing
-    ismissing(scalar(kb, "SELECT 1 FROM watch WHERE taken IS NULL LIMIT 1")) && return nothing
+    ismissing(scalar(kb, "SELECT 1 FROM watch WHERE taken IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers) LIMIT 1")) && return nothing
     isempty(cannot_run(kb, "embed", String[])) || return nothing
     return start_watch(kb)
 end
