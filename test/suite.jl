@@ -5787,7 +5787,12 @@ end
         K.link_task!(kb, "DM-5", "blocks", "DM-10"; by = me)                                         # DM-5 is open
         @test K.next_task(kb, "DM") == "DM-11"
         out = as_ada(() -> tools["next_task"]("DM"; take = true))
-        @test startswith(out, "Taken: DM-11") && K.task(kb, "DM-11").status == "in_progress" && K.task(kb, "DM-11").assignee == K.AGENT_ASSIGNEE
+        @test K.task(kb, "DM-11").status == "in_progress" && K.task(kb, "DM-11").assignee == K.AGENT_ASSIGNEE
+        # A task in a project with a codebase comes with how its commits name it; one in a project without, not.
+        @test startswith(out, "Commits in DM's codebase that do this task end with a trailer line, `Tasks: DM-11`") &&
+              occursin("\n\nTaken: DM-11", out) && only(K.commit_relations("Do it\n\nTasks: DM-11")) == ("DM-11" => "part")
+        K.create_project!(kb, "Plain"; key = "PL", by = me)
+        @test K.commit_naming("PL-1") == "" && K.commit_naming("dm-11") == K.commit_naming("DM-11") != ""
         K.update_task!(kb, "DM-5"; status = "done", by = me)                                         # DM-10 unblocked
         @test K.next_task(kb, "DM") == "DM-10"
         @test isempty(K.agents_at_work(kb, "DM").waiting)

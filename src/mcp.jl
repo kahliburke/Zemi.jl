@@ -237,8 +237,9 @@ const MCP_INSTRUCTIONS = """
     Work is planned here as tasks in projects (with the task tools, where the token allows them).
     Plan work of more than a step or two with `plan` rather than in a file; a person approves it on
     the board. To work on approved tasks, take one with `next_task`, mark its subtasks done as you go,
-    report with `task_note`, and move it to review when it is finished. `next_task` also lists the
-    questions asked of the agents: answer each with `task_note(kind="comment", reply_to=<its note>)`.
+    report with `task_note`, and move it to review when it is finished. A commit names the tasks it
+    did in a trailer line, `Tasks: KB-12`. `next_task` also lists the questions asked of the agents:
+    answer each with `task_note(kind="comment", reply_to=<its note>)`.
     Files people attach (`media/<hash>/<name>`: screenshots, PDFs, data) are opened with `media`.
     When work concludes something worth keeping, record it with `finding_draft`, citing what it rests
     on; a person accepts it."""

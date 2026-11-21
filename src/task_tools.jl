@@ -389,10 +389,22 @@ function next_task_tool(project::String; take::Bool = false)::String
             assigned = task(kb(), ref).assignee
             update_task!(kb(), ref; status = "in_progress", assignee = isempty(assigned) ? AGENT_ASSIGNEE : assigned, by = tool_actor())
         end
-        task_answer(task(kb(), ref), asked * (take ? "Taken: " : "Next: "))
+        task_answer(task(kb(), ref), asked * commit_naming(ref) * (take ? "Taken: " : "Next: "))
     end
 end
 tool!("next_task", next_task_tool; need = "tasks.edit")
+
+"""
+How a commit in the codebase of task `ref`'s project names the task as its work (see
+[`commit_relations`](@ref)): nothing for a project without a codebase.
+"""
+function commit_naming(ref::AbstractString)
+    key = ref_project(ref)
+    any(p -> p.key == key && !isempty(p.codebase), projects(kb())) || return ""
+    r = uppercase(strip(ref))
+    return "Commits in $key's codebase that do this task end with a trailer line, `Tasks: $r`, or say `Fixes $r` in the one " *
+           "that finishes it; a reference elsewhere in a message is only a mention, not the task's work.\n\n"
+end
 
 """
     plan(project::String, title::String; body::String="", subtasks::String="", milestone::String="", parent::String="", priority::String="normal") -> String
