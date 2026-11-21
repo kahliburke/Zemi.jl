@@ -113,9 +113,12 @@ function waiting_questions(kb::KB; project::AbstractString = "")
                            WHERE $WAITS_SQL AND t.archived_at IS NULL AND (? = '' OR p.key = ?) ORDER BY e.id""", (k, k))]
 end
 
-"Whether question `q` (see [`waiting_questions`](@ref)) waits on person `me`: asked of them, or of anyone and not by them."
+"""
+Whether question `q` (see [`waiting_questions`](@ref)) waits on person `me`: asked of them, or of
+anyone and not by them themselves. An agent's question to anyone waits on the person it works for too.
+"""
 asked_of(q, me::AbstractString) =
-    q.to_whom == "person" ? q.to_person == me : q.to_whom == "anyone" && (isempty(me) || q.by_person != me)
+    q.to_whom == "person" ? q.to_person == me : q.to_whom == "anyone" && (isempty(me) || q.by_agent || q.by_person != me)
 
 """
     concerns(kb, task_id, me) -> Bool
@@ -147,7 +150,7 @@ function waiting(kb::KB; me::AbstractString = "")
     marked(ts) = NamedTuple[merge(t, (; concerns = concerns(kb, task_ref(kb, t.ref), me))) for t in ts]
     open_questions = [q for q in waiting_questions(kb) if q.status != "done"]
     for_me = [q for q in open_questions if asked_of(q, me)]
-    by_me = isempty(me) ? eltype(open_questions)[] : [q for q in open_questions if q.by_person == me]
+    by_me = isempty(me) ? eltype(open_questions)[] : [q for q in open_questions if q.by_person == me && !asked_of(q, me)]
     ids = unique(q.task_id for q in [for_me; by_me])
     rows = isempty(ids) ? Dict{Int,NamedTuple}() :
         Dict(Int(r.id) => task_row(r) for r in query(kb, TASK_SELECT * " WHERE t.id IN ($(join(ids, ',')))"))

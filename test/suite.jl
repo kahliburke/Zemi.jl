@@ -5264,6 +5264,10 @@ end
     mesh = K.note_task!(kb, qt, "Which mesh?"; kind = "question", by = bot)
     asking() = [t.ref for t in K.waiting(kb).questions]
     @test qt in asking() && qt in [t.ref for t in K.waiting(kb; me = "Bea").questions]
+    # It waits on the person the agent works for too (run for one person, the only one there is),
+    # as a question to answer rather than one they asked.
+    rowan = K.waiting(kb; me = "Rowan")
+    @test qt in [t.ref for t in rowan.questions] && !(qt in [t.ref for t in rowan.asked])
     @test_throws "only its own" K.resolve_question!(kb, qt, mesh; by = K.agent("Claude for Bea"))
     K.resolve_question!(kb, qt, mesh; by = me)
     @test !(qt in asking())
