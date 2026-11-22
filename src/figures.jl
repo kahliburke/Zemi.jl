@@ -67,8 +67,10 @@ figures with gradients are much smaller lossy. Lossy keeps full-resolution color
 (`-sharp_yuv`), so thin colored lines do not bleed.
 """
 function encode_webp(png::AbstractString, file::AbstractString)
-    lossy, lossless = "$file.q.tmp", "$file.z.tmp"
     mkpath(dirname(file))
+    # Named apart, so two writers of the same figure (a sync and a site build) do not take each other's.
+    tmp = tempname(dirname(file); cleanup = false)
+    lossy, lossless = "$tmp.q.tmp", "$tmp.z.tmp"
     try
         cwebp!(`-q $FIGURE_QUALITY -sharp_yuv -m 6 $png -o $lossy`)
         cwebp!(`-lossless -z 6 $png -o $lossless`)
