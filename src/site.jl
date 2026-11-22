@@ -316,7 +316,9 @@ paper is read from a PDF, whose pages can be shown in place of the text.
 """
 function section_text_json(kb::KB, id::AbstractString, section::Integer)
     rows = query(kb, "SELECT section, kind, page, x0, y0, x1, y1, text FROM blocks WHERE paper_id = ? ORDER BY ord", (paper_id(kb, id),))
-    regions = (figure_region(rows, c.label) for c in captions(rows) if c.block.section == section)
+    named = [c for c in captions(rows) if c.block.section == section]
+    odd = isempty(named) ? NO_PAGES : paper_odd_pages(kb, id)
+    regions = (figure_region(rows, c.label; odd) for c in named)
     return Dict("pdf" => is_kind(k -> k.pdf, id),
                 "blocks" => [Dict("kind" => String(r.kind), "text" => String(r.text), "page" => r.page, "box" => [r.x0, r.y0, r.x1, r.y1])
                              for r in rows if r.section == section],

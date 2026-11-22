@@ -236,10 +236,10 @@ found; a figure not found is kept without them, to try again (see [`refigure_dai
 Returns how many of the picks were found.
 """
 function cut_figures!(kb::KB, id::AbstractString, figures)
-    cut = Dict((f.kind, f.number) => f for f in cut_paper_figures!(kb, id))
+    cut = Dict(figure_key(f.label) => f for f in cut_paper_figures!(kb, id))
     n = 0
     for f in figures
-        named = parse_figure_label(f["label"])
+        named = figure_key(f["label"])
         g = named === nothing ? nothing : get(cut, named, nothing)
         if g === nothing
             delete!(f, "file")
@@ -461,7 +461,7 @@ end
 """
     figure_places(markdown, figures) -> Vector
 
-`markdown` in pieces, with each of `figures` (an index, by the `(kind, number)` a mention of it
+`markdown` in pieces, with each of `figures` (an index, by the `(kind, series, number)` a mention of it
 names, see [`figure_mentions`](@ref)) after the first paragraph that mentions it; those it never
 mentions go before it. Each piece is Markdown text or a figure's index. Headings, code, tables and
 quotes are not paragraphs here.

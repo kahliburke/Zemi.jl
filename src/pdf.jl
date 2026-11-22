@@ -7,7 +7,7 @@
 Bump when parsing or chunking changes in a way that should re-parse (and so re-chunk and re-embed)
 papers.
 """
-const PARSER_VERSION = 5
+const PARSER_VERSION = 6
 
 struct Span
     x0::Float64
@@ -236,13 +236,25 @@ styled(b::RawBlock, body) = any(l -> any(s -> s.bold || s.italic || occursin(EMP
 "The stamp arXiv prints down the margin of a paper's first page (`arXiv:<id> [<category>] <day> <month> <year>`), a block of its own."
 const MARGIN_STAMP = r"^arXiv:\S+\s+\[[^\]]+\]\s+\d{1,2}\s+\w{3}\s+\d{4}$"
 """
-A caption: a figure or table's label ("Figure 3", "Fig. S2", "TABLE II") followed by a stop, colon, bar
-or dash, or by nothing. A paragraph that opens by mentioning one ("Figure 3 shows …") is not one,
-unless its label is set in bold, as some journals set a caption's (see [`CAPTION_LABEL`](@ref)).
+What a caption calls its figure or table, as a pattern to build on: the word, "Figure", "Fig." or
+"Table", or what a report calls a drawing, map or plate ("Sheet", "Plate"); its number, which may
+carry the letter of a series numbered on its own ("S2", "A1") or, a figure's or table's, be in Roman
+numerals ("TABLE II"); and before them, what qualifies such a series ("Supplementary", "Extended
+Data", "Annex,", "Appendix B,"). Its groups are `series`, and `word` and `number`, or `other` and
+`othernumber` for a drawing's (see [`figure_key`](@ref)).
 """
-const CAPTION = r"^(?:fig(?:ure)?|tab(?:le)?)\.?\s*(?:[A-Z]?\d+(?:\.\d+)*|[IVXLC]+)\s*(?:[:.|–—](?!\d)|$)"i
+const FIGURE_LABEL = raw"(?<series>(?:supplementary|supplemental|extended\s+data|annex|appendix)(?:\s+[A-Z](?=[\s,.:]))?[\s,.:]*\s)?" *
+                    raw"(?:(?<word>fig(?:ure)?|tab(?:le)?)\.?\s*(?<number>[A-Z]{0,2}\d+|[IVXLC]+)" *
+                    raw"|(?<other>plate|sheet|map|drawing|scheme|chart|exhibit)\s+(?<othernumber>[A-Z]{0,2}\d+))"
+"""
+A caption: a figure or table's label ("Figure 3", "Fig. S2", "TABLE II", "Annex, sheet S1", see
+[`FIGURE_LABEL`](@ref)) followed by a stop, colon, bar or dash, or by nothing. A paragraph that opens by
+mentioning one ("Figure 3 shows …") is not one, unless its label is set in bold, as some journals set
+a caption's (see [`CAPTION_LABEL`](@ref)).
+"""
+const CAPTION = Regex("^" * FIGURE_LABEL * raw"(?:\.\d+)*\s*(?:[:.|–—](?!\d)|$)", "i")
 "A figure or table's label opening a block, which makes it a caption when set in bold."
-const CAPTION_LABEL = r"^(?:fig(?:ure)?|tab(?:le)?)\.?\s*[A-Z]?\d+"i
+const CAPTION_LABEL = Regex("^" * FIGURE_LABEL, "i")
 const NUMBERED_HEADING = r"^((?:\d+|[A-Z]|[IVX]+)(?:\.\d+)*)\.?\s+(\p{Lu}.*)$"
 const NAMED_HEADING = r"^(abstract|introduction|references|bibliography|acknowledge?ments?|conclusions?|summary|discussion|appendix(?:\s+[A-Z])?(?:[.:]\s*.*)?|data availability.*|declaration of interests?|funding|author contributions?)\.?$"i
 const REFERENCES = r"^(references|bibliography|literature cited)$"i
@@ -341,7 +353,7 @@ function parse_blocks(blocks::Vector{RawBlock}, sizes::Vector{<:Tuple})
         end
     end
     filter!(p -> count(isletter, p.text) >= 3 || p.kind == :equation, pieces)
-    return assign_sections(drop_figure_text(merge_equations(merge_titles(pieces), body)), npages)
+    return assign_sections(drop_figure_text(merge_equations(merge_titles(pieces), body); odd = odd_pages(sizes)), npages)
 end
 
 block_text(b::RawBlock) = join_lines(line_text.(b.lines))
@@ -463,15 +475,15 @@ end
 """
 Drop the text the PDF holds inside its figures (panel letters, axis labels, legends): the paragraphs,
 equations and footnotes within a figure's region, the space above its caption up to the text that
-bounds it (see [`region_above`](@ref)). Nothing that bounds a figure is inside one, so headings,
+bounds it (see [`region_above`](@ref); `odd`, the pages of a size of their own, see [`odd_pages`](@ref)). Nothing that bounds a figure is inside one, so headings,
 captions and long running text stay. So do a numbered equation and a sentence in the body's type,
 which labels are not, as where a paragraph's last line is a block of its own.
 """
-function drop_figure_text(pieces::Vector{Piece})
+function drop_figure_text(pieces::Vector{Piece}; odd = NO_PAGES)
     rows = [(; kind = String(p.kind), p.page, x0 = p.bbox[1], y0 = p.bbox[2], x1 = p.bbox[3], y1 = p.bbox[4], p.text)
             for p in pieces]
-    regions = [r for b in rows if b.kind == "caption" && startswith(lowercase(b.text), "fig")
-               for r in (region_above(rows, b),) if r !== nothing]
+    regions = [r for b in rows if b.kind == "caption" && something(figure_key(b.text), ("",))[1] == "figure"
+               for r in (region_above(rows, b; odd),) if r !== nothing]
     inside(p, r) = p.page == r.page && r.x0 <= (p.bbox[1] + p.bbox[3]) / 2 <= r.x1 && r.y0 - 2 <= (p.bbox[2] + p.bbox[4]) / 2 <= r.y1 + 2
     sentence(t) = occursin(r"[.!?:]\)?$", t) && count(w -> count(isletter, w) >= 2, split(t)) >= 3
     label(p) = p.kind == :footnote || (p.kind == :equation && isempty(p.number)) || (p.kind == :paragraph && !sentence(p.text))

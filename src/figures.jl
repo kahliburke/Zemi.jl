@@ -130,9 +130,10 @@ image_type(file::AbstractString) = get(CONTENT_TYPES, lowercase(splitext(file)[2
 
 """
 A caption that names its figure or table and then says what it shows ("Figure 3:", "FIG. 3.",
-"TABLE II."), which a paragraph that mentions one ("Figure 3 follows …") does not.
+"TABLE II.", "Annex, sheet S1."; see [`FIGURE_LABEL`](@ref)), which a paragraph that mentions one
+("Figure 3 follows …") does not.
 """
-const NAMING_CAPTION = r"^(fig(?:ure)?|tab(?:le)?)\.?\s*(\d+|[IVXLC]+)\s*[:.|]"i
+const NAMING_CAPTION = Regex("^" * FIGURE_LABEL * raw"\s*[:.|]", "i")
 
 "A figure or table's number, from its digits or Roman numerals; `nothing` for neither."
 function caption_number(s::AbstractString)
@@ -143,98 +144,200 @@ function caption_number(s::AbstractString)
     return sum(i < length(v) && v[i] < v[i+1] ? -v[i] : v[i] for i in eachindex(v))
 end
 
-const FIGURE_LABEL = r"^(?:(fig|tab)[a-z]*\.?\s*)?(\d+|[IVXLC]+)[a-z]?\b"i
+"""
+    figure_series(qualifier, other, letters) -> String
+
+The series a figure or table is numbered in: `""` for the paper's own, or what sets apart one
+numbered on its own, from what qualifies it ("Supplementary", "Extended Data"), the word for a
+drawing, map or plate (`other`), and the letters before its number: "s" for "Fig. S2", "sheet s" for
+"Sheet S1", "supplementary" for "Supplementary Figure 2". An annex or appendix only says where one is,
+so "Annex, sheet S1" is in the series of "sheet S1", as the text mentions it.
+"""
+function figure_series(qualifier, other, letters::AbstractString)
+    q = lowercase(something(qualifier, ""))
+    parts = String[]
+    occursin("supplement", q) && push!(parts, "supplementary")
+    occursin(r"extended\s+data", q) && push!(parts, "extended data")
+    other === nothing || push!(parts, replace(lowercase(other), r"s$" => ""))
+    isempty(letters) || push!(parts, lowercase(letters))
+    return join(parts, " ")
+end
 
 """
-    parse_figure_label(s) -> Union{Nothing,Tuple{String,Int}}
+    figure_key(s) -> Union{Nothing,Tuple{String,String,Int}}
 
-The kind (`"figure"` or `"table"`) and number a label names: "Figure 3", "Fig. 2b" (a panel names its
-figure), "Table II", or a bare number, a figure's. `nothing` for anything else.
+What a label names, as its kind (`"figure"` or `"table"`), series (see [`figure_series`](@ref)) and
+number: "Figure 3", "Fig. 2b" (a panel names its figure), "Table II", "Fig. S2", "Sheet S1", or a
+bare number, a figure's. `nothing` for anything else. Given a match of [`FIGURE_LABEL`](@ref), what
+it names.
 """
-function parse_figure_label(s::AbstractString)
-    m = match(FIGURE_LABEL, strip(s))
-    n = m === nothing ? nothing : caption_number(m[2])
+function figure_key(s::AbstractString)
+    t = strip(s)
+    (d = match(r"^(\d+)[a-z]?\b", t)) === nothing || return ("figure", "", parse(Int, d[1]))
+    m = match(LABEL_START, t)
+    return m === nothing ? nothing : figure_key(m)
+end
+
+function figure_key(m::RegexMatch)
+    letters, digits = match(r"^([A-Za-z]*)(\d*)$", something(m[:number], m[:othernumber])).captures
+    n = isempty(digits) ? caption_number(letters) : parse(Int, digits)
     n === nothing && return nothing
-    return (m[1] !== nothing && lowercase(m[1]) == "tab" ? "table" : "figure", n)
+    kind = m[:word] !== nothing && lowercase(m[:word])[1] == 't' ? "table" : "figure"
+    return (kind, figure_series(m[:series], m[:other], isempty(digits) ? "" : letters), n)
+end
+
+const LABEL_START = Regex("^" * FIGURE_LABEL * raw"[a-z]?\b", "i")
+
+"""
+    figure_label(m) -> String
+
+The label of the figure or table a caption's match of [`FIGURE_LABEL`](@ref) names, its words
+spelled out: "Figure 3" for "FIG. 3", "Table IV", "Annex, Sheet S1".
+"""
+function figure_label(m::RegexMatch)
+    q = something(m[:series], "")
+    words = [length(w) == 1 ? uppercase(w) : uppercasefirst(lowercase(w)) for w in split(q, r"[^A-Za-z]+"; keepempty = false)]
+    lead = isempty(words) ? "" : join(words, " ") * (occursin(',', q) ? ", " : " ")
+    word = m[:word] === nothing ? uppercasefirst(lowercase(m[:other])) : lowercase(m[:word])[1] == 't' ? "Table" : "Figure"
+    return lead * word * " " * uppercase(something(m[:number], m[:othernumber]))
 end
 
 """
     captions(blocks) -> Vector{NamedTuple}
 
-The figures and tables a paper's blocks name in their captions, figures first, each kind in order
-and each one once: `(; kind, number, label, block)`, `kind` `"figure"` or `"table"`. A table's
-caption read as a paragraph, a reference or a footnote counts too, as readings before parser version 4
-took one numbered in Roman numerals ("TABLE II.") for one.
+The figures and tables a paper's blocks name in their captions, figures first, each one once:
+`(; kind, key, number, label, block)`, `kind` `"figure"` or `"table"` and `key` what its label names
+(see [`figure_key`](@ref)). `number` orders them: the paper's own figures and tables keep theirs, and
+those of other series ("Fig. S2", "Sheet S1") follow, a series at a time in the order they start. A
+table's caption read as a paragraph, a reference or a footnote counts too, as readings before parser
+version 4 took one numbered in Roman numerals ("TABLE II.") for one.
 """
 function captions(blocks)
-    seen = Dict{Tuple{String,Int},Any}()
+    seen = Dict{Tuple{String,String,Int},Any}()
+    started = String[]
     for b in blocks
         b.kind in ("caption", "paragraph", "reference", "footnote") || continue
         m = match(NAMING_CAPTION, strip(b.text))
         m === nothing && continue
-        kind = lowercase(m[1])[1] == 'f' ? "figure" : "table"
-        b.kind == "caption" || kind == "table" || continue
-        n = caption_number(m[2])
-        n === nothing && continue
-        get!(seen, (kind, n), (; kind, number = n, label = (kind == "figure" ? "Figure " : "Table ") * m[2], block = b))
+        key = figure_key(m)
+        key === nothing && continue
+        b.kind == "caption" || key[1] == "table" || continue
+        haskey(seen, key) && continue
+        seen[key] = (; kind = key[1], key, label = figure_label(m), block = b)
+        key[2] in started || push!(started, key[2])
     end
-    return sort!(collect(values(seen)); by = c -> (c.kind != "figure", c.number))
+    out = NamedTuple[]
+    for kind in ("figure", "table")
+        own = sort!([c for c in values(seen) if c.kind == kind && isempty(c.key[2])]; by = c -> c.key[3])
+        rest = sort!([c for c in values(seen) if c.kind == kind && !isempty(c.key[2])];
+                     by = c -> (findfirst(==(c.key[2]), started), c.key[3]))
+        top = isempty(own) ? 0 : last(own).key[3]
+        append!(out, [(; c.kind, c.key, number = c.key[3], c.label, c.block) for c in own])
+        append!(out, [(; c.kind, c.key, number = top + i, c.label, c.block) for (i, c) in enumerate(rest)])
+    end
+    return out
 end
 
 """
 A mention of figures or tables in running text: "Fig. 3", "Figure 3b", "FIG. 3", "Figs. 2 and 4",
-"Table II", "Tabs. 1–3". The numbers it names are in its second group (see [`figure_mentions`](@ref)).
+"Table II", "Fig. S2", "Supplementary Figure 1", "sheets S1 and S2". The numbers it names are in its
+group `numbers`, what qualifies them in `series` (see [`figure_mentions`](@ref)). The page finds
+them with the same pattern (kbFigureMentions.ts).
 """
-const FIGURE_MENTION = r"\b([Ff]ig(?:ure)?s?|FIG(?:URE)?S?|[Tt]ab(?:le)?s?|TABLES?)\.?\s*((?:\d+[a-z]?|[IVXLC]+)\b(?:\s*(?:,|and|&|or)\s*(?:\d+[a-z]?|[IVXLC]+)\b)*)"
+const FIGURE_MENTION = Regex(raw"\b(?<series>(?:[Ss]upplement(?:ary|al)|SUPPLEMENT(?:ARY|AL)|[Ee]xtended\s+[Dd]ata|EXTENDED\s+DATA)\s+)?" *
+                             raw"(?<word>[Ff]ig(?:ure)?s?|FIG(?:URE)?S?|[Tt]ab(?:le)?s?|TABLES?|(?:[Pp]late|[Ss]heet|[Mm]ap|[Dd]rawing|[Ss]cheme|[Cc]hart|[Ee]xhibit)s?)\.?\s*" *
+                             raw"(?<numbers>(?:[A-Z]{0,2}\d+[a-z]?|[IVXLC]+)\b(?:\s*(?:,|and|&|or)\s*(?:[A-Z]{0,2}\d+[a-z]?|[IVXLC]+)\b)*)")
 
 """
-    figure_mentions(text) -> Vector{Tuple{String,Int}}
+    figure_mentions(text) -> Vector{Tuple{String,String,Int}}
 
-The figures and tables `text` mentions, in order, each once, as `(kind, number)`: "Figs. 2 and 4"
-is figures 2 and 4, a panel ("Fig. 3b") its figure.
+The figures and tables `text` mentions, in order, each once, as what each names (see
+[`figure_key`](@ref)): "Figs. 2 and 4" is figures 2 and 4, a panel ("Fig. 3b") its figure.
 """
 function figure_mentions(text::AbstractString)
-    out = Tuple{String,Int}[]
+    out = Tuple{String,String,Int}[]
     for m in eachmatch(FIGURE_MENTION, text)
-        kind = lowercase(m[1])[1] == 'f' ? "figure" : "table"
-        for n in eachmatch(r"\d+|[IVXLC]+", m[2])
+        w = lowercase(m[:word])
+        kind = w[1] == 't' ? "table" : "figure"
+        other = w[1] in ('f', 't') ? nothing : w
+        for n in eachmatch(r"[A-Z]{0,2}\d+|[IVXLC]+", m[:numbers])
+            letters, digits = match(r"^([A-Z]*)(\d*)$", n.match).captures
             # Roman numerals name tables; a figure's number is in digits.
-            kind == "figure" && !all(isdigit, n.match) && continue
-            v = caption_number(n.match)
-            v === nothing || (kind, v) in out || push!(out, (kind, v))
+            isempty(digits) && kind == "figure" && continue
+            v = isempty(digits) ? caption_number(letters) : parse(Int, digits)
+            key = (kind, figure_series(m[:series], other, isempty(digits) ? "" : letters), v)
+            v === nothing || key in out || push!(out, key)
         end
     end
     return out
 end
 
 """
-    figure_region(blocks, label) -> Union{NamedTuple,Nothing}
+    figure_region(blocks, label; odd) -> Union{NamedTuple,Nothing}
 
-Where the figure or table `label` ("Figure 3", "Fig. 2", "Table 1") is, among a paper's blocks
-(`kind`, `page`, `x0`, `y0`, `x1`, `y1`, `text`): `(; page, x0, y0, x1, y1, caption)`. A figure is
-the region above its caption, a table the side of its caption that holds it (see
-[`table_region`](@ref)), as wide as the caption's column or the text across the page.
+Where the figure or table `label` ("Figure 3", "Fig. 2", "Table 1", "Sheet S1") is, among a paper's
+blocks (`kind`, `page`, `x0`, `y0`, `x1`, `y1`, `text`): `(; page, x0, y0, x1, y1, caption)`. A
+figure is the region above its caption, a table the side of its caption that holds it (see
+[`table_region`](@ref)), as wide as the caption's column or the text across the page, or as the page
+where it is among the paper's `odd` pages (see [`odd_pages`](@ref)).
 """
-function figure_region(blocks, label::AbstractString)
-    parsed = parse_figure_label(label)
-    parsed === nothing && return nothing
-    kind, n = parsed
-    named = [c for c in captions(blocks) if c.kind == kind && c.number == n]
-    if isempty(named) && kind == "figure"
+function figure_region(blocks, label::AbstractString; odd = NO_PAGES)
+    key = figure_key(label)
+    key === nothing && return nothing
+    kind, series, n = key
+    named = [c for c in captions(blocks) if c.key == key]
+    if isempty(named) && kind == "figure" && isempty(series)
         # A caption that only names its figure, for want of one that also says what it shows.
         loose = [b for b in blocks if b.kind == "caption" && occursin(Regex("^fig(ure)?\\.?\\s*$n\\b", "i"), strip(b.text))]
         isempty(loose) && return nothing
-        return region_above(blocks, first(loose))
+        return region_above(blocks, first(loose); odd)
     end
     isempty(named) && return nothing
     cap = only(named).block
-    return kind == "figure" ? region_above(blocks, cap) : table_region(blocks, cap)
+    return kind == "figure" ? region_above(blocks, cap; odd) : table_region(blocks, cap; odd)
+end
+
+const NO_PAGES = Dict{Int,Tuple{Float64,Float64}}()
+
+"""
+    odd_pages(sizes) -> Dict{Int,Tuple{Float64,Float64}}
+
+The pages whose size (`sizes`, see [`page_sizes`](@ref)) differs from the paper's usual one, the size
+most of its pages have, each with its width and height: a drawing, map or plate set on a page of its
+own, a table turned to fit one. Such a page does not share the margins of the paper's text, so a
+figure on it reaches the page's own edges.
+"""
+function odd_pages(sizes)
+    isempty(sizes) && return NO_PAGES
+    rounded = [round.(s) for s in sizes]
+    usual = argmax(s -> count(==(s), rounded), unique(rounded))
+    return Dict{Int,Tuple{Float64,Float64}}(p => (Float64(sizes[p][1]), Float64(sizes[p][2])) for p in eachindex(sizes) if rounded[p] != usual)
+end
+
+"The odd pages of the PDF `pdf` (see [`odd_pages`](@ref))."
+pdf_odd_pages(c::Config, pdf::AbstractString) =
+    odd_pages(page_sizes(read(pipeline(ignorestatus(`$(c.mutool) pages $pdf`); stderr = devnull), String)))
+
+"The odd pages of paper `id`'s PDF (see [`odd_pages`](@ref)), none where its PDF is not here."
+function paper_odd_pages(kb::KB, id::AbstractString)
+    files = query(kb, "SELECT path FROM files WHERE paper_id = ?", (paper_id(kb, id),))
+    return isempty(files) || !isfile(first(files).path) ? NO_PAGES : pdf_odd_pages(kb.config, first(files).path)
+end
+
+"The blocks on the paper's pages of its usual size, where its text's margins are learned (see [`odd_pages`](@ref))."
+function usual_blocks(blocks, odd)
+    isempty(odd) && return blocks
+    usual = [b for b in blocks if !haskey(odd, b.page)]
+    return isempty(usual) ? blocks : usual
 end
 
 # The columns a caption's figure spans: the caption's own, or the text across the page when it is wide,
-# at least as far as the paper's text usually runs (a page of figures has little text of its own).
-function caption_columns(blocks, page, cap)
-    left, right = min(minimum(b.x0 for b in page), text_left(blocks)), max(maximum(b.x1 for b in page), text_right(blocks))
+# at least as far as the paper's text usually runs (a page of figures has little text of its own); on a
+# page of a size of its own (see `odd_pages`), the page from edge to edge.
+function caption_columns(blocks, page, cap; odd = NO_PAGES)
+    haskey(odd, cap.page) && return (0.0, odd[cap.page][1])
+    usual = usual_blocks(blocks, odd)
+    left, right = min(minimum(b.x0 for b in page), text_left(usual)), max(maximum(b.x1 for b in page), text_right(usual))
     wide = (cap.x1 - cap.x0) > 0.6 * (right - left)
     return wide ? (left, right) : (cap.x0 - 6, cap.x1 + 6)
 end
@@ -256,12 +359,12 @@ end
 
 # The figure above caption `cap`: up to the nearest block above it that overlaps it across the page;
 # with nothing above, from where the text of a page usually starts (below the running head, which
-# reading the PDF leaves out).
-function region_above(blocks, cap; table::Bool = false)
+# reading the PDF leaves out), or from the top of a page of a size of its own (see `odd_pages`).
+function region_above(blocks, cap; table::Bool = false, odd = NO_PAGES)
     page = [b for b in blocks if b.page == cap.page && !ismissing(b.x0)]
-    x0, x1 = caption_columns(blocks, page, cap)
+    x0, x1 = caption_columns(blocks, page, cap; odd)
     above = [b.y1 for b in page if b.y1 <= cap.y0 + 1 && b !== cap && b.x1 > x0 && b.x0 < x1 && bounds_figure(b, x0, x1; table)]
-    y0 = isempty(above) ? text_top(blocks) - 8 : maximum(above)
+    y0 = !isempty(above) ? maximum(above) : haskey(odd, cap.page) ? -2.0 : text_top(usual_blocks(blocks, odd)) - 8
     (cap.y0 - y0) < (table ? 20 : 30) && return nothing
     table && ((x0, x1) = rows_width(page, cap, y0, cap.y0, x0, x1))
     return (; page = cap.page, x0, y0 = y0 + 2, x1, y1 = cap.y0 - 2, caption = cap.text)
@@ -280,8 +383,8 @@ end
 The table caption `cap` names: below it, as most journals set a table, or above it, as some do, on
 the side whose region holds more of the table's own text (its rows, which are not running text).
 """
-function table_region(blocks, cap)
-    sides = filter(!isnothing, [region_below(blocks, cap), region_above(blocks, cap; table = true)])
+function table_region(blocks, cap; odd = NO_PAGES)
+    sides = filter(!isnothing, [region_below(blocks, cap; odd), region_above(blocks, cap; table = true, odd)])
     isempty(sides) && return nothing
     held(r) = count(b -> b.page == cap.page && b !== cap && !ismissing(b.x0) && b.x1 > r.x0 && b.x0 < r.x1 &&
                          r.y0 <= (b.y0 + b.y1) / 2 <= r.y1, blocks)
@@ -289,12 +392,13 @@ function table_region(blocks, cap)
 end
 
 # The table below caption `cap`: down to the nearest block below it that overlaps it across the page,
-# or to where the text of a page usually ends, and across as wide as its rows.
-function region_below(blocks, cap)
+# or to where the text of a page usually ends (the bottom of a page of a size of its own), and across as
+# wide as its rows.
+function region_below(blocks, cap; odd = NO_PAGES)
     page = [b for b in blocks if b.page == cap.page && !ismissing(b.x0)]
-    x0, x1 = caption_columns(blocks, page, cap)
+    x0, x1 = caption_columns(blocks, page, cap; odd)
     below = [b.y0 for b in page if b.y0 >= cap.y1 - 1 && b !== cap && b.x1 > x0 && b.x0 < x1 && bounds_figure(b, x0, x1; table = true)]
-    y1 = isempty(below) ? text_bottom(blocks) + 8 : minimum(below)
+    y1 = !isempty(below) ? minimum(below) : haskey(odd, cap.page) ? odd[cap.page][2] + 2 : text_bottom(usual_blocks(blocks, odd)) + 8
     (y1 - cap.y1) < 20 && return nothing
     (x0, x1) = rows_width(page, cap, cap.y1, y1, x0, x1)
     return (; page = cap.page, x0, y0 = cap.y1 + 2, x1, y1 = y1 - 2, caption = cap.text)
@@ -329,9 +433,10 @@ Render figure or table `label` of paper `id` from its PDF to the image `file`, W
 function cut_figure(kb::KB, id::AbstractString, label::AbstractString, file::AbstractString; dpi::Integer = FIGURE_DPI)
     pid = paper_id(kb, id)
     blocks = query(kb, "SELECT kind, page, x0, y0, x1, y1, text FROM blocks WHERE paper_id = ? ORDER BY ord", (pid,))
-    r = figure_region(blocks, label)
+    pdf = first(query(kb, "SELECT path FROM files WHERE paper_id = ?", (pid,))).path
+    r = figure_region(blocks, label; odd = pdf_odd_pages(kb.config, pdf))
     r === nothing && return nothing
-    render_region(kb.config, first(query(kb, "SELECT path FROM files WHERE paper_id = ?", (pid,))).path, r, file; dpi)
+    render_region(kb.config, pdf, r, file; dpi)
     return r
 end
 
@@ -379,8 +484,9 @@ function cut_paper_figures!(kb::KB, id::AbstractString)
     blocks = query(kb, "SELECT kind, page, x0, y0, x1, y1, text FROM blocks WHERE paper_id = ? ORDER BY ord", (pid,))
     dir = figures_dir(kb.config, id)
     cut = NamedTuple[]
+    odd = pdf_odd_pages(kb.config, first(files).path)
     for c in captions(blocks)
-        r = c.kind == "figure" ? region_above(blocks, c.block) : table_region(blocks, c.block)
+        r = c.kind == "figure" ? region_above(blocks, c.block; odd) : table_region(blocks, c.block; odd)
         r === nothing && continue
         file = joinpath(dir, (c.kind == "figure" ? "fig" : "table") * "-$(c.number).webp")
         try
@@ -432,11 +538,16 @@ paper_figures(kb::KB, id::AbstractString) =
     figures_json(kb, id) -> Vector{Dict}
 
 A paper's figures and tables for its page (KBFigures.vue): each one's `kind`, `label`, `caption`,
-`file`, and `src`, where the service sends it (see [`figure_file`](@ref)).
+`file`, `src`, where the service sends it (see [`figure_file`](@ref)), and `key`, what its label
+names as `kind:series:number` (see [`figure_key`](@ref)), for the page's mentions to find it by.
 """
 figures_json(kb::KB, id::AbstractString) =
     [Dict("kind" => f.kind, "label" => f.label, "caption" => f.caption, "file" => f.file,
-          "src" => "/api/figures/$(page_slug(id))/$(f.file)") for f in paper_figures(kb, id)]
+          "src" => "/api/figures/$(page_slug(id))/$(f.file)", "key" => figure_key_text(figure_key(f.label)))
+     for f in paper_figures(kb, id)]
+
+"A figure's key as the page's mentions spell it (kbFigureMentions.ts): `kind:series:number`, `\"\"` for none."
+figure_key_text(k) = k === nothing ? "" : join(k, ":")
 
 """
     figure_file(kb, slug, file; theme = "") -> String
@@ -569,15 +680,15 @@ function webp_figures!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
 end
 
 """
-    figure_mentions_in(kb, id) -> Dict{Tuple{String,Int},Vector{NamedTuple}}
+    figure_mentions_in(kb, id) -> Dict{Tuple{String,String,Int},Vector{NamedTuple}}
 
-Where paper `id`'s running text mentions each of its figures and tables, keyed `(kind, number)` (see
+Where paper `id`'s running text mentions each of its figures and tables, keyed `(kind, series, number)` (see
 [`figure_mentions`](@ref)): each mention's `section`, `page` and the `sentence` it is in, in order.
 """
 function figure_mentions_in(kb::KB, id::AbstractString)
     pid = paper_id(kb, id)
     titles = Dict(Int(r.ord) => String(r.title) for r in query(kb, "SELECT ord, title FROM sections WHERE paper_id = ?", (pid,)))
-    out = Dict{Tuple{String,Int},Vector{NamedTuple}}()
+    out = Dict{Tuple{String,String,Int},Vector{NamedTuple}}()
     for b in query(kb, "SELECT section, page, text FROM blocks WHERE paper_id = ? AND kind = 'paragraph' ORDER BY ord", (pid,))
         for sentence in split(b.text, r"(?<=[.!?])\s+(?=[A-Z(])")
             for key in figure_mentions(sentence)
@@ -601,9 +712,9 @@ function pick_figures(figures, which::AbstractString)
     for w in split(which, ',')
         w = strip(w)
         isempty(w) && continue
-        named = parse_figure_label(w)
+        named = figure_key(w)
         i = findfirst(f -> f.label == w, figures)              # a record's figure, by its name
-        i === nothing && named !== nothing && (i = findfirst(f -> (f.kind, f.number) == named, figures))
+        i === nothing && named !== nothing && (i = findfirst(f -> figure_key(f.label) == named, figures))
         i === nothing ? push!(missing, w) : (figures[i] in out || push!(out, figures[i]))
     end
     isempty(missing) || error("No $(join(missing, ", ")) among the figures and tables cut from this paper: see `figures`")

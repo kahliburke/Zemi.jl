@@ -15,12 +15,12 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useData } from 'vitepress'
 import { api, mode, connect, getJSON } from './kbApi'
 import { originalFigures } from './kbDisplay'
-import { MENTION, numeral, figureKey, mentionPieces } from './kbFigureMentions'
+import { MENTION, mentionPieces } from './kbFigureMentions'
 import { plural } from './kbFormat'
 import KBDialog from './KBDialog.vue'
 
 const props = defineProps<{ id: string; figures?: number; tables?: number; discussed?: string }>()
-type Figure = { kind: string; label: string; caption: string; file: string; src: string }
+type Figure = { kind: string; label: string; caption: string; file: string; src: string; key: string }
 const figures = ref<Figure[]>([])
 const at = ref(-1)
 const current = computed(() => (at.value >= 0 ? figures.value[at.value] : null))
@@ -66,7 +66,7 @@ function toggled(e: Event) { (e.target as HTMLDetailsElement).open ? open() : (s
 
 // ── Mentions in the page's text (see kbFigureMentions.ts) ──────────────────────────────────────
 // Where a figure is in the list, by its key.
-const index = computed(() => new Map(figures.value.map((f, i) => [figureKey(f.kind, numeral(f.label.split(/\s+/).pop() ?? '')), i])))
+const index = computed(() => new Map(figures.value.map((f, i) => [f.key, i])))
 // Text that is not discussion: headings, code, links, the gallery and the paper's full text.
 const SKIP = 'h1,h2,h3,h4,h5,h6,a,code,pre,button,.kbf,.kbfig,.kbst,.kb-paper-head,.kb-dialog,.kbfig-preview'
 function linkMentions() {

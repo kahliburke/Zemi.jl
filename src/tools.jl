@@ -151,7 +151,7 @@ function figures_tool(doc_id::String)::String
             "See one with `figure(\"$id\", \"$(first(figs).label)\")`.")
     for f in figs
         println(io, "\n## ", f.label, "\n\n", f.caption)
-        for m in get(said, (f.kind, f.number), NamedTuple[])
+        for m in get(said, figure_key(f.label), NamedTuple[])
             println(io, "- mentioned in ", isempty(m.section) ? "p. $(m.page)" : "$(m.section) (p. $(m.page))", ": ", m.sentence)
         end
     end

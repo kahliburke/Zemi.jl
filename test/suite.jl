@@ -635,9 +635,13 @@ end
     n = K.figure_region(blocks, "Figure 4")
     @test n.page == 4 && (n.x0, n.x1) == (294.0, 526.0) && n.y0 == 202.0               # its column, not the one beside it
     @test K.figure_region(blocks, "Figure 9") === nothing
-    @test K.parse_figure_label("Fig. 2b") == ("figure", 2) && K.parse_figure_label("Table II.") == ("table", 2)
-    @test K.parse_figure_label("3") == ("figure", 3) && K.parse_figure_label("FIGURE 12: the reef") == ("figure", 12)
-    @test K.parse_figure_label("the reef") === nothing
+    @test K.figure_key("Fig. 2b") == ("figure", "", 2) && K.figure_key("Table II.") == ("table", "", 2)
+    @test K.figure_key("3") == ("figure", "", 3) && K.figure_key("FIGURE 12: the reef") == ("figure", "", 12)
+    @test K.figure_key("the reef") === nothing && K.figure_key("Map C.") === nothing   # a drawing's number is in digits
+    # Figures numbered in series of their own: by letter, by what they are, by what qualifies them.
+    @test K.figure_key("Fig. S2") == ("figure", "s", 2) && K.figure_key("Table A1") == ("table", "a", 1)
+    @test K.figure_key("Annex, sheet S1") == K.figure_key("Sheet S1") == ("figure", "sheet s", 1)
+    @test K.figure_key("Supplementary Figure 3") == ("figure", "supplementary", 3) && K.figure_key("Plate 4") == ("figure", "plate", 4)
     @test occursin(r"^\d{4}-\d{2}-\d{2}$", K.utc_today())
 
     # The judge reads the best placed new papers together; the pick comes from those it promoted.
@@ -4367,12 +4371,19 @@ end
                         cap("Figure 1. Not a caption."; kind = "paragraph"), cap("TABLE IV. Roman."; kind = "paragraph"), cap("Table 2: Two.")])
     @test [(c.kind, c.number, c.label) for c in found] == [("figure", 2, "Figure 2"), ("figure", 4, "Figure 4"), ("table", 2, "Table 2"), ("table", 4, "Table IV")]
     @test K.caption_number("XIV") == 14 && K.caption_number("12") == 12 && K.caption_number("Q") === nothing
+    # Those numbered in series of their own follow the paper's own, a series at a time in the order they start.
+    found = K.captions([cap("Annex, sheet S2. A section."), cap("Figure 2. Own."), cap("Fig. S1: Extra."), cap("Annex, sheet S1. A plan."),
+                        cap("Supplementary Figure 1. More."), cap("Figure 1. Own."), cap("Table A1. Lettered.")])
+    @test [(c.number, c.label) for c in found] == [(1, "Figure 1"), (2, "Figure 2"), (3, "Annex, Sheet S1"), (4, "Annex, Sheet S2"),
+                                                   (5, "Figure S1"), (6, "Supplementary Figure 1"), (1, "Table A1")]
     # Mentions in an analysis's text, and each figure the analysis picked placed after the paragraph first discussing it.
     @test K.figure_mentions("Figs. 2 and 4 compare; Figure 3b too; FIG. 2 again; Table II lists; the configuration 3") ==
-          [("figure", 2), ("figure", 4), ("figure", 3), ("table", 2)]
-    @test K.figure_mentions("figure 5 and Fig. IV") == [("figure", 5)]                # a figure's number is in digits
+          [("figure", "", 2), ("figure", "", 4), ("figure", "", 3), ("table", "", 2)]
+    @test K.figure_mentions("figure 5 and Fig. IV") == [("figure", "", 5)]            # a figure's number is in digits
+    @test K.figure_mentions("Figs. S1 and S2, Supplementary Table 3, sheets S4 & S5, the map 2 and the roadmap 3") ==
+          [("figure", "s", 1), ("figure", "s", 2), ("table", "supplementary", 3), ("figure", "sheet s", 4), ("figure", "sheet s", 5), ("figure", "map", 2)]
     md = "Intro.\n\nThe result is in Fig. 2.\n\n```math\na\n\nFig. 9\n```\n\nTable II lists them.\n\n## On Fig. 7\n"
-    placed = K.figure_places(md, Dict(("figure", 2) => 2, ("table", 2) => 3, ("figure", 7) => 7))
+    placed = K.figure_places(md, Dict(("figure", "", 2) => 2, ("table", "", 2) => 3, ("figure", "", 7) => 7))
     @test placed[1:3] == [7, "Intro.\n\nThe result is in Fig. 2.", 2] && placed[5:6] == [3, "## On Fig. 7"]
     @test placed[4] == "```math\na\n\nFig. 9\n```\n\nTable II lists them."         # a math block kept whole
     dir = mktempdir()
@@ -4411,7 +4422,15 @@ end
         BT /F1 9 Tf 72 660 Td (TABLE III. Set below its rows, as some journals set their tables.) Tj ET
         BT /F1 10 Tf 72 620 Td (Running text after the third table, a sentence long enough to read as a paragraph.) Tj ET
         """)
-    run(`mutool create -o $pdf $(joinpath(dir, "page1.txt")) $(joinpath(dir, "page2.txt")) $(joinpath(dir, "page3.txt"))`)
+    # A drawing at the end, numbered in a series of its own, on a page turned to fit it, its
+    # caption at the foot of the page.
+    write(joinpath(dir, "page4.txt"), """
+        %%MediaBox 0 0 792 612
+        %%Font F1 Helvetica
+        0 0.5 0 rg 40 150 710 400 re f
+        BT /F1 9 Tf 72 80 Td (Annex, sheet S1. A green box at the end of the paper, set at the foot of its page.) Tj ET
+        """)
+    run(`mutool create -o $pdf $(joinpath(dir, "page1.txt")) $(joinpath(dir, "page2.txt")) $(joinpath(dir, "page3.txt")) $(joinpath(dir, "page4.txt"))`)
     kb = open_kb(temp_config(layers = Layer[]))
     saved = K.UPLOAD_LOOKUP[]
     K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
@@ -4420,12 +4439,12 @@ end
         @test only(ingest!(kb, [id])).ok
         # Reading it cut every figure and table, once, as WebP images at 300 DPI.
         folder = K.figures_dir(kb.config, id)
-        files = ["fig-1.webp", "fig-2.webp", "table-1.webp", "table-2.webp", "table-3.webp"]
+        files = ["fig-1.webp", "fig-2.webp", "fig-3.webp", "table-1.webp", "table-2.webp", "table-3.webp"]
         @test [f.file for f in K.paper_figures(kb, id)] == files && sort(readdir(folder)) == files
         @test read(joinpath(folder, "fig-1.webp"), 12)[9:12] == b"WEBP"
         r1 = K.figure_region(K.query(kb, "SELECT kind, page, x0, y0, x1, y1, text FROM blocks WHERE paper_id = ? ORDER BY ord", (K.paper_id(kb, id),)), "Figure 1")
         @test all(abs.(K.image_size(joinpath(folder, "fig-1.webp")) .- ((r1.x1 - r1.x0) * 300 / 72, (r1.y1 - r1.y0) * 300 / 72)) .<= 1)
-        @test [f.label for f in K.paper_figures(kb, id)] == ["Figure 1", "Figure 2", "Table 1", "Table II", "Table III"]
+        @test [f.label for f in K.paper_figures(kb, id)] == ["Figure 1", "Figure 2", "Annex, Sheet S1", "Table 1", "Table II", "Table III"]
         K.execute!(kb, "INSERT INTO kv VALUES ('daily_figures_swept', 'x')")
         @test K.start_figure_sweep(kb) === nothing                                 # nothing left to sweep
         blocks = K.query(kb, "SELECT kind, page, x0, y0, x1, y1, text FROM blocks WHERE paper_id = ? ORDER BY ord", (K.paper_id(kb, id),))
@@ -4437,13 +4456,19 @@ end
         t3 = K.figure_region(blocks, "Table III")
         @test t3.page == 3 && t3.y1 < 132 && t3.y0 < 95                          # above its caption, where its rows are
         @test K.figure_region(blocks, "Table II").page == 2                        # "II" is not "I"
+        odd = K.pdf_odd_pages(kb.config, pdf)
+        @test collect(keys(odd)) == [4] && odd[4] == (792.0, 612.0)                # the one page turned to fit its drawing
+        s1 = K.figure_region(blocks, "Sheet S1"; odd)
+        @test s1.page == 4 && (s1.x0, s1.y0, s1.x1) == (0.0, 0.0, 792.0) && s1.y1 > 462     # the page it has to itself
+        @test K.figure_region(blocks, "Sheet S1").x1 < 750                         # not the margins of the paper's text
         write(joinpath(folder, "fig-9.webp"), "left from before")
         write(joinpath(folder, "fig-1.png"), "cut as PNG before")
-        @test length(K.cut_paper_figures!(kb, id)) == 5 && sort(readdir(folder)) == files   # what is no longer cut goes
+        @test length(K.cut_paper_figures!(kb, id)) == 6 && sort(readdir(folder)) == files   # what is no longer cut goes
         # The analysis's picks point at the paper's figures; one not found is kept, to try again.
         picks = [Dict{String,Any}("label" => "Figure 2", "why" => "The red one."), Dict{String,Any}("label" => "Table 1", "why" => "Numbers."),
-                 Dict{String,Any}("label" => "Figure 7", "why" => "None.")]
-        @test K.cut_figures!(kb, id, picks) == 2 && picks[1]["file"] == "fig-2.webp" && picks[2]["file"] == "table-1.webp" && !haskey(picks[3], "file")
+                 Dict{String,Any}("label" => "Figure 7", "why" => "None."), Dict{String,Any}("label" => "Annex, Sheet S1", "why" => "Drawn.")]
+        @test K.cut_figures!(kb, id, picks) == 3 && picks[1]["file"] == "fig-2.webp" && picks[2]["file"] == "table-1.webp" && !haskey(picks[3], "file")
+        @test picks[4]["file"] == "fig-3.webp"
         # Sent as they are looked at, in either theme; the site's build copies only the picks of the days.
         slug = K.page_slug(id)
         @test [f["src"] for f in K.figures_json(kb, id)][1] == "/api/figures/$slug/fig-1.webp"
@@ -4453,16 +4478,17 @@ end
         get(target) = K.respond_local(kb, K.HTTP.Request("GET", target))
         served = get("/api/figures/$slug/table-1.webp")
         @test served.status == 200 && K.HTTP.header(served, "Content-Type") == "image/webp" && get("/api/figures/$slug/fig-9.webp").status == 404
-        @test K.JSON.parse(String(get("/api/figures?id=$id").body))[3]["label"] == "Table 1"
+        @test K.JSON.parse(String(get("/api/figures?id=$id").body))[4]["label"] == "Table 1"
+        @test [f["key"] for f in K.figures_json(kb, id)] == ["figure::1", "figure::2", "figure:sheet s:1", "table::1", "table::2", "table::3"]
         # For agents: picked by label, found where the text mentions them, and a page as an image.
         figs = K.paper_figures(kb, id)
-        @test [f.label for f in K.pick_figures(figs, "2, Table II, fig. 1")] == ["Figure 2", "Table II", "Figure 1"]
+        @test [f.label for f in K.pick_figures(figs, "2, Table II, fig. 1, Sheet S1")] == ["Figure 2", "Table II", "Figure 1", "Annex, Sheet S1"]
         @test_throws "No Fig. 7" K.pick_figures(figs, "Fig. 7")
-        @test only(K.figure_mentions_in(kb, id)[("figure", 2)]).page == 1
+        @test only(K.figure_mentions_in(kb, id)[("figure", "", 2)]).page == 1
         @test K.page_image(kb, id, 2)[2:4] == b"PNG"
         @test_throws "no page 9" K.page_image(kb, id, 9)
         data = K.paper_json(K.site_paper(kb, id; related = false))
-        @test (data["figures"], data["tables"]) == (2, 3) && !occursin("fig-1.webp", K.JSON.json(data))   # the images on demand
+        @test (data["figures"], data["tables"]) == (3, 3) && !occursin("fig-1.webp", K.JSON.json(data))   # the images on demand
         site = mktempdir()
         @test isempty(K.site_figures!(kb, joinpath(site, "figures"), Set{String}())) && !isdir(joinpath(site, "figures"))
         # A day from before every figure was cut: its picks' files in the day's folder, brought over once.
@@ -4480,7 +4506,7 @@ end
         @test built["width"] == K.image_size(joinpath(folder, "fig-1.webp"))[1] ÷ 2 && built["dark"] == "fig-1-dark.webp"
         @test isfile(joinpath(site, "figures", slug, "fig-1-dark.webp"))
         day = Dict(K.daily_pages(kb, dailies(kb)).data)["2026-10-01/index"]
-        @test day["gallery"] == Dict("figures" => 2, "tables" => 3, "discussed" => ["fig-1.webp"]) && only(day["figures"])["file"] == "fig-1.webp"
+        @test day["gallery"] == Dict("figures" => 3, "tables" => 3, "discussed" => ["fig-1.webp"]) && only(day["figures"])["file"] == "fig-1.webp"
         @test only(K.daily_figures(kb, "2026-10-01")).type == "image/webp"
         @test occursin("## Its other figures\n\n- Figure 2: Figure 2: A red box", K.format_daily(kb)) && occursin("- Table II: TABLE II.", K.format_daily(kb))
         # Figures cut before they were WebP: the sweep converts the PNG images, without cutting them again,
@@ -4508,13 +4534,13 @@ end
         @test !K.figures_cut(kb, id) && any(r -> r.id == id, K.query(kb, K.uncut_sql()))
         job = K.start_figure_sweep(kb)
         timedwait(() -> job.finished !== nothing, 60)
-        @test job.status == :done && K.figures_cut(kb, id) && length(K.paper_figures(kb, id)) == 5 && K.start_figure_sweep(kb) === nothing
+        @test job.status == :done && K.figures_cut(kb, id) && length(K.paper_figures(kb, id)) == 6 && K.start_figure_sweep(kb) === nothing
         # A read paper whose figures were never cut has them cut once, by the sweep.
         K.execute!(kb, "DELETE FROM figure_cuts")
         K.execute!(kb, "DELETE FROM figures")
         job = K.start_figure_sweep(kb)
         timedwait(() -> job.finished !== nothing, 60)
-        @test job.status == :done && length(K.paper_figures(kb, id)) == 5 && K.start_figure_sweep(kb) === nothing
+        @test job.status == :done && length(K.paper_figures(kb, id)) == 6 && K.start_figure_sweep(kb) === nothing
         K.remove_paper!(kb, id)
         @test !isdir(folder) && isempty(K.query(kb, "SELECT * FROM figures"))
     finally

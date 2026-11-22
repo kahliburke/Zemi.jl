@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changes
+
+- **Figures in series of their own**: captions such as "Fig. S2", "Supplementary Figure 1",
+  "Table A1" and a report's drawings, maps and plates ("Annex, sheet S1") are read as captions, and
+  their figures are cut and listed after the paper's own. A figure on a page of another size than
+  the paper's text, such as a drawing on a landscape page, is cut from that page's own edges.
+  Papers are read again (parser version 6) on the next sync.
+
 ## 0.5.0 (2026-11-21)
 
 ### Breaking
