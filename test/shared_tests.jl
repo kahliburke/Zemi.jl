@@ -1647,7 +1647,7 @@ end
             sent = Ref(0)
             return HTTP.Response(200, ["Content-Type" => "text/event-stream"], HTTP.CallbackBody(dst -> begin
                 (sent[] += 1) > 2 && return 0
-                sent[] == 2 && sleep(1.5)
+                sent[] == 2 && sleep(3)
                 d = Vector{UInt8}(parts[sent[]]); copyto!(dst, 1, d, 1, length(d)); length(d)
             end, () -> nothing))
         end
@@ -1733,7 +1733,7 @@ end
         # A tool's progress reaches the client while it runs, ahead of its answer.
         t0 = time()
         r = post(rpc("tools/call"; params = Dict("name" => "zemi.task_wait", "arguments" => Dict("slow" => true))); sid = s1)
-        @test time() - t0 < 1.0
+        @test time() - t0 < 2.0                                    # the answer comes 3 s after the progress
         got = chunks(r)
         @test occursin("notifications/progress", first(got)) && occursin("\"done\"", last(got)) && length(got) == 2
         empty!(seen)
