@@ -356,7 +356,9 @@ function bounds_figure(b, x0, x1; table::Bool = false)
     length(b.text) < 120 && occursin(SECTION_LINE, b.text) && (b.x1 - b.x0) >= 0.4 * (x1 - x0) && return true
     length(b.text) >= 60 && (b.x1 - b.x0) >= 0.6 * (x1 - x0) || return false
     table || return true
-    return count(isletter, b.text) >= 0.7 * length(b.text) && length(split(b.text)) >= 10
+    # Running text has sentences; a table's row of column names, however wordy, does not.
+    return count(isletter, b.text) >= 0.7 * length(b.text) && length(split(b.text)) >= 10 &&
+           occursin(r"[.,;:](\s|$)", b.text)
 end
 
 # The figure above caption `cap`: up to the nearest block above it that overlaps it across the page;

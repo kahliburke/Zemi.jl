@@ -635,6 +635,14 @@ end
     n = K.figure_region(blocks, "Figure 4")
     @test n.page == 4 && (n.x0, n.x1) == (294.0, 526.0) && n.y0 == 202.0               # its column, not the one beside it
     @test K.figure_region(blocks, "Figure 9") === nothing
+    # A table below its caption runs past its row of column names, however wordy, to the heading below.
+    tbl = [b("caption", 5, 72.0, 70.0, 520.0, 100.0, "Table 1: Costs of the methods compared, per step and in all."),
+           b("paragraph", 5, 90.0, 115.0, 500.0, 135.0, "Method Cost per Step Sequential Steps Longest Path Between Any Two Points"),
+           b("paragraph", 5, 90.0, 140.0, 450.0, 150.0, "Direct O(n) O(1) O(1)"),
+           b("heading", 5, 72.0, 200.0, 220.0, 210.0, "3.5 The next section"),
+           b("paragraph", 5, 72.0, 220.0, 520.0, 300.0, repeat("The paper's text goes on, in sentences. ", 4))]
+    t = K.figure_region(tbl, "Table 1")
+    @test t.page == 5 && (t.y0, t.y1) == (102.0, 198.0)
     @test K.figure_key("Fig. 2b") == ("figure", "", 2) && K.figure_key("Table II.") == ("table", "", 2)
     @test K.figure_key("3") == ("figure", "", 3) && K.figure_key("FIGURE 12: the reef") == ("figure", "", 12)
     @test K.figure_key("the reef") === nothing && K.figure_key("Map C.") === nothing   # a drawing's number is in digits
