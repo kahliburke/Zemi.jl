@@ -85,11 +85,11 @@ function read_stext(pdf::AbstractString, c::Config)
     out = tempname() * ".json"
     try
         messages = IOBuffer()
-        p = run(pipeline(ignorestatus(`$(c.mutool) draw -q -F stext.json -O dehyphenate -o $out $pdf`); stderr = messages))
+        p = run(pipeline(ignorestatus(`$(mutool(c)) draw -q -F stext.json -O dehyphenate -o $out $pdf`); stderr = messages))
         data = filesize(out) > 0 ? (try JSON.parsefile(out) catch; nothing end) : nothing
         data isa AbstractDict && haskey(data, "pages") ||
             error("mutool could not read $(basename(pdf)) (exit $(p.exitcode)): ", strip(String(take!(messages))))
-        sizes = page_sizes(read(pipeline(ignorestatus(`$(c.mutool) pages $pdf`); stderr = devnull), String))
+        sizes = page_sizes(read(pipeline(ignorestatus(`$(mutool(c)) pages $pdf`); stderr = devnull), String))
         return stext_blocks(data), sizes
     finally
         rm(out; force = true)
@@ -309,7 +309,7 @@ function pdf_info(path::AbstractString, c::Config)
     script = tempname() * ".js"
     write(script, INFO_JS)
     try
-        d = JSON.parse(read(pipeline(`$(c.mutool) run $script $path`; stderr = devnull), String))
+        d = JSON.parse(read(pipeline(`$(mutool(c)) run $script $path`; stderr = devnull), String))
         return Dict{String,String}(String(k) => strip(String(v)) for (k, v) in d if v isa AbstractString && !isempty(strip(v)))
     catch
         return Dict{String,String}()

@@ -1,5 +1,5 @@
 # A knowledge base's shared service (zemi --shared) as a container image, beside install.sh: Julia,
-# the package with its environment and the site's compiled, and MuPDF's mutool. compose.yaml runs it
+# and the package with its environment and the site's compiled. compose.yaml runs it
 # with Qdrant, Ollama and Caddy. From the checkout:
 #
 #   docker build -f deploy/Dockerfile -t zemi .
@@ -12,7 +12,7 @@ ARG JULIA_VERSION=1.13.3
 ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq \
- && apt-get install -y -qq --no-install-recommends ca-certificates curl git openssl socat mupdf-tools poppler-utils >/dev/null \
+ && apt-get install -y -qq --no-install-recommends ca-certificates curl git openssl socat poppler-utils >/dev/null \
  && rm -rf /var/lib/apt/lists/*
 RUN set -e; \
     case "$TARGETARCH" in amd64) dir=x64 arch=x86_64 ;; arm64) dir=aarch64 arch=aarch64 ;; \

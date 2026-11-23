@@ -298,7 +298,7 @@ function section_pages_pdf(kb::KB, doc_id::AbstractString, ord::Integer)
     ismissing(r.a) && return nothing
     dir = mkpath(joinpath(xdg_home("XDG_CACHE_HOME", ".cache"), "zemi", "section-pages"))
     out = joinpath(dir, "$(first(first(f).sha256, 16))-p$(r.a)-$(r.b).pdf")
-    isfile(out) || run(pipeline(`$(kb.config.mutool) merge -o $out $(first(f).path) $(r.a)-$(r.b)`; stdout = devnull, stderr = devnull))
+    isfile(out) || run(pipeline(`$(mutool(kb.config)) merge -o $out $(first(f).path) $(r.a)-$(r.b)`; stdout = devnull, stderr = devnull))
     return out
 end
 

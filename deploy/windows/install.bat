@@ -5,9 +5,9 @@ rem   install.bat               the released Zemi
 rem   install.bat BRANCH        Zemi from a branch of github.com/kahliburke/Zemi.jl
 rem   install.bat C:\path\Zemi  Zemi from a checkout on this machine
 rem
-rem Each part is skipped where this account already has it: Julia, MuPDF's mutool (reads papers),
-rem Ollama (search by meaning), Git and Claude Code (agents that summarize), then Kaimon and Zemi,
-rem with Kaimon set up to run Zemi: the questions of its first run answered for one person's machine.
+rem Each part is skipped where this account already has it: Julia, Ollama (search by meaning), Git
+rem and Claude Code (agents that summarize), then Kaimon and Zemi, with Kaimon set up to run Zemi:
+rem the questions of its first run answered for one person's machine.
 rem Programs go in %LOCALAPPDATA%\Programs, and their folders on this account's PATH.
 rem The rest of this file is PowerShell, run as a command rather than a script file, which policies
 rem against running scripts leave alone.
@@ -63,16 +63,6 @@ if (Have julia) { Write-Host "Found $((Get-Command julia).Source)" } else {
     $dir = Install-Zip (Get-File $file.url 'julia.zip') 'julia'
     Add-Path (Join-Path $dir 'bin')
     $Done += "Julia $($latest.Name)"
-}
-
-Step "MuPDF's mutool"
-if (Have mutool) { Write-Host "Found $((Get-Command mutool).Source)" } else {
-    $names = [regex]::Matches((Invoke-WebRequest -UseBasicParsing https://mupdf.com/releases).Content, 'mupdf-(\d+\.\d+\.\d+)-windows\.zip') |
-        ForEach-Object { $_.Groups[1].Value } | Sort-Object { [version]$_ } -Unique
-    $version = $names | Select-Object -Last 1
-    $dir = Install-Zip (Get-File "https://mupdf.com/downloads/archive/mupdf-$version-windows.zip" 'mupdf.zip') 'mupdf'
-    Add-Path $dir
-    $Done += "MuPDF $version"
 }
 
 Step 'Ollama'

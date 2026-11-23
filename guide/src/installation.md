@@ -4,7 +4,6 @@
 
 An installer sets up everything below for your account and connects it:
 - Julia;
-- MuPDF's `mutool`;
 - Ollama, started when you log in, with `qwen3-embedding:4b` pulled;
 - Git;
 - Claude Code;
@@ -22,8 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/kahliburke/Zemi.jl/main/deploy/inst
 ```
 
 On macOS it installs through [Homebrew](https://brew.sh), which it needs. On Linux it uses the
-system's packages where you may use `sudo`. Otherwise it installs into `~/.local`, and builds
-`mutool` there if your system's version is too old, which needs a C compiler.
+system's packages where you may use `sudo`, and otherwise installs into `~/.local`.
 
 On Windows, without administrator rights, in a Command Prompt:
 
@@ -45,9 +43,7 @@ The sections below are the manual steps the installers take.
 ## Requirements
 
 - [Julia](https://julialang.org/downloads/) 1.12 or later
-- To read papers:
-  - `mutool` 1.27 or later from [MuPDF](https://mupdf.com): `apt install mupdf-tools` (Ubuntu 26.04,
-    Debian 14 or later), `dnf install mupdf` (Fedora 43 or later), or `brew install mupdf-tools`
+- To read papers (Zemi carries MuPDF, which reads the PDFs):
   - [Ollama](https://ollama.com) with `qwen3-embedding:4b`, for searching by meaning
   - [Qdrant](https://qdrant.tech), which [Kaimon](https://github.com/kahliburke/Kaimon.jl) runs for
     you, or one of your own on port 6333

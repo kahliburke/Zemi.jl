@@ -1098,7 +1098,7 @@ end
         f = K.create_finding!(kb, "WE", "The catchment drains south"; evidence = [(; kind = "paper", target = id)], by = me)
         dir = mktempdir()
         write(joinpath(dir, "dem.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 10 Tf 72 700 Td (Elevation tiles.) Tj ET\n")
-        run(`mutool create -o $(joinpath(dir, "dem.pdf")) $(joinpath(dir, "dem.txt"))`)
+        run(`$MUTOOL create -o $(joinpath(dir, "dem.pdf")) $(joinpath(dir, "dem.txt"))`)
         paper = K.promote_resource!(kb, id, joinpath(dir, "dem.pdf"); by = "Ada")
         q = K.paper_row(kb, paper)
         @test startswith(paper, "doc-") && q.title == "Copernicus DEM GLO-30" && q.doi == "10.5270/esa-c5d3d65" && q.published == "2021"
@@ -1524,7 +1524,7 @@ end
 @zset "PDFs in a library" begin
     dir = mktempdir()
     pdf(name, title) = (write(joinpath(dir, "$name.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 24 Tf 72 700 Td ($title) Tj ET\n");
-                        run(`mutool create -o $(joinpath(dir, "$name.pdf")) $(joinpath(dir, "$name.txt"))`); read(joinpath(dir, "$name.pdf")))
+                        run(`$MUTOOL create -o $(joinpath(dir, "$name.pdf")) $(joinpath(dir, "$name.txt"))`); read(joinpath(dir, "$name.pdf")))
     kb = open_kb(temp_config(layers = Layer[]))
     user(email) = Int(K.scalar(kb, "INSERT INTO users (email, name, created_at) VALUES (?, '', ?) RETURNING id", (email, K.now_iso())))
     ada, bea = user("ada@x.org"), user("bea@x.org")
@@ -2435,6 +2435,9 @@ end
     @test isempty(blocks) && sizes == [(612.0, 792.0)]
     e = try K.read_stext("x.pdf", Config(; mutool = fails)); nothing catch e; e end
     @test e isa ErrorException && occursin("cannot open document", e.msg) && occursin("exit 1", e.msg)
+    # Unset, it is the one Zemi carries; set, the program named.
+    @test K.mutool(Config()) == K.MuPDF_jll.mutool_path && isfile(K.mutool(Config()))
+    @test K.mutool(Config(; mutool = fails)) == fails
 end
 
 @zset "reference lists under any heading" begin
@@ -3976,7 +3979,7 @@ end
 @zset "papers by DOI" begin
     dir = mktempdir()
     write(joinpath(dir, "a.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 24 Tf 72 700 Td (Floods in a Small Catchment) Tj ET\n")
-    run(`mutool create -o $(joinpath(dir, "a.pdf")) $(joinpath(dir, "a.txt"))`)
+    run(`$MUTOOL create -o $(joinpath(dir, "a.pdf")) $(joinpath(dir, "a.txt"))`)
     port = 18000 + rand(0:999)
     server = K.HTTP.serve!("127.0.0.1", port) do req
         req.target == "/a.pdf" ? K.HTTP.Response(200, read(joinpath(dir, "a.pdf"))) : K.HTTP.Response(200, "<html>a publisher's page</html>")
@@ -4225,7 +4228,7 @@ end
         BT /F1 10 Tf 72 650 Td (Abstract. Uploads of a paper the knowledge base has are that paper.) Tj ET
         """
     pdf(name, extra = "") = (write(joinpath(dir, "$name.txt"), page * extra);
-                             run(`mutool create -o $(joinpath(dir, "$name.pdf")) $(joinpath(dir, "$name.txt"))`); joinpath(dir, "$name.pdf"))
+                             run(`$MUTOOL create -o $(joinpath(dir, "$name.pdf")) $(joinpath(dir, "$name.txt"))`); joinpath(dir, "$name.pdf"))
     kb = open_kb(temp_config(layers = Layer[]))
     saved = K.UPLOAD_LOOKUP[]
     try
@@ -4270,7 +4273,7 @@ end
 @zset "a dropped document is kept out" begin
     dir = mktempdir()
     write(joinpath(dir, "a.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 24 Tf 72 700 Td (A Survey of Wells) Tj ET\n")
-    run(`mutool create -o $(joinpath(dir, "a.pdf")) $(joinpath(dir, "a.txt"))`)
+    run(`$MUTOOL create -o $(joinpath(dir, "a.pdf")) $(joinpath(dir, "a.txt"))`)
     pdf = joinpath(dir, "a.pdf")
     saved_lookup, saved_copies = K.UPLOAD_LOOKUP[], K.DOI_COPIES[]
     K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
@@ -4304,7 +4307,7 @@ end
         K.UPLOAD_LOOKUP[] = (p; contact = "") -> (; title = "A Survey of Wells", authors = String[], year = "2024",
                                                    journal_ref = nothing, doi = "10.1/wells", abstract = nothing)
         write(joinpath(dir, "b.txt"), read(joinpath(dir, "a.txt"), String) * "BT /F1 10 Tf 72 600 Td (Another file.) Tj ET\n")
-        run(`mutool create -o $(joinpath(dir, "b.pdf")) $(joinpath(dir, "b.txt"))`)
+        run(`$MUTOOL create -o $(joinpath(dir, "b.pdf")) $(joinpath(dir, "b.txt"))`)
         files = length(readdir(K.pdf_dir(kb.config)))
         @test_throws K.DroppedError add_pdf!(kb, joinpath(dir, "b.pdf"))
         @test length(readdir(K.pdf_dir(kb.config))) == files                       # its copy not kept
@@ -4430,7 +4433,7 @@ end
         0 0.5 0 rg 40 150 710 400 re f
         BT /F1 9 Tf 72 80 Td (Annex, sheet S1. A green box at the end of the paper, set at the foot of its page.) Tj ET
         """)
-    run(`mutool create -o $pdf $(joinpath(dir, "page1.txt")) $(joinpath(dir, "page2.txt")) $(joinpath(dir, "page3.txt")) $(joinpath(dir, "page4.txt"))`)
+    run(`$MUTOOL create -o $pdf $(joinpath(dir, "page1.txt")) $(joinpath(dir, "page2.txt")) $(joinpath(dir, "page3.txt")) $(joinpath(dir, "page4.txt"))`)
     kb = open_kb(temp_config(layers = Layer[]))
     saved = K.UPLOAD_LOOKUP[]
     K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
@@ -4789,7 +4792,7 @@ end
         BT /F1 10 Tf 72 620 Td (Coral polyps are fed by algae living in their tissue.) Tj ET
         BT /F1 10 Tf 72 606 Td (The reef crest breaks the force of storm waves.) Tj ET
         """)
-    run(`mutool create -o $pdf $(joinpath(dir, "page.txt"))`)
+    run(`$MUTOOL create -o $pdf $(joinpath(dir, "page.txt"))`)
     # A stand-in summarizer, so reading the upload summarizes and classifies it the same everywhere.
     port = 18000 + rand(0:999)
     stand_in = K.HTTP.serve!("127.0.0.1", port) do req
@@ -5871,7 +5874,7 @@ end
         dir = mktempdir()
         page_file(n, text) = (f = joinpath(dir, "p$n.txt");
                               write(f, "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 10 Tf 72 700 Td ($text) Tj ET\n"); f)
-        run(`mutool create -o $(joinpath(dir, "scan.pdf")) $(page_file(1, "Tide gauge readings.")) $(page_file(2, "Second page."))`)
+        run(`$MUTOOL create -o $(joinpath(dir, "scan.pdf")) $(page_file(1, "Tide gauge readings.")) $(page_file(2, "Second page."))`)
         pdf = K.add_media!(kb, read(joinpath(dir, "scan.pdf")), "scan.pdf"; by = "Ada", project = "DM")
         csv = K.add_media!(kb, Vector{UInt8}("depth,temp\n1,12.5\n"), "readings.csv"; by = "Ada", project = "DM")
         svg = K.add_media!(kb, Vector{UInt8}("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'><rect width='40' height='20' fill='red'/></svg>"),
@@ -6540,7 +6543,7 @@ end
     dir = mktempdir()
     write(joinpath(dir, "p.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 24 Tf 72 700 Td (A page.) Tj ET\n")
     pdf = joinpath(dir, "p.pdf")
-    run(`mutool create -o $pdf $(joinpath(dir, "p.txt"))`)
+    run(`$MUTOOL create -o $pdf $(joinpath(dir, "p.txt"))`)
     withenv("XDG_CACHE_HOME" => mktempdir()) do
         c = temp_config()
         f = K.draw_page(c, pdf, 1; width = 700)

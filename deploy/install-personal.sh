@@ -6,9 +6,10 @@
 #   bash install-personal.sh BRANCH          Zemi from a branch of github.com/kahliburke/Zemi.jl
 #   bash install-personal.sh ~/path/Zemi.jl  Zemi from a checkout on this machine
 #
-# Each part is skipped where this account already has it: Julia, MuPDF's mutool (reads papers),
-# Ollama (search by meaning), Git and Claude Code (agents that summarize), then Kaimon and Zemi,
-# with Kaimon set up to run Zemi: the questions of its first run answered for one person's machine.
+# Each part is skipped where this account already has it: Julia, Poppler's pdftoppm (Claude Code
+# reads long PDFs with it), Ollama (search by meaning), Git and Claude Code (agents that summarize),
+# then Kaimon and Zemi, with Kaimon set up to run Zemi: the questions of its first run answered for
+# one person's machine.
 # On macOS it installs through Homebrew. On Linux it uses the system's packages where sudo is allowed
 # and installs into ~/.local where it is not. For a group's shared server, see deploy/install.sh.
 set -euo pipefail
@@ -36,6 +37,12 @@ as_root() {
     fi
 }
 can_root() { as_root true 2>/dev/null; }
+# Installs Debian or Ubuntu packages, reading the package lists first, once.
+apt_listed=""
+apt_install() {
+    [ -n "$apt_listed" ] || { as_root apt-get update -qq >/dev/null && apt_listed=1; }
+    as_root apt-get install -y -qq "$@" >/dev/null
+}
 
 if [ "$os" = Darwin ]; then
     have brew || [ -x /opt/homebrew/bin/brew ] || [ -x /usr/local/bin/brew ] ||
@@ -54,40 +61,11 @@ else
     installed+=("Julia $(julia --startup-file=no -e 'print(VERSION)')")
 fi
 
-step "MuPDF's mutool"
-# The version papers are read with (older ones read pages and draw figures differently).
-mupdf=1.27.0 mupdf_sha256=ae2442416de499182d37a526c6fa2bacc7a3bed5a888d113ca04844484dfe7c6
-recent() { [ -n "$1" ] && [ "$(printf '%s\n%s\n' "$mupdf" "$1" | sort -V | head -1)" = "$mupdf" ]; }
-mutool_version() { mutool -v 2>&1 | sed -n 's/^mutool version \([0-9.]*\).*/\1/p' | head -1 || true; }
-if have mutool && recent "$(mutool_version)"; then found mutool
-elif [ "$os" = Darwin ]; then
-    brew install mupdf-tools
-    installed+=("MuPDF $(mutool_version)")
-else
-    packaged=""
-    if have apt-cache && can_root; then
-        as_root apt-get update -qq >/dev/null
-        packaged=$(apt-cache policy mupdf-tools | sed -n 's/^ *Candidate: \([0-9.]*\).*/\1/p')
-    fi
-    if recent "$packaged"; then
-        as_root apt-get install -y -qq mupdf-tools >/dev/null
-    elif have dnf && can_root && recent "$(dnf -q info mupdf 2>/dev/null | sed -n 's/^Version *: *//p' | head -1)"; then
-        as_root dnf install -y -q mupdf
-    else
-        # Built from MuPDF's source into ~/.local.
-        have cc && have make || fail "mutool $mupdf or later is needed to read papers. Install a C compiler and make (build-essential on Debian or Ubuntu), or MuPDF's tools, then run this again."
-        curl -fsSL -o "$work/mupdf.tar.gz" "https://mupdf.com/downloads/archive/mupdf-$mupdf-source.tar.gz"
-        echo "$mupdf_sha256  $work/mupdf.tar.gz" | sha256sum -c --quiet || fail "MuPDF's source is not the one expected."
-        tar xzf "$work/mupdf.tar.gz" -C "$work"
-        echo "Building MuPDF (some minutes)"
-        make -C "$work/mupdf-$mupdf-source" -j"$(nproc)" HAVE_X11=no HAVE_GLUT=no HAVE_CURL=no build=release prefix="$HOME/.local" install >/dev/null
-    fi
-    installed+=("MuPDF $(mutool_version)")
-fi
+step "Poppler's pdftoppm"
 # Not Zemi's: Claude Code reads a PDF too large to attach whole as its pages' images, made by poppler's pdftoppm.
 if ! have pdftoppm; then
     if [ "$os" = Darwin ]; then brew install poppler
-    elif have apt-get && can_root; then as_root apt-get install -y -qq poppler-utils >/dev/null
+    elif have apt-get && can_root; then apt_install poppler-utils
     elif have dnf && can_root; then as_root dnf install -y -q poppler-utils
     else echo "No pdftoppm (poppler): Claude Code then reads long PDFs as text only."
     fi
@@ -105,7 +83,7 @@ if [ "$os" = Darwin ]; then
 elif have ollama; then found ollama
 elif can_root; then
     # Ollama's own installer: a system service, started at boot.
-    have zstd || { have apt-get && as_root apt-get install -y -qq zstd >/dev/null; } || true
+    have zstd || { have apt-get && apt_install zstd; } || true
     curl -fsSL https://ollama.com/install.sh | sh
     installed+=("Ollama")
 else
@@ -139,7 +117,7 @@ if have git && git --version >/dev/null 2>&1; then found git
 elif [ "$os" = Darwin ]; then
     xcode-select --install 2>/dev/null || true
     fail "Git comes with Apple's command line tools: finish their install, then run this again."
-elif have apt-get && can_root; then as_root apt-get install -y -qq git >/dev/null; installed+=("Git")
+elif have apt-get && can_root; then apt_install git; installed+=("Git")
 elif have dnf && can_root; then as_root dnf install -y -q git; installed+=("Git")
 else fail "Git is needed: ask whoever looks after this machine to install it, then run this again."
 fi

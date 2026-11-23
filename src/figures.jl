@@ -318,7 +318,7 @@ end
 
 "The odd pages of the PDF `pdf` (see [`odd_pages`](@ref))."
 pdf_odd_pages(c::Config, pdf::AbstractString) =
-    odd_pages(page_sizes(read(pipeline(ignorestatus(`$(c.mutool) pages $pdf`); stderr = devnull), String)))
+    odd_pages(page_sizes(read(pipeline(ignorestatus(`$(mutool(c)) pages $pdf`); stderr = devnull), String)))
 
 "The odd pages of paper `id`'s PDF (see [`odd_pages`](@ref)), none where its PDF is not here."
 function paper_odd_pages(kb::KB, id::AbstractString)
@@ -443,6 +443,13 @@ function cut_figure(kb::KB, id::AbstractString, label::AbstractString, file::Abs
 end
 
 """
+    mutool(c::Config) -> String
+
+MuPDF's tool as `c` names it, or the one Zemi carries (MuPDF_jll) when `c.mutool` is empty.
+"""
+mutool(c::Config) = isempty(c.mutool) ? MuPDF_jll.mutool_path : c.mutool
+
+"""
 Run mutool command `cmd`, keeping out of the log what it says of a PDF's faults it works around
 (a broken structure tree, a missing resource, odd font metrics); when it fails, that is the error.
 """
@@ -462,7 +469,7 @@ function render_region(c::Config, pdf::AbstractString, r, file::AbstractString; 
     mkpath(dirname(file))
     png = endswith(file, ".webp") ? tempname() * ".png" : file
     try
-        mutool!(`$(c.mutool) run $script $pdf $(r.page) $(r.x0) $(r.y0) $(r.x1) $(r.y1) $dpi $png`)
+        mutool!(`$(mutool(c)) run $script $pdf $(r.page) $(r.x0) $(r.y0) $(r.x1) $(r.y1) $dpi $png`)
         png == file || encode_webp(png, file)
     finally
         rm(script; force = true)
@@ -741,7 +748,7 @@ end
 
 "How many pages PDF `pdf` has, or `nothing` when it does not say."
 pdf_pages(c::Config, pdf::AbstractString) =
-    tryparse(Int, strip(try read(pipeline(`$(c.mutool) show $pdf trailer/Root/Pages/Count`; stderr = devnull), String) catch; "" end))
+    tryparse(Int, strip(try read(pipeline(`$(mutool(c)) show $pdf trailer/Root/Pages/Count`; stderr = devnull), String) catch; "" end))
 
 """
     draw_png(c, file, what; dpi = 110, width = 0) -> Union{Vector{UInt8},Nothing}
@@ -753,7 +760,7 @@ function draw_png(c::Config, file::AbstractString, what::Integer = 1; dpi::Integ
     out = tempname() * ".png"
     try
         size = width > 0 ? `-w $width` : `-r $dpi`
-        ok = success(pipeline(`$(c.mutool) draw -q $size -o $out $file $what`; stdout = devnull, stderr = devnull))
+        ok = success(pipeline(`$(mutool(c)) draw -q $size -o $out $file $what`; stdout = devnull, stderr = devnull))
         return ok && isfile(out) ? read(out) : nothing
     finally
         rm(out; force = true)

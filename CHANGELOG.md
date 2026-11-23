@@ -9,6 +9,9 @@
   their figures are cut and listed after the paper's own. A figure on a page of another size than
   the paper's text, such as a drawing on a landscape page, is cut from that page's own edges.
   Papers are read again (parser version 6) on the next sync.
+- **MuPDF comes with Zemi** (MuPDF_jll), so nothing else needs installing to read papers, and the
+  installers no longer install it. The `mutool` setting is empty for that one; a program named there
+  is used instead.
 
 ## 0.5.0 (2026-11-21)
 

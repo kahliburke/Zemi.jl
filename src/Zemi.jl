@@ -25,6 +25,7 @@ using HTTP
 using JSON
 using PNGFiles
 import libwebp_jll
+import MuPDF_jll
 using OpenSSL_jll: libcrypto
 using SQLite
 using Tables

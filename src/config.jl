@@ -536,6 +536,9 @@ from the config file's folder, so an instance can be one folder: its config, con
 `qdrant_url` and `qdrant_key` name a Qdrant and its API key (a key as layers' keys are); with no
 URL, the one Kaimon runs (see [`qdrant_endpoint`](@ref)).
 
+`mutool` is MuPDF's tool, which reads PDFs and cuts their figures: empty for the one Zemi carries
+(see [`mutool`](@ref)), or another program by its name or path.
+
 `base_set` is a file a new, empty knowledge base is seeded from (see [`seed!`](@ref)), `""` for none.
 
 `group` says who the knowledge base is for (see [`Group`](@ref)): its name, field, description,
@@ -580,7 +583,7 @@ Base.@kwdef struct Config
     qdrant_url::String = ""
     qdrant_key::String = ""
     collection_prefix::String = "zemi"
-    mutool::String = "mutool"
+    mutool::String = ""
     contact::String = ""
     summarizers::Vector{Summarizer} = default_summarizers()
     summarizer::String = "deepseek-v4.1-flash"

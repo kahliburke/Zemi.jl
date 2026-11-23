@@ -282,7 +282,7 @@ arXiv adds to the PDFs it builds, or nothing. Read from the page's raw text: par
 out, as it does the page's margins.
 """
 function arxiv_stamp(pdf::AbstractString, c::Config)
-    text = try read(pipeline(`$(c.mutool) draw -q -F txt -o - $pdf 1`; stderr = devnull), String) catch; "" end
+    text = try read(pipeline(`$(mutool(c)) draw -q -F txt -o - $pdf 1`; stderr = devnull), String) catch; "" end
     m = match(ARXIV_ID_STAMP, replace(text, r"\s+" => " "))
     return m === nothing ? nothing : String(m[1])
 end

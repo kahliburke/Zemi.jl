@@ -6,6 +6,8 @@ using Zemi: Span, TextLine, RawBlock, parse_blocks, keyword_query, point_id,
     parse_arxiv_feed, split_long, CHUNK_MAX, query, scalar, compose_accents
 
 const K = Zemi
+# The mutool Zemi carries, for making test PDFs.
+const MUTOOL = K.mutool(K.Config())
 # Nothing of the person running the tests is read: their config, its settings and the keys saved
 # beside it, their OpenCode login (under XDG_DATA_HOME) and key, or the Kaimon they run. Testsets that
 # need a config or Kaimon's folders set their own.

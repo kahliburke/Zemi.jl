@@ -126,7 +126,7 @@ function check_services!(kb::KB)
     starting = STARTING[]
     c = kb.config
     out = Dict{Symbol,String}()
-    Sys.which(c.mutool) === nothing && (out[:parser] = "MuPDF's `$(c.mutool)` is not installed")
+    Sys.which(mutool(c)) === nothing && (out[:parser] = "MuPDF's `$(mutool(c))` is not installed")
     layers = ingest_layers(c)
     problems = String[]
     local_models = unique(l.model for l in layers if isempty(l.url))

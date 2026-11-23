@@ -163,7 +163,7 @@ Slate hub, or the one on `[notebooks] slate_port`. `ZEMI_SITE_NOTEBOOKS=0` leave
 | `ollama_keep_alive` | `"24h"` | how long Ollama keeps an embedding model loaded after its last use, so a search does not wait for it to load (Ollama's own default is five minutes) |
 | `qdrant_url`, `qdrant_key` | Kaimon's Qdrant, else `http://localhost:6333` | the vector store, and its API key as `"env:NAME"` or `"file:PATH"` |
 | `collection_prefix` | `"zemi"` | Qdrant collections are `<prefix>_<layer>` |
-| `mutool` | `"mutool"` | MuPDF's command |
+| `mutool` | `""` | MuPDF's command; empty for the one Zemi carries |
 | `contact` | `""` | an email sent to arXiv and OpenAlex with requests |
 | `base_set` | `""` | a file a new, empty knowledge base is seeded from |
 | `[[layers]]` | five layers (see [Models](models.md)) | replaces the default layers |

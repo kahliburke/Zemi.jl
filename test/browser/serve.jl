@@ -75,7 +75,7 @@ function seed_figures!(kb)
         BT /F1 10 Tf 72 620 Td (Running text after the table, a sentence long enough to read as a paragraph of words.) Tj ET
         """)
     pdf = joinpath(pages, "figures.pdf")
-    run(`$(kb.config.mutool) create -o $pdf $(joinpath(pages, "1.txt")) $(joinpath(pages, "2.txt"))`)
+    run(`$(K.mutool(kb.config)) create -o $pdf $(joinpath(pages, "1.txt")) $(joinpath(pages, "2.txt"))`)
     K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing             # no published record to look for
     id = K.add_pdf!(kb, pdf; title = "Figures to look at")
     K.fetch_pdf!(kb, id)                                     # records the uploaded file, as reading needs

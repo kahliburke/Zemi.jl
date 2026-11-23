@@ -218,7 +218,7 @@ tool!("media", media_tool; need = "tasks.view")
 
 "The text of PDF `pdf`, or of its page `page`."
 pdf_text(c::Config, pdf::AbstractString, page::Integer = 0) =
-    try read(pipeline(`$(c.mutool) draw -q -F txt -o - $pdf $(page == 0 ? "1-N" : string(page))`; stderr = devnull), String) catch; "" end
+    try read(pipeline(`$(mutool(c)) draw -q -F txt -o - $pdf $(page == 0 ? "1-N" : string(page))`; stderr = devnull), String) catch; "" end
 
 "A tool's answer of `text` followed by `images`, as MCP content blocks (see KaimonGate's `image_result`)."
 function with_images(text::AbstractString, images)

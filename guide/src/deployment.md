@@ -111,7 +111,7 @@ the Claude token instead, set `summarizer = "opus-agent-pdf"` and `code_summariz
 sudo /srv/zemi/Zemi.jl/deploy/install.sh kb.example.org [name]
 ```
 
-Installs the Julia packages, `mutool`, Ollama and the embedding models, Caddy (site in
+Installs the Julia packages, Ollama and the embedding models, Caddy (site in
 `/etc/caddy/sites/<name>.caddy`), and `<name>.service` (default `zemi`). Refuses to run the service
 as a user who can become root. Several knowledge bases can share a machine, each with its own `name`,
 user, config, host, `[shared] port`, `[shared] kaimon_port` (default 2829) and `collection_prefix`

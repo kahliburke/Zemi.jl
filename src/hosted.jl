@@ -119,7 +119,7 @@ const MACHINE_SETTINGS = [
     (key = "content_dir", kind = "path", choices = String[], label = "Content folder", help = "Pages, studies and notebooks"),
     (key = "ollama_url", kind = "string", choices = String[], label = "Ollama", help = "Where the embedding models run"),
     (key = "qdrant_url", kind = "string", choices = String[], label = "Qdrant", help = "Empty for the Qdrant Kaimon runs"),
-    (key = "mutool", kind = "string", choices = String[], label = "mutool", help = "MuPDF's tool, for reading PDFs and cutting figures"),
+    (key = "mutool", kind = "string", choices = String[], label = "mutool", help = "MuPDF's tool, for reading PDFs and cutting figures; empty for the one Zemi carries"),
 ]
 
 "Setting `key`'s value in configuration `c`, as the panel shows it."

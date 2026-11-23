@@ -41,7 +41,7 @@ fetched first where it is not here (see [`paper_pdf`](@ref)).
 function paper_pages(kb::KB, id::AbstractString, a::Integer, b::Integer)
     1 <= a <= b || error("No pages $a-$b.")
     pdf = paper_pdf(kb, id)
-    return page_bounds(read(pipeline(ignorestatus(`$(kb.config.mutool) pages $pdf $a-$b`); stderr = devnull), String))
+    return page_bounds(read(pipeline(ignorestatus(`$(mutool(kb.config)) pages $pdf $a-$b`); stderr = devnull), String))
 end
 
 # Pages being drawn, each by one request: another asking for it waits for that one.
@@ -73,9 +73,9 @@ function draw_page(c::Config, pdf::AbstractString, page::Integer; width::Integer
             png = tempname() * ".png"
             try
                 # (mutool takes a page past the last as the last.)
-                any(b -> b.page == page, page_bounds(read(pipeline(ignorestatus(`$(c.mutool) pages $pdf $page`); stderr = devnull), String))) ||
+                any(b -> b.page == page, page_bounds(read(pipeline(ignorestatus(`$(mutool(c)) pages $pdf $page`); stderr = devnull), String))) ||
                     not_found("No page $page in $(basename(pdf)).")
-                mutool!(`$(c.mutool) draw -q -w $w -o $png $pdf $page`)
+                mutool!(`$(mutool(c)) draw -q -w $w -o $png $pdf $page`)
                 encode_webp(png, printed)
             finally
                 rm(png; force = true)
