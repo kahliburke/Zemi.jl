@@ -1,8 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Changes
+## 0.5.1 (2026-11-23)
 
 - **Figures in series of their own**: captions such as "Fig. S2", "Supplementary Figure 1",
   "Table A1" and a report's drawings, maps and plates ("Annex, sheet S1") are read as captions, and
@@ -12,6 +10,7 @@
 - **MuPDF comes with Zemi** (MuPDF_jll), so nothing else needs installing to read papers, and the
   installers no longer install it. The `mutool` setting is empty for that one; a program named there
   is used instead.
+- **Tables** whose row of column names is long enough to read as a sentence are cut whole.
 
 ## 0.5.0 (2026-11-21)
 
