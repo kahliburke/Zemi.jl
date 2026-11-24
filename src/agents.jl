@@ -41,17 +41,31 @@ end
 
 agents_dir(parts...) = joinpath(xdg_home("XDG_CACHE_HOME", ".cache"), "zemi", "agents", parts...)
 
+"Whether `model` names an agent Kaimon drives over the Agent Client Protocol: `acp:<agent>[:<model>]` (Codex, OpenCode, Gemini)."
+acp_model(model::AbstractString) = startswith(model, "acp:")
+
+"An ACP agent's own file tools, by the names it reports them under; Kaimon keeps them to its working folder."
+const ACP_FILE_TOOLS = ["read", "write", "edit"]
+
 """
     open_agent(dir; id, model, tools = String[], system = "", effort = nothing) -> String
 
-Open agent `id` with `model` working in `dir`, allowed only its file tools, kept to `dir` (see
-[`file_tools`](@ref)), and `tools`; and to read the targets of the links in `dir` (see
-[`agent_reads`](@ref)). Returns the id Kaimon gives it.
+Open agent `id` with `model` working in `dir`, allowed only its file tools, kept to `dir`, and
+`tools`; and to read the targets of the links in `dir` (see [`agent_reads`](@ref)). Returns the id
+Kaimon gives it.
+
+Those tools are the agent's whole tool set. The Claude CLI is held to them by `only`, its file tools
+named with Claude's path rules (see [`file_tools`](@ref)); an ACP agent by Kaimon's `specialist`
+preset, its own file tools named bare ([`ACP_FILE_TOOLS`](@ref)). Kaimon holds OpenCode's own tools to
+them; Codex's and Gemini's only where the agent asks permission for a call.
 """
 function open_agent(dir::AbstractString; id::AbstractString, model::AbstractString,
                     tools::AbstractVector{<:AbstractString} = String[], system::AbstractString = "", effort = nothing)
-    args = Dict{String,Any}("cwd" => dir, "id" => id, "model" => model, "permission" => "default",
-        "allowed_tools" => [file_tools(dir); tools], "only" => true, "confine_allow" => agent_reads(dir), "system_prompt" => system)
+    acp = acp_model(model)
+    args = Dict{String,Any}("cwd" => dir, "id" => id, "model" => model, "permission" => acp ? "specialist" : "default",
+        "allowed_tools" => [acp ? ACP_FILE_TOOLS : file_tools(dir); tools], "confine_allow" => agent_reads(dir),
+        "system_prompt" => system)
+    acp || (args["only"] = true)
     effort === nothing || (args["effort"] = effort)
     return kaimon_tool(:agent_open, args)["agent_id"]
 end

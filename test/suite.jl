@@ -3622,6 +3622,31 @@ end
     end
 end
 
+@zset "agents opened on any agent Kaimon runs" begin
+    # Kaimon holds an agent to its tools one way for the Claude CLI and another for an ACP agent
+    # (`only` is refused for one), and the two name their file tools differently.
+    asked = Ref{Dict{String,Any}}()
+    saved = K.AGENT_CALL[]
+    K.AGENT_CALL[] = (name, args) -> (asked[] = args; K.JSON.json(Dict("agent_id" => args["id"])))
+    dir = mktempdir()
+    try
+        opened(model; kw...) = (K.open_agent(dir; id = "a", model, kw...); asked[])
+        claude = opened("opus"; tools = ["mcp__kaimon__zemi_search"])
+        @test claude["permission"] == "default" && claude["only"] === true
+        @test claude["allowed_tools"] == [K.file_tools(dir); "mcp__kaimon__zemi_search"]
+        for model in ("acp:codex", "acp:opencode:opencode/minimax-m3", "acp:gemini")
+            a = opened(model; tools = ["mcp__kaimon__zemi_search"], effort = "medium")
+            @test a["model"] == model && a["permission"] == "specialist" && !haskey(a, "only")
+            @test a["allowed_tools"] == ["read", "write", "edit", "mcp__kaimon__zemi_search"]
+            @test a["confine_allow"] == K.agent_reads(dir)
+        end
+        @test opened("ollama:qwen3:14b")["only"] === true            # a local model: as the CLI
+        @test K.acp_model("acp:codex") && !K.acp_model("opus") && !K.acp_model("ollama:qwen3:14b")
+    finally
+        K.AGENT_CALL[] = saved
+    end
+end
+
 @zset "hosted models" begin
     HTTP, JSON = K.HTTP, K.JSON
     keyfile = tempname()
