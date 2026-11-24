@@ -24,7 +24,8 @@ type Record = { id: string; slug: string; title: string; date: string; day: stri
 const { data: r, error, render } = useTemplatedPage<Record>('records', 'No such record, or not one you may see.', { title: x => x.title })
 
 // Its figures are sent by the service, at the API's address.
-const shown = (text: string) => render.value(text.replace(/\]\(\/api\/figures\//g, `](${api.value}/api/figures/`))
+// A record's text names others by reference (a vault's links, `@[label](record:…)`): they are rendered as links.
+const shown = (text: string) => render.value(text.replace(/\]\(\/api\/figures\//g, `](${api.value}/api/figures/`), { refs: true })
 const unplaced = computed(() => (r.value?.figures ?? []).filter(f => !f.placed))
 const two = (n: number) => String(Math.floor(n)).padStart(2, '0')
 const clock = (s: number) => s >= 3600 ? `${Math.floor(s / 3600)}:${two(s % 3600 / 60)}:${two(s % 60)}` : `${Math.floor(s / 60)}:${two(s % 60)}`
@@ -99,7 +100,7 @@ async function link(key: string, remove = false) {
 
     <template v-if="r.summary">
       <h2 id="summary">Summary</h2>
-      <div v-html="render(r.summary)"></div>
+      <div v-html="render(r.summary, { refs: true })"></div>
       <p v-if="r.topics.length"><strong>Topics:</strong> {{ r.topics.join(' · ') }}</p>
     </template>
     <p v-else-if="!r.read" class="kb-dim">Not read yet.</p>

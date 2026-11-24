@@ -14,6 +14,7 @@ import { byline } from './kbFormat'
 import { current, vectorless } from './kbSearchPrefs'
 import { kbPage, findingHref } from './kbLinks'
 import { markedSnippet } from './kbUtils'
+import { refsTextHtml, clipRefs } from './kbRefs'
 
 
 type Evidence = { ranking: string; ranking_label: string; rank: number; matched: string; contribution: number }
@@ -130,7 +131,6 @@ const note = computed(() => mode.value === 'live'
 const strength = (h: Hit) => h.score && h.max_score ? h.score / h.max_score : 0
 const share = (h: Hit, e: Evidence) => h.score ? Math.round(100 * e.contribution / h.score) : 0
 const open = ref<Record<string, boolean>>({})
-const clip = (s: string, n = 420) => s.length > n ? s.slice(0, n).replace(/\s+\S*$/, '') + ' …' : s
 const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start}` : `pp. ${p.page_start}–${p.page_end}`
 </script>
 
@@ -184,14 +184,14 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
             </tr>
           </tbody>
         </table>
-        <p v-if="h.summary" class="kb-text">{{ clip(h.summary) }}</p>
+        <p v-if="h.summary" class="kb-text" v-html="refsTextHtml(clipRefs(h.summary))"></p>
         <div v-for="(p, i) in h.passages ?? []" :key="i" class="kb-passage">
           <div class="kb-where">
             <a v-if="p.page" :href="kbPage(p.page)">{{ p.section }}</a>
             <template v-else>{{ p.section }} · {{ pagesOf(p) }}</template>
             <span v-for="e in p.evidence" :key="e.ranking" class="kb-chip" :title="e.ranking_label">{{ e.ranking_label.split(' · ')[1] ?? e.ranking_label }} #{{ e.rank }}</span>
           </div>
-          <p class="kb-text">{{ clip(p.text) }}</p>
+          <p class="kb-text" v-html="refsTextHtml(clipRefs(p.text))"></p>
         </div>
       </li>
     </ol>

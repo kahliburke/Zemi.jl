@@ -121,6 +121,30 @@ export const onTaskRef = (open: (ref: string) => void) => (e: Event) => {
 }
 
 
+// The links `refsToMarkdown` writes: to a reference (`kbref:`), or a cited paper on arXiv.
+const MADE_LINK = /\[((?:\\.|[^\]\\\n])*)\]\((kbref:\w+:[^)\s]*|https:\/\/arxiv\.org\/abs\/[^)\s]*)\)/g
+
+// Plain `text` (a passage, a summary) as HTML, escaped, with its references as their links and nothing
+// else in it taken for Markdown.
+export function refsTextHtml(text: string): string {
+  const md = refsToMarkdown(text)
+  let out = '', i = 0
+  for (const m of md.matchAll(MADE_LINK)) {
+    out += escapeHtml(md.slice(i, m.index)) + `<a href="${escapeHtml(m[2])}">${escapeHtml(m[1].replace(/\\([[\]])/g, '$1'))}</a>`
+    i = m.index! + m[0].length
+  }
+  return refsHtml(out + escapeHtml(md.slice(i)))
+}
+
+// `text` cut to about `n` characters at a word, never inside an `@[label](kind:target)` reference.
+export function clipRefs(text: string, n = 420): string {
+  if (text.length <= n) return text
+  let t = text.slice(0, n)
+  const open = t.lastIndexOf('@[')
+  if (open >= 0 && !t.slice(open).includes(')')) t = t.slice(0, open)
+  return t.replace(/\s+\S*$/, '') + ' …'
+}
+
 // Rendered HTML with the reference links `refsToMarkdown` left made into the references' links.
 export function refsHtml(html: string): string {
   return html.replace(/<a href="kbref:(\w+):([^"]*)">([\s\S]*?)<\/a>/g, (_, kind, enc, label) => {
