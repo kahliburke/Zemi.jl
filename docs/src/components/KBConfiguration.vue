@@ -8,6 +8,7 @@
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
+import KBConnections from './KBConnections.vue'
 import KBModelChoice, { type ModelInfo, type Choice } from './KBModelChoice.vue'
 import { ref, computed, onMounted } from 'vue'
 import { mode, connect, getJSON, post, can, shared, api } from './kbApi'
@@ -276,6 +277,8 @@ const moveUp = (list: unknown[], i: number) => list.splice(i - 1, 0, ...list.spl
           <button v-if="dirty" class="kb-link kbcf-link" @click="undo">undo</button>
           <span v-if="saved" class="kbcf-saved">{{ saved }}</span>
         </div>
+        <!-- Run for one person, the clients its owner connected; the shared service lists a person's under Your account. -->
+        <section v-if="!shared && editable"><KBConnections /></section>
       </template>
     </KBNeedsService>
     <p v-if="error" class="kb-error kbcf-error">{{ error }}</p>

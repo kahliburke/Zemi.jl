@@ -82,22 +82,31 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
     params = HTTP.queryparams(uri)
     parts = filter(!isempty, split(HTTP.unescapeuri(uri.path), '/'))
     t0 = time()
+    oauth = !isempty(parts) && (parts[1] == "oauth" || (parts[1] == ".well-known" && length(parts) > 1 && startswith(parts[2], "oauth-")))
+    # Run for one person, a client the owner connected (see oauth.jl) reaches the API with its token.
+    token = shared || isempty(parts) || parts[1] != "api" ? nothing : bearer_owner_token(kb, req)
     r = try
         if length(parts) == 4 && parts[1:3] == ["api", "media", "upload"]
             # A file sent to an upload link: the link is its sender's credential (see media_upload).
             upload_response(kb, req, parts[4])
-        elseif !shared && !haskey(ICON_PATHS, uri.path) && (locked = local_key_response(kb, req, uri, params)) !== nothing
+        elseif !shared && oauth && parts != ["oauth", "authorize"]
+            # Run for one person, a client connects as it would to the shared service: what it asks
+            # here, before the owner has approved it, needs no key. Approving it does (below).
+            oauth_response(kb, sh, req, parts, params; owner = true)
+        elseif !shared && token === nothing && !haskey(ICON_PATHS, uri.path) && (locked = local_key_response(kb, req, uri, params)) !== nothing
             locked
+        elseif !shared && oauth
+            oauth_response(kb, sh, req, parts, params; owner = true)
         elseif shared && !isempty(parts) && parts[1] == "auth"
             auth_response(kb, sh, req, parts, params)
         elseif shared && !isempty(parts) && parts[1] == "mcp"
             mcp_response(kb, req)
-        elseif shared && !isempty(parts) && (parts[1] == "oauth" || (parts[1] == ".well-known" && length(parts) > 1 &&
-                                                                     startswith(parts[2], "oauth-")))
+        elseif shared && oauth
             oauth_response(kb, sh, req, parts, params)
         elseif !isempty(parts) && parts[1] == "api"
             if !shared
-                local_host(req) ? respond_local(kb, req) : json_response(Dict("error" => "Not this machine's address"); status = 403)
+                local_host(req) ? respond_local(kb, req; caller = something(token, local_caller())) :
+                                  json_response(Dict("error" => "Not this machine's address"); status = 403)
             elseif req.method == "POST" && !shared_write_allowed(sh, req)
                 json_response(Dict("error" => "Only from this site's pages, or with a token."); status = 403)
             else

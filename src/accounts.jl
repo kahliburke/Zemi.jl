@@ -461,18 +461,38 @@ function token_caller(kb::KB, token::AbstractString; mcp::Bool = false)
     t = first(r)
     (ismissing(t.revoked_at) && (ismissing(t.expires_at) || t.expires_at > now_iso())) || return ANONYMOUS
     # A token an MCP client got by OAuth is for /mcp: its tools, not the whole API. One got for a
-    # library (scope `library`) is for the API, with that permission alone.
-    mcp || ismissing(t.client_id) || coalesce(t.scope, "mcp") == "library" || return ANONYMOUS
+    # library or for reading (see `API_SCOPES`) is for the API, with that permission alone.
+    mcp || ismissing(t.client_id) || coalesce(t.scope, "mcp") in API_SCOPES || return ANONYMOUS
+    # A token of the person who runs a knowledge base for one person, who has no account, is nothing
+    # to the shared service.
+    ismissing(t.user_id) && SHARED_MODE[] && return ANONYMOUS
     seen_now(t.last_used) && execute!(kb, "UPDATE api_tokens SET last_used = ? WHERE id = ?", (now_iso(), t.id))
-    return account_caller(kb, t.user_id, :token; token_id = Int(t.id), only = Set(JSON.parse(t.permissions)),
+    only = Set{String}(JSON.parse(t.permissions))
+    ismissing(t.user_id) && return owner_caller(:token; token_id = Int(t.id), only)
+    return account_caller(kb, t.user_id, :token; token_id = Int(t.id), only,
                           projects = ismissing(t.projects) ? nothing : Set{String}(JSON.parse(t.projects)))
 end
 
-"The tokens of person `uid`, or everyone's: never the tokens themselves, only what identifies them."
+"""
+    owner_caller(via; token_id = nothing, only = nothing) -> Caller
+
+The person who runs a knowledge base for one person (see [`local_caller`](@ref)), as a token or an
+approval of theirs acts: with the permissions in `only`, where given.
+"""
+function owner_caller(via::Symbol; token_id = nothing, only = nothing)
+    c = local_caller()
+    return Caller(nothing, c.name, "", only === nothing ? c.permissions : intersect(c.permissions, only), via, token_id)
+end
+
+"""
+The tokens of person `uid`, or everyone's: never the tokens themselves, only what identifies them. A
+token of the person who runs a knowledge base for one person has `user_id` `nothing` (see
+[`owner_tokens`](@ref)).
+"""
 function tokens(kb::KB; uid = nothing)
-    rows = uid === nothing ? query(kb, "SELECT t.*, u.email FROM api_tokens t JOIN users u ON u.id = t.user_id ORDER BY t.created_at DESC") :
+    rows = uid === nothing ? query(kb, "SELECT t.*, u.email FROM api_tokens t LEFT JOIN users u ON u.id = t.user_id ORDER BY t.created_at DESC") :
            query(kb, "SELECT t.*, u.email FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.user_id = ? ORDER BY t.created_at DESC", (uid,))
-    return [(; id = t.id, user_id = t.user_id, email = t.email, name = t.name, prefix = t.prefix,
+    return [(; id = t.id, user_id = ismissing(t.user_id) ? nothing : t.user_id, email = coalesce(t.email, ""), name = t.name, prefix = t.prefix,
                permissions = String.(JSON.parse(t.permissions)), projects = ismissing(t.projects) ? nothing : String.(JSON.parse(t.projects)),
                created_at = t.created_at,
                expires_at = coalesce(t.expires_at, ""), last_used = coalesce(t.last_used, ""), revoked = !ismissing(t.revoked_at),
@@ -482,11 +502,22 @@ end
 
 "Revoke token `id`; `uid`, given, must own it."
 function revoke_token!(kb::KB, id::Integer; uid = nothing)
-    owner = scalar(kb, "SELECT user_id FROM api_tokens WHERE id = ?", (id,))
-    ismissing(owner) && not_found("No token $id")
-    uid === nothing || owner == uid || error("That token is not yours")
+    rows = query(kb, "SELECT user_id FROM api_tokens WHERE id = ?", (id,))
+    isempty(rows) && not_found("No token $id")
+    uid === nothing || isequal(first(rows).user_id, uid) || error("That token is not yours")
     execute!(kb, "UPDATE api_tokens SET revoked_at = coalesce(revoked_at, ?) WHERE id = ?", (now_iso(), id))
 end
+
+"""
+    owner_tokens(kb) -> Vector{NamedTuple}
+
+The connections the person who runs a knowledge base for one person approved (see oauth.jl): each
+client's token, never the token itself, with its scope and when it was last used, the latest first.
+"""
+owner_tokens(kb::KB) =
+    [(; id = Int(t.id), name = String(t.name), scope = String(coalesce(t.scope, "")), created_at = String(t.created_at),
+        last_used = String(coalesce(t.last_used, "")), revoked = !ismissing(t.revoked_at))
+     for t in query(kb, "SELECT * FROM api_tokens WHERE user_id IS NULL ORDER BY created_at DESC")]
 
 # ── Quotas and the audit log ──────────────────────────────────────────────────────────────────────
 

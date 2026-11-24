@@ -2202,6 +2202,66 @@ K.store_file!(r::InProcessLibrary, path, bytes; base, modified) =
     K.JSON.parse(String(library_call(r, "PUT", path; body = bytes, query = ["base" => something(base, ""), "modified" => string(modified)])))
 K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path; query = ["base" => something(base, "")])
 
+@zset "a client connects to a knowledge base run for one person" begin
+    HTTP = K.HTTP
+    kb = open_kb(temp_config())
+    serve(method, target; headers = Pair{String,String}[], body = "") =
+        K.respond_service(kb, HTTP.Request(method, target, ["Host" => "localhost:8000"; headers], body); shared = false)
+    js(r) = K.JSON.parse(String(r.body))
+    location(r) = HTTP.header(r, "Location")
+    owner = ["Cookie" => "$(K.local_cookie())=$(K.local_key(kb.config))"]
+    formed = ["Content-Type" => "application/x-www-form-urlencoded"]
+    # What a client asks before the owner approves it needs no key: it has none yet.
+    @test js(serve("GET", "/.well-known/oauth-authorization-server"))["scopes_supported"] == ["library", "read"]   # no /mcp here
+    back = "http://127.0.0.1:4567/callback"
+    client = js(serve("POST", "/oauth/register"; body = K.JSON.json(Dict("client_name" => "Slate", "redirect_uris" => [back]))))["client_id"]
+    verifier = "a-verifier-long-enough-for-pkce-0123456789abcdef"
+    P = ["response_type" => "code", "client_id" => client, "redirect_uri" => back, "state" => "s1",
+         "code_challenge" => K.pkce_challenge(verifier), "code_challenge_method" => "S256", "scope" => "read"]
+    # Approving it is the owner's, whose browser has the key.
+    @test serve("GET", "/oauth/authorize?" * HTTP.escapeuri(P)).status == 401
+    @test startswith(location(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P[1:6]; "scope" => "mcp"]); headers = owner)), "$back?error=invalid_scope")
+    page = String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri(P); headers = owner).body)
+    @test occursin("It would read this knowledge base", page) && occursin("Settings, under Connections", page)
+    key = match(r"name=\"form_key\" value=\"([^\"]+)\"", page)[1]
+    approve(form_key) = serve("POST", "/oauth/authorize"; headers = [owner; formed],
+                              body = HTTP.escapeuri([P; ["form_key" => form_key, "decision" => "allow"]]))
+    @test approve("not-the-page's").status == 403                         # posted from anywhere but its page
+    code = HTTP.queryparams(HTTP.URI(location(approve(key))))["code"]
+    t = js(serve("POST", "/oauth/token"; headers = formed,
+                 body = HTTP.escapeuri(["grant_type" => "authorization_code", "code" => code, "client_id" => client,
+                                        "redirect_uri" => back, "code_verifier" => verifier])))
+    @test t["scope"] == "read"
+    # The token reads, at the API, and nothing more: no other permission, no page.
+    auth = ["Authorization" => "Bearer $(t["access_token"])"]
+    @test serve("GET", "/api/bib"; headers = auth).status == 200
+    @test serve("GET", "/api/documents"; headers = auth).status == 403            # library
+    @test serve("POST", "/api/actions"; headers = auth, body = "{}").status == 403  # paper.manage
+    @test serve("GET", "/"; headers = auth).status == 401
+    caller = K.token_caller(kb, t["access_token"])
+    @test caller.user_id === nothing && caller.permissions == Set(["read"]) && caller.via == :token
+    # The owner's connections, and revoking one ends it, its refresh too.
+    conn = only(K.owner_tokens(kb))
+    @test conn.scope == "read" && occursin("Slate", conn.name) && !conn.revoked
+    @test only(js(serve("GET", "/api/connections"; headers = owner)))["id"] == conn.id   # the Configuration page's list
+    @test serve("GET", "/api/connections"; headers = auth).status == 403                  # not a client's to see
+    @test serve("POST", "/api/connections/$(conn.id)/revoke"; headers = [owner; "X-Zemi" => "1"], body = "{}").status == 200
+    @test serve("GET", "/api/bib"; headers = auth).status == 401
+    @test serve("POST", "/oauth/token"; headers = formed,
+                body = HTTP.escapeuri(["grant_type" => "refresh_token", "refresh_token" => t["refresh_token"], "client_id" => client])).status == 400
+    # A token of the person who runs it for one person is nothing to a shared service.
+    t2 = K.oauth_token!(kb, Dict("grant_type" => "authorization_code", "client_id" => client, "redirect_uri" => back,
+        "code_verifier" => verifier, "code" => HTTP.queryparams(HTTP.URI(K.issue_code!(kb, K.authorization_request(kb, Dict(P); scopes = K.OWNER_SCOPES), nothing)))["code"]))
+    try
+        K.SHARED_MODE[] = true
+        @test K.token_caller(kb, t2["access_token"]).via == :anonymous
+    finally
+        K.SHARED_MODE[] = false
+    end
+    @test K.token_caller(kb, t2["access_token"]).via == :token
+    close(kb)
+end
+
 @zset "connecting a folder to one's library" begin
     HTTP = K.HTTP
     kb = open_kb(temp_config(; shared = shared_config(sign_up = :open, default_role = "Learner"), layers = Layer[]))

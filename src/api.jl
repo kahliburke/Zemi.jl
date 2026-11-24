@@ -273,6 +273,21 @@ route!("GET", "/api/figures/:paper/:file") do c
     isfile(f) ? file_response(f; c.req) : not_found("No such figure.")
 end
 
+# The clients the person who runs a knowledge base for one person connected (see oauth.jl), and
+# revoking one: theirs alone, from its pages, not a client's token.
+owner_only(c) = c.caller.via == :local || not_permitted("Not permitted: the connections are those of the person who runs this knowledge base")
+route!("GET", "/api/connections"; need = "config.edit") do c
+    owner_only(c)
+    Any[Dict(pairs(t)) for t in owner_tokens(c.kb)]
+end
+route!("POST", "/api/connections/:id/revoke"; need = "config.edit") do c
+    owner_only(c)
+    id = tryparse(Int, c[:id])
+    (id === nothing || !any(t -> t.id == id, owner_tokens(c.kb))) && not_found("No connection $(c[:id])")
+    revoke_token!(c.kb, id)
+    Dict("id" => id, "revoked" => true)
+end
+
 # The documents of one kind most recently posted or added (`?kind=paper|code|record|resource&limit=…`),
 # of those the caller may find: the Knowledge base page's list, while its search is set to that kind.
 route!("GET", "/api/recent") do c
@@ -546,9 +561,25 @@ end
 Answer a request to the knowledge base run for one person: from whoever runs it, with every
 permission, and changes only from this machine's pages (see [`write_allowed`](@ref)).
 """
-function respond_local(kb::KB, req::HTTP.Request)
-    req.method == "POST" && !write_allowed(req) &&
+function respond_local(kb::KB, req::HTTP.Request; caller::Caller = local_caller())
+    # A page's request is its owner's, and changes only from this machine's pages; a client's token
+    # (see `bearer_owner_token`) does what its permissions allow.
+    caller.via == :token || req.method != "POST" || write_allowed(req) ||
         return json_response(Dict("error" => "Only from this machine's pages."); status = 403)
-    return handle(kb, req, local_caller())
+    return handle(kb, req, caller)
+end
+
+"""
+    bearer_owner_token(kb, req) -> Union{Caller,Nothing}
+
+Run for one person, the caller a request's `Authorization: Bearer` token is: a client the person who
+runs it connected (see oauth.jl), or `nothing` for none (the knowledge base's own key among them,
+which `local_key_response` takes).
+"""
+function bearer_owner_token(kb::KB, req::HTTP.Request)
+    auth = HTTP.header(req, "Authorization", "")
+    startswith(auth, "Bearer ") || return nothing
+    c = token_caller(kb, String(strip(auth[8:end])))
+    return c.via == :token && c.user_id === nothing ? c : nothing
 end
 

@@ -167,7 +167,9 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
         # The site's data a page has no file for (a record's, a closed paper's or codebase's) is the
         # service's, to those who may see it.
         data = "{ target: $target, bypass: req => kbExists(path.join(__dirname, '../public', decodeURIComponent(req.url.split('?')[0]))) ? req.url : undefined }"
-        config = replace(config, vite => vite * "\n    server: { proxy: { '/api/': $target, '/auth/': $target, '^/mcp(\\\\?|\$)': $target, '/kb-data/': $data } },"; count = 1)
+        # A client connecting by OAuth (a notebook citing the knowledge base) asks the service too.
+        config = replace(config, vite => vite * "\n    server: { proxy: { '/api/': $target, '/auth/': $target, '^/mcp(\\\\?|\$)': $target, " *
+                                         "'/oauth/': $target, '^/\\\\.well-known/oauth-': $target, '/kb-data/': $data } },"; count = 1)
         # A page made from a template that has no page of its own here is its kind's template, as
         # the built site answers it (see kbTemplates.ts): the router asks for the page's `.md`.
         kinds = KBase.JSON.json([Dict("folder" => t.folder, "template" => t.template) for (_, t) in KBase.TEMPLATED])
