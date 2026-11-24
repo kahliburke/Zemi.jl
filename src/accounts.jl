@@ -485,6 +485,15 @@ function owner_caller(via::Symbol; token_id = nothing, only = nothing)
 end
 
 """
+    sees_everything(caller) -> Bool
+
+Whether `caller` is the person who runs a knowledge base for one person, or a client they connected
+(see [`owner_caller`](@ref)): every document and file is theirs to see. What a client may do with
+them is its permissions'.
+"""
+sees_everything(c::Caller) = c.via == :local || (c.via == :token && c.user_id === nothing)
+
+"""
 The tokens of person `uid`, or everyone's: never the tokens themselves, only what identifies them. A
 token of the person who runs a knowledge base for one person has `user_id` `nothing` (see
 [`owner_tokens`](@ref)).

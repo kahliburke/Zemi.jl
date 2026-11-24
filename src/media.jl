@@ -71,7 +71,7 @@ Whether `caller` may have file `hash`: it belongs to a project they see, or thei
 it. Run for one person, every file is theirs.
 """
 function media_visible(kb::KB, caller::Caller, hash::AbstractString)
-    caller.via == :local && return true
+    sees_everything(caller) && return true
     media_file(kb, hash) === nothing && return false
     caller.user_id === nothing || scalar(kb, "SELECT added_by_user FROM media WHERE hash = ?", (hash,)) === caller.user_id && return true
     return any(r -> project_access(kb, caller, String(r.key)) >= VIEW,

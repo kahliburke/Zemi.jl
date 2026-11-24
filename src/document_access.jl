@@ -128,7 +128,7 @@ tasks. One linked to no project only those with its kind's `unassigned` permissi
 before anyone assigns it).
 """
 function document_visible(kb::KB, caller::Caller, id::AbstractString)
-    caller.via == :local && return true
+    sees_everything(caller) && return true
     access = coalesce(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,)), "open")
     access == "open" && return true
     holds(kb, caller, id) && return true
@@ -146,7 +146,7 @@ closed_documents(kb::KB) =
 
 "The documents `caller` may not see (see [`document_visible`](@ref)), to leave out of what they are answered."
 function hidden_documents(kb::KB, caller::Caller)
-    caller.via == :local && return Set{String}()
+    sees_everything(caller) && return Set{String}()
     linked, member = documents_projects(kb), Dict{String,Bool}()
     sees(k) = get!(() -> project_membership(kb, caller, k) >= VIEW, member, k)
     held = caller.user_id === nothing ? Set{String}() : held_documents(kb, caller.user_id)
@@ -165,13 +165,13 @@ The private documents not held for `caller`: none of theirs to manage, whatever 
 who manage documents see every other, those of projects they are not in too.
 """
 others_private(kb::KB, caller::Caller) =
-    caller.via == :local ? Set{String}() :
+    sees_everything(caller) ? Set{String}() :
     Set{String}(String(r.doc_id) for r in query(kb, """SELECT p.doc_id FROM papers p WHERE p.access = 'private'
         AND NOT EXISTS (SELECT 1 FROM document_holders h WHERE h.paper_id = p.id AND h.user_id = ?)""", (something(caller.user_id, 0),)))
 
 "Document `id`, refused as none when it is private and not `caller`'s (see [`others_private`](@ref))."
 managed_document(kb::KB, caller::Caller, id::AbstractString) =
-    (caller.via == :local || coalesce(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,)), "open") != "private" ||
+    (sees_everything(caller) || coalesce(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,)), "open") != "private" ||
      holds(kb, caller, id) || not_found("No document $id in the knowledge base"); String(id))
 
 "Document `id`, refused as none when `caller` may not see it."

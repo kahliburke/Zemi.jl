@@ -2249,6 +2249,10 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     @test serve("GET", "/"; headers = auth).status == 401
     caller = K.token_caller(kb, t["access_token"])
     @test caller.user_id === nothing && caller.permissions == Set(["read"]) && caller.via == :token
+    # It sees what the owner sees: a record of a vault, linked to no project, too.
+    K.execute!(kb, "INSERT INTO papers (doc_id, title, added_at, kind, access) VALUES ('rec-note', 'Note', '2026-11-01T00:00:00Z', 'record', 'projects')")
+    @test K.document_visible(kb, caller, "rec-note") && isempty(K.hidden_documents(kb, caller))
+    @test !K.document_visible(kb, K.ANONYMOUS, "rec-note")
     # The owner's connections, and revoking one ends it, its refresh too.
     conn = only(K.owner_tokens(kb))
     @test conn.scope == "read" && occursin("Slate", conn.name) && !conn.revoked
