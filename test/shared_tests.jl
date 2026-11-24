@@ -922,7 +922,7 @@ end
         r = bib(as(ada))
         @test r.status == 200 && HTTP.header(r, "Content-Type") == "text/plain; charset=utf-8"
         entry = String(r.body)
-        @test occursin("@misc{$id,", entry) && occursin("date = {2026-10-02}", entry) &&
+        @test occursin("@misc{$(K.cite_key(kb, id)),", entry) && occursin("date = {2026-10-02}", entry) &&
               occursin("howpublished = {Meeting notes written up by a tool}", entry) && occursin("title = {{Pump test review}}", entry)
         @test !occursin(id, String(bib(as(bea)).body))
         @test occursin(id, String(bib(as(ada), "?keys=arXiv:2401.00001,$id").body)) &&
@@ -932,7 +932,7 @@ end
         @test bib(K.ANONYMOUS).status == 401 && bib(K.token_caller(kb, tutor_only)).status == 403
         # Membership decides which records a token sees, whatever it may do with the project's tasks.
         read_only = K.token_caller(kb, K.create_token!(kb, ada; name = "read only", permissions = ["read"]).token)
-        @test occursin("@misc{$id,", String(bib(read_only).body)) && K.project_access(kb, read_only, "PU") == K.NO_ACCESS
+        @test occursin("@misc{$(K.cite_key(kb, id)),", String(bib(read_only).body)) && K.project_access(kb, read_only, "PU") == K.NO_ACCESS
 
         # No page of it is built; the service answers its page, script and data, to those who may see it.
         site_dir, public = mktempdir(), mktempdir()

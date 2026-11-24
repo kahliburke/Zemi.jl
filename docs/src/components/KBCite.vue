@@ -1,6 +1,6 @@
 <!--
   How to cite what a page shows: a Cite button opening a panel with each form to copy (its `@`
-  reference, its address, a Markdown link, and for a document its citation in prose and its BibTeX
+  reference, its address, a Markdown link, and for a document its citation in a notebook, in prose and its BibTeX
   entry, from its data: see `cite_json`), and beside it an icon copying the reference at once. The
   address is the page's own, wherever the site is served; `link` gives another (a task on a board).
   `compact` draws the button small, for a panel's header.
@@ -11,7 +11,7 @@ import KBDialog from './KBDialog.vue'
 import KBIcon from './KBIcon.vue'
 import { copyText } from './kbUtils'
 
-type Cite = { reference: string; citation?: string; bibtex?: string }
+type Cite = { reference: string; cite?: string; citation?: string; bibtex?: string }
 const props = defineProps<{ cite: Cite; title: string; link?: string; compact?: boolean }>()
 
 const open = ref(false)
@@ -22,6 +22,7 @@ const address = computed(() => typeof location === 'undefined' ? props.link ?? '
                                 props.link ? new URL(props.link, location.href).href : location.origin + location.pathname)
 const forms = computed(() => [
   { key: 'reference', label: 'Reference', note: 'in a task, note or finding here', text: props.cite.reference },
+  { key: 'cite', label: 'Notebook', note: 'a Slate notebook citing this knowledge base', text: props.cite.cite ?? '' },
   { key: 'citation', label: 'Citation', note: 'APA', text: props.cite.citation ?? '' },
   { key: 'bibtex', label: 'BibTeX', note: '', text: props.cite.bibtex?.trim() ?? '' },
   { key: 'link', label: 'Link', note: '', text: address.value },

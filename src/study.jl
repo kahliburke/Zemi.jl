@@ -420,7 +420,7 @@ function draft_markdown(kb::KB, study::Study, slug::AbstractString)
     return replace(body, DRAFT_CITATION => function (m)
         ids = cited_ids(m)
         known = filter(have, ids)
-        cites = isempty(known) ? "" : "[" * join(("@" * cite_key(id) for id in known), "; ") * "]"
+        cites = isempty(known) ? "" : "[" * join(("@" * cite_key(kb, id) for id in known), "; ") * "]"
         rest = join(("arXiv:" * id for id in ids if !have(id)), "; ")
         isempty(rest) ? cites : isempty(cites) ? "($rest)" : "$cites ($rest)"
     end)

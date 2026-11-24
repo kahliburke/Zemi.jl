@@ -1,14 +1,100 @@
 # BibTeX for the knowledge base's documents: a study's references (see study.jl), and the whole
 # knowledge base as one file, for a reference manager or a LaTeX document.
 
-"""
-    cite_key(id) -> String
+# A document's key in a bibliography, kept once given (see `cite_keys!`).
+migration!(24, ["ALTER TABLE papers ADD COLUMN cite_key TEXT",
+                "CREATE UNIQUE INDEX papers_cite_key ON papers (cite_key) WHERE cite_key IS NOT NULL"])
 
-The bibliography key of a document: `arXiv:` and its id for a paper (an old-style id's `/` as `_`),
-readable in a draft and valid in BibTeX, Slate's `[@key]` and Typst; an upload's or a record's own id
-otherwise.
+"A paper on arXiv's key: `arXiv:` and its id, an old-style id's `/` as `_`."
+arxiv_key(id::AbstractString) = "arXiv:" * replace(id, '/' => '_')
+
 """
-cite_key(id::AbstractString) = is_arxiv_id(id) ? "arXiv:" * replace(id, '/' => '_') : String(id)
+    cite_key(kb, id) -> String
+
+The key document `id` is cited by, in BibTeX, Slate's `[@key]` and Typst: `arXiv:` and its id for a
+paper on arXiv; for any other document a short one a person would write, given the first time it is
+asked for and kept (see [`cite_keys!`](@ref)); the id of a document the knowledge base does not have.
+"""
+cite_key(kb::KB, id::AbstractString) = is_arxiv_id(id) ? arxiv_key(id) : cite_keys!(kb, [id])[id]
+
+"""
+    cite_keys!(kb, ids) -> Dict{String,String}
+
+The keys of documents `ids` (see [`cite_key`](@ref)), giving one to each that has none yet: a record
+its title, as a note is named (`heron-migration`); any other document the first author's surname, the
+year and the first word of its title (`lovelace2024engines`), or its title where it names no author.
+A key another document has takes the year, then `-2`, `-3`. A key is kept once given, so a title
+edited later does not change it under the notebooks citing it.
+"""
+function cite_keys!(kb::KB, ids)
+    out = Dict{String,String}()
+    rest = String[]
+    for id in ids
+        is_arxiv_id(id) ? (out[String(id)] = arxiv_key(id)) : push!(rest, String(id))
+    end
+    isempty(rest) && return out
+    stored = Dict{String,String}(String(r.doc_id) => String(r.cite_key)
+                                 for r in query(kb, "SELECT doc_id, cite_key FROM papers WHERE cite_key IS NOT NULL"))
+    known = Set{String}(String(r.doc_id) for r in query(kb, "SELECT doc_id FROM papers"))
+    todo = [id for id in unique(rest) if !haskey(stored, id) && id in known]
+    if !isempty(todo)
+        transaction(kb) do
+            taken = Set(values(stored))
+            for id in todo
+                base, year = key_base(kb, id)
+                key = free_key(isempty(base) ? id : base, year, taken)
+                execute!(kb, "UPDATE papers SET cite_key = ? WHERE doc_id = ?", (key, id))
+                push!(taken, key)
+                stored[id] = key
+            end
+        end
+    end
+    for id in rest
+        out[id] = get(stored, id, id)
+    end
+    return out
+end
+
+"Words a key is not made from: those a title starts with that say nothing of it."
+const KEY_SKIP_WORDS = Set(["a", "an", "the", "on", "of", "in", "for", "and", "to", "with", "from", "at", "by", "towards", "toward"])
+
+# Text as a key's part: its letters and digits, accents dropped, words joined by `-`; `n` characters at most.
+key_slug(s::AbstractString, n::Integer = typemax(Int)) =
+    String(rstrip(first(slugify(Base.Unicode.normalize(String(s); stripmark = true)), n), '-'))
+
+"""
+    key_base(kb, id) -> (base, year)
+
+What document `id`'s key is made from, before a clash is settled (see [`cite_keys!`](@ref)), and its
+year.
+"""
+function key_base(kb::KB, id::AbstractString)
+    p = first(query(kb, "SELECT title, authors, published, kind FROM papers WHERE doc_id = ?", (id,)))
+    title = String(coalesce(p.title, ""))
+    if p.kind == RECORD.name
+        r = record_row(kb, id)
+        return key_slug(title, 40), first(String(r === nothing ? coalesce(p.published, "") : coalesce(r.happened, "")), 4)
+    end
+    year = first(String(coalesce(p.published, "")), 4)
+    authors = json_list(p.authors)
+    words = filter(w -> !(w in KEY_SKIP_WORDS), split(key_slug(title), '-'; keepempty = false))
+    isempty(authors) && return key_slug(join(first(words, 4), " "), 40), year
+    a = strip(first(authors))
+    surname = occursin(',', a) ? first(split(a, ',')) : last(split(a))
+    return replace(key_slug(surname), "-" => "") * year * (isempty(words) ? "" : first(words)), year
+end
+
+"`base`, or where another document has it, `base-year` (unless the year is in it), then `base-2`, `base-3`…"
+function free_key(base::AbstractString, year::AbstractString, taken)
+    base in taken || return String(base)
+    with_year = isempty(year) || occursin(year, base) ? "" : "$base-$year"
+    isempty(with_year) || with_year in taken || return with_year
+    for n in 2:10_000
+        k = "$base-$n"
+        k in taken || return k
+    end
+    error("No free key for $base")
+end
 
 bib_escape(s) = replace(string(s), r"([&%#_])" => s"\\\1")
 # "First Last" → "Last, First" for BibTeX; a name already with a comma is kept, and a team or
@@ -22,9 +108,9 @@ function bib_name(n)
 end
 
 """
-    bib_entry(kb, id; pages = "generated/kb/", docpage = true) -> String
+    bib_entry(kb, id; pages = "generated/kb/", docpage = true, key = cite_key(kb, id)) -> String
 
-A document's BibTeX entry, keyed by [`cite_key`](@ref). A paper is an article: its authors, title,
+A document's BibTeX entry, keyed by `key` (see [`cite_key`](@ref)). A paper is an article: its authors, title,
 year, arXiv record, DOI, journal (its journal reference, else its arXiv record) and `url` (the arXiv
 page). An upload is an article when it has a journal reference, else a `misc`. A record is a `misc`:
 its people, title, date, how it was made and `url`, its page on the site. A resource is the entry its
@@ -32,14 +118,15 @@ type calls for (see [`resource_bib`](@ref)). With `docpage`, the entry
 also names the knowledge base's page for it under the docs source, which the docs site links a
 citation to.
 """
-function bib_entry(kb::KB, id::AbstractString; pages::AbstractString = "generated/kb/", docpage::Bool = true)
+function bib_entry(kb::KB, id::AbstractString; pages::AbstractString = "generated/kb/", docpage::Bool = true,
+                   key::AbstractString = cite_key(kb, id))
     p = paper_row(kb, id)
     arxiv = is_arxiv_id(id)
     field(k, v) = (ismissing(v) || isempty(string(v))) ? "" : "  $k = {$(v)},\n"
     io = IOBuffer()
     r = record_row(kb, id)
     if r !== nothing
-        print(io, "@misc{", cite_key(id), ",\n")
+        print(io, "@misc{", key, ",\n")
         print(io, field("author", join(bib_name.(json_list(p.authors)), " and ")))
         print(io, field("title", "{" * bib_escape(coalesce(p.title, id)) * "}"))
         print(io, field("year", first(r.happened, 4)), field("date", first(r.happened, 10)))
@@ -47,10 +134,10 @@ function bib_entry(kb::KB, id::AbstractString; pages::AbstractString = "generate
         print(io, "}\n")
         return String(take!(io))
     end
-    is_resource(id) && return resource_bib(kb, id; pages, docpage)
+    is_resource(id) && return resource_bib(kb, id; pages, docpage, key)
     # An article, the usual form for a preprint: citation styles print an article's year, and its
     # journal is where it appeared or else its arXiv record.
-    print(io, "@", arxiv || !ismissing(p.journal_ref) ? "article" : "misc", "{", cite_key(id), ",\n")
+    print(io, "@", arxiv || !ismissing(p.journal_ref) ? "article" : "misc", "{", key, ",\n")
     print(io, field("author", join(bib_name.(json_list(p.authors)), " and ")))
     print(io, field("title", "{" * bib_escape(coalesce(p.title, id)) * "}"))
     print(io, field("year", first(coalesce(p.published, ""), 4)))
@@ -77,14 +164,15 @@ a conference paper, or a report (of its institution), with what a style prints o
 else (a data set, a portal, software, a law) a `misc`, published where it appeared or by whom, and
 noting its type. Each with its authors, title, date, DOI, address and when it was accessed there.
 """
-function resource_bib(kb::KB, id::AbstractString; pages::AbstractString = "generated/kb/", docpage::Bool = true)
+function resource_bib(kb::KB, id::AbstractString; pages::AbstractString = "generated/kb/", docpage::Bool = true,
+                      key::AbstractString = cite_key(kb, id))
     r = resource_row(kb, id)
     field(k, v; escape = true) = isempty(string(v)) ? "" : "  $k = {$(escape ? bib_escape(v) : v)},\n"
     entry = get(RESOURCE_ENTRIES, r.type, "misc")
     entry == "techreport" && isempty(r.publisher) && (entry = "misc")
     date = coalesce(r.published, "")
     io = IOBuffer()
-    print(io, "@", entry, "{", cite_key(id), ",\n")
+    print(io, "@", entry, "{", key, ",\n")
     # An organization is braced, so a style prints it whole ("others", in an author list, is "et al.").
     orgs = Set(json_list(r.organizations))
     name(a) = a in orgs && a != "others" ? "{" * a * "}" : bib_name(a)
@@ -130,8 +218,10 @@ function bibliography(kb::KB; ids = nothing, caller::Union{Caller,Nothing} = not
         unseen = hidden_documents(kb, caller)
         ids = filter(!in(unseen), ids)
     end
-    keys === nothing || (wanted = Set(keys); ids = filter(id -> cite_key(id) in wanted, ids))
-    entries = [bib_entry(kb, id; pages, docpage) for id in sort(ids; by = cite_key)]
+    named = cite_keys!(kb, ids)
+    # Asked for by key: a document's key, or its id.
+    keys === nothing || (wanted = Set(keys); ids = filter(id -> named[id] in wanted || id in wanted, ids))
+    entries = [bib_entry(kb, id; pages, docpage, key = named[id]) for id in sort(ids; by = id -> named[id])]
     return "% The documents of the knowledge base: $(length(entries)) entries.\n\n" * join(entries, "\n")
 end
 
@@ -231,8 +321,10 @@ end
 """
     cite_json(kb, id) -> Dict
 
-How document `id` is cited, for its page's Cite panel: its `@` reference, its citation in prose
-([`citation`](@ref)) and its BibTeX entry ([`bib_entry`](@ref)).
+How document `id` is cited, for its page's Cite panel: its `@` reference, its citation in a notebook
+(`[@key]`, see [`cite_key`](@ref)), its citation in prose ([`citation`](@ref)) and its BibTeX entry
+([`bib_entry`](@ref)).
 """
 cite_json(kb::KB, id::AbstractString) =
-    Dict("reference" => "@" * cited_as(id), "citation" => citation(kb, id), "bibtex" => bib_entry(kb, id; docpage = false))
+    Dict("reference" => "@" * cited_as(id), "cite" => "[@" * cite_key(kb, id) * "]", "citation" => citation(kb, id),
+         "bibtex" => bib_entry(kb, id; docpage = false))

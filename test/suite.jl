@@ -62,7 +62,7 @@ end
     @test only(authors(kb)).papers == ["2609.00001"]
     @test [sp.doc_id for sp in K.site_papers(kb; related = false)] == ["2609.00001"]
     bib = bibliography(kb)                                                    # a record is cited, though not literature
-    @test startswith(bib, "% The documents of the knowledge base: 2 entries.") && occursin("@misc{rec-reef-survey,", bib)
+    @test startswith(bib, "% The documents of the knowledge base: 2 entries.") && occursin("@misc{reef-survey-meeting,", bib)
     @test [m.target for m in K.at_reference_matches(kb, "reef") if m.kind == "paper"] == ["2609.00001"]
     @test all(c -> c.id != "rec-reef-survey", K.daily_candidates(kb))
     @test [t.action for t in K.sync_plan(kb; unread = true) if t.id == "rec-reef-survey"] == [:ingest]   # read, not looked up
@@ -799,6 +799,38 @@ end
     end
 end
 
+@zset "citation keys" begin
+    kb = open_kb(temp_config())
+    K.execute!(kb, """INSERT INTO papers (doc_id, title, authors, published, metadata_at, added_at, kind) VALUES
+        ('2401.00001', 'Engines', '["Ada Lovelace"]', '2024-01-01', '2024-01-01', '2024-01-01', 'paper'),
+        ('doc-aaaaaaaaaa', 'The engines of Mars', '["Ada Lovelace", "Bea Bard"]', '2024-05-01', '2024-05-01', '2024-05-01', 'paper'),
+        ('doc-bbbbbbbbbb', 'Engines, again', '["Lovelace, Ada"]', '2024-06-01', '2024-06-01', '2024-06-01', 'paper'),
+        ('doc-cccccccccc', 'A handbook of looms', '[]', '', '2024-06-01', '2024-06-01', 'paper'),
+        ('doc-dddddddddd', 'Über Webstühle', '["Jörg Müller"]', '2023-01-01', '2023-01-01', '2023-01-01', 'paper'),
+        ('rec-x-heron-migration-md-0c7918fd', 'Heron migration', '[]', '2026-11-14', '2026-11-14', '2026-11-14', 'record'),
+        ('rec-y-heron-migration-md-11111111', 'Heron migration', '[]', '2025-03-02', '2025-03-02', '2025-03-02', 'record'),
+        ('rec-z-heron-migration-md-22222222', 'Heron migration', '[]', '2025-03-02', '2025-03-02', '2025-03-02', 'record')""")
+    key(id) = K.cite_key(kb, id)
+    @test key("2401.00001") == "arXiv:2401.00001"                                     # a paper on arXiv: as ever
+    @test key("doc-aaaaaaaaaa") == "lovelace2024engines"                              # surname, year, first word that says something
+    @test key("doc-bbbbbbbbbb") == "lovelace2024engines-2"                            # taken; the year is in it already
+    @test key("doc-cccccccccc") == "handbook-looms"                                   # no author: its title
+    @test key("doc-dddddddddd") == "muller2023uber"                                   # accents dropped
+    @test key("rec-x-heron-migration-md-0c7918fd") == "heron-migration"               # a note, as it is named
+    @test key("rec-y-heron-migration-md-11111111") == "heron-migration-2025"          # taken: its year
+    @test key("rec-z-heron-migration-md-22222222") == "heron-migration-2"
+    @test key("doc-nothing-here") == "doc-nothing-here"                               # not in the knowledge base
+    # Kept once given: a title edited later does not change it.
+    K.execute!(kb, "UPDATE papers SET title = 'Bird counts' WHERE doc_id = 'rec-x-heron-migration-md-0c7918fd'")
+    @test key("rec-x-heron-migration-md-0c7918fd") == "heron-migration"
+    # The bibliography is keyed so, and asked for by a key or an id.
+    bib = bibliography(kb)
+    @test occursin("@misc{heron-migration,", bib) && occursin("@misc{lovelace2024engines,", bib)
+    @test occursin("{lovelace2024engines,", bibliography(kb; keys = ["lovelace2024engines"]))
+    @test occursin("{heron-migration,", bibliography(kb; keys = ["rec-x-heron-migration-md-0c7918fd"]))
+    close(kb)
+end
+
 @zset "bibliography" begin
     kb = open_kb(temp_config())
     add_papers!(kb, ["2609.00001"])
@@ -811,7 +843,7 @@ end
     @test startswith(bib, "% The documents of the knowledge base: 2 entries.")
     @test occursin("@article{arXiv:2609.00001,", bib) && occursin("author = {Lovelace, Ada and {Reef Survey Team}}", bib)
     @test occursin("title = {{Reef \\& lagoon}}", bib) && occursin("url = {https://arxiv.org/abs/2609.00001}", bib)
-    @test occursin("@misc{doc-0123456789,\n  title = {{A handbook}},\n}", bib)   # an upload: its own key, no arXiv fields
+    @test occursin("@misc{handbook,\n  title = {{A handbook}},\n}", bib)   # an upload: a key from its title, no arXiv fields
     @test !occursin("code-", bib) && !occursin("docpage", bib)                # no codebases; no docs-site paths
     @test occursin("docpage = {generated/kb/papers/2609-00001.md}", bib_entry(kb, "2609.00001"))
     # In prose: a preprint in its arXiv record; an upload with no authors or date, led by its title, at its page here.
@@ -819,7 +851,8 @@ end
           "Lovelace, A., & Reef Survey Team. (2026). Reef & lagoon. arXiv preprint arXiv:2609.00001. https://arxiv.org/abs/2609.00001"
     @test K.citation(kb, "doc-0123456789") == rstrip("A handbook. (n.d.). " * K.document_link(kb.config, "doc-0123456789"))
     c = K.cite_json(kb, "2609.00001")
-    @test c["reference"] == "@arXiv:2609.00001" && c["bibtex"] == bib_entry(kb, "2609.00001"; docpage = false)
+    @test c["reference"] == "@arXiv:2609.00001" && c["cite"] == "[@arXiv:2609.00001]" && c["bibtex"] == bib_entry(kb, "2609.00001"; docpage = false)
+    @test K.cite_json(kb, "doc-0123456789")["cite"] == "[@handbook]"
     close(kb)
 end
 
@@ -1075,7 +1108,7 @@ end
         @test [(x.target, x.status) for x in K.library(kb, "FL")] == [(r, "proposed")]
         # Cited: a news story is an article in its newspaper, its address as it is.
         bib = K.bib_entry(kb, r)
-        @test startswith(bib, "@article{$r,") && occursin("journal = {Tempo English}", bib) && occursin("url = {https://example.org/floods?id=1_2}", bib)
+        @test startswith(bib, "@article{$(K.cite_key(kb, r)),") && occursin("journal = {Tempo English}", bib) && occursin("url = {https://example.org/floods?id=1_2}", bib)
         # In prose, as APA has it: a data set described, a work with no authors led by its title.
         @test K.citation(kb, id) == "ESA. (2021). Copernicus DEM GLO-30 [Data set]. https://doi.org/10.5270/esa-c5d3d65"
         @test K.citation(kb, r) == "Bali flood facts so far. (n.d.). Tempo English. https://example.org/floods?id=1_2"
@@ -1096,7 +1129,7 @@ end
         @test nav.resources == "resources.md" && K.site_from_json(K.site_json(nav)).resources == "resources.md"
         d = K.JSON.parsefile(joinpath(public, "kb-data", "resources", K.page_slug(id) * ".json"))
         @test d["title"] == "Copernicus DEM GLO-30" && d["type"] == "dataset" && d["doi"] == "10.5270/esa-c5d3d65" && d["source"] == "zotero"
-        @test d["cite"]["reference"] == "@$id" && startswith(d["cite"]["citation"], "ESA. (2021).") && startswith(d["cite"]["bibtex"], "@misc{$id,")
+        @test d["cite"]["reference"] == "@$id" && startswith(d["cite"]["citation"], "ESA. (2021).") && startswith(d["cite"]["bibtex"], "@misc{$(K.cite_key(kb, id)),")
         @test isfile(joinpath(site, "resources", K.page_slug(id) * ".md")) && K.document_page(id) == "resources/$(K.page_slug(id))"
         @test [x["title"] for x in K.JSON.parsefile(joinpath(public, "resources.json"))] == ["Bali flood facts so far", "Copernicus DEM GLO-30", "Land cover", "Rainfall records"]
 
@@ -4137,7 +4170,7 @@ end
         @test (d.container, d.publisher, d.accessed) == ("Copernicus Data Space", "European Space Agency", "2026-11-05")
         @test K.json_list(d.organizations) == ["European Space Agency"]
         bib = K.bib_entry(kb, dem)
-        @test startswith(bib, "@misc{$dem,") && occursin("author = {{European Space Agency} and Hale, Rowan}", bib)
+        @test startswith(bib, "@misc{$(K.cite_key(kb, dem)),") && occursin("author = {{European Space Agency} and Hale, Rowan}", bib)
         @test occursin("howpublished = {Copernicus Data Space}", bib) && !occursin("note = ", bib)
         @test occursin("url = {https://example.org/dem}", bib) && occursin("urldate = {2026-11-05}", bib)
         @test occursin("docpage = {generated/kb/resources/", bib)
