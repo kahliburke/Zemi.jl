@@ -133,8 +133,11 @@ the roles and add others.
 
 The bibliography is at `/api/bib`: BibTeX of the papers, uploads and records the caller may see, or
 only those cited by the keys in `?keys=arXiv:2401.01234,rec-…`. A program reads it with an API token
-that has `read` (`Authorization: Bearer zemi_…`); the search page links it for download. Run for one
-person, it takes the knowledge base's key instead, from this machine.
+that has `read` (`Authorization: Bearer zemi_…`); the search page links it for download. A Slate
+notebook citing the knowledge base signs in instead: the notebook asks for the `read` scope by
+OAuth, and you approve it on the knowledge base's own page. That works run for one person too, where
+the approval page is behind the knowledge base's key, so only you can approve, and the connections
+you approved are listed, with Revoke, under Configuration, Connections.
 
 A codebase, like any document of a kind with access, is open to every reader, or only to the
 members of the projects linked to it (and those whose roles reach every project). A record linked to
