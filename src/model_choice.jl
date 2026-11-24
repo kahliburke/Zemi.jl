@@ -42,7 +42,7 @@ one installed, for Claude over ACP, and for a model that is not an ACP agent.
 """
 function acp_problem(model::AbstractString)
     acp_model(model) || return nothing
-    agent = first(split(chop(model; head = 4, tail = 0), ':'))
+    agent = first(acp_parts(model))
     i = findfirst(a -> a.agent == agent, OTHER_AGENTS)
     i === nothing && return nothing
     a = OTHER_AGENTS[i]
@@ -212,10 +212,16 @@ function model_machine(c::Config; path::AbstractString = config_path())
                            for (i, m) in enumerate(LOCAL_MODELS)])
 end
 
-"The choices of model offered, each with what it needs here, what stops it, and its cost (see `MODEL_CHOICES`)."
+"""
+The choices of model offered, each with what it needs here, what stops it, and its cost (see
+`MODEL_CHOICES`). A shared service offers no agent whose tools Kaimon does not bind (see
+[`agent_tools_bound`](@ref)): its tutor reads text anyone can add.
+"""
 function model_choices_json(c::Config)
     known = Set(s.name for s in c.summarizers)
-    map(filter(m -> isempty(m.papers) || m.papers in known, MODEL_CHOICES)) do m
+    offered(m) = (isempty(m.papers) || m.papers in known) &&
+                 !(c.service.mode == :shared && (a = other_agent(m.id)) !== nothing && !agent_tools_bound("acp:$(a.agent)"))
+    map(filter(offered, MODEL_CHOICES)) do m
         s = isempty(m.papers) ? nothing : maybe_summarizer(c, m.papers)
         a = other_agent(m.id)
         problem = m.id == "ollama" ? (isempty(ollama_chat_models(c)) ? "Ollama has no chat model here" : "") :
@@ -365,7 +371,7 @@ function current_choice(c::Config)
     i = findfirst(m -> m.papers == s.name, MODEL_CHOICES)
     i === nothing || return Dict("id" => MODEL_CHOICES[i].id, "model" => "", "url" => "")
     if s.kind == :agent && acp_model(s.model)
-        agent, model = (parts = split(chop(s.model; head = 4, tail = 0), ':'; limit = 2); (parts[1], get(parts, 2, "")))
+        agent, model = acp_parts(s.model)
         j = findfirst(a -> a.agent == agent, OTHER_AGENTS)
         j === nothing || return Dict("id" => OTHER_AGENTS[j].id, "model" => model, "url" => "")
     end

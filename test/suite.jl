@@ -3715,6 +3715,18 @@ end
         @test pdf("opus") && pdf("acp:claude") && pdf("acp:claude:sonnet")
         @test !pdf("acp:codex") && !pdf("acp:opencode:opencode/minimax-m3") && !pdf("acp:gemini") && !pdf("ollama:qwen3:14b")
         @test !K.reads_pdf(K.Summarizer(; name = "s", kind = :agent, model = "opus", reads = :text))
+        # A shared service runs only agents whose tools Kaimon binds: not Codex or Gemini, which run their own.
+        @test K.agent_tools_bound("opus") && K.agent_tools_bound("ollama:qwen3:14b") && K.agent_tools_bound("acp:claude") &&
+              K.agent_tools_bound("acp:opencode:opencode/minimax-m3")
+        @test !K.agent_tools_bound("acp:codex") && !K.agent_tools_bound("acp:gemini:gemini-3-pro")
+        @test K.acp_parts("acp:opencode:opencode/glm-5") == ("opencode", "opencode/glm-5") && K.acp_parts("acp:codex") == ("codex", "")
+        shared = K.ServiceConfig(; mode = :shared)
+        @test_throws "Kaimon does not hold to its folder" K.validate(Config(; service = shared, tutor = "codex-agent"))
+        @test K.validate(Config(; service = shared, tutor = "opencode-agent")) isa Config
+        @test K.validate(Config(; tutor = "codex-agent")) isa Config                      # one person's own agent
+        offered(c) = [m["id"] for m in K.model_choices_json(c)]
+        @test "opencode-agent" in offered(Config(; service = shared)) && !any(in(offered(Config(; service = shared))), ("codex", "gemini"))
+        @test all(in(offered(Config())), ("codex", "gemini", "opencode-agent"))
     finally
         K.AGENT_CALL[] = saved
     end

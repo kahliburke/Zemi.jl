@@ -172,7 +172,7 @@ starting. The folder belongs to the container's user (uid 10001), so edit it wit
 
 The default summarizer's key, `OPENCODE_API_KEY=…`, goes in `deploy/service.env`, which compose
 reads (`chmod 600`). OpenAI's is `deploy/config/openai_key`. The image has no agents' CLIs (Claude
-Code, Codex, OpenCode): a group whose summarizers or tutor run as agents builds an image `FROM zemi`
+Code, OpenCode): a group whose summarizers or tutor run as agents builds an image `FROM zemi`
 that installs them, with their tokens in `service.env`.
 
 - Logs: `docker compose -f deploy/compose.yaml logs -f zemi`.
@@ -274,6 +274,10 @@ folders. Workers also start without the service's tokens.
 
 The service refuses to start on a kernel without Landlock. `[shared] confine_agents = false` runs
 agents unconfined there.
+
+Its agents are Claude or OpenCode, which Kaimon holds to the tools Zemi gives them. Codex and Gemini
+run their own file and shell tools, which Kaimon reaches only when they ask permission for a call, so
+a shared service neither offers them nor starts with one in a role.
 
 ## Not covered
 

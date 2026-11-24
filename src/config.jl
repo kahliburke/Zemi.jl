@@ -890,6 +890,10 @@ function validate(c::Config)
                          "analyst" => purpose(c, :analyst).name)
         i = findfirst(s -> s.name == name, c.summarizers)
         i === nothing && error("$role: no summarizer named $name")
+        s = c.summarizers[i]
+        c.service.mode == :shared && s.kind == :agent && !agent_tools_bound(s.model) &&
+            error("$role: $name runs $(s.model), whose own file and shell tools Kaimon does not hold to its folder. " *
+                  "A shared service runs Claude or OpenCode agents")
     end
     b = c.backup
     b.every_hours > 0 || error("[backup] every_hours must be more than 0, got $(b.every_hours)")

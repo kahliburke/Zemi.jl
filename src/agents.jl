@@ -44,6 +44,19 @@ agents_dir(parts...) = joinpath(xdg_home("XDG_CACHE_HOME", ".cache"), "zemi", "a
 "Whether `model` names an agent Kaimon drives over the Agent Client Protocol: `acp:<agent>[:<model>]` (Codex, OpenCode, Gemini)."
 acp_model(model::AbstractString) = startswith(model, "acp:")
 
+"The agent and the model an ACP `model` names: `acp:opencode:opencode/glm` is `(\"opencode\", \"opencode/glm\")`."
+function acp_parts(model::AbstractString)
+    parts = split(chop(model; head = 4, tail = 0), ':'; limit = 2)
+    return (String(parts[1]), String(get(parts, 2, "")))
+end
+
+"""
+Whether Kaimon holds the agent `model` names to the tools it is given: the Claude CLI and local models
+by `only`, Claude and OpenCode over ACP by the specialist preset. Codex and Gemini run their own file
+and shell tools, which Kaimon's deny list reaches only when they ask permission for a call.
+"""
+agent_tools_bound(model::AbstractString) = !acp_model(model) || first(acp_parts(model)) in ("claude", "opencode")
+
 "An ACP agent's own file tools, by the names it reports them under; Kaimon keeps them to its working folder."
 const ACP_FILE_TOOLS = ["read", "write", "edit"]
 
