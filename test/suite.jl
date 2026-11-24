@@ -3102,7 +3102,7 @@ end
     gito(args...) = run(pipeline(`git -C $origin -c user.name=Ada -c user.email=ada@x.org -c commit.gpgsign=false $args`; stdout = devnull, stderr = devnull))
     gito("init", "-q", "-b", "main")
     write(joinpath(origin, "a.jl"), "f() = 1\n"); gito("add", "a.jl"); gito("commit", "-q", "-m", "Add f\n\nTasks: RP-1")
-    kb = open_kb(temp_config())
+    kb = open_kb(temp_config(; layers = Layer[]))          # nothing to embed: a codebase is read here
     me = K.person("Rowan")
     K.create_project!(kb, "Repo"; key = "RP", by = me)
     K.create_task!(kb, "RP", "Write f"; by = me)
@@ -3155,7 +3155,6 @@ end
         @test occursin("not fetched", K.codebase_problem(kb, url_id))
         @test occursin("is not fetched from", only(t.reason for t in K.sync_plan(kb) if t.id == url_id))
         @test_throws "can't be read here" K.parse_code!(kb, url_id)
-        @test !K.codebase_read(kb, url_id) && !K.codebase_page_json(kb, only(K.query(kb, "SELECT * FROM papers WHERE doc_id = ?", (url_id,))))["read"]
         @test K.fetch_codebases!(kb) == 1 && isfile(joinpath(K.clone_dir(kb.config, url_id), "a.jl"))   # not the one from a folder
         @test K.codebase_dir(kb, K.add_codebase_from!(kb, origin)) == origin
         @test_throws "No folder" K.add_codebase_from!(kb, joinpath(origin, "nothing-here"))
@@ -3168,7 +3167,10 @@ end
         @test_throws "config.edit" K.add_codebase_from!(kb, folder; caller = curator)
         @test_throws "config.edit" K.update_project!(kb, "RP"; codebase = folder, by = me, caller = curator)
         folder_id = K.add_codebase_from!(kb, folder)
+        page(cid) = K.codebase_page_json(kb, only(K.query(kb, "SELECT * FROM papers WHERE doc_id = ?", (cid,))))
+        @test !K.codebase_read(kb, folder_id) && !page(folder_id)["read"]          # its page says so, not 0 files
         @test K.codebase_dir(kb, folder_id) == folder && K.parse_code!(kb, folder_id)
+        @test K.codebase_read(kb, folder_id) && page(folder_id)["read"] && page(folder_id)["files"] == 1
         @test K.fetch_codebases!(kb) == 0                  # each is read from its folder (that one too, added from it since)
         K.update_project!(kb, "OX"; codebase = folder * "/", by = me, caller = curator)   # known: linked by its path
         @test only(p for p in K.projects(kb) if p.key == "OX").codebase == folder_id
