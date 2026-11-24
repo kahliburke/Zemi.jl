@@ -1289,6 +1289,60 @@ end
     close(kb)
 end
 
+@zset "the first admin, named from the server" begin
+    sh = shared_config(base_url = "https://kb.example.org", admins = String[])
+    kb = open_kb(temp_config(shared = sh))
+    K.ensure_roles!(kb)
+    # Nobody named in the config, nobody with an admin's account or invitation: nobody could ever
+    # administer the service, so it does not start, and says how to name one.
+    why = K.admin_problem(kb)
+    @test occursin("zemi admin", why) && occursin("[shared] admins", why)
+    @test K.admin_cli(kb, String[]) == [why]
+    @test_throws "Nobody can administer" K.serve_shared(; kb, site = false)
+
+    # Named from the server: invited as an admin, whose first sign-in with any provider makes them one.
+    @test K.admin_cli(kb, ["ada@example.org"]) ==
+          ["ada@example.org is invited as an admin: signing in at https://kb.example.org with any of its providers makes them one."]
+    @test K.admin_problem(kb) == "" && K.admin_cli(kb, String[]) == ["Invited: ada@example.org"]
+    ada = K.sign_in!(kb, sh, "GitHub", "g1"; email = "Ada@example.org", verified = true)
+    @test K.user_roles(kb, ada) == ["Admin"] && K.admin_cli(kb, String[]) == ["Account: ada@example.org"]
+
+    # The way back in: an account that lost the role and was disabled gets both back.
+    K.invite!(kb, "rowan@example.org"; roles = ["Admin"], by = ada)
+    rowan = K.sign_in!(kb, sh, "Campus", "r1"; email = "rowan@example.org", verified = true)
+    K.set_roles!(kb, ada, ["Reader"])
+    K.set_disabled!(kb, ada, true)
+    @test K.make_admin!(kb, " ADA@example.org ") == :granted
+    @test "Admin" in K.user_roles(kb, ada) && !only(filter(u -> u.id == ada, K.users(kb))).disabled
+
+    # A disabled admin, or another role that may manage people, counts as one only while enabled.
+    K.set_roles!(kb, ada, ["Reader"])
+    K.save_role!(kb, "Steward"; permissions = ["read", "users.manage"])
+    K.set_roles!(kb, rowan, ["Steward"])
+    @test K.admin_problem(kb) == "" && "Account: rowan@example.org" in K.admin_cli(kb, String[])
+    K.execute!(kb, "UPDATE users SET disabled = 1 WHERE id = ?", (rowan,))       # past keeping_an_admin, as a restore might
+    @test occursin("Nobody can administer", K.admin_problem(kb))
+
+    # Not for one person's knowledge base, which has no accounts.
+    mine = open_kb(temp_config())
+    @test_throws "base_url is not set" K.admin_cli(mine, ["ada@example.org"])
+    close(mine); close(kb)
+
+    # An admin named in the config is enough, and so is signing in on this machine, whose first sign-in is one.
+    named = open_kb(temp_config(shared = shared_config()))
+    @test K.admin_problem(named) == ""
+    close(named)
+    local_kb = open_kb(temp_config(shared = shared_config(admins = String[])))
+    K.ensure_roles!(local_kb)
+    K.LOCAL_SIGN_IN[] = true
+    try
+        @test K.admin_problem(local_kb) == ""
+    finally
+        K.LOCAL_SIGN_IN[] = false
+    end
+    close(local_kb)
+end
+
 @zset "nobody demotes themselves" begin
     kb = open_kb(temp_config())
     K.ensure_roles!(kb)

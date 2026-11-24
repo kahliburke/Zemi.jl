@@ -170,6 +170,7 @@ respond_shared(kb::KB, req::HTTP.Request) = respond_service(kb, req; shared = tr
 
 Run the shared service on `[shared] port`: the site (built now if it has never been or was built from other sources, and again when a
 job changes the knowledge base), the API and signing in. The default roles are created if missing.
+Refuses to start when nobody could ever administer it (see [`admin_problem`](@ref)).
 """
 function serve_shared(; kb::KB = kb(), build = default_site_build, host::AbstractString = kb.config.shared.host,
                       site::Bool = true)
@@ -185,6 +186,8 @@ function serve_shared(; kb::KB = kb(), build = default_site_build, host::Abstrac
         end
     end
     ensure_roles!(kb)
+    why = admin_problem(kb)
+    isempty(why) || error(why)
     SHARED_MODE[] = true
     STARTED[] = now()
     if site

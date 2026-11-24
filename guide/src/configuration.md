@@ -27,6 +27,9 @@ The front page of a new knowledge base leads to Setup, four steps:
 
 Setup can be run again from the menu; saving replaces what it sets.
 
+On a server, the first admin signs in and goes through it as [Server deployment](deployment.md#The-first-sign-in)
+shows, each step's screen in turn.
+
 ## The Configuration page
 
 ```@raw html

@@ -34,6 +34,9 @@ const CLI_HELP = """
     zemi token revoke NAME               take NAME's key back
     zemi token add FILE                  install a key you were sent, and share the dataset it opens
     zemi token issuer                    save the Cloudflare API token that issues keys (asked for, not echoed)
+    zemi admin [EMAIL]...                make EMAIL an admin of the shared service: an account with it gets
+                                         the role back, otherwise it is invited as one and its first sign-in
+                                         makes it an admin. Alone, who can administer it
     zemi backup [--keep NAME]            take a snapshot now ([backup] in the config), kept by NAME until deleted
     zemi backups                         the snapshots, the latest first
     zemi restore SNAPSHOT [--config] [--force]
@@ -82,6 +85,37 @@ function progress_line()
     return report, finish
 end
 
+"""
+    admin_cli(kb, emails) -> Vector{String}
+
+`zemi admin`: make each of `emails` an admin (see [`make_admin!`](@ref)), saying what was done; with
+none, who can administer the service: those the config names, the admins' accounts and the open
+invitations to be one.
+"""
+function admin_cli(kb::KB, emails)
+    shared = kb.config.shared
+    isempty(shared.base_url) && error("zemi admin is for a shared service, and [shared] base_url is not set in $(config_path())")
+    if !isempty(emails)
+        return map(emails) do email
+            make_admin!(kb, email) == :granted ? "$email is an admin." :
+                "$email is invited as an admin: signing in at $(shared.base_url) with any of its providers makes them one."
+        end
+    end
+    ensure_roles!(kb)
+    managing = managing_roles(kb)
+    lines = String[]
+    isempty(shared.admins) || push!(lines, "Named in the config: $(join(shared.admins, ", "))")
+    for u in users(kb)
+        isdisjoint(u.roles, managing) || push!(lines, "Account: $(u.email)$(u.disabled ? " (disabled)" : "")")
+    end
+    for i in invitations(kb)
+        isempty(i.accepted_at) && !isdisjoint(i.roles, managing) && push!(lines, "Invited: $(i.email)")
+    end
+    why = admin_problem(kb)
+    isempty(why) || push!(lines, why)
+    return lines
+end
+
 "The port of this knowledge base's service, the shared one's or `zemi`'s, if something answers on it."
 function serving_port(c::Config)
     for port in unique([c.shared.port, parse(Int, get(ENV, "ZEMI_PORT", "8000"))])
@@ -126,6 +160,8 @@ function cli(args::AbstractVector{<:AbstractString})
                 write(expand_home(rest[1]), text)
                 println("Wrote $(count(startswith("@"), split(text, '\n'))) entries to $(rest[1])")
             end
+        elseif cmd == "admin"
+            foreach(println, admin_cli(kb(), rest))
         elseif cmd == "backup"
             c = validate(load_config())
             path = backup!(c; keep = something(option(rest, "--keep"), ""))

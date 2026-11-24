@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install a knowledge base's shared service on a Debian or Ubuntu server, from this checkout:
 #
-#   sudo /srv/zemi/Zemi.jl/deploy/install.sh kb.example.org [name]
+#   sudo /srv/zemi/Zemi.jl/deploy/install.sh kb.example.org [name] [--admin you@example.org]...
 #
 # `name` (by default `zemi`) names what is installed for it, `<name>.service` and Caddy's
 # `sites/<name>.caddy`, so several knowledge bases can be served from one machine, each on its own
@@ -14,10 +14,25 @@
 # layers use, installs the Qdrant binary Kaimon runs for the service unless the config names a Qdrant
 # of its own, then installs and starts the
 # systemd service. Run again after changing the host name, the config's port or the logo.
+#
+# Someone has to be able to administer the service, or nobody can sign in: an email in the config's
+# `[shared] admins`, or one named with `--admin`, invited as an admin (see `zemi admin`). With
+# neither, the installer asks for one on a terminal, and stops otherwise.
 set -euo pipefail
 
-domain=${1:?usage: sudo deploy/install.sh <host name> [name]}
-name=${2:-zemi}
+usage="usage: sudo deploy/install.sh <host name> [name] [--admin email]..."
+args=() admins=()
+while [ $# -gt 0 ]; do
+    case $1 in
+        --admin) [ $# -ge 2 ] || { echo "$usage" >&2; exit 1; }; admins+=("$2"); shift 2 ;;
+        --admin=*) admins+=("${1#--admin=}"); shift ;;
+        -*) echo "$usage" >&2; exit 1 ;;
+        *) args+=("$1"); shift ;;
+    esac
+done
+[ ${#args[@]} -ge 1 ] && [ ${#args[@]} -le 2 ] || { echo "$usage" >&2; exit 1; }
+domain=${args[0]}
+name=${args[1]:-zemi}
 [[ "$name" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "The name is lower case letters, digits and dashes: $name" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || { echo "Run with sudo." >&2; exit 1; }
 checkout=$(cd "$(dirname "$0")/.." && pwd)
@@ -40,6 +55,29 @@ echo "Installing the packages"
 # versions the environment last had, even ones its compat no longer allows.
 install='using Pkg; isempty(Pkg.Registry.reachable_registries()) && Pkg.Registry.add("General"); Pkg.update(); Pkg.instantiate()'
 (cd "$checkout" && as_user julia --project=app -e "$install")
+
+echo "The first admin"
+# Those named with --admin are invited as admins (`zemi admin`); then whether anyone could administer
+# the service at all, asked before the long installs below rather than found when nobody can sign in.
+# Exits 3 when nobody could.
+name_admins='import Zemi as K
+    isempty(ARGS) || (s = K.cli(["admin"; ARGS]); s == 0 || exit(s))
+    why = K.admin_problem(K.kb())
+    isempty(why) || (println(stderr, why); exit(3))'
+admin_step() { (cd "$checkout" && as_user julia --project=app -e "$name_admins" "$@"); }
+status=0
+admin_step ${admins[@]+"${admins[@]}"} || status=$?
+if [ "$status" != 0 ] && [ "$status" != 3 ]; then
+    exit 1
+elif [ "$status" = 3 ] && ! [ -t 0 ]; then
+    echo "Or run this again with --admin you@example.org." >&2
+    exit 1
+fi
+while [ "$status" != 0 ]; do
+    read -rp "Email of the first admin, who invites everyone else: " email
+    status=0
+    admin_step "$email" || status=$?
+done
 
 # The port the service listens on, whose Qdrant it uses (Kaimon's, or its own at `qdrant_url`) and
 # the embedding models its layers use, from its config.

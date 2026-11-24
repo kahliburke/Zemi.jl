@@ -56,6 +56,13 @@ async function scrollTo(page, sel) {
   await page.evaluate(y => window.scrollBy(0, y), b.y - 90)
 }
 
+// Setup at its step `n` (from 0), moved on with Next as a person would.
+async function setupStep(page, n) {
+  await page.waitForSelector('.kbsu-steps', { timeout: 30_000 })
+  for (let i = 0; i < n; i++) await page.click('.kbsu-button:has-text("Next")', { timeout: 10_000 })
+  await page.mouse.move(0, 0)
+}
+
 // name, page, what to wait for before taking it, anything to do on the page first, the part of the
 // page to take (all of what is in view when none; a selector takes that element whole; a function
 // gives the part), and how long to let it settle (1.5 s when not given).
@@ -85,8 +92,25 @@ const SHOTS = [
   ['finding', '/findings#LS-F1', 'text=Millimetre-scale ridges'],
   ['admin', '/service/administration', '.kbad-chip'],
   ['menu', '/', '.kba-menu', async page => { await page.click('.kba-button') }, { x: 1440 - 480, y: 0, width: 480, height: 300 }],
-  // The service's own pages, where a group sets itself up.
+  // What a group's first admin goes through: signing in (the providers' buttons, without the form for
+  // signing in on this machine), Setup's four steps, and inviting the others.
+  ['sign-in', '/auth/sign-in', 'h1', page => page.addStyleTag({ content: 'form.l { display: none }' }), 'main'],
   ['setup', '/service/setup', '.kbsu-steps'],
+  ['setup-arxiv', '/service/setup', '.kbsu-steps', page => setupStep(page, 1)],
+  ['setup-model', '/service/setup', '.kbsu-steps', page => setupStep(page, 2)],
+  ['setup-sharing', '/service/setup', '.kbsu-steps', page => setupStep(page, 3)],
+  ['invite', '/service/administration', '.kbad-chip', async page => {
+    const form = page.locator('h3:text-is("Invite someone") + form')
+    await form.locator('input[type=email]').fill('una@example.org')
+    await form.locator('.kbad-chip:has-text("Curator")').click()
+    await scrollTo(page, 'h3:text-is("Invite someone")')
+    await page.mouse.move(0, 0)
+  }, async page => {
+    const h = await page.locator('h3:text-is("Invite someone")').boundingBox()
+    const f = await page.locator('h3:text-is("Invite someone") + form').boundingBox()
+    return { x: f.x - 16, y: h.y - 12, width: f.width + 32, height: f.y + f.height - h.y + 28 }
+  }],
+  // The service's own pages, where a group sets itself up.
   ['configuration', '/service/configuration', '.kbcf h2'],
   ['configuration-group', '/service/configuration', '.kbcf h2', page => scrollTo(page, '.kbcf h2:text-is("The group")')],
   ['models', '/service/configuration', '#model input', page => scrollTo(page, '#model h2')],

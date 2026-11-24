@@ -270,6 +270,51 @@ invitations(kb::KB) = [(; email = r.email, roles = String.(JSON.parse(r.roles)),
 uninvite!(kb::KB, email::AbstractString) = execute!(kb, "DELETE FROM invitations WHERE email = ? AND accepted_at IS NULL", (email,))
 
 """
+    make_admin!(kb, email) -> Symbol
+
+Make `email` an admin, from the server (`zemi admin`): its account, if it has one, gets the Admin
+role and is enabled again (`:granted`); otherwise it is invited as an admin, and its first sign-in
+with any provider makes it one (`:invited`). How a service gets its first admin, and the way back in
+for one locked out.
+"""
+function make_admin!(kb::KB, email::AbstractString)
+    email = lowercase(strip(email))
+    ensure_roles!(kb)
+    uid = scalar(kb, "SELECT id FROM users WHERE email = ?", (email,))
+    if ismissing(uid)
+        invite!(kb, email; roles = ["Admin"])
+        return :invited
+    end
+    transaction(kb) do
+        execute!(kb, "INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, 'Admin')", (uid,))
+        execute!(kb, "UPDATE users SET disabled = 0 WHERE id = ?", (uid,))
+    end
+    return :granted
+end
+
+"The roles that may manage people (`users.manage`): Admin, and any other given it."
+managing_roles(kb::KB) = Set(r.name for r in roles(kb) if r.name == "Admin" || "users.manage" in r.permissions)
+
+"""
+    admin_problem(kb) -> String
+
+Why nobody could ever manage this shared service's people, or `""` when someone can: an email in
+`[shared] admins`, an enabled account with a role that manages people, or an open invitation to one.
+Signing in on this machine needs none, its first sign-in being an admin (see `finish_local_sign_in`).
+"""
+function admin_problem(kb::KB)
+    shared = kb.config.shared
+    (local_sign_in(shared) || !isempty(shared.admins)) && return ""
+    managing = managing_roles(kb)
+    held = query(kb, "SELECT ur.role FROM user_roles ur JOIN users u ON u.id = ur.user_id WHERE u.disabled = 0")
+    any(r -> r.role in managing, held) && return ""
+    any(i -> isempty(i.accepted_at) && !isdisjoint(i.roles, managing), invitations(kb)) && return ""
+    return "Nobody can administer this service: [shared] admins names no one, and nobody has an admin's " *
+           "account or invitation. Name the first admin on the server with `zemi admin you@example.org`, " *
+           "or add the email to [shared] admins in $(config_path()), then start the service again."
+end
+
+"""
     sign_in!(kb, shared, provider, subject; email, verified, name) -> Int
 
 The account a sign-in (`subject` at `provider`) belongs to, its id. A sign-in seen before is its

@@ -120,7 +120,11 @@ end
 
 if shared
     K.LOCAL_SIGN_IN[] = true
-    kb = demo_kb(dir; shared = Dict("port" => port, "base_url" => "http://127.0.0.1:$port"))
+    # Providers as a group's would have, for the sign-in page's screenshot: their buttons lead nowhere
+    # here, where people sign in on this machine.
+    providers = [Dict("name" => "GitHub", "kind" => "github", "client_id" => "demo", "client_secret" => "demo"),
+                 Dict("name" => "Google", "issuer" => "https://accounts.google.com", "client_id" => "demo", "client_secret" => "demo")]
+    kb = demo_kb(dir; shared = Dict("port" => port, "base_url" => "http://127.0.0.1:$port", "providers" => providers))
     K.ensure_roles!(kb)
     ids = Dict(map(PEOPLE) do (email, name, role, member)
         ismissing(K.scalar(kb, "SELECT id FROM users WHERE email = ?", (email,))) &&

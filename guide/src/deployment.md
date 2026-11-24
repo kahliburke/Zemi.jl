@@ -46,7 +46,7 @@ data_dir = "/srv/zemi/data"
 [shared]
 base_url = "https://kb.example.org"
 port = 8800
-admins = ["you@example.org"]          # Admin on first sign-in
+admins = ["you@example.org"]          # admins whenever they sign in (see The first sign-in)
 # sign_up = "open"                    # default "invite"
 # session_days = 14                   # how long a sign-in lasts
 # trusted_proxies = ["127.0.0.1", "::1"]   # whose X-Forwarded-* headers are believed
@@ -108,7 +108,7 @@ the Claude token instead, set `summarizer = "opus-agent-pdf"` and `code_summariz
 ## Install
 
 ```sh
-sudo /srv/zemi/Zemi.jl/deploy/install.sh kb.example.org [name]
+sudo /srv/zemi/Zemi.jl/deploy/install.sh kb.example.org [name] --admin you@example.org
 ```
 
 Installs the Julia packages, Ollama and the embedding models, Caddy (site in
@@ -187,6 +187,82 @@ in as any invited email.
 ```sh
 ZEMI_ADMINS=you@example.org docker compose -f deploy/compose.yaml -f deploy/compose.local.yaml up -d --build
 ```
+
+## The first sign-in
+
+Sign-up is by invitation (`[shared] sign_up = "invite"`), and admins send the invitations, so the
+service needs an admin before anyone can sign in. Name the first with `--admin` when installing, or
+in the config's `[shared] admins` (in a container, `ZEMI_ADMINS` at its first start). With neither,
+`install.sh` asks for one, and the service refuses to start.
+
+Whoever runs the server can name an admin at any time. This is also the way back in for an admin
+who lost the role or was disabled:
+
+```sh
+sudo -u zemi env ZEMI_CONFIG=/srv/zemi/.config/zemi/config.toml /srv/zemi/Zemi.jl/zemi admin you@example.org
+docker compose -f deploy/compose.yaml exec zemi /srv/zemi/Zemi.jl/zemi admin you@example.org   # in a container
+```
+
+An email with an account gets the Admin role back. Any other email is invited as an admin, and its
+first sign-in makes it one. `zemi admin` alone lists who can administer the service. The email is
+matched against the verified email the provider reports, so sign in with an account that has it.
+
+**1. Sign in** at `https://<host>` with one of the providers.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/sign-in-light.png" alt="The sign-in page, with a button for each provider">
+  <img class="dark-only" src="./assets/screenshots/sign-in-dark.png" alt="The sign-in page, with a button for each provider">
+</figure>
+```
+
+**2. Set up the knowledge base.** Its front page leads an admin to Setup, four steps (see
+[Configuration](configuration.md#Setup)). The group: its name, field, description and focus areas.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/setup-light.png" alt="Setup's first step: the group and its focus areas">
+  <img class="dark-only" src="./assets/screenshots/setup-dark.png" alt="Setup's first step: the group and its focus areas">
+</figure>
+```
+
+The arXiv categories to watch for new papers, and a contact email for arXiv and OpenAlex:
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/setup-arxiv-light.png" alt="Setup's second step: the arXiv categories watched">
+  <img class="dark-only" src="./assets/screenshots/setup-arxiv-dark.png" alt="Setup's second step: the arXiv categories watched">
+</figure>
+```
+
+The model that reads papers, which can be chosen later (see [Models](models.md)):
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/setup-model-light.png" alt="Setup's third step: the model that reads papers">
+  <img class="dark-only" src="./assets/screenshots/setup-model-dark.png" alt="Setup's third step: the model that reads papers">
+</figure>
+```
+
+Whether the knowledge base stands alone or shares a group's dataset (see [Datasets](datasets.md)):
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/setup-sharing-light.png" alt="Setup's fourth step: reading alone or sharing a dataset">
+  <img class="dark-only" src="./assets/screenshots/setup-sharing-dark.png" alt="Setup's fourth step: reading alone or sharing a dataset">
+</figure>
+```
+
+**3. Invite people** on the Administration page, in the top bar's menu: each email with its roles
+(see [Serving](serving.md)). They sign in with any provider whose verified email it is.
+
+```@raw html
+<figure class="shot">
+  <img class="light-only" src="./assets/screenshots/invite-light.png" alt="Inviting someone on the Administration page, with their roles">
+  <img class="dark-only" src="./assets/screenshots/invite-dark.png" alt="Inviting someone on the Administration page, with their roles">
+</figure>
+```
+
 
 ## Agents and notebooks
 
