@@ -3116,14 +3116,14 @@ end
         K.update_project!(kb, "RP"; codebase = "file://$origin", by = me)
         id = String(K.scalar(kb, "SELECT d.doc_id FROM projects p JOIN papers d ON d.id = p.codebase_id WHERE p.key = 'RP'"))
         @test startswith(id, "code-") && K.codebase_dir(kb, id) == K.clone_dir(kb.config, id)
+        # Added with the project, it is read at once: fetched, and read from the clone.
+        reading = only(j for j in lock(() -> collect(values(K.JOBS)), K.JOBS_LOCK) if j.name == "ingest $id")
+        @test wait(reading).status == :done && isfile(joinpath(K.clone_dir(kb.config, id), "a.jl")) && K.codebase_read(kb, id)
         K.create_project!(kb, "Too"; key = "TO", codebase = "file://$origin", add_codebase = false, by = me)
         @test only(p for p in K.projects(kb) if p.key == "TO").codebase == id
-        # Not fetched yet: the status says so, and reading it says why it can't.
-        @test only(t.reason for t in K.sync_plan(kb) if t.id == id) == "it is not fetched from file://$origin yet"
-        @test_throws "can't be read here" K.parse_code!(kb, id)
-        # Fetched, it is read from the clone: its files, and its commits against their tasks.
-        @test K.fetch_codebases!(kb) == 1 && isfile(joinpath(K.clone_dir(kb.config, id), "a.jl"))
-        @test K.parse_code!(kb, id) && K.read_commits!(kb, id) == 1
+        @test count(j -> j.name == "ingest $id", lock(() -> collect(values(K.JOBS)), K.JOBS_LOCK)) == 1   # linked, not read again
+        # Its commits, against their tasks.
+        @test K.read_commits!(kb, id) == 1
         @test [c.subject for c in K.task(kb, "RP-1").commits] == ["Add f"]
         # New commits on another branch arrive with the next fetch.
         gito("checkout", "-q", "-b", "side")
@@ -3151,7 +3151,11 @@ end
         # read from a clone of it, fetched with the others; a folder is read where it is.
         url_id = K.add_codebase_from!(kb, "file://$(dirname(origin))/$(basename(origin))")
         @test K.codebase_dir(kb, url_id) == K.clone_dir(kb.config, url_id)
+        # Not fetched yet: the status says so, and reading it says why it can't.
         @test occursin("not fetched", K.codebase_problem(kb, url_id))
+        @test occursin("is not fetched from", only(t.reason for t in K.sync_plan(kb) if t.id == url_id))
+        @test_throws "can't be read here" K.parse_code!(kb, url_id)
+        @test !K.codebase_read(kb, url_id) && !K.codebase_page_json(kb, only(K.query(kb, "SELECT * FROM papers WHERE doc_id = ?", (url_id,))))["read"]
         @test K.fetch_codebases!(kb) == 1 && isfile(joinpath(K.clone_dir(kb.config, url_id), "a.jl"))   # not the one from a folder
         @test K.codebase_dir(kb, K.add_codebase_from!(kb, origin)) == origin
         @test_throws "No folder" K.add_codebase_from!(kb, joinpath(origin, "nothing-here"))

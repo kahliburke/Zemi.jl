@@ -36,7 +36,8 @@ function write_code_site(kb::KB, dir::AbstractString, public::AbstractString; wr
             write(joinpath(data, "code", slug, f["page"] * ".json"), JSON.json(file))
         end
         println(listing, "- [", md_escape(page["title"]), "](./", slug, "/index.md): ", md_escape(page["one_line"]),
-                " *(", page["files"], " files", isempty(page["commit"]) ? "" : ", commit `$(page["commit"])`", ")*")
+                " *(", page["read"] ? "$(page["files"]) files" : "not read yet",
+                isempty(page["commit"]) ? "" : ", commit `$(page["commit"])`", ")*")
         push!(out, (; id = p.doc_id, title = page["title"], page = "$slug/index.md"))
     end
     # The codebases of the reader's projects that are not open are listed as the page is read.
@@ -68,7 +69,7 @@ function codebase_page_json(kb::KB, p)
     one_line = c !== nothing && get(c, "one_line", nothing) !== nothing ? string(c["one_line"]) : first_sentence(summary)
     return Dict{String,Any}(
         "id" => p.doc_id, "slug" => slug, "title" => coalesce(p.title, p.doc_id), "one_line" => one_line,
-        "commit" => coalesce(p.version, ""), "files" => stats.files, "lines" => stats.lines, "definitions" => stats.definitions,
+        "commit" => coalesce(p.version, ""), "read" => codebase_read(kb, p.doc_id), "files" => stats.files, "lines" => stats.lines, "definitions" => stats.definitions,
         "languages" => [Dict("language" => l, "files" => n) for (l, n) in stats.languages],
         "summary" => summary, "topics" => topics, "access" => p.access,
         "classification" => c === nothing ? [] : [Dict("label" => l, "value" => v) for (l, v) in classification_rows(c)],

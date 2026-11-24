@@ -11,7 +11,7 @@ import { codebaseHref } from './kbLinks'
 
 const props = defineProps<{ none?: boolean }>()
 
-type Codebase = { id: string; slug: string; title: string; one_line: string; files: number; commit: string; access: string }
+type Codebase = { id: string; slug: string; title: string; one_line: string; read: boolean; files: number; commit: string; access: string }
 const closed = ref<Codebase[]>([])
 const loaded = ref(false)
 
@@ -29,7 +29,7 @@ onMounted(async () => {
     <h2 id="of-your-projects">Of your projects</h2>
     <ul>
       <li v-for="c in closed" :key="c.id"><a :href="codebaseHref(c.slug)">{{ c.title }}</a><template v-if="c.one_line">: {{ c.one_line }}</template>
-        <em> ({{ c.files }} files<template v-if="c.commit">, commit <code>{{ c.commit }}</code></template>)</em></li>
+        <em> ({{ c.read ? `${c.files} files` : 'not read yet' }}<template v-if="c.commit">, commit <code>{{ c.commit }}</code></template>)</em></li>
     </ul>
   </template>
   <p v-else-if="props.none && loaded">No codebases yet.</p>

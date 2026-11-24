@@ -88,6 +88,27 @@ function add_codebase_from!(kb::KB, what::AbstractString; by = nothing, anyway::
     return add_codebase!(kb, root; by, anyway)
 end
 
+"""
+    start_codebase_reading(kb, id) -> Union{Job,Nothing}
+
+Read codebase `id` as a job, a clone of its repository fetched first: what follows adding one,
+wherever it is added. `nothing` where documents cannot be read here; the next sync reads it then.
+"""
+function start_codebase_reading(kb::KB, id::AbstractString)
+    isempty(cannot_run(kb, "ingest", [id])) || return nothing
+    return start_job("ingest $id"; ids = [id], changes = changes_stamp(kb.config)) do job
+        if codebase_dir(kb, id) == clone_dir(kb.config, id)
+            report!(job, "fetching $id from its repository")
+            fetch_codebase!(kb, id) || error("$id cannot be fetched: $(codebase_problem(kb, id))")
+        end
+        format_ingest(ingest!(kb, [id]; progress = m -> report!(job, m), cancelled = () -> cancelled(job)))
+    end
+end
+
+"Whether codebase `id` has been read: its files parsed."
+codebase_read(kb::KB, id::AbstractString) =
+    !ismissing(scalar(kb, "SELECT 1 FROM parses WHERE paper_id = ?", (paper_id(kb, id),)))
+
 "For tests: a shared service may clone repositories on this machine's disk (`file://`)."
 const LOCAL_REPOSITORIES = Ref(false)
 

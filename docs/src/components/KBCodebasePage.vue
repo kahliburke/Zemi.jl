@@ -12,7 +12,7 @@ import KBInLibraries from './KBInLibraries.vue'
 import KBCodeTree from './KBCodeTree.vue'
 
 type Access = 'open' | 'projects'
-type Codebase = { id: string; slug: string; title: string; one_line: string; commit: string; files: number; lines: number
+type Codebase = { id: string; slug: string; title: string; one_line: string; commit: string; read: boolean; files: number; lines: number
                   definitions: number; languages: { language: string; files: number }[]; summary: string; topics: string[]
                   access: Access; classification: { label: string; value: string }[]; tree: string; pages: string }
 
@@ -48,8 +48,10 @@ async function choose(to: Access) {
   <template v-else>
     <h1 id="codebase-title">{{ c.title }}</h1>
     <p v-if="c.one_line"><em>{{ c.one_line }}</em></p>
-    <p><template v-if="c.commit">commit <code>{{ c.commit }}</code> · </template>{{ c.files }} files · {{ c.lines }} lines ·
+    <p v-if="c.read"><template v-if="c.commit">commit <code>{{ c.commit }}</code> · </template>{{ c.files }} files · {{ c.lines }} lines ·
       {{ c.definitions }} definitions<template v-if="languages"> · {{ languages }}</template></p>
+    <p v-else class="kb-dim"><template v-if="c.commit">commit <code>{{ c.commit }}</code> · </template>Not read yet: its files are
+      listed, summarized and searchable once it is.</p>
     <div class="kb-buttons"><a class="kb-button kb-live-only" :href="manageHref(c.id)">Manage</a></div>
     <p v-if="manages" class="kbcb-access">
       <label>Seen by

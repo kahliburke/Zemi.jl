@@ -323,15 +323,8 @@ route!("POST", "/api/documents"; need = "paper.add") do c
     anyway = get(b, "anyway", false) === true
     if !isempty(strip(String(get(b, "codebase", ""))))
         id = add_codebase_from!(kb, String(b["codebase"]); by = adder(get(b, "by", nothing), caller), anyway, caller)
-        job = start_job("ingest $id"; ids = [id], changes = changes_stamp(kb.config)) do job
-            # One read from a clone of its repository is fetched first.
-            if codebase_dir(kb, id) == clone_dir(kb.config, id)
-                report!(job, "fetching $id from its repository")
-                fetch_codebase!(kb, id) || error("$id cannot be fetched: $(codebase_problem(kb, id))")
-            end
-            format_ingest(ingest!(kb, [id]; progress = m -> report!(job, m), cancelled = () -> cancelled(job)))
-        end
-        return Dict("ids" => [id], "already" => already_read(kb, [id]), "job" => job.id)
+        job = start_codebase_reading(kb, id)
+        return Dict("ids" => [id], "already" => already_read(kb, [id]), "job" => job === nothing ? nothing : job.id)
     end
     ids = add_papers!(kb, split_list(String(get(b, "arxiv", ""))); source = String(get(b, "source", "added")),
                       by = adder(get(b, "by", nothing), caller), anyway)

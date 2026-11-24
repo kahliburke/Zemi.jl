@@ -46,23 +46,27 @@ with its own credentials and shows it to its readers, so adding one takes what a
 [`add_codebase_from!`](@ref)). Linking a project to a
 codebase shows it to the project's members, so one `caller` may not see is none to them, unless
 they decide who sees codebases (`paper.manage`).
+
+A codebase added here is read at once, as one added from the Manage page is (see
+[`start_codebase_reading`](@ref)).
 """
 function codebase_id(kb::KB, codebase::AbstractString; add::Bool = true, caller::Caller = local_caller())
     codebase = strip(codebase)
     (isempty(codebase) || lowercase(codebase) == "none") && return missing
     linkable(doc_id) = can(caller, "paper.manage") ? doc_id : seen_document(kb, caller, doc_id)
+    added(doc_id) = (start_codebase_reading(kb, doc_id); paper_id(kb, doc_id))
     if is_repository(codebase)
         known = query(kb, "SELECT id, doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND remote = ?", (clone_url(codebase),))
         isempty(known) || (linkable(first(known).doc_id); return Int(first(known).id))
         add || not_permitted("Not permitted: a repository the knowledge base does not have yet is added by someone with paper.add")
-        return paper_id(kb, link_repository!(kb, codebase))
+        return added(link_repository!(kb, codebase))
     end
     if is_folder(codebase)
         root = full_folder(codebase)
         known = query(kb, "SELECT id, doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND source_path = ?", (root,))
         isempty(known) || (linkable(first(known).doc_id); return Int(first(known).id))
         add || not_permitted("Not permitted: a folder the knowledge base does not have yet is added by someone with paper.add")
-        return paper_id(kb, add_codebase_from!(kb, root; caller))
+        return added(add_codebase_from!(kb, root; caller))
     end
     id = is_codebase(codebase) ? paper_id(kb, codebase) : missing
     ismissing(id) && not_found("No codebase $codebase in the knowledge base (a codebase's id begins code-; give a repository's address or a folder's path for a new one)")

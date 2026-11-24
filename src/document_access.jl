@@ -223,7 +223,7 @@ visible_codebases(kb::KB, caller::Caller) =
 # The codebases the caller may see, as the Codebases page lists them: it lists those the site is
 # built without as it is read.
 route!("GET", "/api/codebases") do c
-    Any[Dict(k => d[k] for k in ("id", "slug", "title", "one_line", "files", "commit", "access"))
+    Any[Dict(k => d[k] for k in ("id", "slug", "title", "one_line", "read", "files", "commit", "access"))
         for d in (codebase_page_json(c.kb, p) for p in visible_codebases(c.kb, c.caller))]
 end
 
