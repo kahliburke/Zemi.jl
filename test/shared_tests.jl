@@ -557,6 +557,9 @@ end
         listed(uid, target) = [x["id"] for x in call(uid, "GET", target)[2]]
         @test listed(ada, "/api/codebases") == [id] && only(call(ada, "GET", "/api/codebases")[2])["access"] == "projects"
         @test isempty(listed(bea, "/api/codebases")) && isempty(listed(bea, "/api/tasks/codebases")) && listed(ada, "/api/tasks/codebases") == [id]
+        # The recent documents of a kind, as the Knowledge base page lists them while its search is set to it.
+        @test listed(ada, "/api/recent?kind=code") == [id] && isempty(listed(bea, "/api/recent?kind=code"))
+        @test call(ada, "GET", "/api/recent?kind=nothing-such")[1] == 400
         @test only(call(rowan, "GET", "/api/documents?state=code")[2]["documents"])["access"] == "projects"   # Manage lists every one
         hits(uid) = [h["id"] for h in call(uid, "GET", "/api/search?q=tide")[2]["hits"]]
         @test hits(ada) == [id] && isempty(hits(bea))

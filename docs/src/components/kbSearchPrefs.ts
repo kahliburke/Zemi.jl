@@ -43,3 +43,7 @@ export function reset() {
   chosen.value = null
   localStorage.removeItem(PREFS)
 }
+
+// The kind of document the Knowledge base page's search is set to ('' for every kind); the page's list
+// of recent documents shows that kind too.
+export const searchKind = ref('')

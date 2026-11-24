@@ -273,6 +273,16 @@ route!("GET", "/api/figures/:paper/:file") do c
     isfile(f) ? file_response(f; c.req) : not_found("No such figure.")
 end
 
+# The documents of one kind most recently posted or added (`?kind=paper|code|record|resource&limit=…`),
+# of those the caller may find: the Knowledge base page's list, while its search is set to that kind.
+route!("GET", "/api/recent") do c
+    kind = get(c.params, "kind", "")
+    any(k -> k.name == kind, DOCUMENT_KINDS) || error("No kind of document named $(repr(kind))")
+    found = list_documents(c.kb; state = kind, except = unfound_documents(c.kb, c.caller), limit = int_param(c.params, "limit", 15, 1:100))
+    Any[Dict("id" => d.id, "page" => d.page, "title" => d.title, "authors" => d.authors, "kind" => d.kind, "posted" => d.posted)
+        for d in found.documents]
+end
+
 # Documents, for managing them (`?q=…&state=…&limit=…&offset=…`): every one, for those who manage them;
 # for anyone else, their own (`state=mine`).
 route!("GET", "/api/documents"; need = "library") do c

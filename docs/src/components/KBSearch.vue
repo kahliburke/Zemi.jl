@@ -11,7 +11,7 @@ import { ref, shallowRef, computed, onMounted, watch } from 'vue'
 import { mode, connect, getJSON, latest, isStale } from './kbApi'
 import { loadPapers, type Paper } from './kbData'
 import { byline } from './kbFormat'
-import { current, vectorless } from './kbSearchPrefs'
+import { current, vectorless, searchKind } from './kbSearchPrefs'
 import { kbPage, findingHref } from './kbLinks'
 import { markedSnippet } from './kbUtils'
 import { refsTextHtml, clipRefs } from './kbRefs'
@@ -28,7 +28,8 @@ const query = ref('')
 // The kinds of document found: every kind, or one (see src/kinds.jl).
 const KINDS = [{ id: '', label: 'everything' }, { id: 'paper', label: 'papers' }, { id: 'code', label: 'codebases' },
                { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }]
-const kind = ref('')
+const kind = searchKind
+const choose = (k: string) => { searchKind.value = k }
 const hits = ref<Hit[]>([])
 type Found = { ref: string; claim: string; status: string; snippet: string }
 const found = ref<Found[]>([])
@@ -145,7 +146,7 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
       {{ note }}<button type="button" v-if="mode === 'static'" class="kb-link kb-retry" @click="start(true)">retry</button>
       <span v-if="busy && partial"> · keyword matches; searching by meaning…</span><span v-else-if="busy"> · searching…</span><span v-else-if="seconds !== null"> · {{ seconds.toFixed(2) }} s</span>
       <span v-if="mode === 'live'" class="kb-kinds">
-        <button v-for="k in KINDS" :key="k.id" type="button" :class="['kb-link', { on: kind === k.id }]" @click="kind = k.id">{{ k.label }}</button>
+        <button v-for="k in KINDS" :key="k.id" type="button" :class="['kb-link', { on: kind === k.id }]" @click="choose(k.id)">{{ k.label }}</button>
       </span>
     </div>
     <p v-if="error" class="kb-error">{{ error }}</p>
