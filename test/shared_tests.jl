@@ -2311,6 +2311,8 @@ end
         close(api_sock)
     end
     @test K.site_label("local"; c) == "the knowledge base on this machine (not served now)"
+    # An address kept from when it was served another way (shared, here) is still this knowledge base.
+    @test K.connect_site("http://localhost:$(c.shared.port)"; c) == "local"
     # Nothing answering where it was served: the config's port, as before.
     @test K.local_served(c) === nothing && K.local_api(c) == "http://127.0.0.1:$(K.local_port(c))"
     K.forget_served!(c)

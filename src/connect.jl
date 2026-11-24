@@ -247,13 +247,15 @@ function site_label(site::AbstractString; c::Config = load_config())
 end
 
 # Whether `site` is an address the knowledge base run on this machine is served at: where it is served
-# now, else (nothing serving) the ports its config names.
+# now, and every port its config serves it on (for one person, in development, or shared), so an
+# address kept from when it ran another way is still this knowledge base.
 function is_local_address(site::AbstractString, c::Config)
     u = try HTTP.URI(site) catch; return false end
     lowercase(u.host) in LOOPBACK_HOSTS || return false
     s = local_served(c)
-    known = s === nothing ? ["http://localhost:$(local_port(c))", "http://localhost:$(dev_server_port(c))"] : [s.url, s.api]
-    return any(a -> HTTP.URI(a).port == u.port, known)
+    ports = Set(string.([local_port(c), dev_server_port(c), c.shared.port]))
+    s === nothing || union!(ports, (HTTP.URI(s.url).port, HTTP.URI(s.api).port))
+    return u.port in ports
 end
 
 """
@@ -343,7 +345,19 @@ end
 
 # ── The command ───────────────────────────────────────────────────────────────────────────────────
 
-load_connect_config() = (f = connect_config_path(); isfile(f) ? TOML.parsefile(f) : Dict{String,Any}())
+"""
+    load_connect_config() -> Dict
+
+The folders `zemi connect` keeps and the site it keeps them at, which an address of this machine's
+own knowledge base names as `local` (see [`connect_site`](@ref)): one kept from when it was served
+on another port, or shared, is still it.
+"""
+function load_connect_config()
+    f = connect_config_path()
+    c = isfile(f) ? TOML.parsefile(f) : Dict{String,Any}()
+    isempty(get(c, "site", "")) || (c["site"] = connect_site(String(c["site"])))
+    return c
+end
 function save_connect_config!(c)
     mkpath(dirname(connect_config_path()))
     open(io -> (println(io, "# The folders `zemi connect` keeps in step with your library, and where it is."); TOML.print(io, c)),
