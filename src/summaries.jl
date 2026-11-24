@@ -18,8 +18,14 @@ paper_input(sections) = join((t.text for t in sections), "\n\n")
 "The hash a summary is stored with: its input, and what wrote it from that input."
 summary_input_sha(s::Summarizer, text::AbstractString) = text_sha("$(s.model)|$(prompt_version(s))|$text")
 
-"Whether `s` is an agent that reads a paper's PDF rather than the text extracted from it."
-reads_pdf(s::Summarizer) = s.kind == :agent && s.reads == :pdf
+"""
+Whether the agent `model` names reads a PDF whole, figures included, with its file tool: Claude,
+through its CLI or over ACP. Other ACP agents read a file as bytes, and local models see no images.
+"""
+agent_reads_pdf(model::AbstractString) = !occursin(':', model) || startswith(model, "acp:claude")
+
+"Whether `s` is an agent that reads a paper's PDF rather than the text extracted from it: one asked to and able to (see [`agent_reads_pdf`](@ref))."
+reads_pdf(s::Summarizer) = s.kind == :agent && s.reads == :pdf && agent_reads_pdf(s.model)
 
 """
     summary_inputs(kb, s, doc_id, sections) -> (; paper, sections)

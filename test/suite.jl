@@ -3675,6 +3675,11 @@ end
         end
         @test opened("ollama:qwen3:14b")["only"] === true            # a local model: as the CLI
         @test K.acp_model("acp:codex") && !K.acp_model("opus") && !K.acp_model("ollama:qwen3:14b")
+        # Only Claude reads a PDF whole; a summarizer asked to read the PDF on another agent reads the text.
+        pdf(model) = K.reads_pdf(K.Summarizer(; name = "s", kind = :agent, model, reads = :pdf))
+        @test pdf("opus") && pdf("acp:claude") && pdf("acp:claude:sonnet")
+        @test !pdf("acp:codex") && !pdf("acp:opencode:opencode/minimax-m3") && !pdf("acp:gemini") && !pdf("ollama:qwen3:14b")
+        @test !K.reads_pdf(K.Summarizer(; name = "s", kind = :agent, model = "opus", reads = :text))
     finally
         K.AGENT_CALL[] = saved
     end

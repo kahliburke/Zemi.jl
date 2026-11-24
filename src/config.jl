@@ -46,7 +46,8 @@ kinds:
   Kaimon session: the `zemi` extension, a Slate notebook, or the `zemi` command). `model` is any model
   Kaimon's agents take: `"opus"` or `"sonnet"` for Claude through a Claude subscription,
   `"ollama:<tag>"` for a local model, `"acp:opencode:<model>"` for OpenCode. The agent reads the
-  whole paper first, from its PDF (`reads = :pdf`) or its extracted text (`reads = :text`), then
+  whole paper first, from its PDF (`reads = :pdf`, for Claude; other agents read the text) or its
+  extracted text (`reads = :text`), then
   writes every summary; for a codebase, agents read its files in batches, then one writes the
   directory and codebase summaries. `timeout` bounds one agent's turn, in seconds.
 
