@@ -249,7 +249,9 @@ zemi connect --background                          # sync from now and at every 
 ```
 
 The first time, it opens your browser to sign in and approve it: it gets a token for your library and
-nothing else, which you can revoke under Your account, Tokens. The folder is kept as `Notes/` in your
+nothing else, which you can revoke under Your account, Tokens. The knowledge base run on this machine
+needs no sign-in: `local`, or any address it is served at (`http://localhost:5173` in development),
+reaches it with its key, wherever it is served now. The folder is kept as `Notes/` in your
 library (`--name` names it otherwise). A file changed on one side is copied to the other; changed on
 both, your machine's stands. Hidden files stay on your machine, but for a vault's settings the
 knowledge base reads, and so do the subfolders and files `--skip` names.

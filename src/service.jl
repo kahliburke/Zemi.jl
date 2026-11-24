@@ -334,6 +334,40 @@ end
 "The port the knowledge base is served on for one person: `ZEMI_PORT`, else `[service] port`."
 local_port(c::Config) = parse(Int, get(ENV, "ZEMI_PORT", string(c.service.port)))
 
+# Where the knowledge base run for one person is being served, written by the process serving it, so
+# another on this machine (`zemi connect`, `zemi open`) reaches it wherever it was started: on another
+# port, or with the site from the development server.
+served_file(c::Config) = joinpath(c.data_dir, "served.json")
+
+function record_served!(c::Config, r::Running)
+    mkpath(c.data_dir)
+    write(served_file(c), JSON.json(Dict("url" => r.url, "api" => r.api, "pid" => getpid())))
+end
+
+function forget_served!(c::Config)
+    f = served_file(c)
+    rec = try JSON.parse(read(f, String)) catch; nothing end
+    rec isa AbstractDict && get(rec, "pid", 0) == getpid() && rm(f; force = true)
+end
+
+"""
+    local_served(c) -> Union{NamedTuple,Nothing}
+
+Where the knowledge base run for one person is served now, `(; url, api)`: where people open it (the
+development server's address, in development) and its API. `nothing` when nothing answers there.
+"""
+function local_served(c::Config)
+    rec = try JSON.parse(read(served_file(c), String)) catch; nothing end
+    rec isa AbstractDict || return nothing
+    api = String(get(rec, "api", ""))
+    m = match(r":(\d+)$", api)
+    (m === nothing || !port_taken(parse(Int, m[1]))) && return nothing
+    return (; url = String(get(rec, "url", api)), api)
+end
+
+"The API of the knowledge base run for one person: where it is served now, else where its config says."
+local_api(c::Config) = (s = local_served(c); s === nothing ? "http://127.0.0.1:$(local_port(c))" : s.api)
+
 """
     start_local(; port, dev = false, dev_port, hosted = false, build = default_site_build) -> Running
 
@@ -360,8 +394,9 @@ function start_local(; port::Integer = local_port(kb().config), dev::Bool = fals
     end
     dev && (DEV_URL[] = "http://localhost:$dev_port")
     server = serve_local(; kb = db, port, site = !dev, build)
-    api = "http://localhost:$port"
-    r = Running(dev ? :dev : :local, dev ? DEV_URL[] : api, api, server, Any[], Function[], hosted)
+    api = "http://127.0.0.1:$port"
+    r = Running(dev ? :dev : :local, dev ? DEV_URL[] : "http://localhost:$port", api, server, Any[], Function[], hosted)
+    record_served!(db.config, r)
     dev || push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db))
     push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db))
     load_plugins!(db.config)
@@ -506,6 +541,7 @@ function stop!(r::Running; seconds::Real = 15)
             sleep(0.1)
         end
     end
+    r.mode == :shared || try forget_served!(kb().config) catch end
     SERVED_AT[] = DEV_URL[] = ""
     SHARED_MODE[] = LOCAL_SIGN_IN[] = STARTING[] = false
     return r

@@ -69,15 +69,17 @@ function local_key_response(kb::KB, req::HTTP.Request, uri::HTTP.URI, params)
 end
 
 """
-    open_local(; port)
+    open_local()
 
-`zemi open`: open the knowledge base run for one person in the browser, with its key, once `zemi`
-serves it on `port`.
+`zemi open`: open the knowledge base run for one person in the browser where it is served (see
+[`local_served`](@ref)): with its key, or the development server's address in development.
 """
-function open_local(; port::Integer = parse(Int, get(ENV, "ZEMI_PORT", "8000")))
-    serving = try close(Sockets.connect("127.0.0.1", port)); true catch; false end
-    serving || return println(stderr, "Nothing is serving on port $port: start the knowledge base with `zemi` first, then `zemi open`.")
-    url = local_link(load_config(), port)
+function open_local()
+    c = load_config()
+    s = local_served(c)
+    s === nothing && return println(stderr, "Nothing is serving the knowledge base: start it with `zemi` first, then `zemi open`.")
+    port = parse(Int, match(r":(\d+)$", s.api)[1])
+    url = s.url == "http://localhost:$port" ? local_link(c, port) : s.url
     cmd = Sys.isapple() ? `open $url` : Sys.iswindows() ? `cmd /c start "" $url` : `xdg-open $url`
     try
         run(pipeline(cmd; stdout = devnull, stderr = devnull))

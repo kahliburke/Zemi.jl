@@ -2288,6 +2288,35 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     close(kb)
 end
 
+@zset "zemi connect finds the knowledge base run on this machine" begin
+    c = temp_config()
+    @test K.site_address("localhost:5173") == "http://localhost:5173" && K.site_address("kb.example.org/") == "https://kb.example.org"
+    # Served in development: opened at the development server, its API on another port.
+    api_sock = K.Sockets.listen(K.Sockets.localhost, 0)
+    api_port = Int(K.Sockets.getsockname(api_sock)[2])
+    dev_port = api_port == 65000 ? 65001 : 65000
+    r = K.Running(:dev, "http://localhost:$dev_port", "http://127.0.0.1:$api_port", nothing, Any[], Function[], false)
+    K.record_served!(c, r)
+    try
+        @test K.local_api(c) == "http://127.0.0.1:$api_port"
+        @test K.connect_site("http://localhost:$dev_port"; c) == "local"          # where it is opened
+        @test K.connect_site("127.0.0.1:$api_port"; c) == "local"                 # its API
+        @test K.connect_site("local"; c) == "local"
+        other = api_port == 64999 ? 64998 : 64999
+        @test K.connect_site("http://localhost:$other"; c) == "http://localhost:$other"   # another site on this machine (a tunnel, say)
+        @test K.connect_site("kb.example.org"; c) == "https://kb.example.org"
+        @test K.site_label("local"; c) == "the knowledge base on this machine, http://localhost:$dev_port"
+        @test K.site_label("https://kb.example.org"; c) == "https://kb.example.org"
+    finally
+        close(api_sock)
+    end
+    @test K.site_label("local"; c) == "the knowledge base on this machine (not served now)"
+    # Nothing answering where it was served: the config's port, as before.
+    @test K.local_served(c) === nothing && K.local_api(c) == "http://127.0.0.1:$(K.local_port(c))"
+    K.forget_served!(c)
+    @test !isfile(K.served_file(c))
+end
+
 @zset "zemi connect's app and service" begin
     TK = K.TK
     kb = open_kb(temp_config(; shared = shared_config(sign_up = :open, default_role = "Learner"), layers = Layer[]))

@@ -29,15 +29,18 @@ a [`Refusal`](@ref) with the API's status) and `remove!(r, path; base)`.
 """
 abstract type LibraryRemote end
 
-"The library at a knowledge base's address, reached with a token that `token()` gives, made again by `renew()` when refused."
+"""
+The library at a knowledge base's address, as `address()` gives it now, reached with a token that
+`token()` gives, made again by `renew()` when refused.
+"""
 struct HTTPLibrary <: LibraryRemote
-    base::String
+    address::Function
     token::Function
     renew::Function
 end
 
 function library_request(r::HTTPLibrary, method, path; body = UInt8[], query = Pair{String,String}[])
-    url = r.base * "/api/library/files" * (isempty(path) ? "" : "/" * join(HTTP.escapeuri.(split(path, '/')), '/')) *
+    url = r.address() * "/api/library/files" * (isempty(path) ? "" : "/" * join(HTTP.escapeuri.(split(path, '/')), '/')) *
           (isempty(query) ? "" : "?" * HTTP.escapeuri(query))
     for attempt in 1:2
         resp = HTTP.request(method, url, ["Authorization" => "Bearer " * r.token()], body; status_exception = false, retry = false,
@@ -195,8 +198,63 @@ function save_connect_auth!(d)
     chmod(connect_auth_path(), 0o600)
 end
 
-"A site's address as it is kept: with its scheme, without a trailing slash."
-site_address(site::AbstractString) = (s = rstrip(strip(site), '/'); occursin("://", s) ? String(s) : "https://" * s)
+const LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
+
+"""
+A site's address as it is kept: with its scheme (`http` for this machine, given none; else `https`),
+without a trailing slash.
+"""
+function site_address(site::AbstractString)
+    s = String(rstrip(strip(site), '/'))
+    occursin("://", s) && return s
+    host = lowercase(first(split(s, r"[/?#]")))
+    host = occursin(r"^\[", host) ? first(split(host, ']')) * "]" : first(split(host, ':'))
+    return (host in LOOPBACK_HOSTS ? "http://" : "https://") * s
+end
+
+"""
+    connect_site(given; c = load_config()) -> String
+
+The site `zemi connect` keeps a library at, from what it was `given`: `local` for the knowledge base
+run on this machine, named so or by an address it is served at (where it is opened, the development
+server's in development, or its API); else the site's address (see [`site_address`](@ref)).
+"""
+function connect_site(given::AbstractString; c::Config = load_config())
+    strip(given) == "local" && return "local"
+    site = site_address(given)
+    return is_local_address(site, c) ? "local" : site
+end
+
+"""
+    default_connect_site() -> String
+
+The site a folder given alone is kept in step with: the one `zemi connect` keeps folders with
+already, else the knowledge base run on this machine, found where it is served.
+"""
+function default_connect_site()
+    site = String(get(load_connect_config(), "site", ""))
+    isempty(site) || return site
+    local_served(load_config()) === nothing &&
+        error("No knowledge base is served on this machine: start it (zemi), or name the site: zemi connect https://kb.example.org FOLDER")
+    return "local"
+end
+
+"How `site` is named to people: its address, or for `local` where the knowledge base run on this machine is served."
+function site_label(site::AbstractString; c::Config = load_config())
+    site == "local" || return String(site)
+    s = local_served(c)
+    return s === nothing ? "the knowledge base on this machine (not served now)" : "the knowledge base on this machine, $(s.url)"
+end
+
+# Whether `site` is an address the knowledge base run on this machine is served at: where it is served
+# now, else (nothing serving) the ports its config names.
+function is_local_address(site::AbstractString, c::Config)
+    u = try HTTP.URI(site) catch; return false end
+    lowercase(u.host) in LOOPBACK_HOSTS || return false
+    s = local_served(c)
+    known = s === nothing ? ["http://localhost:$(local_port(c))", "http://localhost:$(dev_server_port(c))"] : [s.url, s.api]
+    return any(a -> HTTP.URI(a).port == u.port, known)
+end
 
 """
     sign_in_library(site; open_browser) -> Dict
@@ -269,17 +327,18 @@ end
 """
     library_remote(site) -> LibraryRemote
 
-The library at `site`: `local`, the knowledge base run on this machine, reached with its key; else the
-site signed in to (see [`sign_in_library`](@ref)).
+The library at `site`: `local`, the knowledge base run on this machine, reached with its key at the
+API it is served at now (see [`local_api`](@ref)); else the site signed in to (see
+[`sign_in_library`](@ref)).
 """
 function library_remote(site::AbstractString)
     if site == "local"
         c = load_config()
-        return HTTPLibrary("http://127.0.0.1:$(local_port(c))", () -> local_key(c), () -> nothing)
+        return HTTPLibrary(() -> local_api(c), () -> local_key(c), () -> nothing)
     end
     auth = load_connect_auth()
     get(auth, "site", "") == site || error("Not signed in to $site: run `zemi connect $site FOLDER`")
-    return HTTPLibrary(site, () -> auth["access"], () -> renew_library_auth!(auth))
+    return HTTPLibrary(() -> site, () -> auth["access"], () -> renew_library_auth!(auth))
 end
 
 # ── The command ───────────────────────────────────────────────────────────────────────────────────

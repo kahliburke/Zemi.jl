@@ -128,7 +128,10 @@ function TK.update!(m::ConnectApp, e::TK.KeyEvent)
     elseif k == :escape || (k == :char && c == 'q')
         m.quit = true
     elseif k == :char && c == 'a'
-        isempty(get(m.config, "site", "")) ? ask!(m, :site, "Site: ", "https://") : ask_path!(m)
+        # The knowledge base served on this machine, where there is one, is offered first.
+        isempty(get(m.config, "site", "")) ?
+            ask!(m, :site, "Site (local: the knowledge base on this machine): ", local_served(load_config()) === nothing ? "https://" : "local") :
+            ask_path!(m)
     elseif k == :char && c == 'd'
         chosen === nothing ? tell!(m, "No folder to remove") : (m.dialog = :remove; m.pending = Dict{String,Any}("name" => chosen["name"]))
     elseif k == :char && c == 'e'
@@ -194,7 +197,7 @@ end
 function submit!(m::ConnectApp, value::AbstractString)
     try
         if m.dialog == :site
-            site = value == "local" ? "local" : site_address(value)
+            site = connect_site(value)
             c = load_connect_config()
             c["site"] = site
             save_connect_config!(c)

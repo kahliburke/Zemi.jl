@@ -425,7 +425,9 @@ end
     connect_cli(args)
 
 `zemi connect`: with a site and a folder, keep that folder in step with one's library there (signing
-in first); `--name NAME` names it there, and each `--skip FOLDER` is a folder of it never sent. With
+in first); with a folder alone, at the site it keeps folders with, else the knowledge base served on
+this machine (see [`default_connect_site`](@ref)). `--name NAME` names it there, and each
+`--skip FOLDER` is a folder of it never sent. With
 no arguments, the app that shows and manages the folders on a terminal, else a line for each change
 (`--headless` either way); `--once`, one pass; `--background` (or `--install`), the service syncing
 from now and at every login; `--status`, how they stand; `--stop`, the service stopped.
@@ -436,21 +438,23 @@ function connect_cli(args::AbstractVector{<:AbstractString})
     given(flag) = [args[j+1] for (j, a) in enumerate(args) if a == flag && j < length(args)]
     name = (n = given("--name"); isempty(n) ? nothing : last(n))
     plain = [a for (j, a) in enumerate(args) if !startswith(a, "--") && !(j in valued)]
-    if length(plain) == 2
-        site = plain[1] == "local" ? "local" : site_address(plain[1])
-        dir = abspath(expand_home(plain[2]))
+    if length(plain) in (1, 2)
+        length(plain) == 1 && !isdir(expand_home(plain[1])) &&
+            error("$(plain[1]) is not a folder here: give a folder, or a site and a folder (zemi connect https://kb.example.org ~/Documents/Notes)")
+        site = length(plain) == 2 ? connect_site(plain[1]) : default_connect_site()
+        dir = abspath(expand_home(last(plain)))
         isdir(dir) || error("$dir is not a folder here")
         c = load_connect_config()
-        get(c, "site", site) == site || error("zemi connect keeps folders in step with $(c["site"]) already")
+        get(c, "site", site) == site || error("zemi connect keeps folders in step with $(site_label(c["site"])) already")
         if site != "local" && get(load_connect_auth(), "site", "") != site
             save_connect_auth!(sign_in_library(site))
         end
         f = add_folder!(site, dir; name, skip = given("--skip"))
-        say(:ok, "$(f["name"]) is kept in step with $site", ("Folder", f["path"]))
+        say(:ok, "$(f["name"]) is kept in step with $(site_label(site))", ("Folder", f["path"]))
         syncing_pid() === nothing ? connect_once_cli() : request_pass()
         say(:info, "Keep it in step", "`zemi connect` to watch and manage the folders, `zemi connect --background` to sync from every login")
     elseif !isempty(plain)
-        error("Give a site and a folder: zemi connect https://kb.example.org ~/Documents/Notes")
+        error("Give a folder, or a site and a folder: zemi connect https://kb.example.org ~/Documents/Notes")
     elseif "--background" in flags || "--install" in flags
         start_background()
         say(:ok, "zemi connect syncs in the background, from now and at every login",
