@@ -440,7 +440,7 @@ route!("POST", "/api/me/tokens") do c
     account = c.caller.user_id
     account === nothing && error("Tokens belong to accounts; run for one person, the knowledge base has none")
     # Made signed in, so a token never makes another wider than itself.
-    c.caller.via == :token && not_permitted("Not permitted: tokens are made signed in to the site, not with a token")
+    c.caller.via in (:token, :owner) && not_permitted("Not permitted: tokens are made signed in to the site, not with a token")
     b = json_body(c)
     t = create_token!(c.kb, account; name = String(get(b, "name", "")),
                       permissions = get(b, "permissions", nothing) === nothing ? nothing : String.(b["permissions"]),

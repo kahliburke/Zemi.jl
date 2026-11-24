@@ -2248,7 +2248,7 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     @test serve("POST", "/api/actions"; headers = auth, body = "{}").status == 403  # paper.manage
     @test serve("GET", "/"; headers = auth).status == 401
     caller = K.token_caller(kb, t["access_token"])
-    @test caller.user_id === nothing && caller.permissions == Set(["read"]) && caller.via == :token
+    @test caller.user_id === nothing && caller.permissions == Set(["read"]) && caller.via == :owner
     # It sees what the owner sees: a record of a vault, linked to no project, too.
     K.execute!(kb, "INSERT INTO papers (doc_id, title, added_at, kind, access) VALUES ('rec-note', 'Note', '2026-11-01T00:00:00Z', 'record', 'projects')")
     @test K.document_visible(kb, caller, "rec-note") && isempty(K.hidden_documents(kb, caller))
@@ -2271,7 +2271,7 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     finally
         K.SHARED_MODE[] = false
     end
-    @test K.token_caller(kb, t2["access_token"]).via == :token
+    @test K.token_caller(kb, t2["access_token"]).via == :owner
     close(kb)
 end
 

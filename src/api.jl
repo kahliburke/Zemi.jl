@@ -564,7 +564,7 @@ permission, and changes only from this machine's pages (see [`write_allowed`](@r
 function respond_local(kb::KB, req::HTTP.Request; caller::Caller = local_caller())
     # A page's request is its owner's, and changes only from this machine's pages; a client's token
     # (see `bearer_owner_token`) does what its permissions allow.
-    caller.via == :token || req.method != "POST" || write_allowed(req) ||
+    caller.via == :owner || req.method != "POST" || write_allowed(req) ||
         return json_response(Dict("error" => "Only from this machine's pages."); status = 403)
     return handle(kb, req, caller)
 end
@@ -580,6 +580,6 @@ function bearer_owner_token(kb::KB, req::HTTP.Request)
     auth = HTTP.header(req, "Authorization", "")
     startswith(auth, "Bearer ") || return nothing
     c = token_caller(kb, String(strip(auth[8:end])))
-    return c.via == :token && c.user_id === nothing ? c : nothing
+    return c.via == :owner ? c : nothing
 end
 

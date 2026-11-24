@@ -468,7 +468,7 @@ function token_caller(kb::KB, token::AbstractString; mcp::Bool = false)
     ismissing(t.user_id) && SHARED_MODE[] && return ANONYMOUS
     seen_now(t.last_used) && execute!(kb, "UPDATE api_tokens SET last_used = ? WHERE id = ?", (now_iso(), t.id))
     only = Set{String}(JSON.parse(t.permissions))
-    ismissing(t.user_id) && return owner_caller(:token; token_id = Int(t.id), only)
+    ismissing(t.user_id) && return owner_caller(:owner; token_id = Int(t.id), only)
     return account_caller(kb, t.user_id, :token; token_id = Int(t.id), only,
                           projects = ismissing(t.projects) ? nothing : Set{String}(JSON.parse(t.projects)))
 end
@@ -488,10 +488,10 @@ end
     sees_everything(caller) -> Bool
 
 Whether `caller` is the person who runs a knowledge base for one person, or a client they connected
-(see [`owner_caller`](@ref)): every document and file is theirs to see. What a client may do with
-them is its permissions'.
+(`via` `:owner`, see [`owner_caller`](@ref)): every document and file is theirs to see. What a client
+may do with them is its permissions'.
 """
-sees_everything(c::Caller) = c.via == :local || (c.via == :token && c.user_id === nothing)
+sees_everything(c::Caller) = c.via in (:local, :owner)
 
 """
 The tokens of person `uid`, or everyone's: never the tokens themselves, only what identifies them. A
