@@ -56,9 +56,11 @@ async function scrollTo(page, sel) {
   await page.evaluate(y => window.scrollBy(0, y), b.y - 90)
 }
 
-// Setup at its step `n` (from 0), moved on with Next as a person would.
+// Setup at its step `n` (from 0), moved on with Next as a person would, as a new knowledge base shows
+// it: without the line saying the demo's is set up already.
 async function setupStep(page, n) {
   await page.waitForSelector('.kbsu-steps', { timeout: 30_000 })
+  await page.addStyleTag({ content: 'p.kb-dim:has(+ .kbsu-steps) { display: none }' })
   for (let i = 0; i < n; i++) await page.click('.kbsu-button:has-text("Next")', { timeout: 10_000 })
   await page.mouse.move(0, 0)
 }
@@ -95,7 +97,7 @@ const SHOTS = [
   // What a group's first admin goes through: signing in (the providers' buttons, without the form for
   // signing in on this machine), Setup's four steps, and inviting the others.
   ['sign-in', '/auth/sign-in', 'h1', page => page.addStyleTag({ content: 'form.l { display: none }' }), 'main'],
-  ['setup', '/service/setup', '.kbsu-steps'],
+  ['setup', '/service/setup', '.kbsu-steps', page => setupStep(page, 0)],
   ['setup-arxiv', '/service/setup', '.kbsu-steps', page => setupStep(page, 1)],
   ['setup-model', '/service/setup', '.kbsu-steps', page => setupStep(page, 2)],
   ['setup-sharing', '/service/setup', '.kbsu-steps', page => setupStep(page, 3)],
