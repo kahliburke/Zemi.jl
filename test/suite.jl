@@ -2275,6 +2275,31 @@ end
         keyfile = only(other.summarizers)["key"][6:end]
         @test other.summarizer == "reader-2" && strip(read(keyfile, String)) == "sk-1" && filemode(keyfile) & 0o777 == 0o600
         @test_throws "address and model" K.model_choice(c, Dict("id" => "custom"); config_dir = dir)
+        # Another agent Kaimon runs: its own default model or one named, reading the text of papers and codebases both.
+        codex = K.model_choice(c, Dict("id" => "codex"); config_dir = dir)
+        @test (codex.summarizer, codex.code) == ("codex-agent", "codex-agent") &&
+              only(codex.summarizers) == Dict("name" => "codex-agent", "kind" => "agent", "model" => "acp:codex", "reads" => "text")
+        @test only(K.model_choice(c, Dict("id" => "opencode-agent", "model" => "anthropic/claude-sonnet-5"); config_dir = dir).summarizers)["model"] ==
+              "acp:opencode:anthropic/claude-sonnet-5"
+        @test_throws "Not a model's name" K.model_choice(c, Dict("id" => "gemini", "model" => "x; rm"); config_dir = dir)
+        saved_installed = K.AGENT_INSTALLED[]
+        try
+            K.AGENT_INSTALLED[] = a -> a.id != "gemini"
+            offered = Dict(x["id"] => x for x in call("GET", "/api/config/model")[2]["models"])
+            @test offered["codex"]["place"] == "agents" && offered["codex"]["needs"] == "acp" && offered["codex"]["account"] == "your ChatGPT plan"
+            machine = call("GET", "/api/config/model")[2]["machine"]["acp"]
+            @test machine["codex"]["installed"] && !machine["gemini"]["installed"]
+            @test occursin("Gemini is not installed here", K.acp_problem("acp:gemini")) && K.acp_problem("acp:codex") === nothing &&
+                  K.acp_problem("opus") === nothing && K.acp_problem("acp:claude") === nothing
+            @test occursin("not installed", K.try_model(kb, Dict("id" => "gemini"))["error"]) || !K.AGENTS_AVAILABLE[]()
+            call("POST", "/api/config/model", Dict("id" => "codex", "model" => "gpt-5.5"))
+            @test kb.config.summarizer == kb.config.code_summarizer == "codex-agent-gpt-5.5"
+            @test K.current_choice(kb.config) == Dict("id" => "codex", "model" => "gpt-5.5", "url" => "")
+            @test !K.reads_pdf(K.maybe_summarizer(kb.config, "codex-agent-gpt-5.5"))
+        finally
+            K.AGENT_INSTALLED[] = saved_installed
+        end
+        call("POST", "/api/config/model", Dict("id" => "opencode", "model" => "deepseek-v4.1-flash"))
         # The group's focus areas and the tutoring profile, from the Configuration page.
         K.save_settings!(kb, Dict("group.questions" => [Dict("id" => "stage", "text" => "Your stage?", "options" => ["Student", " ", "Staff"])]))
         @test only(kb.config.group.questions).options == ["Student", "Staff"]
@@ -3458,11 +3483,13 @@ end
     fake(name, args) = if name == :agent_open
         opened[args["id"]] = args["cwd"]
         # Summarizers only read and write files, in their own folder; the tutor also searches the
-        # knowledge base. What they are linked to (a PDF, a codebase) they may read too.
-        files = K.file_tools(args["cwd"])
+        # knowledge base. What they are linked to (a PDF, a codebase) they may read too. An ACP agent is
+        # held to them by Kaimon's specialist preset, its file tools named as it names them.
+        acp = K.acp_model(args["model"])
+        files = acp ? K.ACP_FILE_TOOLS : K.file_tools(args["cwd"])
         @test args["allowed_tools"] == (startswith(args["id"], "zemi-chat-") ? [files; K.tutor_tools()] : files) &&
-              args["permission"] == "default" && args["only"] === true             # those tools and no others
-        @test all(t -> endswith(t, "(/" * realpath(args["cwd"]) * "/**)"), files)
+              args["permission"] == (acp ? "specialist" : "default") && get(args, "only", false) === !acp   # those tools and no others
+        acp || @test all(t -> endswith(t, "(/" * realpath(args["cwd"]) * "/**)"), files)
         @test args["confine_allow"] == K.agent_reads(args["cwd"])
         isdir(joinpath(args["cwd"], "repo")) && @test realpath(joinpath(args["cwd"], "repo")) in args["confine_allow"]
         startswith(args["id"], "zemi-chat-") && @test args["effort"] == "medium"     # quick turns, to converse
@@ -3607,8 +3634,8 @@ end
         note = K.profile_note("- Stage: PhD student")
         @test occursin("- Stage: PhD student", note) && occursin("only as a guideline", note) && occursin("Include nothing", note)
         @test K.profile_note("  ") == "" && occursin("Never include anything from it", K.tutor_system(Config()))
-        wait_reply(c) = for _ in 1:200
-            last(K.chat_messages(kb, c).messages).status == "thinking" || break
+        wait_reply(c; on = kb) = for _ in 1:200
+            last(K.chat_messages(on, c).messages).status == "thinking" || break
             sleep(0.05)
         end
         n = length(sent)
@@ -3621,6 +3648,14 @@ end
         stored = K.query(kb, "SELECT * FROM chats WHERE id = ?", (pc,))
         @test !any(v -> v isa AbstractString && occursin("Stage:", v), values(first(stored)))
         @test !any(m -> occursin("Stage:", m.text), K.chat_messages(kb, pc).messages)
+        # The tutor on another agent Kaimon runs, which reads the paper's text rather than its PDF.
+        codex = Summarizer(; name = "codex-agent", kind = :agent, model = "acp:codex", reads = :text)
+        other = open_kb(Config(; data_dir = kb.config.data_dir, collection_prefix = "zemi_test", summarizers = [s, api, pdf, codex],
+                               summarizer = "agent-t", code_summarizer = "api-t", judge = "agent-t", tutor = "codex-agent", layers = Layer[]))
+        oc = K.ask_chat!(other, "2609.00001", "What is new?"); wait_reply(oc; on = other)
+        @test last(K.chat_messages(other, oc).messages).status == "done"
+        @test occursin("The paper's text is in paper.txt", sent[end]) && !occursin("paper.pdf", sent[end])
+        close(other)
         # One question: the preamble and attachments are files in the agent's directory, removed after.
         pdf = tempname() * ".pdf"
         write(pdf, "%PDF-1.4")

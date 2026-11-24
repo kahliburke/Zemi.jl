@@ -17,8 +17,10 @@ section summary, paper summary. Search fuses the rankings from each layer and a 
 One model, the summarizer, summarizes papers, codebases and records, sorts what is added, and picks
 the paper of the day. Setup's Model step and the Configuration page choose it by where it runs: a
 service (OpenCode Zen, OpenAI, or another OpenAI-compatible API by its address, model and key), Claude
-on your subscription through Kaimon, or Ollama on this machine. Each choice says what it needs here (a
-key, Kaimon's agents, Ollama and a model) and whether it has it. Zen's models are listed with their
+on your subscription through Kaimon, another agent on your own plan through Kaimon (Codex, Gemini or
+OpenCode, each offered once its command is installed and signed in), or Ollama on this machine. Each
+choice says what it needs here (a key, Kaimon's agents, an agent's command, Ollama and a model) and
+whether it has it. Another agent runs its own default model unless one is named. Zen's models are listed with their
 cost per paper, from Zen's prices.
 
 **Try** has the choice summarize a section as each section of a paper is summarized: a section of a
@@ -36,8 +38,9 @@ Two kinds of model:
 
 - **API**: one request per section to an OpenAI-compatible endpoint (OpenCode Zen, OpenAI, Ollama's
   `/v1`).
-- **Agent**: an agent supporting ACP (Claude Code, opencode, Codex), run through Kaimon; reads the
-  whole paper before summarizing. Needs a Kaimon running on this machine, or Kaimon running the
+- **Agent**: Claude Code, or an agent supporting ACP (Codex, Gemini, OpenCode), run through Kaimon;
+  reads the whole paper before summarizing. Claude reads the PDF, figures included, or the extracted
+  text; the others read the text. Needs a Kaimon running on this machine, or Kaimon running the
   knowledge base as its extension.
 
 Built in:
@@ -48,6 +51,15 @@ Built in:
 - `gpt-5.4-mini`: OpenAI, its key in `~/.config/zemi/openai_key`.
 - `opus-agent-pdf`, `opus-agent-text`, `opus-agent-code`, `sonnet-agent-pdf`, `sonnet-agent-code`:
   Claude through a Claude subscription.
+
+Choosing Codex, Gemini or OpenCode adds a summarizer for it, `codex-agent` (`codex-agent-<model>` with
+a model named), which reads papers and codebases both:
+
+| Agent    | Installed with                                   | Signed in with        |
+|:---------|:-------------------------------------------------|:----------------------|
+| Codex    | `npm install -g @agentclientprotocol/codex-acp`  | `codex login`         |
+| Gemini   | `npm install -g @google/gemini-cli`              | running `gemini` once |
+| OpenCode | from [opencode.ai](https://opencode.ai)          | `opencode auth login` |
 
 ## Who does what
 
@@ -77,8 +89,8 @@ config file, and can then be chosen under **Who does what**:
 [[summarizers]]
 name = "local-agent"
 kind = "agent"
-model = "ollama:qwen3:32b"      # or "sonnet", "acp:opencode:opencode/glm-5.3-flash", ...
-reads = "text"                  # default "pdf", for models that read PDFs
+model = "ollama:qwen3:32b"      # or "sonnet", "acp:codex", "acp:opencode:opencode/glm-5.3-flash", ...
+reads = "text"                  # default "pdf": Claude reads the PDF, other agents the text
 
 [[summarizers]]
 name = "local-api"

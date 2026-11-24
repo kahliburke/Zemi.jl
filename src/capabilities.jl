@@ -171,7 +171,7 @@ catch e
 end
 
 function summarizer_problem(s::Summarizer)
-    s.kind == :agent && return AGENTS_AVAILABLE[]() ? nothing :
+    s.kind == :agent && return AGENTS_AVAILABLE[]() ? acp_problem(s.model) :
         STARTING[] ? "the summarizer $(s.name) is a Kaimon agent, and the service's Kaimon is starting" :
         "the summarizer $(s.name) is a Kaimon agent, and no Kaimon server with agents is running"
     problem = key_problem(s.key, "the summarizer $(s.name)")

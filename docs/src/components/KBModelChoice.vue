@@ -13,8 +13,9 @@ import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 export type ModelInfo = {
   places: { id: string; label: string; detail: string }[]
   models: { id: string; place: string; label: string; detail: string; speed: string; needs: string; problem: string;
-            agent: boolean; cost: number | null }[]
+            agent: boolean; account: string; cost: number | null }[]
   machine: { opencode: string; openai: boolean; agents: boolean; memory_gb: number; disk_free_gb: number | null
+             acp: Record<string, { installed: boolean; command: string; install: string }>
              ollama: { installed: boolean; running: boolean; here: boolean; url: string; models: { name: string; gb: number }[] }
              local_models: { model: string; gb: number; memory_gb: number; note: string; fits: boolean; room: boolean;
                              pulled: boolean; recommended: boolean }[] }
@@ -46,6 +47,9 @@ function readiness(x: ModelInfo['models'][number]): { text: string; ready: boole
     case 'openai': return m.value.openai ? { text: 'OpenAI key saved here', ready: true } : { text: 'needs an OpenAI key', ready: false }
     case 'agents': return m.value.agents ? { text: 'Kaimon\'s agents are running', ready: true } :
                                          { text: 'needs Kaimon running here', ready: false }
+    case 'acp': return !m.value.acp[x.id]?.installed ? { text: `needs ${m.value.acp[x.id]?.command ?? x.id}`, ready: false } :
+                       m.value.agents ? { text: 'installed; Kaimon\'s agents are running', ready: true } :
+                       { text: 'needs Kaimon running here', ready: false }
     case 'ollama':
       return !m.value.ollama.running ? { text: m.value.ollama.installed ? 'Ollama is not running' : 'needs Ollama', ready: false } :
              m.value.ollama.models.length ? { text: `${m.value.ollama.models.length} model(s) in Ollama`, ready: true } :
@@ -56,7 +60,7 @@ function readiness(x: ModelInfo['models'][number]): { text: string; ready: boole
 const perPaper = (c: number | null) => c === null ? '' : c ? `≈ $${c < 0.01 ? c.toFixed(3) : c.toFixed(2)} a paper` : 'free'
 const zen = computed(() => props.info.opencode_models.find(z => z.id === choice.value.model))
 const cost = (x: ModelInfo['models'][number]) =>
-  x.agent ? 'your Claude plan' : x.needs === 'opencode' ? (choice.value.id === x.id && zen.value ? perPaper(zen.value.cost) : '') :
+  x.agent ? x.account : x.needs === 'opencode' ? (choice.value.id === x.id && zen.value ? perPaper(zen.value.cost) : '') :
   perPaper(x.cost)
 
 // Another key offered at once when the key in use is the one refused.
@@ -67,6 +71,8 @@ watch(() => choice.value.id, id => {
   replaceKey.value = false
   if (id === 'ollama' && !choice.value.model) choice.value.model = props.info.machine.ollama.models[0]?.name ?? ''
   if (id === 'opencode' && !props.info.opencode_models.some(z => z.id === choice.value.model)) choice.value.model = props.info.opencode_default
+  // Another agent starts from the model saved for it, else its own default.
+  if (props.info.models.find(x => x.id === id)?.needs === 'acp') choice.value.model = props.info.model.id === id ? props.info.model.model : ''
 }, { immediate: true })
 
 // Trying choices on one section, as the knowledge base summarizes each section of a paper: one of
@@ -90,7 +96,8 @@ watch(sectionKey, async key => {
 watch([sectionKey, pasting, pasted], () => { tries.value = [] })
 // The model a choice runs, as a try names it: a local or other model by its own name.
 const choiceName = (c: Choice) => c.id === 'opencode' ? (props.info.opencode_models.find(z => z.id === c.model)?.name ?? c.model) :
-  (props.info.models.find(x => x.id === c.id)?.label ?? c.id) + (c.id === 'ollama' || c.id === 'custom' ? `: ${c.model}` : '')
+  (props.info.models.find(x => x.id === c.id)?.label ?? c.id) +
+  (c.id === 'ollama' || c.id === 'custom' || (c.model && props.info.models.find(x => x.id === c.id)?.needs === 'acp') ? `: ${c.model}` : '')
 async function tryIt() {
   trying.value = true
   const name = choiceName(choice.value)
@@ -174,6 +181,14 @@ const keyFor = computed(() => chosen.value?.needs === 'opencode' ? 'OpenCode' : 
 
             <span v-if="x.needs === 'agents' && !m.agents" class="kbmc-sub kbmc-help">
               Run the knowledge base in Kaimon (<code>zemi kaimon</code>), with Claude Code signed in on this machine.
+            </span>
+
+            <span v-if="x.needs === 'acp'" class="kbmc-sub">
+              <span v-if="!m.acp[x.id]?.installed" class="kbmc-help">
+                Install it: {{ m.acp[x.id]?.install }}. Then
+                <button type="button" class="kb-link kbmc-link" @click="emit('refresh')">look again</button>.</span>
+              <span v-else-if="!m.agents" class="kbmc-help">Run the knowledge base in Kaimon (<code>zemi kaimon</code>).</span>
+              <input v-model="choice.model" :disabled="!editable" placeholder="Model (empty for the agent's own default)" />
             </span>
 
             <span v-if="x.needs === 'custom'" class="kbmc-sub">

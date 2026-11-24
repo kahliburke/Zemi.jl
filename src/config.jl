@@ -85,6 +85,10 @@ default_summarizers() = [
     Summarizer(; name = "opus-agent-code", kind = :agent, model = "opus"),
     Summarizer(; name = "sonnet-agent-pdf", kind = :agent, model = "sonnet", reads = :pdf),
     Summarizer(; name = "sonnet-agent-code", kind = :agent, model = "sonnet"),
+    # Other agents Kaimon runs, on their own default models, for the tutor and other agent work.
+    Summarizer(; name = "codex-agent", kind = :agent, model = "acp:codex", reads = :text),
+    Summarizer(; name = "gemini-agent", kind = :agent, model = "acp:gemini", reads = :text),
+    Summarizer(; name = "opencode-agent", kind = :agent, model = "acp:opencode", reads = :text),
 ]
 
 """

@@ -241,8 +241,10 @@ function ask_chat!(kb::KB, id::AbstractString, message::AbstractString; chat = n
         note = sha == told ? "" : profile_note(profile)
         text = if agent.fresh
             earlier = [m for m in chat_messages(kb, chat).messages[1:end-2] if m.status == "done"]
-            "Start from context.md: it summarizes the paper and describes the group. The paper itself is in " *
-            "paper.pdf, its text in paper.txt. Your folder is $(agents_dir("chats", chat)).\n\n" * note *
+            "Start from context.md: it summarizes the paper and describes the group. " *
+            (agent_reads_pdf(purpose(kb.config, :tutor).model) ? "The paper itself is in paper.pdf, its text in paper.txt. " :
+                                                                  "The paper's text is in paper.txt. ") *
+            "Your folder is $(agents_dir("chats", chat)).\n\n" * note *
             (isempty(earlier) ? "" : "Our conversation so far:\n\n" *
                 join(("**$(m.role == "user" ? "Student" : "You")**: $(m.text)" for m in earlier), "\n\n") * "\n\n") *
             "The student asks:\n\n" * message

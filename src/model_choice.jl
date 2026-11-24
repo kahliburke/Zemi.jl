@@ -8,15 +8,53 @@ const MODEL_PLACES = [
      detail = "Paid by the paper, with the service's API key. The papers' text is sent to the service."),
     (id = "claude", label = "Claude, on your subscription",
      detail = "An agent run through Kaimon, signed in to Claude Code on this machine. Nothing is paid by the paper; it counts against your plan's usage."),
+    (id = "agents", label = "Another agent, on your own plan",
+     detail = "Codex, Gemini or OpenCode, signed in on this machine and run through Kaimon. Nothing is paid by the paper. They read the papers' extracted text, without the figures."),
     (id = "local", label = "On this machine",
      detail = "Free, and nothing leaves the machine. Runs through Ollama; summarizes well only with a large model, which needs the memory and disk for it."),
 ]
 
 """
+The agents other than Claude that Kaimon runs over the Agent Client Protocol, as setup offers them:
+the `agent` in their model (`acp:<agent>[:<model>]`), the `command` Kaimon starts, what the agent
+runs on, and how to install it and sign in.
+"""
+const OTHER_AGENTS = [
+    (id = "codex", agent = "codex", label = "Codex", command = "codex-acp", account = "your ChatGPT plan",
+     install = "npm install -g @agentclientprotocol/codex-acp, then sign in with codex login"),
+    (id = "gemini", agent = "gemini", label = "Gemini", command = "gemini", account = "your Google account",
+     install = "npm install -g @google/gemini-cli, then run gemini once to sign in"),
+    (id = "opencode-agent", agent = "opencode", label = "OpenCode", command = "opencode", account = "the provider you sign in to in OpenCode",
+     install = "install OpenCode from opencode.ai, then sign in with opencode auth login"),
+]
+
+"The entry of [`OTHER_AGENTS`](@ref) for choice `id`, or `nothing`."
+other_agent(id::AbstractString) = (i = findfirst(a -> a.id == id, OTHER_AGENTS); i === nothing ? nothing : OTHER_AGENTS[i])
+
+"Which of [`OTHER_AGENTS`](@ref) are installed here, by choice id. Kaimon finds their commands on the `PATH`."
+const AGENT_INSTALLED = Ref{Function}(a -> Sys.which(a.command) !== nothing)
+
+"""
+    acp_problem(model) -> Union{String,Nothing}
+
+What stops the ACP agent `model` names from starting here: its command not installed. `nothing` for
+one installed, for Claude over ACP, and for a model that is not an ACP agent.
+"""
+function acp_problem(model::AbstractString)
+    acp_model(model) || return nothing
+    agent = first(split(chop(model; head = 4, tail = 0), ':'))
+    i = findfirst(a -> a.agent == agent, OTHER_AGENTS)
+    i === nothing && return nothing
+    a = OTHER_AGENTS[i]
+    return AGENT_INSTALLED[](a) ? nothing : "$(a.label) is not installed here ($(a.command)): $(a.install)"
+end
+
+"""
 The summarizers setup offers, as `(; id, place, label, detail, speed, papers, code, needs)`: `place`
 one of [`MODEL_PLACES`](@ref), `papers` the summarizer that reads papers and `code` the one for
-codebases, and `needs` what it needs here (`opencode`, `openai`, `agents`, `ollama` or `custom`).
-`opencode`, `ollama` and `custom` are made from the model chosen with them (see [`model_choice`](@ref)).
+codebases, and `needs` what it needs here (`opencode`, `openai`, `agents`, `acp`, `ollama` or
+`custom`). `opencode`, `ollama`, `custom` and the other agents ([`OTHER_AGENTS`](@ref), needing `acp`)
+are made from the model chosen with them (see [`model_choice`](@ref)).
 """
 const MODEL_CHOICES = [
     (id = "opencode", place = "service", label = "A model through OpenCode Zen",
@@ -36,6 +74,8 @@ const MODEL_CHOICES = [
     (id = "opus-agent-text", place = "claude", label = "Claude Opus, reading the text",
      detail = "Reads the paper's extracted text rather than its PDF, without the figures.", speed = "faster than from the PDF",
      papers = "opus-agent-text", code = "opus-agent-code", needs = "agents"),
+    [(id = a.id, place = "agents", label = "$(a.label), reading the text", detail = "Runs on $(a.account).",
+      speed = "minutes a paper", papers = "", code = "", needs = "acp") for a in OTHER_AGENTS]...,
     (id = "ollama", place = "local", label = "A model in Ollama",
      detail = "Quality depends on the model: one of 14B or more summarizes usefully, 30B or more well.",
      speed = "depends on the machine", papers = "", code = "", needs = "ollama"),
@@ -158,6 +198,8 @@ function model_machine(c::Config; path::AbstractString = config_path())
         "opencode" => opencode_source(path),
         "openai" => openai !== nothing && key_problem(openai.key, "OpenAI") === nothing,
         "agents" => AGENTS_AVAILABLE[](),
+        "acp" => Dict(a.id => Dict("installed" => AGENT_INSTALLED[](a), "command" => a.command, "install" => a.install)
+                      for a in OTHER_AGENTS),
         "ollama" => Dict{String,Any}("installed" => Sys.which("ollama") !== nothing || tags !== nothing, "running" => tags !== nothing,
                                      "url" => c.ollama_url, "here" => here,
                                      "models" => [Dict("name" => t.name, "gb" => round(t.size / 1024^3; digits = 1))
@@ -175,11 +217,13 @@ function model_choices_json(c::Config)
     known = Set(s.name for s in c.summarizers)
     map(filter(m -> isempty(m.papers) || m.papers in known, MODEL_CHOICES)) do m
         s = isempty(m.papers) ? nothing : maybe_summarizer(c, m.papers)
+        a = other_agent(m.id)
         problem = m.id == "ollama" ? (isempty(ollama_chat_models(c)) ? "Ollama has no chat model here" : "") :
                   m.needs == "opencode" ? (isempty(opencode_source()) ? "no OpenCode key here" : "") :
                   s === nothing ? "" : something(summarizer_problem(s), "")
         Dict("id" => m.id, "place" => m.place, "label" => m.label, "detail" => m.detail, "speed" => m.speed,
-             "needs" => m.needs, "problem" => problem, "agent" => s !== nothing && s.kind == :agent,
+             "needs" => m.needs, "problem" => problem, "agent" => a !== nothing || s !== nothing && s.kind == :agent,
+             "account" => a === nothing ? "your Claude plan" : a.account,
              "cost" => s === nothing || s.kind == :agent ? nothing : round(paper_cost(s); digits = 3))
     end
 end
@@ -218,6 +262,11 @@ function choice_summarizer(c::Config, m::AbstractDict)
         url, model = (strip(String(get(m, k, ""))) for k in ("url", "model"))
         (isempty(url) || isempty(model)) && error("Another API needs its address and model")
         return Summarizer(; name = replace(lowercase(model), r"[^a-z0-9.]+" => "-"), url, model), typed
+    elseif (a = other_agent(id)) !== nothing
+        model = strip(String(get(m, "model", "")))
+        occursin(r"^[A-Za-z0-9._/:\[\]-]*$", model) || error("Not a model's name: $model")
+        return Summarizer(; name = "$(a.agent)-agent" * (isempty(model) ? "" : "-" * replace(model, r"[^A-Za-z0-9.]+" => "-")),
+                          kind = :agent, model = "acp:$(a.agent)" * (isempty(model) ? "" : ":$model"), reads = :text), ""
     elseif id == "opencode"
         model = strip(String(get(m, "model", "")))
         isempty(model) && (model = ZEN_DEFAULT)
@@ -240,7 +289,8 @@ end
     model_choice(c, m; config_dir) -> (; summarizer, code, summarizers)
 
 What the model choice `m` sets: the summarizer for papers and for codebases, by name, and the
-`[[summarizers]]` to add for one made here (a local model, another API). A key typed with it is saved
+`[[summarizers]]` to add for one made here (a local model, another API, another agent, which reads
+papers and codebases both). A key typed with it is saved
 beside the config, readable only by its owner: an OpenCode key where every OpenCode summarizer finds
 it (see [`resolve_key`](@ref)), another with its summarizer.
 """
@@ -254,6 +304,9 @@ function model_choice(c::Config, m::AbstractDict; config_dir::AbstractString)
         return (; summarizer = s.name, code = s.name, summarizers = [t])
     elseif id == "custom"
         t = Dict{String,Any}("name" => s.name, "url" => s.url, "model" => s.model, "key" => isempty(key) ? "" : save_key_file(s.name, key))
+        return (; summarizer = s.name, code = s.name, summarizers = [t])
+    elseif other_agent(id) !== nothing
+        t = Dict{String,Any}("name" => s.name, "kind" => "agent", "model" => s.model, "reads" => "text")
         return (; summarizer = s.name, code = s.name, summarizers = [t])
     end
     if id == "opencode"
@@ -311,6 +364,11 @@ function current_choice(c::Config)
     s === nothing && return Dict("id" => "", "model" => "", "url" => "")
     i = findfirst(m -> m.papers == s.name, MODEL_CHOICES)
     i === nothing || return Dict("id" => MODEL_CHOICES[i].id, "model" => "", "url" => "")
+    if s.kind == :agent && acp_model(s.model)
+        agent, model = (parts = split(chop(s.model; head = 4, tail = 0), ':'; limit = 2); (parts[1], get(parts, 2, "")))
+        j = findfirst(a -> a.agent == agent, OTHER_AGENTS)
+        j === nothing || return Dict("id" => OTHER_AGENTS[j].id, "model" => model, "url" => "")
+    end
     s.kind == :api && s.key == "opencode" && return Dict("id" => "opencode", "model" => s.model, "url" => "")
     s.kind == :api && startswith(s.url, rstrip(c.ollama_url, '/')) && return Dict("id" => "ollama", "model" => s.model, "url" => "")
     return Dict("id" => "custom", "model" => s.model, "url" => s.url)
@@ -430,7 +488,8 @@ pasted. Returns `ok`, the `text` it wrote, the `seconds` it took and the words i
 function try_model(kb::KB, m::AbstractDict)
     s, key = try choice_summarizer(kb.config, m) catch e; return Dict("ok" => false, "error" => failure_message(e)) end
     s.kind == :agent && !AGENTS_AVAILABLE[]() &&
-        return Dict("ok" => false, "error" => "Kaimon's agents are not running here: start Kaimon, signed in to Claude Code.")
+        return Dict("ok" => false, "error" => "Kaimon's agents are not running here: run the knowledge base in Kaimon.")
+    s.kind == :agent && (p = acp_problem(s.model)) !== nothing && return Dict("ok" => false, "error" => p)
     pasted = strip(String(get(m, "passage", "")))
     sec = isempty(pasted) ? try_section(kb, String(get(m, "section", "sample"))) : (; title = "A pasted passage", path = "", text = first(pasted, TRY_CHARS))
     prompt = section_prompt(sec.title, isempty(sec.path) ? "(not given)" : sec.path, first(sec.text, s.max_input_chars))
