@@ -2213,6 +2213,15 @@ K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path
     formed = ["Content-Type" => "application/x-www-form-urlencoded"]
     # What a client asks before the owner approves it needs no key: it has none yet.
     @test js(serve("GET", "/.well-known/oauth-authorization-server"))["scopes_supported"] == ["library", "read"]   # no /mcp here
+    # Its addresses are where the owner opens it, whose browser holds its key: the development server's,
+    # though the server passes the request on naming the service's own host.
+    try
+        K.DEV_URL[] = "http://localhost:5173"
+        meta = js(K.respond_service(kb, HTTP.Request("GET", "/.well-known/oauth-authorization-server", ["Host" => "127.0.0.1:8000"]); shared = false))
+        @test meta["authorization_endpoint"] == "http://localhost:5173/oauth/authorize" && meta["issuer"] == "http://localhost:5173"
+    finally
+        K.DEV_URL[] = ""
+    end
     back = "http://127.0.0.1:4567/callback"
     client = js(serve("POST", "/oauth/register"; body = K.JSON.json(Dict("client_name" => "Slate", "redirect_uris" => [back]))))["client_id"]
     verifier = "a-verifier-long-enough-for-pkce-0123456789abcdef"

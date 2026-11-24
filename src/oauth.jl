@@ -66,6 +66,21 @@ const OAUTH_REFRESH = Day(90)
 oauth_base(sh::SharedConfig, req::HTTP.Request) =
     !isempty(sh.base_url) ? rstrip(sh.base_url, '/') : "http://" * HTTP.header(req, "Host", "127.0.0.1:$(sh.port)")
 
+"""
+    owner_base(req) -> String
+
+A knowledge base run for one person, as its owner opens it: the development server's address in
+development, else where it is served (`http://localhost:<port>`), else this request's host. Its
+approval page is at that address because the owner's browser holds the knowledge base's key for it;
+a request passed on by the development server names the service's own host instead.
+"""
+function owner_base(req::HTTP.Request)
+    for at in (DEV_URL[], SERVED_AT[])
+        isempty(at) || return String(rstrip(at, '/'))
+    end
+    return "http://" * HTTP.header(req, "Host", "127.0.0.1")
+end
+
 "Where a client finds how to sign in to /mcp (RFC 9728), named in /mcp's 401 answer."
 resource_metadata_url(base::AbstractString) = "$base/.well-known/oauth-protected-resource/mcp"
 
@@ -270,7 +285,7 @@ approval page, and the token endpoint. In the shared service a signed-in person 
 """
 function oauth_response(kb::KB, sh::SharedConfig, req::HTTP.Request, parts, params; owner::Bool = false)
     scopes = owner ? OWNER_SCOPES : OAUTH_SCOPES
-    base = oauth_base(sh, req)
+    base = owner ? owner_base(req) : oauth_base(sh, req)
     nostore = ["Content-Type" => "application/json", "Cache-Control" => "no-store"]
     jsonr(x; status = 200) = HTTP.Response(status, nostore, JSON.json(x))
     html(s; status = 200) = HTTP.Response(status, ["Content-Type" => "text/html; charset=utf-8", "Cache-Control" => "no-store",
