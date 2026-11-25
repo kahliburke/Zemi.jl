@@ -183,9 +183,56 @@ function colour(n: Node) {
   if (colourBy.value !== 'cluster' || n.cluster === undefined) return KIND_COLOURS[n.kind] ?? '#999'
   return CLUSTER_COLOURS[(n.cluster - 1) % CLUSTER_COLOURS.length]
 }
+// What each colour stands for as the map is coloured, among the documents shown, with how many of them.
+const legend = computed(() => {
+  const g = data.value
+  if (!g) return []
+  const counts = new Map<string, number>()
+  for (const n of g.nodes.filter(visibleNode)) counts.set(legendKey(n), (counts.get(legendKey(n)) ?? 0) + 1)
+  const rows = [
+    ...g.clusters.map(c => ({ key: `c${c.id}`, colour: CLUSTER_COLOURS[(c.id - 1) % CLUSTER_COLOURS.length], label: c.name || 'Unnamed' })),
+    ...WHOSE.map(([k, l]) => ({ key: `w${k}`, colour: WHOSE_COLOURS[k], label: l })),
+    ...NODE_KINDS.map(([k, l]) => ({ key: `k${k}`, colour: KIND_COLOURS[k] ?? '#999', label: l })),
+  ]
+  return rows.filter(r => counts.has(r.key)).map(r => ({ ...r, count: counts.get(r.key)! }))
+    .sort((a, b) => (a.key[0] === 'c' && b.key[0] === 'c' ? b.count - a.count : 0))
+})
+// The legend's row a node falls in, as it is coloured.
+function legendKey(n: Node) {
+  if (colourBy.value === 'cluster' && n.cluster !== undefined) return `c${n.cluster}`
+  if (colourBy.value === 'whose' && n.kind !== 'finding' && n.kind !== 'task') return `w${whose(n)}`
+  return `k${n.kind}`
+}
+// A legend row gone to: its documents lit and the rest greyed, the view framing the middle of them, the
+// seven in ten nearest their centre, so that outliers do not hold it far out. Again, or a click on the
+// background, lets it go.
+const litRow = ref<string | null>(null)
+function goToRow(key: string) {
+  if (litRow.value === key) { litRow.value = null; return }
+  selected.value = null
+  litRow.value = key
+  const ns: GNode[] = (graph?.graphData().nodes ?? []).filter((n: GNode) => legendKey(n) === key && n.x !== undefined)
+  if (!ns.length) return
+  const mid = ['x', 'y', 'z'].map(a => ns.reduce((t, n) => t + ((n as any)[a] ?? 0), 0) / ns.length)
+  const apart = (n: GNode) => Math.hypot(n.x - mid[0], n.y - mid[1], (n.z ?? 0) - mid[2])
+  const core = new Set(ns.slice().sort((a, b) => apart(a) - apart(b)).slice(0, Math.max(3, Math.ceil(ns.length * 0.7))).map(n => n.id))
+  if (view.value === '2d') { graph.zoomToFit(900, 20, (n: GNode) => core.has(n.id)); return }
+  // The space's own fitting aims at the origin; this looks at the middle, from where the camera is.
+  const r = Math.max(20, ...ns.filter(n => core.has(n.id)).map(apart))
+  const cam = graph.camera(), from = cam.position
+  const away = Math.hypot(from.x - mid[0], from.y - mid[1], from.z - mid[2]) || 1
+  const d = (r / Math.sin((cam.fov * Math.PI) / 360)) * 1.05
+  graph.cameraPosition({ x: mid[0] + (from.x - mid[0]) * d / away, y: mid[1] + (from.y - mid[1]) * d / away,
+                         z: mid[2] + (from.z - mid[2]) * d / away }, { x: mid[0], y: mid[1], z: mid[2] }, 1200)
+}
+watch(selected, n => { if (n) litRow.value = null })
+const legendOpen = ref<boolean>(stored('legend', true))
+watch(legendOpen, v => keep('legend', v))
+const settingsOpen = ref(false)
 function shade(n: Node) {
   const c = colour(n)
   if (hits.value.size) return hits.value.has(n.id) ? c : isDark.value ? '#3a3a44' : '#d8d8de'
+  if (litRow.value) return legendKey(n) === litRow.value ? c : isDark.value ? '#3a3a44' : '#d8d8de'
   if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return isDark.value ? '#55555f' : '#c8c8ce'
   return c
 }
@@ -300,11 +347,12 @@ async function draw() {
       .linkLineDash((l: GLink) => (l.kind === 'similar' ? [2, 3] : null))
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 3 : 0))
       .linkDirectionalArrowRelPos(1)
-      .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null })
+      .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
       .enableNodeDrag(false)                                                     // placed by meaning, not by hand
       .cooldownTicks(1)
       .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => drawNearest2d(ctx, scale))
       .onRenderFramePost((ctx: CanvasRenderingContext2D, scale: number) => {
+        drawNearestLabels2d(ctx, scale)
         // Cluster names, a constant size on screen; faded out as one comes close.
         const fade = Math.max(0, Math.min(1, (2.2 - scale) / 1.4))
         if (!fade) return
@@ -336,6 +384,8 @@ async function draw() {
         const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: disc, color: shade(n), transparent: true, depthWrite: false }))
         const d = spriteSize(n)
         sprite.scale.set(d, d, 1)
+        sprite.onBeforeRender = (renderer: any, _scene: any, camera: any) => keepFocusInSight(sprite, n, renderer, camera)
+        if (n.id === selected.value?.id) { sprite.material.depthTest = false; sprite.renderOrder = 999 }
         sprites.set(n.id, { sprite, node: n })
         return sprite
       })
@@ -343,7 +393,7 @@ async function draw() {
       .linkWidth((l: GLink) => (l.kind === 'similar' ? 0 : 0.6))           // 0: a plain line, the cheapest drawn
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 2.5 : 0))
       .linkDirectionalArrowRelPos(1)
-      .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null })
+      .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
       .enableNodeDrag(false)
       .cooldownTicks(1)
     graph.d3Force('charge')?.strength(-10)
@@ -398,10 +448,24 @@ function drawNearest2d(ctx: CanvasRenderingContext2D, scale: number) {
     ctx.lineWidth = (0.5 + 3 * t) / scale
     ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke()
   }
-  ctx.font = `${11 / scale}px system-ui, sans-serif`
-  ctx.fillStyle = isDark.value ? 'rgba(230,230,245,0.9)' : 'rgba(40,40,60,0.9)'
+  ctx.restore()
+}
+// How alike each is, beside its node's edge on a backing: drawn after the nodes, so none covers it.
+function drawNearestLabels2d(ctx: CanvasRenderingContext2D, scale: number) {
+  const lines = nearestShown()
+  if (!lines.length) return
+  ctx.save()
+  ctx.font = `600 ${11 / scale}px system-ui, sans-serif`
   ctx.textBaseline = 'middle'
-  for (const { to, similarity } of lines) ctx.fillText(`${Math.round(similarity * 100)}%`, to.x + 6 / scale, to.y)
+  const pad = 3 / scale, h = 15 / scale
+  for (const { to, similarity } of lines) {
+    const text = `${Math.round(similarity * 100)}%`
+    const x = to.x + Math.sqrt(Math.max(0, size(to))) * 4 + 3 / scale, w = ctx.measureText(text).width + 2 * pad
+    ctx.fillStyle = isDark.value ? 'rgba(17,17,22,0.75)' : 'rgba(250,250,250,0.8)'
+    ctx.beginPath(); ctx.roundRect(x, to.y - h / 2, w, h, 3 / scale); ctx.fill()
+    ctx.fillStyle = isDark.value ? 'rgba(235,235,248,0.95)' : 'rgba(30,30,45,0.95)'
+    ctx.fillText(text, x + pad, to.y)
+  }
   ctx.restore()
 }
 // A text sprite in the space kept between `least` and `most` pixels tall on screen: smaller with distance
@@ -417,6 +481,33 @@ function capHeight(sprite: any, least: number, most: number) {
     sprite.scale.copy(base).multiplyScalar((px * perPixel) / base.y)
     sprite.updateMatrixWorld()
   }
+}
+// The selected document kept in sight in the space: its disc drawn over whatever is nearer (see `restyle`),
+// and the discs between it and the camera that overlap it on screen faded while they do. Where it lies on
+// screen is found once a frame, by the first disc drawn.
+const pixelSize = (d: number, renderer: any, camera: any) =>
+  2 * d * Math.tan((camera.fov * Math.PI) / 360) / renderer.domElement.clientHeight
+let focusFrame = -1
+let focus: { at: any; distance: number; radius: number } | null = null
+let scratch: any = null
+function keepFocusInSight(sprite: any, n: GNode, renderer: any, camera: any) {
+  if (renderer.info.render.frame !== focusFrame) {
+    focusFrame = renderer.info.render.frame
+    const f = selected.value && sprites.get(selected.value.id)
+    if (f) {
+      const distance = camera.position.distanceTo(f.sprite.position)
+      focus = { at: f.sprite.position.clone().project(camera), distance,
+                radius: f.sprite.scale.x / 2 / pixelSize(distance, renderer, camera) }
+    } else focus = null
+  }
+  let opacity = 1
+  const distance = focus && n.id !== selected.value?.id ? camera.position.distanceTo(sprite.position) : Infinity
+  if (focus && distance < focus.distance) {
+    const at = (scratch ??= sprite.position.clone()).copy(sprite.position).project(camera), el = renderer.domElement
+    const apart = Math.hypot((at.x - focus.at.x) * el.clientWidth / 2, (at.y - focus.at.y) * el.clientHeight / 2)
+    if (apart < focus.radius + sprite.scale.x / 2 / pixelSize(distance, renderer, camera) + 4) opacity = 0.12
+  }
+  if (sprite.material.opacity !== opacity) sprite.material.opacity = opacity
 }
 let three: any = null
 let nearest3d: any = null
@@ -497,7 +588,8 @@ function refresh() {
   graph.graphData({ nodes, links })
   restyle()
 }
-watch([selected, hits, colourBy], restyle)
+watch([selected, hits, colourBy, litRow], restyle)
+watch(colourBy, () => { litRow.value = null })
 // Recoloured and resized in place: the space's discs directly, the map's through its accessors.
 function restyle() {
   if (!graph) return
@@ -508,6 +600,9 @@ function restyle() {
     sprite.material.color.set(shade(node))
     const d = spriteSize(node)
     sprite.scale.set(d, d, 1)
+    const focused = node.id === selected.value?.id
+    sprite.material.depthTest = !focused
+    sprite.renderOrder = focused ? 999 : 0
   }
 }
 
@@ -590,22 +685,36 @@ function next(step = 1) {
 const drifting = ref(false)
 let driftTimer: ReturnType<typeof setInterval> | undefined
 const seen = new Set<string>()
+// Where a drift has been, in order, with how alike each step was to the one before.
+const driftTrail = ref<{ node: Node; similarity?: number }[]>([])
 function drift() {
   if (drifting.value) { stopDrift(); return }
   const start = selected.value ?? data.value?.nodes.find(n => n.x) ?? null
   if (!start) return
   drifting.value = true
   seen.clear(); seen.add(start.id)
+  driftTrail.value = [{ node: start }]
   go(start)
   driftTimer = setInterval(() => {
     const here = selected.value
     const nextOne = (nearOf.value.get(here?.id ?? '') ?? []).find(x => !seen.has(x.node.id) && visibleNode(x.node))
     if (!nextOne) { stopDrift(); return }
     seen.add(nextOne.node.id)
+    driftTrail.value.push({ node: nextOne.node, similarity: nextOne.similarity })
     go(nextOne.node)
   }, 4500)
 }
 function stopDrift() { drifting.value = false; clearInterval(driftTimer) }
+// The trail as text: a numbered list of the documents, how alike each was to the one before, and their pages.
+async function copyTrail() {
+  const lines = driftTrail.value.map(({ node: n, similarity }, i) =>
+    `${i + 1}. ${n.title} (${[kindName(n.kind), n.year].filter(Boolean).join(', ')})` +
+    (similarity === undefined ? '' : `, ${Math.round(similarity * 100)}% alike`) + (n.page ? `\n   ${n.page}` : ''))
+  try {
+    await navigator.clipboard.writeText(`Drift from ${driftTrail.value[0].node.title}\n\n${lines.join('\n')}\n`)
+    said.value = `Copied the trail of ${driftTrail.value.length}`
+  } catch (e: any) { said.value = `Not copied: ${e.message ?? e}` }
+}
 
 function key(e: KeyboardEvent) {
   const typing = (e.target as HTMLElement)?.closest?.('input, textarea')
@@ -666,7 +775,7 @@ const showPairs = ref(false)
                 @click="fullScreen">{{ full ? '⤡' : '⤢' }}</button>
       </div>
 
-      <details class="kbx-settings">
+      <details class="kbx-settings" @toggle="settingsOpen = ($event.target as HTMLDetailsElement).open">
         <summary>Show</summary>
         <div class="kbx-grid">
           <template v-if="data?.nodes.some(n => n.ux)">
@@ -680,9 +789,6 @@ const showPairs = ref(false)
           <div class="kbx-wide">
             <div class="kbx-seg kbx-seg-small" role="group" aria-label="Colour by">
               <button v-for="[k, l] in COLOUR_BY" :key="k" :class="{ on: colourBy === k }" @click="colourBy = k">{{ l }}</button>
-            </div>
-            <div v-if="colourBy === 'whose'" class="kbx-legend">
-              <span v-for="[k, l] in WHOSE" :key="k"><i class="kbx-swatch" :style="{ background: WHOSE_COLOURS[k] }"></i>{{ l }}</span>
             </div>
           </div>
           <span class="kbx-label">Links</span>
@@ -711,7 +817,7 @@ const showPairs = ref(false)
       <p v-if="building" class="kbx-building"><span class="kb-spinner"></span> {{ building }}</p>
       <p v-if="said" class="kbx-said" @click="said = ''">{{ said }}</p>
 
-      <aside v-if="selected" class="kbx-card">
+      <aside v-if="selected" class="kbx-card" :class="{ short: driftTrail.length > 1 }">
         <button class="kbx-close" aria-label="Close" @click="selected = null">×</button>
         <p class="kbx-meta"><i class="kbx-swatch" :style="{ background: colour(selected) }"></i>{{ kindName(selected.kind) }}<template
           v-if="selected.year"> · {{ selected.year }}</template><template v-if="selected.read === false"> · abstract only</template></p>
@@ -752,6 +858,28 @@ const showPairs = ref(false)
             </li>
           </ul>
         </template>
+      </aside>
+
+      <details v-if="legend.length && !settingsOpen" class="kbx-key" :open="legendOpen"
+               @toggle="legendOpen = ($event.target as HTMLDetailsElement).open">
+        <summary>Colours</summary>
+        <ul>
+          <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="goToRow(r.key)">
+            <i class="kbx-swatch" :style="{ background: r.colour }"></i>
+            <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button></li>
+        </ul>
+      </details>
+
+      <aside v-if="driftTrail.length > 1" class="kbx-trail">
+        <button class="kbx-close" aria-label="Clear the trail" title="Clear the trail" @click="driftTrail = []">×</button>
+        <h4>Drift trail</h4>
+        <ol>
+          <li v-for="(t, i) in driftTrail" :key="t.node.id" :class="{ here: t.node.id === selected?.id }">
+            <a href="#" :title="t.node.title" @click.prevent="go(t.node)">{{ t.node.title }}</a>
+            <span v-if="i" class="kbx-key-count">{{ Math.round((t.similarity ?? 0) * 100) }}%</span>
+          </li>
+        </ol>
+        <button class="kbx-btn kbx-small" @click="copyTrail">Copy as text</button>
       </aside>
 
       <aside v-if="showPairs" class="kbx-pairs">
@@ -809,14 +937,36 @@ const showPairs = ref(false)
                 border-radius: 8px; padding: 4px 10px; font-size: 12px; }
 .kbx-settings[open] { padding: 6px 14px 12px; }
 .kbx-settings summary { cursor: pointer; color: var(--vp-c-text-2); text-align: right; }
+.kbx-key { position: absolute; top: 92px; right: 10px; width: 15rem; max-height: calc(55% - 92px); overflow: auto;
+           border: 1px solid var(--vp-c-divider); border-radius: 8px; padding: 4px 10px; font-size: 12px;
+           background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.kbx-key:not([open]) { width: auto; }
+.kbx-key summary { cursor: pointer; color: var(--vp-c-text-2); text-align: right; }
+.kbx-key ul { list-style: none; margin: 4px 0 2px; padding: 0; }
+.kbx-key li button { width: 100%; display: grid; grid-template-columns: 9px 1fr auto; align-items: center; column-gap: 7px;
+                     padding: 1px 4px; margin: 0 -4px; border-radius: 4px; text-align: left; }
+.kbx-key li button:hover { background: var(--vp-c-default-soft); }
+.kbx-key li button.on { background: var(--vp-c-brand-soft); }
+.kbx-key-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--vp-c-text-1); }
+.kbx-key-count { color: var(--vp-c-text-3); font-variant-numeric: tabular-nums; }
+.kbx-trail { position: absolute; left: 10px; bottom: 46px; width: min(20rem, 40%); max-height: 38%; overflow: auto; font-size: 12px;
+             border: 1px solid var(--vp-c-divider); border-radius: 10px; padding: 8px 12px 10px;
+             background: color-mix(in srgb, var(--vp-c-bg) 80%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.kbx-trail h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-2); }
+.kbx-trail ol { margin: 0 0 8px; padding-left: 1.4rem; }
+.kbx-trail li { margin: 2px 0; }
+.kbx-trail li > * { vertical-align: middle; }
+.kbx-trail li a { display: inline-block; max-width: calc(100% - 3rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                  color: var(--vp-c-text-1); text-decoration: none; }
+.kbx-trail li.here a { color: var(--vp-c-brand-1); font-weight: 600; }
+.kbx-trail li .kbx-key-count { margin-left: 6px; }
+.kbx-card.short { max-height: calc(62% - 64px); }
 .kbx-grid { display: grid; grid-template-columns: auto 2.4rem 1fr; gap: 8px 8px; align-items: start; margin-top: 8px; font-size: 12px; }
 .kbx-wide { grid-column: 2 / -1; }
 .kbx-label { color: var(--vp-c-text-2); padding-top: 2px; white-space: nowrap; }
 .kbx-seg-small button { padding: 2px 10px; font-size: 12px; }
 .kbx-grid > .kbx-seg { justify-self: start; }
 .kbx-grid > .kbx-label { padding-right: 4px; }
-.kbx-legend { display: flex; gap: 12px; margin-top: 6px; font-size: 12px; color: var(--vp-c-text-2); }
-.kbx-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .kbx-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .kbx-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; font-size: 11.5px; line-height: 1.6; border-radius: 999px;
             border: 1px solid var(--vp-c-divider); color: var(--vp-c-text-3); background: transparent; transition: background 0.15s, color 0.15s; }
