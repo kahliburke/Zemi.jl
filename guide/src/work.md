@@ -322,11 +322,12 @@ labelled as in prose: `(see Hale 2024, p. 3)`. A key the knowledge base has no d
 as written.
 
 **The Obsidian plugin**, in `obsidian/` (desktop only), keeps the knowledge base beside your notes.
-Build it with `npm install && npm run build` there, and copy `main.js`, `manifest.json` and
-`styles.css` into your vault's `.obsidian/plugins/zemi/`; then turn it on under Community plugins. Its
-settings take the knowledge base's address (`http://localhost:8000`, the development site's
-`http://localhost:5173`, or a group's) and sign in in the browser, where you approve it reading the
-knowledge base and your library. It gives:
+`zemi obsidian VAULT` builds it and installs it in the vault (its folder, or the name of a vault
+Obsidian has opened), turned on; reload Obsidian, and allow community plugins in the vault if it
+asks. Its settings take the knowledge base's address (`http://localhost:8000`, the development
+site's `http://localhost:5173`, or a group's) and sign in in your default browser, where you approve
+it reading the knowledge base and your library. For the knowledge base run here, that browser needs
+its key: run `zemi open` first if it has not opened it before. It gives:
 
 - **The Zemi pane** (the ribbon's library icon): for a paper note, the paper's summary, topics and
   figures with its citation; for any note read into your library, its citation; and for either, the

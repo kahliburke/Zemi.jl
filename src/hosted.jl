@@ -92,7 +92,7 @@ rebuild!() = (touch(build_stamp(kb().config)); nothing)
 function open_hosted()
     r = HOST[]
     r === nothing && error("Zemi is not running")
-    url = r.mode == :shared ? r.url : r.mode == :dev ? r.url : local_link(kb().config, LOCAL_PORT[])
+    url = r.mode == :shared ? r.url : local_link(kb().config, LOCAL_PORT[]; to = r.mode == :dev ? r.url : "")
     cmd = Sys.isapple() ? `open $url` : Sys.iswindows() ? `cmd /c start "" $url` : `xdg-open $url`
     run(pipeline(cmd; stdout = devnull, stderr = devnull); wait = false)
     return url

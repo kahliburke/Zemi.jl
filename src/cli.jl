@@ -27,6 +27,8 @@ const CLI_HELP = """
                                          here), its SUBFOLDERs never sent. `zemi connect` alone: an app that
                                          shows and manages the folders; --background syncs from every login
                                          (--status, --stop), --once once
+    zemi obsidian [VAULT]                build Zemi's Obsidian plugin and install it in VAULT (its folder, or
+                                         the name of a vault Obsidian has opened; alone, the one it knows)
     zemi token create NAME --out FILE [--write]
                                          issue NAME a key to the dataset's bucket, saved to FILE (read-only,
                                          or read and write with --write)
@@ -137,6 +139,8 @@ function cli(args::AbstractVector{<:AbstractString})
     try
         if cmd == "open"
             open_local()
+        elseif cmd == "obsidian"
+            foreach(println, obsidian_cli(rest))
         elseif cmd == "kaimon"
             say_registered(register_extension(; force = "--force" in rest))
         elseif cmd == "sync"

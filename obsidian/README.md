@@ -5,10 +5,10 @@ notes nearest the open note, citations to insert (`[@key]`), and notes for paper
 id or DOI. See the guide's "Projects, records and findings" page, under Obsidian, for what it does.
 
 ```sh
-npm install
-npm run build        # main.js; `npm run dev` rebuilds as you edit
+zemi obsidian VAULT      # build it and install it in VAULT, turned on
 ```
 
-Copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/zemi/`, turn it on
-under Community plugins, and sign in from its settings. Desktop only: signing in listens on a port of
-this machine for the browser to come back to.
+Then reload Obsidian and sign in from the plugin's settings. Desktop only: signing in listens on a
+port of this machine for the browser to come back to.
+
+For working on it here: `npm install`, then `npm run dev` rebuilds `main.js` as you edit.

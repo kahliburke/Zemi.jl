@@ -6962,6 +6962,43 @@ end
     @test String(take!(io)) == "✓ Done\n  A browser new to it  http://localhost:8000/x\n"
 end
 
+@zset "zemi obsidian installs the plugin in a vault" begin
+    dir = mktempdir()
+    withenv("XDG_CACHE_HOME" => joinpath(dir, "cache")) do
+        # Built from a copy of the package's source, never in the package's folder.
+        seen = Ref("")
+        built = K.built_plugin(temp_config(); build = d -> (seen[] = d; write(joinpath(d, "main.js"), "plugin")))
+        @test seen[] == built == K.plugin_build_dir() && startswith(built, dir)
+        @test isfile(joinpath(built, "package.json")) && isdir(joinpath(built, "src"))
+        @test_throws "no main.js" K.built_plugin(temp_config(); build = d -> nothing)
+        K.built_plugin(temp_config(); build = d -> write(joinpath(d, "main.js"), "plugin"))
+
+        vault = mkpath(joinpath(dir, "Notes", ".obsidian")) |> dirname
+        other = mkpath(joinpath(dir, "Work", ".obsidian")) |> dirname
+        settings = mkpath(joinpath(dir, "obsidian"))
+        write(joinpath(settings, "obsidian.json"), K.JSON.json(Dict("vaults" => Dict(
+            "a" => Dict("path" => vault), "b" => Dict("path" => other), "c" => Dict("path" => joinpath(dir, "gone"))))))
+        known = K.obsidian_vaults(settings)
+        @test known == sort([vault, other])
+        @test K.find_vault("Notes", known) == vault && K.find_vault(other, known) == other
+        @test K.find_vault("", [vault]) == vault
+        @test_throws "Name the vault" K.find_vault("", known)
+        @test_throws "No vault Elsewhere" K.find_vault("Elsewhere", known)
+
+        # Installed and turned on, beside the plugins already on.
+        write(joinpath(vault, ".obsidian", "community-plugins.json"), "[\"other\"]")
+        to = K.install_plugin!(vault, built)
+        @test to == joinpath(vault, ".obsidian", "plugins", "zemi")
+        @test sort(readdir(to)) == sort(collect(K.PLUGIN_FILES)) && read(joinpath(to, "main.js"), String) == "plugin"
+        @test K.JSON.parsefile(joinpath(vault, ".obsidian", "community-plugins.json")) == ["other", "zemi"]
+        K.install_plugin!(vault, built)
+        @test K.JSON.parsefile(joinpath(vault, ".obsidian", "community-plugins.json")) == ["other", "zemi"]
+        K.install_plugin!(other, built)
+        @test K.JSON.parsefile(joinpath(other, ".obsidian", "community-plugins.json")) == ["zemi"]
+    end
+    rm(dir; recursive = true, force = true)
+end
+
 @zset "the personal installers agree" begin
     # The Windows and the macOS/Linux installers pull the embedding model Zemi's default layers use, set
     # Kaimon's code search to it, and answer Kaimon's first run alike.

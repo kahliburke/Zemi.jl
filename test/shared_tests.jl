@@ -1421,6 +1421,14 @@ end
     @test r.status == 302 && HTTP.header(r, "Location") == "/papers/x?a=1" &&
           occursin("$(K.local_cookie())=$key", HTTP.header(r, "Set-Cookie")) && occursin("HttpOnly", HTTP.header(r, "Set-Cookie"))
     @test K.local_key(c) == key == strip(read(K.local_key_path(c), String))
+    # Sent on to the development server, on this machine only.
+    r = bare("GET", "/?key=$key&to=$(HTTP.escapeuri("http://localhost:5173/"))")
+    @test r.status == 302 && HTTP.header(r, "Location") == "http://localhost:5173/"
+    @test HTTP.header(bare("GET", "/?key=$key&to=https://evil.example/"), "Location") == "/"
+    @test HTTP.header(bare("GET", "/?key=$key&to=//evil.example/"), "Location") == "/"
+    @test K.local_link(c, 8000; to = "http://localhost:5173") == "http://localhost:8000/?key=$key&to=http%3A%2F%2Flocalhost%3A5173"
+    # Approving a client asks for the key, which zemi open gives the default browser.
+    @test occursin("reload this page", String(bare("GET", "/oauth/authorize?client_id=x").body))
     # The site and the API, with no signing in; the person running it may do everything.
     # No other site's page reads its answers, nor reaches it through a name of its own pointed here.
     @test !HTTP.hasheader(req("GET", "/api/status"), "Access-Control-Allow-Origin")
