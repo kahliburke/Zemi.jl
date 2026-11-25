@@ -2832,6 +2832,14 @@ end
     @test r.status == 200 && length(got["nodes"]) == 3 && got["job"] !== nothing
     wait(K.EXPLORE_JOB[].done)
     @test !K.links_behind(kb) && K.explore_soon!(kb) === nothing
+    # With no map yet, and a job to say so.
+    rm(K.explore_path(kb.config))
+    K.execute!(kb, "DELETE FROM document_links_read")
+    r = K.handle(kb, K.HTTP.Request("GET", "/api/graph"), as(ada))
+    got = JSON.parse(String(r.body))
+    @test r.status == 200 && got["job"] !== nothing && got["built_at"] === nothing && !isempty(got["links"])
+    wait(K.EXPLORE_JOB[].done)
+    @test K.handle(kb, K.HTTP.Request("GET", "/api/graph?project=NONE"), as(bea)).status == 200
     close(kb)
 end
 

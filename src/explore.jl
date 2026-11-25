@@ -126,17 +126,18 @@ function read_explore(c::Config)
     return m
 end
 
-"The documents with a vector in layer `l`, whatever their access: `(; id, point_id, text_sha, title, access)`."
+"The documents with a vector in layer `l`, whatever their access: `(; id, point_id, text_sha, title, access)`, the title the
+watch found where the document has none of its own yet."
 explore_rows(kb::KB, l) = [r for r in query(kb, """
-    SELECT p.doc_id AS id, e.point_id, e.text_sha, p.title, p.access
-    FROM embeddings e JOIN papers p ON p.id = e.paper_id
+    SELECT p.doc_id AS id, e.point_id, e.text_sha, coalesce(p.title, w.title) AS title, p.access
+    FROM embeddings e JOIN papers p ON p.id = e.paper_id LEFT JOIN watch w ON w.doc_id = p.doc_id
     WHERE e.layer = ? AND e.unit_key LIKE 'p:%' ORDER BY p.doc_id""", (l.name,))]
 
 "What the map is made from: the vectors, and the landscape's clusters it takes its own from."
 function explore_input(l, rows, land)
     clusters = land === nothing ? nothing : (get(land, "input_sha", ""), [(c["id"], c["name"]) for c in land["clusters"]])
     return bytes2hex(sha256(JSON.json(Dict("version" => EXPLORE_VERSION, "layer" => l.name, "clusters" => clusters,
-                                            "docs" => [(r.id, r.text_sha) for r in rows]))))
+                                            "docs" => [(r.id, r.text_sha, coalesce(r.title, "")) for r in rows]))))
 end
 
 "Whether the map is missing, or made from vectors or clusters other than those now."
@@ -338,7 +339,9 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     m = read_explore(kb.config)
     docs = m === nothing ? Dict{String,Any}() : m["docs"]
     hidden = unfound_documents(kb, caller)
-    rows = Dict(String(r.doc_id) => r for r in query(kb, "SELECT id, doc_id, kind, title, published, access FROM papers"))
+    rows = Dict(String(r.doc_id) => r for r in query(kb, """
+        SELECT p.id, p.doc_id, p.kind, coalesce(p.title, w.title) AS title, coalesce(p.published, w.published) AS published, p.access
+        FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id"""))
     held = caller.user_id === nothing ? Set{String}() : held_documents(kb, caller.user_id)
     byrow = Dict(Int(r.id) => d for (d, r) in rows)
     shown(id) = haskey(rows, id) && !(id in hidden) && String(rows[id].kind) in kinds
@@ -417,7 +420,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     end
     if !isempty(project)
         key = uppercase(strip(project))
-        key in projects || sees_everything(caller) || return Dict("nodes" => [], "links" => [], "similar" => [], "clusters" => [])
+        key in projects || sees_everything(caller) || return Dict{String,Any}("nodes" => [], "links" => [], "similar" => [], "clusters" => [], "built_at" => nothing)
         seeds = [d for (d, ks) in documents_projects(kb) if key in ks]
         append!(seeds, [x["id"] for x in values(extra) if x["project"] == key])
         ids = around(seeds, 1)
@@ -449,7 +452,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     end
     clusters = m === nothing ? [] : [Dict("id" => cl["id"], "name" => cl["name"], "description" => cl["description"],
                                           "size" => count(n -> get(n, "cluster", 0) == cl["id"], nodes)) for cl in m["clusters"]]
-    return Dict("nodes" => nodes,
+    return Dict{String,Any}("nodes" => nodes,
                 "links" => [Any[at[a], at[b], k] for (a, b, k) in E if haskey(at, a) && haskey(at, b)],
                 "similar" => [Any[at[a], at[b], s, (a, b) in linked] for ((a, b), s) in S if haskey(at, a) && haskey(at, b)],
                 "clusters" => clusters, "built_at" => m === nothing ? nothing : m["built_at"])
