@@ -254,13 +254,17 @@ end
     explore!(kb; progress, cancelled)
 
 Bring what the explore page draws up to date: the links read from documents changed since (see
-[`read_links!`](@ref)), and the map (see [`explore_map!`](@ref)) when its vectors or clusters changed.
+[`read_links!`](@ref)), and, where Qdrant answers, the map (see [`explore_map!`](@ref)) when its
+vectors or clusters changed.
 """
 function explore!(kb::KB; progress = msg -> nothing, cancelled = () -> false)
     read_links!(kb; progress, cancelled)
-    cancelled() || explore_map!(kb; progress, cancelled)
+    cancelled() || !can_map(kb) || explore_map!(kb; progress, cancelled)
     return nothing
 end
+
+"Whether the map can be made here: Qdrant, which holds the vectors, answers."
+can_map(kb::KB) = isempty(cannot_run(kb, "explore", String[]))
 
 "The job bringing the explore page's map up to date, while one runs."
 const EXPLORE_JOB = Ref{Union{Job,Nothing}}(nothing)
@@ -270,15 +274,14 @@ const EXPLORE_JOB_LOCK = ReentrantLock()
     explore_soon!(kb) -> Union{Job,Nothing}
 
 Start a job bringing the map and links up to date (see [`explore!`](@ref)) when they are behind and
-none runs; the job running, or `nothing` when there is nothing to do or Qdrant cannot be reached.
+none runs; the job running, or `nothing` when there is nothing to do (the map is behind only where
+Qdrant answers).
 """
 function explore_soon!(kb::KB)
     lock(EXPLORE_JOB_LOCK) do
         j = EXPLORE_JOB[]
         j !== nothing && j.status == :running && return j
-        behind = explore_stale(kb) || links_behind(kb)
-        behind || return nothing
-        isempty(cannot_run(kb, "explore", DocumentKind[])) || return nothing
+        links_behind(kb) || (explore_stale(kb) && can_map(kb)) || return nothing
         EXPLORE_JOB[] = start_job("explore") do job
             explore!(kb; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
         end

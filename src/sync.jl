@@ -259,7 +259,7 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
         end
     end
     # As does the explore page's map, with the links read from what changed.
-    if !cancelled() && isempty(cannot_run(kb, "explore", DocumentKind[]))
+    if !cancelled()
         try
             explore!(kb; progress, cancelled)
         catch e

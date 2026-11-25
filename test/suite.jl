@@ -2824,10 +2824,14 @@ end
     @test f == "RF-F1" && "RF-F1" in ids(g) && ("2401.00002", "RF-F1") in pairs(g, "links")
     @test !("RF-F1" in ids(K.explore_graph(kb, as(bea))))
     @test ids(K.explore_graph(kb, as(ada); project = "RF")) == Set(["RF-F1", "2401.00002"])
-    # Through the API; the map is brought up to date only where it can be (here no Qdrant: no job).
+    # Through the API, which starts reading the links behind; the map is made only where Qdrant
+    # answers (here none: nothing more to do once the links are read).
+    @test K.links_behind(kb) && !K.can_map(kb)
     r = K.handle(kb, K.HTTP.Request("GET", "/api/graph?center=2401.00005&links=cites,refers"), as(ada))
     got = JSON.parse(String(r.body))
-    @test r.status == 200 && length(got["nodes"]) == 3 && got["job"] === nothing
+    @test r.status == 200 && length(got["nodes"]) == 3 && got["job"] !== nothing
+    wait(K.EXPLORE_JOB[].done)
+    @test !K.links_behind(kb) && K.explore_soon!(kb) === nothing
     close(kb)
 end
 
