@@ -283,7 +283,8 @@ function shade(n: Node) {
     const t = standing.value.get(n.id)
     return t === undefined ? c : mix(isDark.value ? '#111116' : '#fafafa', c, 0.38 + 0.62 * t)
   }
-  if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return isDark.value ? '#55555f' : '#c8c8ce'
+  // A document selected: the rest keep their colours, a little faded; its ring and lines mark it out.
+  if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return mix(isDark.value ? '#111116' : '#fafafa', c, 0.6)
   return c
 }
 const size = (n: Node) => (((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links) * 1.2) * (n.read === false ? 0.6 : 1) +

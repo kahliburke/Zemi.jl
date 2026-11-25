@@ -495,7 +495,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     hidden = unfound_documents(kb, caller)
     rows = Dict(String(r.doc_id) => r for r in query(kb, """
         SELECT p.id, p.doc_id, p.kind, coalesce(p.title, w.title) AS title, coalesce(p.published, w.published) AS published, p.access,
-               EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read, w.relevance AS rating
+               EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read, w.relevance AS rating, p.metadata_at
         FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id"""))
     abstracts = abstracts || !isempty(center) && haskey(rows, center) && !Bool(rows[center].read)
     m = read_explore(kb.config)
@@ -611,7 +611,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
         haskey(extra, id) && return merge(extra[id], Dict("links" => get(degree, id, 0)))
         r, d = rows[id], get(docs, id, nothing)
         n = Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "year" => year(r),
-                             "page" => document_link(kb.config, id), "links" => get(degree, id, 0),
+                             "page" => explore_page(kb.config, id, r.metadata_at), "links" => get(degree, id, 0),
                              "access" => coalesce(r.access, "open"), "mine" => id in held, "read" => Bool(r.read))
         if d !== nothing
             n["x"], n["p"], n["cluster"] = d["x"], d["p"], d["c"]
@@ -655,6 +655,13 @@ route!("GET", "/api/graph") do c
 end
 
 """
+Where a document's page is: on the site, or, for an arXiv paper whose record has not come yet (the site
+has no page of it, see [`site_papers`](@ref)), on arXiv.
+"""
+explore_page(c::Config, id::AbstractString, metadata_at) =
+    is_arxiv_id(id) && ismissing(metadata_at) ? "https://arxiv.org/abs/$id" : document_link(c, id)
+
+"""
     explore_node(kb, caller, id) -> Dict
 
 What the explore page's card says of document `id`, as far as `caller` may see it: its title, authors,
@@ -664,7 +671,7 @@ topics as the summarizer shown for its kind wrote them, and whether it was read 
 function explore_node(kb::KB, caller::Caller, id::AbstractString)
     seen_document(kb, caller, id)
     rows = query(kb, """
-        SELECT p.id, p.kind, coalesce(p.title, w.title) AS title, coalesce(p.authors, w.authors) AS authors,
+        SELECT p.id, p.kind, p.metadata_at, coalesce(p.title, w.title) AS title, coalesce(p.authors, w.authors) AS authors,
                coalesce(p.published, w.published) AS published, p.journal_ref, coalesce(p.abstract, w.abstract) AS abstract,
                EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read
         FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id WHERE p.doc_id = ?""", (id,))
@@ -680,7 +687,7 @@ function explore_node(kb::KB, caller::Caller, id::AbstractString)
     return Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "authors" => authors,
                             "published" => coalesce(r.published, ""), "venue" => coalesce(r.journal_ref, ""),
                             "abstract" => coalesce(r.abstract, ""), "summary" => summary, "topics" => topics,
-                            "read" => Bool(r.read), "page" => document_link(kb.config, id))
+                            "read" => Bool(r.read), "page" => explore_page(kb.config, id, r.metadata_at))
 end
 
 # What the explore page's card says of one document (`?id=`, see `explore_node`).
