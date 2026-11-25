@@ -90,9 +90,9 @@ by how near it is to each of them:
 notes included, with the links people made drawn between them: citations between papers, references
 in notes and records, a finding's evidence, a task's links. It needs a running server.
 
-It maps the documents read in full. Papers known only by their title and abstract (recorded but not
-yet read, or found by the watch) are left out unless **Show** includes them; the map is then of every
-document, laid out and clustered afresh, so the papers read in full are not crowded by the rest.
+It maps the documents read in full. **Include abstract only** adds the papers known only by their
+title and abstract (recorded but not yet read, or found by the watch), on a map of every document laid
+out and clustered afresh.
 
 - **Map** lays them out flat; **Space** in three dimensions, to turn with the mouse, or fly through
   with F (WASD to move, the mouse to steer). The clusters are the landscape's, named where they lie.

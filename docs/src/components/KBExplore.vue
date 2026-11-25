@@ -425,6 +425,8 @@ const showPairs = ref(false)
         </div>
         <button class="kbx-btn" :class="{ on: drifting }" title="Wander from here along the nearest documents" @click="drift">{{ drifting ? 'Stop' : 'Drift' }}</button>
         <button class="kbx-btn" :class="{ on: showPairs }" title="Documents close in meaning that no link joins" @click="showPairs = !showPairs">Close, but not linked</button>
+        <button v-if="data?.abstract_only" class="kbx-btn" :class="{ on: abstracts }" :title="`${data.abstract_only} papers not read in full, placed by their title and abstract`"
+                @click="abstracts = !abstracts">Include abstract only</button>
       </div>
 
       <details class="kbx-settings">
@@ -441,17 +443,12 @@ const showPairs = ref(false)
         <div class="kbx-row"><span>Documents</span>
           <label v-for="[k, l] in NODE_KINDS" :key="k"><input v-model="shownKinds" type="checkbox" :value="k">
             <i class="kbx-swatch" :style="{ background: KIND_COLOURS[k] }"></i>{{ l }}</label></div>
-        <div class="kbx-row"><label title="Papers recorded or watched whose text has not been read in full: placed by their title and abstract">
-          <input v-model="abstracts" type="checkbox"> Papers known only by their abstract</label></div>
         <div class="kbx-row"><label><input v-model="showUnlinked" type="checkbox"> Close but unlinked pairs, from</label>
           <input v-model.number="threshold" type="range" min="0.5" max="0.98" step="0.01"> {{ Math.round(threshold * 100) }}% alike</div>
         <p v-if="view === '3d'" class="kb-dim">Drag to turn, scroll to come closer; F flies (WASD, mouse to steer).{{ fly ? ' Flying: F to stop.' : '' }}</p>
       </details>
 
       <p v-if="building" class="kbx-building"><span class="kb-spinner"></span> {{ building }}</p>
-      <p v-else-if="data && !data.abstracts && data.abstract_only" class="kbx-building kbx-left-out">
-        The documents read in full. {{ data.abstract_only }} papers known only by their abstract are left out:
-        <a href="#" @click.prevent="abstracts = true">include them</a></p>
       <p v-if="said" class="kbx-said" @click="said = ''">{{ said }}</p>
 
       <aside v-if="selected" class="kbx-card">
