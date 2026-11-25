@@ -36,6 +36,19 @@ A DOI as DOIs are compared: lower case (they are case-insensitive), without a `d
 normalize_doi(d::AbstractString) =
     lowercase(rstrip(replace(strip(d), r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)"i => ""), ['.', ',', ';', ')', ']']))
 
+const DOI_REF = r"^\s*(?:https?://(?:dx\.)?doi\.org/|doi:\s*)?(10\.\d+(?:\.\d+)*/\S+)\s*$"i
+
+"""
+    parse_doi(s) -> Union{String,Nothing}
+
+The DOI `s` gives, normalized (see [`normalize_doi`](@ref)): a bare one (`10.1137/0202019`), a
+`doi:` reference or a `doi.org` address. `nothing` for anything else.
+"""
+function parse_doi(s::AbstractString)
+    m = match(DOI_REF, s)
+    return m === nothing ? nothing : normalize_doi(m[1])
+end
+
 "A title as titles are compared: lower case, accents dropped, and every run of other characters than letters and digits one space."
 normalize_title(s) = String(strip(replace(Base.Unicode.normalize(string(s); stripmark = true, casefold = true), r"[^\p{L}\p{N}]+" => " ")))
 

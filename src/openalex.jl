@@ -91,6 +91,32 @@ end
 "Where a DOI's copies are looked up (see [`doi_copies`](@ref)); tests put a stand-in here."
 const DOI_COPIES = Ref{Function}(doi_copies)
 
+"OpenAlex's kinds of work as a resource's type names them, for the bibliography's entries (see `RESOURCE_ENTRIES`)."
+const OPENALEX_TYPES = Dict("article" => "article", "review" => "article", "letter" => "article", "editorial" => "article",
+                            "conference-paper" => "conference paper", "book-chapter" => "book section", "book" => "book",
+                            "report" => "report", "dissertation" => "thesis", "preprint" => "preprint")
+
+"""
+    doi_resource(doi; contact = "") -> Union{Resource,Nothing}
+
+The work with DOI `doi` as a resource (see [`Resource`](@ref)), from OpenAlex's record: its title,
+authors, year, type, the journal, proceedings or book it appeared in and its publisher, its `doi.org`
+address, and its abstract where OpenAlex has one, as its note. `nothing` when OpenAlex does not know it.
+"""
+function doi_resource(doi::AbstractString; contact::AbstractString = "")
+    w = openalex_work(; doi, contact)
+    (w === nothing || w["title"] === nothing) && return nothing
+    r = work_record(w)
+    source = something(get(something(w["primary_location"], Dict()), "source", nothing), Dict())
+    return Resource(; key = doi, title = r.title, authors = r.authors, date = something(r.year, ""), doi,
+                    type = get(OPENALEX_TYPES, something(get(w, "type", nothing), ""), "document"),
+                    url = "https://doi.org/" * doi, note = something(r.abstract, ""),
+                    container = something(r.journal, ""), publisher = something(get(source, "host_organization_name", nothing), ""))
+end
+
+"Where a DOI's record is looked up as a resource (see [`doi_resource`](@ref)); tests put a stand-in here."
+const DOI_RESOURCE = Ref{Function}(doi_resource)
+
 """
     openalex_arxiv(dois, contact = "") -> Dict{String,Union{String,Nothing}}
 

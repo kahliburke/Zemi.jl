@@ -2,7 +2,9 @@
     add_papers!(kb, ids; source = "added", by = nothing, anyway = false, holder = nothing) -> Vector{String}
 
 Record papers by arXiv id (URLs and `arXiv:` references are accepted too) without fetching
-anything. Returns the normalized ids. A paper new to the knowledge base gets a mention of how it
+anything, and works by DOI (see [`parse_doi`](@ref)), which are looked up: each is the document
+[`add_work!`](@ref) finds or makes for it, a paper to read or a resource. Returns the normalized ids,
+the documents' for DOIs. A paper new to the knowledge base gets a mention of how it
 came: `source` is one of [`ARRIVALS`](@ref) or a registered source's name (see
 [`record_source!`](@ref)), and `by` who added it, where known. With `holder` (a user id), the papers
 are brought in for that person, private to them unless open already (see [`bring_in!`](@ref));
@@ -15,10 +17,24 @@ restores it.
 function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::AbstractString = "added", by = nothing,
                      anyway::Bool = false, holder::Union{Integer,Nothing} = nothing)
     source in keys(ARRIVALS) || registered_source(source) !== nothing || error("Not a way a paper arrives: $source")
+    # A DOI is looked up first, outside the transaction: finding its copy or record takes requests.
+    works = Dict{String,String}()
+    for s in ids
+        d = work_doi(s)
+        d === nothing && continue
+        try
+            works[s] = add_work!(kb, d; source, by, anyway, holder)
+        catch e
+            e isa DroppedError && !(source in BY_HAND) || rethrow()     # a source's: left out
+        end
+    end
     out = String[]
     transaction(kb) do
         for s in ids
-            if local_kind(s) !== nothing
+            if haskey(works, s)
+                push!(out, works[s])
+                continue
+            elseif local_kind(s) !== nothing
                 ismissing(paper_id(kb, s)) && not_found("No document $s in the knowledge base")
                 # A document here named by its id stays whose it is, but for a person bringing it in too.
                 holder === nothing || bring_in!(kb, s, holder; new = false)
@@ -26,7 +42,10 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
                 continue
             end
             id = parse_arxiv_id(s)
-            id === nothing && error("Not an arXiv id or URL: $s")
+            if id === nothing
+                parse_doi(s) === nothing || continue                    # a DOI a source brought that was dropped
+                error("Not an arXiv id, arXiv address or DOI: $s")
+            end
             new = ismissing(paper_id(kb, id.id))
             d = new ? dropped_as(kb; id = id.id) : nothing
             if d !== nothing
@@ -43,6 +62,14 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
     end
     return unique!(out)
 end
+
+"""
+    work_doi(s) -> Union{String,Nothing}
+
+The DOI `s` names a work by (see [`parse_doi`](@ref)), or `nothing`: for anything else, and for an arXiv
+paper's DOI or a document's id here, which name the paper itself.
+"""
+work_doi(s::AbstractString) = local_kind(s) === nothing && parse_arxiv_id(s) === nothing ? parse_doi(s) : nothing
 
 """
 How papers come into the knowledge base, as their mentions' `source`, with how the site words each:
@@ -227,6 +254,49 @@ function add_doi!(kb::KB, doi::AbstractString; title = nothing, authors::Abstrac
     end
     isempty(c.pdfs) || @info "None of the open copies of $d could be read" copies = c.pdfs
     return nothing
+end
+
+"""
+    document_with_doi(kb, doi) -> Union{String,Missing}
+
+The document here for the work with DOI `doi`: its paper (see [`paper_with_doi`](@ref)), else the
+resource it is kept as. `missing` for none.
+"""
+function document_with_doi(kb::KB, doi::AbstractString)
+    d = normalize_doi(doi)
+    here = paper_with_doi(kb, d)
+    ismissing(here) || return here
+    kept = scalar(kb, "SELECT doc_id FROM papers WHERE lower(doi) = ? AND $(kind_in(RESOURCE)) LIMIT 1", (d,))
+    return ismissing(kept) ? missing : String(kept)
+end
+
+"""
+    add_work!(kb, doi; source = "added", by = nothing, anyway = false, holder = nothing) -> String
+
+The document for the work with DOI `doi`, added where it is new, returning its id: its paper here; else
+the paper [`add_doi!`](@ref) finds to read in full, given the work's title and authors (those of the
+resource it is kept as, else OpenAlex's, see [`doi_resource`](@ref)) so that its arXiv copy can be
+searched for by title; else the resource it is kept as, or a new one made from OpenAlex's record, as a
+closed paper is kept until a copy of it can be read. A DOI OpenAlex does not know and that has no copy
+is an error. A new resource is recorded, not read: [`ingest!`](@ref) reads it.
+"""
+function add_work!(kb::KB, doi::AbstractString; source::AbstractString = "added", by = nothing, anyway::Bool = false,
+                   holder::Union{Integer,Nothing} = nothing)
+    d = normalize_doi(doi)
+    here = paper_with_doi(kb, d)
+    ismissing(here) || (bring_in!(kb, here, holder; new = false); return here)
+    kept = document_with_doi(kb, d)
+    r = ismissing(kept) ? DOI_RESOURCE[](d; contact = kb.config.contact) : nothing
+    known = ismissing(kept) ? r : (k = resource_row(kb, kept); (; k.title, authors = json_list(k.authors), date = coalesce(k.published, "")))
+    id = known === nothing ? add_doi!(kb, d; source, by, anyway, holder) :
+        add_doi!(kb, d; title = known.title, authors = known.authors, published = isempty(known.date) ? nothing : known.date,
+                 source, by, anyway, holder)
+    id === nothing || return id
+    ismissing(kept) || (bring_in!(kb, kept, holder; new = false); return kept)
+    r === nothing && not_found("OpenAlex knows no work with DOI $d")
+    id, _ = put_resource!(kb, "doi", r; by, anyway, arrival = source, read = false)
+    bring_in!(kb, id, holder; new = true)
+    return id
 end
 
 # The PDF at `url`, or `nothing` when it is not one: a publisher's page in place of the file, a

@@ -1,7 +1,7 @@
 <!--
   The works the knowledge base's papers cite and it does not hold (missing.json, written with the
-  site), most cited first, each with the papers citing it. One on arXiv can be added from here when
-  zemi is serving the knowledge base API.
+  site), most cited first, each with the papers citing it. One on arXiv or with a DOI can be added from
+  here when zemi is serving the knowledge base API.
 -->
 <script setup lang="ts">
 import KBTitle from './KBTitle.vue'
@@ -51,16 +51,19 @@ async function find() {
 }
 
 // Works on arXiv are added as recorded papers: their arXiv record and abstract, found by search and
-// placed in the landscape. Reading one in full is a separate step (a sync reading unread papers, or Manage).
+// placed in the landscape. A work by DOI is looked up: its open copy recorded the same way, or a closed
+// one kept as its citation and abstract. Reading one in full is a separate step (a sync reading unread
+// papers, or Manage).
 const canAdd = computed(() => mode.value === 'live' && !cannot.value.length)
-const addable = computed(() => filtered.value.filter(w => w.arxiv && !added.value.has(w.key)))
+const ref_ = (w: Work) => w.arxiv ?? (w.doi ? `doi:${w.doi}` : null)
+const addable = computed(() => filtered.value.filter(w => ref_(w) && !added.value.has(w.key)))
 
 async function add(ws: Work[]) {
-  ws = ws.filter(w => w.arxiv && !added.value.has(w.key))
+  ws = ws.filter(w => ref_(w) && !added.value.has(w.key))
   if (!ws.length) return
   error.value = ''
   try {
-    await recordPapers(ws.map(w => w.arxiv!), 'cited')
+    await recordPapers(ws.map(w => ref_(w)!), 'cited')
     added.value = new Set([...added.value, ...ws.map(w => w.key)])
   } catch (e: any) { error.value = e.message ?? String(e) }
 }
@@ -88,7 +91,7 @@ async function add(ws: Work[]) {
       <div class="kbmi-links">
         <a v-if="w.arxiv" :href="`https://arxiv.org/abs/${w.arxiv}`" target="_blank" rel="noopener">arXiv:{{ w.arxiv }}</a>
         <a v-if="w.doi" :href="`https://doi.org/${w.doi}`" target="_blank" rel="noopener">doi:{{ w.doi }}</a>
-        <button v-if="w.arxiv && canAdd" type="button" class="kb-outline"
+        <button v-if="ref_(w) && canAdd" type="button" class="kb-outline"
                 :disabled="added.has(w.key)" @click="add([w])">{{ added.has(w.key) ? 'Added' : 'Add' }}</button>
       </div>
       <div class="kbmi-cited">cited by

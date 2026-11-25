@@ -4260,6 +4260,63 @@ end
     end
 end
 
+@zset "works by DOI" begin
+    # A DOI in each of its spellings; arXiv's own DOI names the arXiv paper, not a work to look up.
+    @test K.parse_doi("10.1137/0202019") == K.parse_doi("doi: 10.1137/0202019") == K.parse_doi("https://doi.org/10.1137/0202019.") == "10.1137/0202019"
+    @test K.parse_doi("2401.00001") === nothing && K.work_doi("10.48550/arXiv.2401.00001") === nothing && K.work_doi("doc-0123456789") === nothing
+    copies = Dict("10.1/onarxiv" => (; arxiv = "2401.00002", pdfs = String[]))
+    records = Dict("10.1/closed" => K.Resource(; key = "10.1/closed", title = "Matching modulo associativity", type = "conference paper",
+                                               authors = ["Rowan Hale", "Bea Ng"], date = "1993", doi = "10.1/closed",
+                                               url = "https://doi.org/10.1/closed", note = "Discrimination nets for matching.",
+                                               container = "Lecture Notes in Matching", publisher = "Ada Press"),
+                   "10.1/onarxiv" => K.Resource(; key = "10.1/onarxiv", title = "Rewriting in practice", doi = "10.1/onarxiv"))
+    records["10.1/other"] = K.Resource(; key = "10.1/other", title = "Bipartite matchings", type = "article", doi = "10.1/other")
+    saved = (K.DOI_COPIES[], K.DOI_RESOURCE[], K.ARXIV_TITLE_SEARCH[])
+    K.DOI_COPIES[] = (doi; contact = "") -> get(copies, doi, (; arxiv = nothing, pdfs = String[]))
+    K.DOI_RESOURCE[] = (doi; contact = "") -> get(records, doi, nothing)
+    K.ARXIV_TITLE_SEARCH[] = (t, c) -> K.PaperMeta[]
+    kb = open_kb(temp_config(layers = Layer[]))
+    try
+        # One with a copy to read is that paper; a closed one is kept as a resource made from its record.
+        @test K.add_papers!(kb, ["doi:10.1/OnArxiv"]) == ["2401.00002"]
+        id = only(K.add_papers!(kb, ["https://doi.org/10.1/closed"]))
+        r = K.resource_row(kb, id)
+        @test K.is_resource(id) && r.source == "doi" && r.title == "Matching modulo associativity" && r.doi == "10.1/closed"
+        @test r.container == "Lecture Notes in Matching" && r.publisher == "Ada Press" && r.note == "Discrimination nets for matching."
+        @test [m.source for m in K.mentions(kb, id)] == ["added"]
+        # Cited as the conference paper it is.
+        bib = K.bib_entry(kb, id)
+        @test startswith(bib, "@inproceedings{") && occursin("booktitle = {Lecture Notes in Matching}", bib) && occursin("doi = {10.1/closed}", bib)
+        @test startswith(K.citation(kb, id), "Hale, R., & Ng, B. (1993). Matching modulo associativity.")
+        # Named again, in any spelling, it is the one document; read, it is found by what its record says.
+        @test K.add_papers!(kb, ["10.1/CLOSED", "doi:10.1/closed"]) == [id] && K.document_with_doi(kb, "10.1/Closed") == id
+        @test only(K.ingest!(kb, ["10.1/closed"]; classify = false)).ok
+        # A copy found later is added as the paper; the resource stays what it was.
+        copies["10.1/closed"] = (; arxiv = "2401.00005", pdfs = String[])
+        @test K.add_work!(kb, "10.1/closed") == "2401.00005" && K.is_resource(id)
+        delete!(copies, "10.1/closed")
+        # A DOI with no copy that OpenAlex does not know is refused, naming it.
+        @test_throws "OpenAlex knows no work with DOI 10.1/nothing" K.add_papers!(kb, ["10.1/nothing"])
+        # A library takes a work here by its DOI, and refuses one not here.
+        @test K.library_source(kb, "doi:10.1/onarxiv") == (; kind = "paper", target = "2401.00002")
+        @test_throws "add it first" K.library_source(kb, "10.1/other")
+        # Dropped, a source leaves it out and a person is refused, at once when added through a job.
+        other = only(K.add_papers!(kb, ["10.1/other"]))
+        K.drop!(kb, other; by = "Ada", why = "Not ours")
+        @test K.add_papers!(kb, ["10.1/other"]; source = "watch") == String[]
+        @test_throws K.DroppedError K.add_papers!(kb, ["10.1/other"])
+        @test_throws K.DroppedError K.start_adding(kb, ["10.1/other"]; read = false)
+        # Added through a job, a DOI is looked up there, and its document is the job's.
+        records["10.1/late"] = K.Resource(; key = "10.1/late", title = "Adaptive matching", type = "article", doi = "10.1/late")
+        ids, job = K.start_adding(kb, ["10.1/late"]; read = false)
+        wait(job.done)
+        @test isempty(ids) && job.status == :done && job.ids == [K.document_with_doi(kb, "10.1/late")]
+    finally
+        K.DOI_COPIES[], K.DOI_RESOURCE[], K.ARXIV_TITLE_SEARCH[] = saved
+        close(kb)
+    end
+end
+
 @zset "zotero" begin
     # A stand-in for Zotero's API: a group's items, each with the library version it was last changed in.
     item(key, version, type, title; doi = "", url = "", parent = "", note = "", creators = []) =

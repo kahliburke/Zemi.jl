@@ -62,17 +62,19 @@ resource_id(source::AbstractString, key::AbstractString) = source_id(RESOURCE.pr
 resource_content(r::Resource) = (; r.title, r.type, r.authors, r.organizations, r.date, r.url, r.doi, r.note, r.container, r.publisher, r.accessed)
 
 """
-    put_resource!(kb, source, r; by = nothing, proposed = false, why = "", read = true, anyway = false) -> (id, changed)
+    put_resource!(kb, source, r; by = nothing, proposed = false, why = "", read = true, anyway = false, arrival = source) -> (id, changed)
 
 Write resource `r` from `source`: a new one, or the one `source` keeps under `r.key`, in place, its
 id, links and citations kept. Unchanged, nothing is written. It is kept in each of `r.projects`'
 libraries, as `by` (a person's name, or `nothing` for the source itself) put it there, and `proposed`
-there for a person to keep rather than kept, with `why`; its arrival is a mention from `source` with its address. With `read`, it is then read (see [`read_resource!`](@ref))
+there for a person to keep rather than kept, with `why`; its arrival is a mention from `arrival` (`source`, unless it
+came another way, as one added by hand) with its address. With `read`, it is then read (see [`read_resource!`](@ref))
 and embedded. A new one a person dropped (by its key, its DOI, or its title where it has no DOI) is
 refused with a [`DroppedError`](@ref), unless `anyway`, which restores it.
 """
 function put_resource!(kb::KB, source::AbstractString, r::Resource; by::Union{AbstractString,Nothing} = nothing,
-                        proposed::Bool = false, why::AbstractString = "", read::Bool = true, anyway::Bool = false)
+                        proposed::Bool = false, why::AbstractString = "", read::Bool = true, anyway::Bool = false,
+                        arrival::AbstractString = source)
     source = record_source(source)
     title = strip(r.title)
     isempty(title) && error("A resource needs a title")
@@ -109,7 +111,7 @@ function put_resource!(kb::KB, source::AbstractString, r::Resource; by::Union{Ab
                 (pid, source, r.key, r.type, r.url, r.note, strip(r.container), strip(r.publisher), strip(r.accessed), JSON.json(r.organizations), sha, at))
             new && execute!(kb, """INSERT INTO mentions (paper_id, source, channel, posted_at, author, url, message)
                                    VALUES (?, ?, NULL, ?, ?, ?, NULL)""",
-                            (pid, source, time(), something(by, missing), isempty(r.url) ? missing : r.url))
+                            (pid, arrival, time(), something(by, missing), isempty(r.url) ? missing : r.url))
         end
     end
     actor = Actor(something(by, source), proposed)

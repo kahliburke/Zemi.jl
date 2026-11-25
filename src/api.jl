@@ -162,14 +162,46 @@ Fetch the arXiv records of papers just recorded and embed their titles and abstr
 are then found by search and placed in the landscape, without being read.
 """
 function start_record(kb::KB, ids::Vector{String})
-    return start_job("record $(length(ids)) paper(s)"; ids, changes = changes_stamp(kb.config)) do job
-        report!(job, "fetching arXiv records")
-        fetched = refresh_metadata!(kb, ids)
-        blocked = cannot_run(kb, "embed", ids)
-        isempty(blocked) || return "Recorded $(length(ids)) paper(s), $fetched record(s) fetched; not embedded: $(join(blocked, "; "))"
-        embedded = embed_records!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
-        "Recorded $(length(ids)) paper(s): $fetched arXiv record(s) fetched, $embedded abstract(s) embedded."
+    return start_job(job -> record_papers!(kb, ids, job), "record $(length(ids)) paper(s)"; ids, changes = changes_stamp(kb.config))
+end
+
+"What [`start_record`](@ref)'s job does: fetch the arXiv records of papers `ids` and embed their abstracts, reporting to `job`."
+function record_papers!(kb::KB, ids::Vector{String}, job)
+    report!(job, "fetching arXiv records")
+    fetched = refresh_metadata!(kb, ids)
+    blocked = cannot_run(kb, "embed", ids)
+    isempty(blocked) || return "Recorded $(length(ids)) paper(s), $fetched record(s) fetched; not embedded: $(join(blocked, "; "))"
+    embedded = embed_records!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
+    return "Recorded $(length(ids)) paper(s): $fetched arXiv record(s) fetched, $embedded abstract(s) embedded."
+end
+
+"""
+    start_adding(kb, refs; source = "added", by = nothing, anyway = false, read = true) -> (ids, job)
+
+Add the papers `refs` name (see [`add_papers!`](@ref)) and read them, or with `read = false` record
+them (see [`start_record`](@ref)), as a job. A work named by DOI is looked up in the job, as that
+takes requests (see [`add_work!`](@ref)): `ids` are the documents added at once, and the job notes
+the DOIs' as it finds them. One dropped here is refused at once unless `anyway`, as by hand.
+"""
+function start_adding(kb::KB, refs::Vector{String}; source::AbstractString = "added", by = nothing, anyway::Bool = false,
+                      read::Bool = true)
+    dois = filter(s -> work_doi(s) !== nothing, refs)
+    if !anyway && source in BY_HAND
+        for s in dois
+            d = dropped_as(kb; doi = work_doi(s))
+            d === nothing || throw(DroppedError(d))
+        end
     end
+    ids = add_papers!(kb, setdiff(refs, dois); source, by, anyway)
+    isempty(dois) && return (ids, read ? start_action(kb, "ingest", ids) : start_record(kb, ids))
+    read && (blocked = cannot_run(kb, "ingest", String[]); isempty(blocked) || error("Can't ingest here: ", join(blocked, "; ")))
+    job = start_job("add $(length(refs)) paper(s)"; ids, changes = changes_stamp(kb.config)) do job
+        report!(job, "looking up $(length(dois)) DOI(s)")
+        found = unique!([ids; add_papers!(kb, dois; source, by, anyway)])
+        foreach(id -> id in job.ids || push!(job.ids, id), found)
+        read ? ingest!(kb, found; progress = m -> report!(job, m), cancelled = () -> cancelled(job)) : record_papers!(kb, found, job)
+    end
+    return (ids, job)
 end
 
 """
@@ -357,10 +389,11 @@ route!("POST", "/api/documents"; need = "paper.add") do c
         job = start_codebase_reading(kb, id)
         return Dict("ids" => [id], "already" => already_read(kb, [id]), "job" => job === nothing ? nothing : job.id)
     end
-    ids = add_papers!(kb, split_list(String(get(b, "arxiv", ""))); source = String(get(b, "source", "added")),
-                      by = adder(get(b, "by", nothing), caller), anyway)
-    get(b, "read", true) === false && return Dict("ids" => ids, "job" => start_record(kb, ids).id)
-    Dict("ids" => ids, "already" => already_read(kb, ids), "job" => start_action(kb, "ingest", ids).id)
+    read = get(b, "read", true) !== false
+    ids, job = start_adding(kb, split_list(String(get(b, "arxiv", ""))); source = String(get(b, "source", "added")),
+                            by = adder(get(b, "by", nothing), caller), anyway, read)
+    read || return Dict("ids" => ids, "job" => job.id)
+    Dict("ids" => ids, "already" => already_read(kb, ids), "job" => job.id)
 end
 
 # `{"action": …, "ids": […]}`: one of ACTIONS on documents, as a job.

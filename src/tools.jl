@@ -237,8 +237,11 @@ tool!("similar", similar_tool; need = "read")
 
 Add papers to the knowledge base and process them: arXiv metadata, PDF download, parsing,
 chunking and embedding in every layer. `papers` is a comma- or space-separated list of arXiv
-ids or URLs. Steps already done are skipped, so re-running is cheap. arXiv allows one request
-every 3 seconds, so each new paper takes several seconds.
+ids or URLs, document ids, and DOIs (`10.1137/0202019`, `doi:…` or a `doi.org` address). A DOI's
+work is read in full from its arXiv copy or an open PDF where there is one; a closed paper is kept
+as a resource, its citation and abstract, until a copy can be read. Steps already done are
+skipped, so re-running is cheap. arXiv allows one request every 3 seconds, so each new paper takes
+several seconds.
 
 A codebase id (`code-…`) is read again from the service's copy of its repository (current
 within 30 s), and only the files that changed are summarized and embedded. Linked codebases
@@ -255,8 +258,12 @@ function ingest_tool(papers::String; wait::Bool = false)::String
         results = ingest!(kb(), ids; progress = tool_progress)
         return format_ingest(results)
     end
-    job = start_job("ingest $(length(ids)) paper(s)"; ids = normalize_id.(ids), changes = changes_stamp(kb().config)) do job
-        ingest!(kb(), ids; progress = msg -> report!(job, msg), cancelled = () -> cancelled(job))
+    # A DOI's document is known once it is looked up, and is noted as the job's then.
+    known = [normalize_id(s) for s in ids if work_doi(s) === nothing]
+    job = start_job("ingest $(length(ids)) paper(s)"; ids = known, changes = changes_stamp(kb().config)) do job
+        results = ingest!(kb(), ids; progress = msg -> report!(job, msg), cancelled = () -> cancelled(job))
+        foreach(r -> r.id in job.ids || push!(job.ids, r.id), results)
+        results
     end
     return "Started job $(job.id) to ingest $(length(ids)) paper(s). Poll `job_status(job_id=\"$(job.id)\")`."
 end

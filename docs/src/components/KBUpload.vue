@@ -86,7 +86,7 @@ async function add(anyway = false) {
             <span v-else>{{ files.map(f => f.name).join(', ') }}</span>
           </label>
           <input v-if="files.length === 1" v-model="title" class="kb-field kbu-input" placeholder="Title (optional)" />
-          <textarea v-model="arxiv" class="kb-field kbu-input" rows="2" placeholder="arXiv ids or links"></textarea>
+          <textarea v-model="arxiv" class="kb-field kbu-input" rows="2" placeholder="arXiv ids, DOIs or links"></textarea>
         </template>
         <input v-model="codebase" class="kb-field kbu-input" @keydown.enter="add()"
                :placeholder="shared && !can('config.edit') ? 'A codebase: its repository, https://github.com/owner/repo' : 'A codebase: its repository (https://github.com/owner/repo) or a folder here'" />

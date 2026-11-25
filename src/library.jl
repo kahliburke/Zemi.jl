@@ -6,7 +6,7 @@
     library_source(kb, source; caller = local_caller()) -> (; kind, target)
 
 What a library item names, written as it is mentioned anywhere: a paper (`@arXiv:2401.00001`, `@doc-…`,
-or an arXiv id alone), a notebook (`@[label](notebook:path)`), or a codebase (its id, `code-…`, or its
+an arXiv id alone, or the DOI of a work here, see [`document_with_doi`](@ref)), a notebook (`@[label](notebook:path)`), or a codebase (its id, `code-…`, or its
 repository's address, which records it if it is new) that `caller` may see.
 """
 function library_source(kb::KB, source::AbstractString; caller::Caller = local_caller())
@@ -15,6 +15,12 @@ function library_source(kb::KB, source::AbstractString; caller::Caller = local_c
         id = lowercase(lstrip(s, '@'))
         ismissing(paper_id(kb, id)) && not_found("No codebase $id in the knowledge base")
         return (; kind = "codebase", target = seen_document(kb, caller, id))
+    end
+    d = work_doi(lstrip(s, '@'))
+    if d !== nothing
+        id = document_with_doi(kb, d)
+        ismissing(id) && not_found("No work with DOI $d in the knowledge base: add it first")
+        return (; kind = "paper", target = seen_document(kb, caller, id))
     end
     is_repository(s) && return (; kind = "codebase", target = seen_document(kb, caller, link_repository!(kb, s)))
     e = evidence_source(s)
