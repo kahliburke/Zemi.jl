@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.6.0 (unreleased)
+
+### Breaking
+
+- The database moves from schema 22 to 24 on first start, keeping a snapshot first
+  (`data.backups/kept/before-schema-24`); 0.5 cannot read it afterwards.
+
+### Changes
+
+- **Signing in to a knowledge base run for one person**: an OAuth client, such as a Slate notebook
+  citing from its bibliography, signs in with the owner's consent and reads what the owner sees.
+  Configuration lists the clients connected and revokes them. A group's site signs a client in to a
+  member's account as before.
+- **Citation keys** for records and uploads are short and readable (`water-levels`,
+  `rowan2024-soil`), given once and kept; arXiv papers keep `arXiv:<id>`.
+- **Other agents**: Codex, Gemini and OpenCode can read papers, summarize codebases, tutor and make
+  notebooks, offered on setup and Configuration once installed here. They read the extracted text.
+  A shared service runs only Claude and OpenCode agents, whose tools Kaimon holds to their folder.
+- **The first admin of a shared service** is named on the server: `zemi admin EMAIL`, or
+  `install.sh --admin EMAIL`. The service refuses to start when nobody could administer it.
+- **`zemi connect`** finds the knowledge base run on this machine wherever it is served, the
+  development site included, and follows it when it moves. `zemi connect --background` for it has
+  the knowledge base sync the folders itself whenever it runs, with no login service.
+  `zemi connect --status` says where the folders go, what syncs them and whether it is syncing now.
+- **Codebases** a project adds are read at once; one not read yet says so rather than showing no
+  files.
+- **Search** shows references as links in results and on a record's page, and the recently posted
+  list follows the kind of document the search is set to. Findings come after the documents found,
+  and are a kind of their own to search alone. A query of three words or more that a few documents
+  hold word for word puts them first. A summary layer counts with the layer of its text as one
+  ranking, so notes and codebases, which are not summarized, rank alongside papers.
+- **The board** keeps a dragged subtask under its task unless it is dropped onto another;
+  "make it a task of its own" on its page takes it out.
+- **The installers** have Kaimon set itself up (`kaimon --setup-defaults`) where it can.
+
 ## 0.5.1 (2026-11-23)
 
 - **Figures in series of their own**: captions such as "Fig. S2", "Supplementary Figure 1",
