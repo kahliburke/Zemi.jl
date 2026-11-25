@@ -354,16 +354,16 @@ async function draw() {
       .onRenderFramePost((ctx: CanvasRenderingContext2D, scale: number) => {
         drawFocus2d(ctx, scale)
         drawNearestLabels2d(ctx, scale)
-        // Cluster names, a constant size on screen; faded out as one comes close.
-        const fade = Math.max(0, Math.min(1, (2.2 - scale) / 1.4))
-        if (!fade) return
+        // Cluster names, a constant size on screen. Close in, those of what is in view stay; the rest fade
+        // to `DIMMED`, as they do anywhere once something is in view.
+        const fade = DIMMED + (1 - DIMMED) * Math.max(0, Math.min(1, (2.2 - scale) / 1.4))
         ctx.save()
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.font = `600 ${14 / scale}px system-ui, sans-serif`
         const rel = relevantClusters.value
         for (const c of centres) {
           if (!c.name) continue
-          const a = fade * (!rel || rel.has(c.id) ? 1 : DIMMED)
+          const a = rel ? (rel.has(c.id) ? 1 : DIMMED) : fade
           ctx.fillStyle = isDark.value ? `rgba(235,235,245,${0.85 * a})` : `rgba(30,30,40,${0.8 * a})`
           ctx.fillText(c.name, c.x, c.y)
         }
@@ -518,7 +518,7 @@ function keepFocusInSight(sprite: any, n: GNode, renderer: any, camera: any) {
 // The clusters that matter to what one is looking at: a cluster gone to from the legend, or the selected
 // document's and those of its nearest. Null when nothing is in view in particular. The other clusters'
 // names are dimmed to `DIMMED`.
-const DIMMED = 0.12
+const DIMMED = 0.4
 const relevantClusters = computed<Set<number> | null>(() => {
   if (litRow.value) return litRow.value.startsWith('c') ? new Set([Number(litRow.value.slice(1))]) : null
   const s = selected.value
