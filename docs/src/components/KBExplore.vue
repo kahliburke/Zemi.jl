@@ -14,7 +14,8 @@ import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 
 type Node = { id: string; kind: string; title: string; year?: string; page: string; links: number; status?: string; project?: string
               access?: 'open' | 'projects' | 'private'; mine?: boolean; read?: boolean
-              x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]; cluster?: number }
+              x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]; cluster?: number
+              central?: number; rating?: number }
 type Cluster = { id: number; name: string; description: string; size: number }
 type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean][]; clusters: Cluster[];
                built_at: string | null; job: string | null; abstracts: boolean; abstract_only: number }
@@ -226,18 +227,56 @@ function goToRow(key: string) {
                          z: mid[2] + (from.z - mid[2]) * d / away }, { x: mid[0], y: mid[1], z: mid[2] }, 1200)
 }
 watch(selected, n => { if (n) litRow.value = null })
+// A legend row's documents shaded from faint to full by how much each stands out in it: its links among
+// the documents here (the cluster's middle deciding among the unlinked), how central it is in meaning,
+// or the rating the watch's judge gave it.
+type ShadeBy = 'off' | 'linked' | 'central' | 'rated'
+const SHADE_BY = [['off', 'Off', 'Every document in its full colour'],
+                  ['linked', 'Linked', 'Most cited and referred to among the documents here'],
+                  ['central', 'Central', 'Nearest in meaning to the middle of the cluster'],
+                  ['rated', 'Rated', 'How relevant the watch judged it, 0 to 3; unrated faintest']] as const
+const shadeBy = ref<ShadeBy>(stored('shade', 'linked'))
+watch(shadeBy, v => keep('shade', v))
+// Each lit document's standing, 0 to 1, by `shadeBy`.
+const standing = computed(() => {
+  const out = new Map<string, number>()
+  const key = litRow.value
+  if (!key || shadeBy.value === 'off' || !data.value) return out
+  const ns = data.value.nodes.filter(n => visibleNode(n) && legendKey(n) === key)
+  // By rank, since similarities to a cluster's middle bunch together.
+  const middle = new Map(ns.slice().sort((a, b) => (a.central ?? 0) - (b.central ?? 0))
+                           .map((n, i) => [n.id, ns.length > 1 ? i / (ns.length - 1) : 1]))
+  const most = Math.max(0, ...ns.map(n => n.links))
+  for (const n of ns) {
+    const c = middle.get(n.id)!
+    out.set(n.id, shadeBy.value === 'central' ? c
+                : shadeBy.value === 'rated' ? (n.rating === undefined ? 0 : n.rating / 3)
+                : most ? 0.8 * Math.log1p(n.links) / Math.log1p(most) + 0.2 * c : c)
+  }
+  return out
+})
+// `a` towards `b` by `t`, both #rrggbb.
+function mix(a: string, b: string, t: number) {
+  const ch = (h: string, i: number) => parseInt(h.slice(1 + 2 * i, 3 + 2 * i), 16)
+  return '#' + [0, 1, 2].map(i => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t).toString(16).padStart(2, '0')).join('')
+}
 const legendOpen = ref<boolean>(stored('legend', true))
 watch(legendOpen, v => keep('legend', v))
 const settingsOpen = ref(false)
 function shade(n: Node) {
   const c = colour(n)
   if (hits.value.size) return hits.value.has(n.id) ? c : isDark.value ? '#3a3a44' : '#d8d8de'
-  if (litRow.value) return legendKey(n) === litRow.value ? c : isDark.value ? '#3a3a44' : '#d8d8de'
+  if (litRow.value) {
+    if (legendKey(n) !== litRow.value) return isDark.value ? '#3a3a44' : '#d8d8de'
+    const t = standing.value.get(n.id)
+    return t === undefined ? c : mix(isDark.value ? '#111116' : '#fafafa', c, 0.22 + 0.78 * t)
+  }
   if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return isDark.value ? '#55555f' : '#c8c8ce'
   return c
 }
 const size = (n: Node) => (((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links) * 1.2) * (n.read === false ? 0.6 : 1) +
-                           (hits.value.get(n.id) ?? 0) * 3) * (n.id === selected.value?.id ? 2.5 : 1)
+                           (hits.value.get(n.id) ?? 0) * 3) * (n.id === selected.value?.id ? 2.5 : 1) *
+                         (0.7 + 0.8 * (standing.value.get(n.id) ?? 0.375))
 
 type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
 type GLink = { source: string; target: string; kind: string; similarity?: number }
@@ -645,7 +684,7 @@ function refresh() {
   graph.graphData({ nodes, links })
   restyle()
 }
-watch([selected, hits, colourBy, litRow], restyle)
+watch([selected, hits, colourBy, litRow, standing], restyle)
 watch(colourBy, () => { litRow.value = null })
 // Recoloured and resized in place: the space's discs directly, the map's through its accessors.
 function restyle() {
@@ -923,6 +962,12 @@ const showPairs = ref(false)
       <details v-if="legend.length && !settingsOpen" class="kbx-key" :open="legendOpen"
                @toggle="legendOpen = ($event.target as HTMLDetailsElement).open">
         <summary>Colours</summary>
+        <div v-if="litRow" class="kbx-shade">
+          <span>Shade by</span>
+          <div class="kbx-seg kbx-seg-small" role="group" aria-label="Shade by">
+            <button v-for="[k, l, t] in SHADE_BY" :key="k" :class="{ on: shadeBy === k }" :title="t" @click="shadeBy = k">{{ l }}</button>
+          </div>
+        </div>
         <ul>
           <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="goToRow(r.key)">
             <i class="kbx-swatch" :style="{ background: r.colour }"></i>
@@ -1001,6 +1046,9 @@ const showPairs = ref(false)
            border: 1px solid var(--vp-c-divider); border-radius: 8px; padding: 4px 10px; font-size: 12px;
            background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 .kbx-key:not([open]) { width: auto; }
+.kbx-key[open]:has(.kbx-shade) { width: 18rem; }
+.kbx-shade { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0 4px; color: var(--vp-c-text-2); }
+.kbx-shade .kbx-seg button { padding: 2px 7px; }
 .kbx-key summary { cursor: pointer; color: var(--vp-c-text-2); text-align: right; }
 .kbx-key ul { list-style: none; margin: 4px 0 2px; padding: 0; }
 .kbx-key li button { width: 100%; display: grid; grid-template-columns: 9px 1fr auto; align-items: center; column-gap: 7px;

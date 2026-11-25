@@ -99,7 +99,7 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 5
+const EXPLORE_VERSION = 6
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -299,9 +299,12 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
         end
     end
 
+    # How central each is to its cluster: its similarity to the cluster's mean direction.
+    centre = Dict(j => unit_columns(reshape(vec(sum(X[:, assign .== j]; dims = 2)), :, 1)) for j in unique(assign))
+    central = [Float64(dot(view(X, :, i), view(centre[assign[i]], :, 1))) for i in 1:n]
     r4(x) = round(x; digits = 4)
     docs = Dict(r.id => Dict("x" => r4.(pos2[i, :]), "p" => r4.(pos3[i, :]), "ux" => r4.(uflat[i, :]), "up" => r4.(udeep[i, :]), "c" => assign[i],
-                             "near" => [[rows[m].id, r4(s)] for (m, s) in near[i]])
+                             "k" => r4(central[i]), "near" => [[rows[m].id, r4(s)] for (m, s) in near[i]])
                 for (i, r) in enumerate(rows))
     return Dict("clusters" => clusters, "docs" => docs)
 end
@@ -375,7 +378,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     hidden = unfound_documents(kb, caller)
     rows = Dict(String(r.doc_id) => r for r in query(kb, """
         SELECT p.id, p.doc_id, p.kind, coalesce(p.title, w.title) AS title, coalesce(p.published, w.published) AS published, p.access,
-               EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read
+               EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read, w.relevance AS rating
         FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id"""))
     abstracts = abstracts || !isempty(center) && haskey(rows, center) && !Bool(rows[center].read)
     m = read_explore(kb.config)
@@ -489,7 +492,9 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
         if d !== nothing
             n["x"], n["p"], n["cluster"] = d["x"], d["p"], d["c"]
             haskey(d, "ux") && (n["ux"] = d["ux"]; n["up"] = d["up"])
+            haskey(d, "k") && (n["central"] = d["k"])
         end
+        ismissing(r.rating) || (n["rating"] = Int(r.rating))     # the watch's judge's, 0 to 3
         n
     end
     # A cluster no open document names is labelled by its own titles for one who sees every document in it.

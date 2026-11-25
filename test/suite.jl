@@ -2816,13 +2816,15 @@ end
     mine = first(K.put_record!(kb, "upload", (; key = "diary", title = "Diary", date = "2026-10-02", sections = ["Notes" => "Mine."]); read = false))
     K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (mine,))
     K.execute!(kb, "INSERT INTO document_holders (paper_id, user_id) VALUES (?, ?)", (K.paper_id(kb, mine), ada))
-    place(near) = Dict("x" => [0.1, 0.2], "p" => [0.1, 0.2, 0.3], "ux" => [0.3, 0.4], "up" => [0.3, 0.4, 0.5], "c" => 1, "near" => near)
+    place(near) = Dict("x" => [0.1, 0.2], "p" => [0.1, 0.2, 0.3], "ux" => [0.3, 0.4], "up" => [0.3, 0.4, 0.5], "c" => 1, "k" => 0.8, "near" => near)
     reefs = [Dict("id" => 1, "name" => "Reefs", "description" => "")]
     write(K.explore_path(kb.config), JSON.json(Dict("version" => 3, "input_sha" => "", "built_at" => "then", "layer" => "l", "views" => Dict(
         "all" => Dict("clusters" => [reefs; Dict("id" => 2, "name" => "", "description" => "", "closed_name" => "diary")],
                       "docs" => Dict("2401.00001" => place([["2401.00002", 0.9], [rec, 0.6]]), "2401.00002" => place([["2401.00001", 0.9], [mine, 0.7]]),
                                      rec => place([["2401.00005", 0.8]]), mine => merge(place([["2401.00002", 0.7]]), Dict("c" => 2)))),
         "read" => Dict("clusters" => reefs, "docs" => Dict("2401.00001" => place([])))))))
+    K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score, nearest, found_at, relevance)
+                      VALUES ('2401.00002', 'Fast surveys of reefs', '[]', 'On reefs.', '2017-03-01', 'q-bio', 0.5, 'Reefs', 0.5, '[]', ?, 2)""", (K.now_iso(),))
     as(uid) = K.Caller(uid, "Someone", "x@x.org", Set(["read", "library", "tasks.view"]), :session, nothing)
     ids(g) = Set(n["id"] for n in g["nodes"])
     graph(who; kw...) = K.explore_graph(kb, who; abstracts = true, kw...)
@@ -2836,6 +2838,8 @@ end
     n1 = only(n for n in g["nodes"] if n["id"] == "2401.00001")
     @test n1["x"] == [0.1, 0.2] && n1["ux"] == [0.3, 0.4] && n1["cluster"] == 1 && n1["year"] == "2017" && n1["links"] == 2 && first(g["clusters"])["name"] == "Reefs"
     @test !haskey(only(n for n in g["nodes"] if n["id"] == "2401.00006"), "x")         # linked, not placed: no vector
+    # How central each is to its cluster, and the watch's rating where the watch judged it.
+    @test n1["central"] == 0.8 && !haskey(n1, "rating") && only(n for n in g["nodes"] if n["id"] == "2401.00002")["rating"] == 2
     own = only(n for n in g["nodes"] if n["id"] == mine)
     @test own["mine"] && own["access"] == "private" && !n1["mine"] && n1["access"] == "open"
     # By default only the documents read in full, on their own map; one known by its abstract alone,
@@ -2947,6 +2951,7 @@ end
         for (id, doc) in m["docs"]
             @test length(doc["near"]) == K.EXPLORE_NEIGHBOURS && all(topic_of[n[1]] == topic_of[id] for n in doc["near"][1:5])
             @test length(doc["x"]) == 2 && length(doc["p"]) == 3 && all(v -> -1.3 <= v <= 1.3, [doc["x"]; doc["p"]])
+            @test 0 < doc["k"] <= 1.0001
         end
         @test all(length(unique(m["docs"][id]["c"] for id in keys(topic_of) if topic_of[id] == t)) == 1 for t in topics)
         # Laid out by UMAP as well, each paper nearest one of its own topic there too.
