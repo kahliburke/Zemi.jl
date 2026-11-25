@@ -236,8 +236,8 @@ function shade(n: Node) {
   if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return isDark.value ? '#55555f' : '#c8c8ce'
   return c
 }
-const size = (n: Node) => ((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links) * 1.2) * (n.read === false ? 0.6 : 1) +
-                           (hits.value.get(n.id) ?? 0) * 3
+const size = (n: Node) => (((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links) * 1.2) * (n.read === false ? 0.6 : 1) +
+                           (hits.value.get(n.id) ?? 0) * 3) * (n.id === selected.value?.id ? 2.5 : 1)
 
 type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
 type GLink = { source: string; target: string; kind: string; similarity?: number }
@@ -352,6 +352,7 @@ async function draw() {
       .cooldownTicks(1)
       .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => drawNearest2d(ctx, scale))
       .onRenderFramePost((ctx: CanvasRenderingContext2D, scale: number) => {
+        drawFocus2d(ctx, scale)
         drawNearestLabels2d(ctx, scale)
         // Cluster names, a constant size on screen; faded out as one comes close.
         const fade = Math.max(0, Math.min(1, (2.2 - scale) / 1.4))
@@ -359,9 +360,11 @@ async function draw() {
         ctx.save()
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.font = `600 ${14 / scale}px system-ui, sans-serif`
+        const rel = relevantClusters.value
         for (const c of centres) {
           if (!c.name) continue
-          ctx.fillStyle = isDark.value ? `rgba(235,235,245,${0.85 * fade})` : `rgba(30,30,40,${0.8 * fade})`
+          const a = fade * (!rel || rel.has(c.id) ? 1 : DIMMED)
+          ctx.fillStyle = isDark.value ? `rgba(235,235,245,${0.85 * a})` : `rgba(30,30,40,${0.8 * a})`
           ctx.fillText(c.name, c.x, c.y)
         }
         ctx.restore()
@@ -401,6 +404,7 @@ async function draw() {
     const fog = (await import('three')).FogExp2
     // A little depth: a tenth faded across the space as first framed, a quarter beyond it.
     graph.scene().fog = new fog(isDark.value ? 0x111116 : 0xfafafa, 0.00035)
+    clusterLabels.length = 0
     for (const c of clusterCentres(nodes)) {
       if (!c.name) continue
       const s = new SpriteText(c.name, 6, isDark.value ? 'rgba(240,240,248,0.95)' : 'rgba(25,25,35,0.95)')
@@ -414,12 +418,14 @@ async function draw() {
       s.renderOrder = 1000
       s.position.set(c.x, c.y, c.z)
       capHeight(s, 12, 20)
+      clusterLabels.push({ sprite: s, id: c.id })
       graph.scene().add(s)
     }
     setTimeout(() => graph?.zoomToFit(800, 30), 300)
     three = THREE
     nearest3d = null
-    showNearest3d()
+    ring3d = null
+    restyle()
   }
 }
 
@@ -509,6 +515,57 @@ function keepFocusInSight(sprite: any, n: GNode, renderer: any, camera: any) {
   }
   if (sprite.material.opacity !== opacity) sprite.material.opacity = opacity
 }
+// The clusters that matter to what one is looking at: a cluster gone to from the legend, or the selected
+// document's and those of its nearest. Null when nothing is in view in particular. The other clusters'
+// names are dimmed to `DIMMED`.
+const DIMMED = 0.12
+const relevantClusters = computed<Set<number> | null>(() => {
+  if (litRow.value) return litRow.value.startsWith('c') ? new Set([Number(litRow.value.slice(1))]) : null
+  const s = selected.value
+  if (!s) return null
+  return new Set([s.cluster, ...nearSelected.value.map(x => x.node.cluster)].filter((c): c is number => c !== undefined))
+})
+// The space's cluster names, with their clusters.
+const clusterLabels: { sprite: any; id: number }[] = []
+// The selected document marked where it is: a ring in the brand colour around its node, and a wider faint one.
+function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
+  const n: GNode | undefined = selected.value ? graph?.graphData().nodes.find((x: GNode) => x.id === selected.value!.id) : undefined
+  if (!n || n.x === undefined) return
+  const r = Math.sqrt(size(n)) * 4
+  ctx.save()
+  ctx.strokeStyle = BRAND; ctx.lineWidth = 2.5 / scale
+  ctx.beginPath(); ctx.arc(n.x, n.y, r + 4 / scale, 0, 2 * Math.PI); ctx.stroke()
+  ctx.strokeStyle = BRAND + '50'; ctx.lineWidth = 5 / scale
+  ctx.beginPath(); ctx.arc(n.x, n.y, r + 11 / scale, 0, 2 * Math.PI); ctx.stroke()
+  ctx.restore()
+}
+// In the space, a ring sprite over the selected disc, drawn over everything but the labels, breathing slowly.
+let ring3d: any = null
+function showRing3d() {
+  if (!graph || view.value !== '3d' || !three) return
+  if (!ring3d) {
+    const px = 128, c = document.createElement('canvas')
+    c.width = c.height = px
+    const ctx = c.getContext('2d')!
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = 9; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 22, 0, 2 * Math.PI); ctx.stroke()
+    ctx.globalAlpha = 0.35; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 6, 0, 2 * Math.PI); ctx.stroke()
+    const map = new three.CanvasTexture(c)
+    map.colorSpace = three.SRGBColorSpace
+    ring3d = new three.Sprite(new three.SpriteMaterial({ map, color: BRAND, transparent: true, depthTest: false, depthWrite: false }))
+    ring3d.renderOrder = 998
+    ring3d.onBeforeRender = () => {
+      const f = selected.value && sprites.get(selected.value.id)
+      if (!f) return
+      const k = f.sprite.scale.x * 2 * (1 + 0.08 * Math.sin(performance.now() / 400))
+      ring3d.position.copy(f.sprite.position)
+      ring3d.scale.set(k, k, 1)
+      ring3d.updateMatrixWorld()
+    }
+    graph.scene().add(ring3d)
+  }
+  ring3d.visible = !!(selected.value && sprites.has(selected.value.id))
+}
 let three: any = null
 let nearest3d: any = null
 async function showNearest3d() {
@@ -595,6 +652,9 @@ function restyle() {
   if (!graph) return
   graph.linkColor(linkColour)
   showNearest3d()
+  showRing3d()
+  const rel = relevantClusters.value
+  for (const { sprite, id } of clusterLabels) sprite.material.opacity = !rel || rel.has(id) ? 1 : DIMMED
   if (view.value === '2d') { graph.nodeColor(shade).nodeVal(size); return }
   for (const { sprite, node } of sprites.values()) {
     sprite.material.color.set(shade(node))
