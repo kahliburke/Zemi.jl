@@ -258,10 +258,21 @@ async function draw() {
   } else {
     const ForceGraph3D = (await import('3d-force-graph')).default as any
     const SpriteText = (await import('three-spritetext')).default as any
+    const THREE = await import('three')
+    const disc = discTexture(THREE)
+    sprites.clear()
     graph = new ForceGraph3D(el, { controlType: fly.value ? 'fly' : 'orbit' })
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
-      .nodeVal(size).nodeColor(shade).nodeLabel(label).nodeOpacity(0.92).nodeResolution(6)
+      .nodeVal(size).nodeLabel(label)
+      // Each node a disc facing the camera, shaded to read as a sphere: smooth at any distance, and cheap.
+      .nodeThreeObject((n: GNode) => {
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: disc, color: shade(n), transparent: true, depthWrite: false }))
+        const d = spriteSize(n)
+        sprite.scale.set(d, d, 1)
+        sprites.set(n.id, { sprite, node: n })
+        return sprite
+      })
       .linkColor(linkColour).linkOpacity(0.55)
       .linkWidth((l: GLink) => (l.kind === 'similar' ? 0 : 0.6))           // 0: a plain line, the cheapest drawn
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 2.5 : 0))
@@ -283,12 +294,48 @@ async function draw() {
     setTimeout(() => graph?.zoomToFit(800, 30), 300)
   }
 }
+const COLOUR_BY = [['cluster', 'Cluster'], ['kind', 'Kind'], ['whose', 'Whose']] as const
+// One of a list of shown kinds turned on or off.
+const toggle = (list: string[], k: string) => { const i = list.indexOf(k); i < 0 ? list.push(k) : list.splice(i, 1) }
+// The space's node discs, by id, with the nodes they draw.
+const sprites = new Map<string, { sprite: any; node: GNode }>()
+// A disc's width: as wide as the sphere 3d-force-graph would draw for the node (radius 4·∛val).
+const spriteSize = (n: GNode) => 8 * Math.cbrt(size(n))
+// A white disc, lighter at the centre and a little darker towards its antialiased rim, tinted per node.
+function discTexture(THREE: any) {
+  const px = 128, c = document.createElement('canvas')
+  c.width = c.height = px
+  const ctx = c.getContext('2d')!
+  const g = ctx.createRadialGradient(px * 0.4, px * 0.38, px * 0.04, px / 2, px / 2, px / 2)
+  g.addColorStop(0, '#ffffff'); g.addColorStop(0.7, '#d9d9d9'); g.addColorStop(1, '#b0b0b0')
+  ctx.fillStyle = g
+  ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 2, 0, Math.PI * 2); ctx.fill()
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.anisotropy = 4
+  return t
+}
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
+// How a linked document stands to the one shown: what it does to this one, or this one to it.
+const RELATIONS: Record<string, [string, string]> = { cites: ['cites', 'cited by'], refers: ['refers to', 'referred to by'],
+                                                     evidence: ['rests on', 'evidence for'], task: ['linked to', 'task on'] }
+const relation = (kind: string, out: boolean) => (RELATIONS[kind] ?? [kind, kind])[out ? 0 : 1]
 const kindName = (k: string) => ({ paper: 'paper', record: 'note or record', code: 'codebase', resource: 'resource', finding: 'finding', task: 'task' }[k] ?? k)
 
 // Redrawn as what is shown changes; recoloured as the selection, hits and colours do.
 watch([view, fly, shownLinks, shownKinds, threshold, showUnlinked, isDark], () => draw(), { deep: true })
-watch([selected, hits, colourBy], () => graph?.nodeColor(shade).linkColor(linkColour).nodeVal(size))
+watch([selected, hits, colourBy], restyle)
+// Recoloured and resized in place: the space's discs directly, the map's through its accessors.
+function restyle() {
+  if (!graph) return
+  graph.linkColor(linkColour)
+  if (view.value === '2d') { graph.nodeColor(shade).nodeVal(size); return }
+  for (const { sprite, node } of sprites.values()) {
+    sprite.material.color.set(shade(node))
+    const d = spriteSize(node)
+    sprite.scale.set(d, d, 1)
+  }
+}
 
 const resize = () => { if (graph && box.value) graph.width(box.value.clientWidth).height(box.value.clientHeight) }
 onLive(() => {
@@ -431,21 +478,35 @@ const showPairs = ref(false)
 
       <details class="kbx-settings">
         <summary>Show</summary>
-        <div class="kbx-row"><span>Colour by</span>
-          <label><input v-model="colourBy" type="radio" value="cluster"> cluster</label>
-          <label><input v-model="colourBy" type="radio" value="kind"> kind</label>
-          <label><input v-model="colourBy" type="radio" value="whose"> whose</label></div>
-        <div v-if="colourBy === 'whose'" class="kbx-row"><span></span>
-          <label v-for="[k, l] in WHOSE" :key="k"><i class="kbx-swatch" :style="{ background: WHOSE_COLOURS[k] }"></i>{{ l }}</label></div>
-        <div class="kbx-row"><span>Links</span>
-          <label v-for="[k, l] in LINK_KINDS" :key="k"><input v-model="shownLinks" type="checkbox" :value="k">
-            <i class="kbx-swatch" :style="{ background: LINK_COLOURS[k] }"></i>{{ l }}</label></div>
-        <div class="kbx-row"><span>Documents</span>
-          <label v-for="[k, l] in NODE_KINDS" :key="k"><input v-model="shownKinds" type="checkbox" :value="k">
-            <i class="kbx-swatch" :style="{ background: KIND_COLOURS[k] }"></i>{{ l }}</label></div>
-        <div class="kbx-row"><label><input v-model="showUnlinked" type="checkbox"> Close but unlinked pairs, from</label>
-          <input v-model.number="threshold" type="range" min="0.5" max="0.98" step="0.01"> {{ Math.round(threshold * 100) }}% alike</div>
-        <p v-if="view === '3d'" class="kb-dim">Drag to turn, scroll to come closer; F flies (WASD, mouse to steer).{{ fly ? ' Flying: F to stop.' : '' }}</p>
+        <div class="kbx-grid">
+          <span class="kbx-label">Colour by</span>
+          <div>
+            <div class="kbx-seg kbx-seg-small" role="group" aria-label="Colour by">
+              <button v-for="[k, l] in COLOUR_BY" :key="k" :class="{ on: colourBy === k }" @click="colourBy = k">{{ l }}</button>
+            </div>
+            <div v-if="colourBy === 'whose'" class="kbx-legend">
+              <span v-for="[k, l] in WHOSE" :key="k"><i class="kbx-swatch" :style="{ background: WHOSE_COLOURS[k] }"></i>{{ l }}</span>
+            </div>
+          </div>
+          <span class="kbx-label">Links</span>
+          <div class="kbx-chips">
+            <button v-for="[k, l] in LINK_KINDS" :key="k" class="kbx-chip" :class="{ on: shownLinks.includes(k) }" :aria-pressed="shownLinks.includes(k)"
+                    @click="toggle(shownLinks, k)"><i class="kbx-swatch" :style="{ background: LINK_COLOURS[k] }"></i>{{ l }}</button>
+          </div>
+          <span class="kbx-label">Documents</span>
+          <div class="kbx-chips">
+            <button v-for="[k, l] in NODE_KINDS" :key="k" class="kbx-chip" :class="{ on: shownKinds.includes(k) }" :aria-pressed="shownKinds.includes(k)"
+                    @click="toggle(shownKinds, k)"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[k] }"></i>{{ l }}</button>
+          </div>
+          <span class="kbx-label">Unlinked pairs</span>
+          <div class="kbx-pairs-row">
+            <button class="kbx-chip" :class="{ on: showUnlinked }" :aria-pressed="showUnlinked" title="Draw the pairs close in meaning that no link joins"
+                    @click="showUnlinked = !showUnlinked">{{ showUnlinked ? 'Shown' : 'Hidden' }}</button>
+            <input v-model.number="threshold" type="range" min="0.5" max="0.98" step="0.01" :disabled="!showUnlinked" aria-label="How alike">
+            <span class="kbx-value">≥ {{ Math.round(threshold * 100) }}%</span>
+          </div>
+        </div>
+        <p v-if="view === '3d'" class="kbx-hint">Drag to turn, scroll to come closer. F flies: WASD to move, the mouse to steer.{{ fly ? ' Flying: F to stop.' : '' }}</p>
       </details>
 
       <p v-if="building" class="kbx-building"><span class="kb-spinner"></span> {{ building }}</p>
@@ -453,23 +514,34 @@ const showPairs = ref(false)
 
       <aside v-if="selected" class="kbx-card">
         <button class="kbx-close" aria-label="Close" @click="selected = null">×</button>
-        <p class="kbx-kind"><i class="kbx-swatch" :style="{ background: colour(selected) }"></i>{{ kindName(selected.kind) }}<template v-if="selected.read === false"> · known by its abstract</template><template v-if="selected.year"> · {{ selected.year }}</template>
-          <template v-if="clusterName(selected.cluster)"> · {{ clusterName(selected.cluster) }}</template></p>
+        <p class="kbx-meta"><i class="kbx-swatch" :style="{ background: colour(selected) }"></i>{{ kindName(selected.kind) }}<template
+          v-if="selected.year"> · {{ selected.year }}</template><template v-if="selected.read === false"> · abstract only</template></p>
+        <p v-if="clusterName(selected.cluster)" class="kbx-cluster" :title="clusterName(selected.cluster)">{{ clusterName(selected.cluster) }}</p>
         <h3><a :href="selected.page" target="_blank" rel="noopener">{{ selected.title }}</a></h3>
         <div class="kbx-actions">
-          <button class="kbx-btn" @click="open(selected)">Open</button>
-          <button v-if="selected.kind !== 'finding' && selected.kind !== 'task'" class="kbx-btn" @click="copyCitation(selected)">Copy citation</button>
-          <button v-if="trail.length" class="kbx-btn" @click="back">Back</button>
+          <button class="kbx-btn kbx-small" @click="open(selected)">Open</button>
+          <button v-if="selected.kind !== 'finding' && selected.kind !== 'task'" class="kbx-btn kbx-small" @click="copyCitation(selected)">Copy citation</button>
+          <button v-if="trail.length" class="kbx-btn kbx-small" @click="back">Back</button>
         </div>
         <template v-if="linkedSelected.length">
           <h4>Linked</h4>
-          <ul><li v-for="l in linkedSelected" :key="l.node.id + l.kind"><a href="#" @click.prevent="go(l.node)">{{ l.node.title }}</a>
-            <span class="kb-dim"> {{ l.out ? l.kind : `${l.kind} it` }}</span></li></ul>
+          <ul class="kbx-list">
+            <li v-for="l in linkedSelected" :key="l.node.id + l.kind">
+              <i class="kbx-swatch" :style="{ background: KIND_COLOURS[l.node.kind] ?? '#999' }"></i>
+              <a href="#" :title="l.node.title" @click.prevent="go(l.node)">{{ l.node.title }}</a>
+              <span class="kbx-aside">{{ relation(l.kind, l.out) }}</span>
+            </li>
+          </ul>
         </template>
         <template v-if="nearSelected.length">
           <h4>Nearest in meaning</h4>
-          <ul><li v-for="x in nearSelected" :key="x.node.id"><a href="#" @click.prevent="go(x.node)">{{ x.node.title }}</a>
-            <span class="kb-dim"> {{ Math.round(x.similarity * 100) }}%</span><span v-if="!x.linked" class="kbx-new">not linked</span></li></ul>
+          <ul class="kbx-list">
+            <li v-for="x in nearSelected" :key="x.node.id">
+              <i class="kbx-swatch" :style="{ background: KIND_COLOURS[x.node.kind] ?? '#999' }"></i>
+              <a href="#" :title="x.node.title" @click.prevent="go(x.node)">{{ x.node.title }}</a>
+              <span class="kbx-aside"><span v-if="x.linked" class="kbx-tag">linked</span>{{ Math.round(x.similarity * 100) }}%</span>
+            </li>
+          </ul>
         </template>
       </aside>
 
@@ -512,7 +584,24 @@ const showPairs = ref(false)
 .kbx-btn.on { background: var(--vp-c-brand-soft); }
 .kbx-settings { position: absolute; top: 52px; left: 10px; max-width: 34rem; background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider);
                 border-radius: 8px; padding: 4px 10px; font-size: 13px; }
+.kbx-settings[open] { padding: 6px 14px 12px; }
 .kbx-settings summary { cursor: pointer; color: var(--vp-c-text-2); }
+.kbx-grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; align-items: start; margin-top: 10px; font-size: 13px; }
+.kbx-label { color: var(--vp-c-text-2); padding-top: 3px; white-space: nowrap; }
+.kbx-seg-small button { padding: 2px 10px; font-size: 12px; }
+.kbx-legend { display: flex; gap: 12px; margin-top: 6px; font-size: 12px; color: var(--vp-c-text-2); }
+.kbx-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.kbx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kbx-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; font-size: 12px; border-radius: 999px;
+            border: 1px solid var(--vp-c-divider); color: var(--vp-c-text-3); background: transparent; transition: background 0.15s, color 0.15s; }
+.kbx-chip .kbx-swatch { opacity: 0.35; }
+.kbx-chip.on { color: var(--vp-c-text-1); background: var(--vp-c-default-soft); border-color: transparent; }
+.kbx-chip.on .kbx-swatch { opacity: 1; }
+.kbx-pairs-row { display: flex; align-items: center; gap: 10px; }
+.kbx-pairs-row input[type=range] { flex: 1; min-width: 6rem; accent-color: var(--vp-c-brand-1); }
+.kbx-pairs-row input:disabled { opacity: 0.4; }
+.kbx-value { font-size: 12px; color: var(--vp-c-text-2); font-variant-numeric: tabular-nums; min-width: 3.2rem; }
+.kbx-hint { margin: 10px 0 0; font-size: 12px; color: var(--vp-c-text-3); }
 .kbx-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin: 6px 0; }
 .kbx-row > span { color: var(--vp-c-text-2); min-width: 5.5rem; }
 .kbx-row label { display: inline-flex; align-items: center; gap: 4px; }
@@ -525,13 +614,24 @@ const showPairs = ref(false)
                         background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); border-radius: 10px; padding: 10px 14px; font-size: 13px;
                         box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); }
 .kbx-pairs { right: auto; left: 10px; top: auto; bottom: 46px; max-height: 45%; }
-.kbx-card h3 { margin: 4px 0 8px; font-size: 16px; line-height: 1.35; }
-.kbx-card h4, .kbx-pairs h4 { margin: 10px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-2); }
+.kbx-card h3 { margin: 6px 0 10px; font-size: 16px; line-height: 1.35; padding-right: 1.2rem; }
+.kbx-card h3 a { color: var(--vp-c-text-1); text-decoration: none; }
+.kbx-card h3 a:hover { color: var(--vp-c-brand-1); }
+.kbx-meta { margin: 0; font-size: 12px; color: var(--vp-c-text-2); display: flex; align-items: center; gap: 6px; padding-right: 1.2rem; }
+.kbx-cluster { margin: 2px 0 0; font-size: 12px; color: var(--vp-c-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kbx-small { padding: 2px 9px; font-size: 12px; border-radius: 6px; }
+.kbx-list { list-style: none; padding: 0 !important; margin: 0; }
+.kbx-list li { display: grid; grid-template-columns: 9px 1fr auto; align-items: baseline; column-gap: 8px; margin: 0 !important;
+               padding: 4px 0; font-size: 13px; line-height: 1.35; border-bottom: 1px solid var(--vp-c-divider); }
+.kbx-list li:last-child { border-bottom: 0; }
+.kbx-list a { color: var(--vp-c-text-1); text-decoration: none; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kbx-list a:hover { color: var(--vp-c-brand-1); }
+.kbx-aside { font-size: 12px; color: var(--vp-c-text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kbx-tag { margin-right: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--vp-c-divider); color: var(--vp-c-text-3); }
+.kbx-card h4, .kbx-pairs h4 { margin: 14px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-2); }
 .kbx-card ul, .kbx-pairs ul { padding-left: 1rem; margin: 0; }
 .kbx-card li, .kbx-pairs li { margin: 3px 0; }
-.kbx-kind { color: var(--vp-c-text-2); margin: 0; }
-.kbx-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.kbx-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
 .kbx-close { position: absolute; top: 4px; right: 8px; font-size: 18px; color: var(--vp-c-text-2); }
-.kbx-new { margin-left: 6px; font-size: 11px; padding: 0 5px; border-radius: 4px; background: var(--vp-c-brand-soft); color: var(--vp-c-text-1); }
 :deep(.kbx-tip) { font: 12px system-ui, sans-serif; max-width: 22rem; }
 </style>
