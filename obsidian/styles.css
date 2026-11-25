@@ -18,6 +18,8 @@
   border-radius: var(--radius-m); padding: 0.4rem 0.75rem 0.6rem; background: var(--background-primary-alt); }
 .zemi-block-head { display: flex; align-items: center; gap: 0.45rem; font-size: var(--font-ui-small); margin-bottom: 0.35rem; }
 .zemi-block-icon { display: inline-flex; color: var(--interactive-accent); }
+.zemi-block-icon.is-link { cursor: pointer; background-image: none; padding: 0; }
+.zemi-block-icon.is-link:hover { color: var(--interactive-accent-hover); }
 .zemi-block-icon svg { width: 15px; height: 15px; }
 .zemi-block-title { font-weight: 600; color: var(--text-normal); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zemi-block-info { margin-left: auto; color: var(--text-muted); white-space: nowrap; display: inline-flex; align-items: center; gap: 0.3rem; }
@@ -42,11 +44,12 @@
 .zemi-meter.is-small { width: 2.5rem; }
 .zemi-excerpt { font-size: var(--font-ui-small); color: var(--text-muted); margin-top: 0.2rem; line-height: 1.4; }
 .zemi-excerpt mark { background: var(--text-highlight-bg); color: var(--text-normal); border-radius: 2px; padding: 0 1px; }
-.zemi-why { position: absolute; z-index: 20; left: 0; top: 100%; min-width: 18rem; max-width: 30rem; padding: 0.5rem 0.7rem;
+.zemi-why { position: fixed; z-index: var(--layer-tooltip, 60); min-width: 18rem; max-width: min(30rem, calc(100vw - 16px)); padding: 0.5rem 0.7rem;
+  pointer-events: none;
   background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m);
   box-shadow: var(--shadow-s); font-size: var(--font-ui-smaller);
   visibility: hidden; opacity: 0; transition: opacity 0.12s, visibility 0s linear 0.12s; }
-.zemi-hit:hover > .zemi-why { visibility: visible; opacity: 1; transition-delay: 0.35s; }
+.zemi-why.is-shown { visibility: visible; opacity: 1; transition: opacity 0.12s; }
 .zemi-why-head { display: flex; align-items: center; gap: 0.4rem; font-weight: 600; }
 .zemi-why-section { margin-top: 0.4rem; font-weight: 600; color: var(--text-normal); }
 .zemi-why-label { margin-top: 0.45rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.85em; }

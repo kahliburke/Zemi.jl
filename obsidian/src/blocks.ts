@@ -42,8 +42,9 @@ function heading(kind: string, f: Map<string, string>): string {
   return `${kind === 'tasks' ? 'Tasks' : 'Findings'}${project ? ' · ' + project : ''}${filters ? ` (${filters})` : ''}`
 }
 
-/** The part of a block a drawing fills: its `body`, and `info`, beside its heading, said when done. */
-type Parts = { body: HTMLElement; info: (text: string) => void }
+/** The part of a block a drawing fills: its `body`; `info`, beside its heading, said when done; `open`,
+ *  where its icon links to (the same in Zemi); and its hover `cards`, let go of when it is drawn again. */
+type Parts = { body: HTMLElement; info: (text: string) => void; open: (href: string, label: string) => void; cards: HTMLElement[] }
 
 export async function drawBlock(plugin: ZemiPlugin, source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) {
   const child = new MarkdownRenderChild(el)
@@ -53,14 +54,19 @@ export async function drawBlock(plugin: ZemiPlugin, source: string, el: HTMLElem
   const kind = BLOCK_KINDS.find(k => f.has(k))
   if (!kind) { el.createEl('p', { cls: 'zemi-dim', text: 'A zemi block says what it shows: search, cited, tasks or findings.' }); return }
   const head = el.createDiv({ cls: 'zemi-block-head' })
-  setIcon(head.createSpan({ cls: 'zemi-block-icon' }), ICONS[kind])
+  const icon = head.createEl('a', { cls: 'zemi-block-icon' })
+  setIcon(icon, ICONS[kind])
   head.createSpan({ cls: 'zemi-block-title', text: heading(kind, f) })
   const status = head.createSpan({ cls: 'zemi-block-info' })
   const again = head.createEl('button', { cls: 'clickable-icon zemi-block-again', attr: { 'aria-label': 'Ask Zemi again' } })
   setIcon(again, 'refresh-cw')
   const body = el.createDiv({ cls: 'zemi-block-body' })
   const say = (text: string) => body.createEl('p', { cls: 'zemi-dim', text })
+  const cards: HTMLElement[] = []
+  const letGo = () => { cards.forEach(c => c.remove()); cards.length = 0 }
+  child.register(letGo)
   const run = async () => {
+    letGo()
     body.empty()
     status.empty()
     status.createSpan({ cls: 'zemi-spinner' })
@@ -68,7 +74,11 @@ export async function drawBlock(plugin: ZemiPlugin, source: string, el: HTMLElem
     again.disabled = true
     el.addClass('is-loading')
     skeleton(body, Math.min(limitOf(f, kind === 'search' ? 5 : 3), 5))
-    const parts: Parts = { body, info: text => status.setText(text) }
+    const parts: Parts = { body, info: text => status.setText(text), open: (href, label) => {
+      icon.setAttr('href', href)
+      icon.setAttr('aria-label', label)
+      icon.addClass('external-link', 'is-link')
+    }, cards }
     try {
       if (kind === 'search') await drawSearch(plugin, parts, f)
       else if (kind === 'cited') await drawCited(plugin, parts, ctx, child)
@@ -129,10 +139,33 @@ function excerpt(el: HTMLElement, text: string, words: string[], n = 220) {
 
 type Evidence = { ranking: string; ranking_label: string; rank: number; matched: string; contribution: number }
 
+const HOVER_MS = 350
+
+/**
+ * Show a card beside `target` while the pointer rests on it, drawn by `draw` the first time: in the
+ * document's body, so the note's layout does not cut it off, below the target or above where there is
+ * no room below, and kept within the window.
+ */
+function hoverCard(target: HTMLElement, cards: HTMLElement[], draw: (card: HTMLElement) => void) {
+  let card: HTMLElement | null = null
+  let timer: number | undefined
+  const hide = () => { window.clearTimeout(timer); card?.removeClass('is-shown') }
+  const show = () => {
+    if (!card || !card.isConnected) { card = document.body.createDiv({ cls: 'zemi-why', attr: { role: 'tooltip' } }); cards.push(card); draw(card) }
+    const r = target.getBoundingClientRect(), gap = 6
+    card.addClass('is-shown')
+    const w = card.offsetWidth, h = card.offsetHeight
+    const below = r.bottom + gap + h <= window.innerHeight || r.top - gap - h < 0
+    card.style.top = `${below ? r.bottom + gap : r.top - gap - h}px`
+    card.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`
+  }
+  target.addEventListener('mouseenter', () => { window.clearTimeout(timer); timer = window.setTimeout(show, HOVER_MS) })
+  target.addEventListener('mouseleave', hide)
+}
+
 /** A hit's card, shown on hover: its strength, the best passage with the words searched for marked,
  *  and why it is where it is: each ranking that found it, its place there, what it matched and its share. */
-function hitCard(li: HTMLElement, h: any, place: number, words: string[]) {
-  const card = li.createDiv({ cls: 'zemi-why', attr: { role: 'tooltip' } })
+function hitCard(card: HTMLElement, h: any, place: number, words: string[]) {
   const strength = h.score && h.max_score ? Math.round(100 * h.score / h.max_score) : 0
   const head = card.createDiv({ cls: 'zemi-why-head' })
   head.createSpan({ text: `#${place}` })
@@ -158,11 +191,12 @@ function hitCard(li: HTMLElement, h: any, place: number, words: string[]) {
   }
 }
 
-async function drawSearch(plugin: ZemiPlugin, { body, info }: Parts, f: Map<string, string>) {
+async function drawSearch(plugin: ZemiPlugin, { body, info, open, cards }: Parts, f: Map<string, string>) {
   const q = f.get('search') ?? ''
   if (!q) { ready(body).createEl('p', { cls: 'zemi-dim', text: 'Search for what? Give words after search:' }); info(''); return }
   const got = await plugin.zemi.get(`/api/search?q=${encodeURIComponent(q)}&limit=${limitOf(f, 8)}`)
   const hits: any[] = got?.hits ?? []
+  if (got?.link) open(got.link, 'Search in Zemi')
   info([plural(hits.length, 'result'), typeof got?.seconds === 'number' ? `${got.seconds.toFixed(2)} s` : ''].filter(Boolean).join(' · '))
   ready(body)
   if (!hits.length) { body.createEl('p', { cls: 'zemi-dim', text: 'Nothing in Zemi for these words.' }); return }
@@ -177,7 +211,7 @@ async function drawSearch(plugin: ZemiPlugin, { body, info }: Parts, f: Map<stri
     if (line) li.createSpan({ cls: 'zemi-dim', text: ` ${line}` })
     const b = li.createEl('button', { text: 'cite', cls: 'zemi-small', attr: { 'aria-label': 'Insert its citation where the cursor is' } })
     b.onclick = () => plugin.insertCitation(h.id)
-    hitCard(li, h, i + 1, words)
+    hoverCard(li, cards, card => hitCard(card, h, i + 1, words))
   })
 }
 
@@ -211,7 +245,7 @@ async function drawCited(plugin: ZemiPlugin, { body, info }: Parts, ctx: Markdow
   if (missing.length) body.createEl('p', { cls: 'zemi-dim', text: `Not in Zemi: ${missing.map(k => '@' + k).join(', ')}` })
 }
 
-async function drawTasks(plugin: ZemiPlugin, { body, info }: Parts, f: Map<string, string>) {
+async function drawTasks(plugin: ZemiPlugin, { body, info, open }: Parts, f: Map<string, string>) {
   const project = (f.get('tasks') ?? '').toUpperCase()
   if (!project) { ready(body).createEl('p', { cls: 'zemi-dim', text: 'Which project? Give its key after tasks:' }); info(''); return }
   const q = new URLSearchParams({ project, limit: String(limitOf(f, 50)) })
@@ -219,6 +253,8 @@ async function drawTasks(plugin: ZemiPlugin, { body, info }: Parts, f: Map<strin
   if (/^(yes|true|1)$/i.test(f.get('all') ?? '')) q.set('all', '1')
   const tasks: any[] = (await plugin.zemi.get(`/api/tasks?${q}`)) ?? []
   info(plural(tasks.length, 'task'))
+  const board = tasks.find(t => t.page)?.page
+  if (board) open(board.replace(/#.*$/, `#${project}`), 'Open the board in Zemi')
   if (!tasks.length) { ready(body).createEl('p', { cls: 'zemi-dim', text: `No tasks in ${project} here.` }); return }
   const list = ready(body).createEl('ul', { cls: 'zemi-list zemi-tasks' })
   for (const t of tasks) {

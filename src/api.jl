@@ -198,7 +198,8 @@ route!("GET", "/api/status") do c
     merge(status_json(c.kb), Dict("me" => me_json(c.kb, c.caller), "build" => SITE.id, "building" => building))
 end
 
-# Hybrid search: papers with their best passages, and the findings of the projects the caller sees.
+# Hybrid search: papers with their best passages, and the findings of the projects the caller sees,
+# with the address of the site's search page for the same query (`link`).
 # `?layers=a,b`, `all` or `none` and `?keyword=0|1` default to the config's; `?kinds=paper,code,record`
 # finds only those, and `finding` among them the findings (see `search_kinds`).
 route!("GET", "/api/search") do c
@@ -214,7 +215,9 @@ route!("GET", "/api/search") do c
     t = @elapsed hits = want.documents ? search(kb, q; limit, layers, keyword, want.kinds, except = unfound_documents(kb, c.caller)) : []
     found = want.findings && can(c.caller, "tasks.view") ?
         search_findings(kb, q; projects = visible_projects(kb, c.caller), limit = want.documents ? 5 : 3limit) : NamedTuple[]
+    page = site_link(kb.config, "generated/kb/index")
     Dict("query" => q, "seconds" => t, "k" => kb.config.rrf_k, "hits" => [hit_json(kb, h) for h in hits],
+         "link" => isempty(page) ? "" : page * "?q=" * HTTP.escapeuri(q),
          "findings" => Any[Dict(pairs(f)) for f in found])
 end
 
