@@ -111,7 +111,7 @@ function landscape!(kb::KB; force::Bool = false, progress = msg -> nothing, canc
                 "focus_areas" => [Dict("name" => f.name, "description" => f.description) for f in c.group.focus_areas],
                 "clusters" => clusters, "papers" => papers)
     mkpath(c.data_dir)
-    write(landscape_path(c), JSON.json(data))
+    write_atomic(landscape_path(c), JSON.json(data))
     return (; data, changed = true)
 end
 

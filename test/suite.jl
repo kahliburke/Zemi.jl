@@ -2892,6 +2892,14 @@ end
         end
         @test all(length(unique(m["docs"][id]["c"] for id in keys(topic_of) if topic_of[id] == t)) == 1 for t in topics)
         @test !K.explore_map!(kb).changed && !K.explore_stale(kb)
+        # Without a landscape, clusters of the map's own, labelled by their titles' words.
+        mv(K.landscape_path(c), K.landscape_path(c) * ".kept")
+        @test K.explore_stale(kb)
+        own = K.explore_map!(kb).data
+        @test length(own["clusters"]) >= 2 && all(cl -> !isempty(cl["name"]) && !startswith(cl["name"], "Group "), own["clusters"])
+        @test all(length(unique(own["docs"][id]["c"] for id in keys(topic_of) if topic_of[id] == t)) == 1 for t in topics)
+        mv(K.landscape_path(c) * ".kept", K.landscape_path(c))
+        @test K.explore_map!(kb).changed && !K.explore_stale(kb)
         # Each cluster is one topic, named by the namer, and each paper is nearest its own topic's area.
         for cl in d["clusters"]
             @test length(unique(topic_of[p["id"]] for p in d["papers"] if p["cluster"] == cl["id"])) == 1

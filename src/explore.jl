@@ -99,7 +99,7 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 1
+const EXPLORE_VERSION = 2
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -112,8 +112,19 @@ const EXPLORE_LAYOUT_LIMIT = 4000
 
 explore_path(c::Config) = joinpath(c.data_dir, "explore.json")
 
-"The map last made (see [`explore_map!`](@ref)), or `nothing`."
-read_explore(c::Config) = (p = explore_path(c); isfile(p) ? JSON.parsefile(p) : nothing)
+const EXPLORE_READ = Ref{Any}(nothing)            # (path, mtime, map): the map last read
+
+"The map last made (see [`explore_map!`](@ref)), or `nothing`; read again once its file changes."
+function read_explore(c::Config)
+    p = explore_path(c)
+    isfile(p) || return nothing
+    t = mtime(p)
+    last = EXPLORE_READ[]
+    last !== nothing && last[1] == p && last[2] == t && return last[3]
+    m = JSON.parsefile(p)
+    EXPLORE_READ[] = (p, t, m)
+    return m
+end
 
 "The documents with a vector in layer `l`, whatever their access: `(; id, point_id, text_sha, title, access)`."
 explore_rows(kb::KB, l) = [r for r in query(kb, """
@@ -171,7 +182,8 @@ Make the map of every document with a vector in the landscape's layer (see [`lan
 whoever may see it: each one's nearest documents, its position on a 2D map and in a 3D space (t-SNE,
 the most linked first where there are more than `EXPLORE_LAYOUT_LIMIT`), and its cluster. The clusters
 are the landscape's, named from documents every reader sees; a document the landscape leaves out joins
-the cluster whose centre is nearest. Without a landscape there is one cluster. Saved as `explore.json`
+the cluster whose centre is nearest. Without a landscape the map makes its own, labelled by the words
+of the open documents' titles. Saved as `explore.json`
 in the data directory; returns `(; data, changed)`, or `nothing` with fewer than three documents.
 Nothing is made again while the vectors and clusters are as they were.
 """
@@ -237,7 +249,16 @@ function explore_map!(kb::KB; force::Bool = false, progress = msg -> nothing, ca
                         for (j, cl) in enumerate(named)]
         end
     end
-    isempty(clusters) && (clusters = [Dict("id" => 1, "name" => "", "description" => "")])
+    # With no landscape, clusters of its own, labelled by the words of the titles every reader sees.
+    if isempty(clusters)
+        k = c.landscape_clusters > 0 ? c.landscape_clusters : clamp(round(Int, sqrt(n / 4)), 2, 16)
+        assign, _ = spherical_kmeans(X, k)
+        open_titles = [coalesce(r.title, "") for r in rows if coalesce(r.access, "open") == "open"]
+        clusters = map(1:maximum(assign)) do j
+            titles = [coalesce(rows[i].title, "") for i in 1:n if assign[i] == j && coalesce(rows[i].access, "open") == "open"]
+            Dict("id" => j, "name" => isempty(titles) ? "" : keyword_label(titles, open_titles), "description" => "")
+        end
+    end
 
     r4(x) = round(x; digits = 4)
     docs = Dict(r.id => Dict("x" => r4.(pos2[i, :]), "p" => r4.(pos3[i, :]), "c" => assign[i],
@@ -246,7 +267,7 @@ function explore_map!(kb::KB; force::Bool = false, progress = msg -> nothing, ca
     data = Dict("version" => EXPLORE_VERSION, "input_sha" => input_sha, "built_at" => now_iso(), "layer" => l.name,
                 "clusters" => clusters, "docs" => docs)
     mkpath(c.data_dir)
-    write(explore_path(c), JSON.json(data))
+    write_atomic(explore_path(c), JSON.json(data))
     return (; data, changed = true)
 end
 
