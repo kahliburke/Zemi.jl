@@ -353,9 +353,15 @@ async function draw() {
     graph.scene().fog = new fog(isDark.value ? 0x111116 : 0xfafafa, 0.00035)
     for (const c of clusterCentres(nodes)) {
       if (!c.name) continue
-      const s = new SpriteText(c.name, 6, isDark.value ? 'rgba(235,235,245,0.8)' : 'rgba(30,30,40,0.75)')
+      const s = new SpriteText(c.name, 6, isDark.value ? 'rgba(240,240,248,0.95)' : 'rgba(25,25,35,0.95)')
       s.fontWeight = '600'
-      s.material.depthWrite = false                                            // names over the nodes, never cut by them
+      s.backgroundColor = isDark.value ? 'rgba(17,17,22,0.6)' : 'rgba(250,250,250,0.7)'
+      s.padding = [3, 1.5]
+      s.borderRadius = 3
+      // Over every node, whatever is nearer: drawn last, and not hidden by depth.
+      s.material.depthTest = false
+      s.material.depthWrite = false
+      s.renderOrder = 1000
       s.position.set(c.x, c.y, c.z)
       graph.scene().add(s)
     }
@@ -415,6 +421,8 @@ async function showNearest3d() {
     col.push(c.r, c.g, c.b, c.r, c.g, c.b)
     const label = new SpriteText(`${Math.round(lines.find(l => l.to === to)!.similarity * 100)}%`, 4,
                                  isDark.value ? 'rgba(230,230,245,0.9)' : 'rgba(40,40,60,0.9)')
+    label.material.depthTest = false
+    label.renderOrder = 1001
     label.position.set(to.x, to.y + 6, to.z)
     group.add(label)
   }
