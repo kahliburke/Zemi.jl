@@ -199,7 +199,7 @@ end
 
 # Hybrid search: papers with their best passages, and the findings of the projects the caller sees.
 # `?layers=a,b`, `all` or `none` and `?keyword=0|1` default to the config's; `?kinds=paper,code,record`
-# finds only those.
+# finds only those, and `finding` among them the findings (see `search_kinds`).
 route!("GET", "/api/search") do c
     kb, params = c.kb, c.params
     q = strip(get(params, "q", ""))
@@ -209,11 +209,10 @@ route!("GET", "/api/search") do c
         isempty(l) ? kb.config.search_layers : l == "all" ? nothing : l == "none" ? String[] : split_list(l)
     end
     keyword = get(params, "keyword", kb.config.search_keyword ? "1" : "0") in ("1", "true")
-    kinds = let k = get(params, "kinds", "")
-        isempty(k) ? nothing : split_list(k)
-    end
-    t = @elapsed hits = search(kb, q; limit, layers, keyword, kinds, except = unfound_documents(kb, c.caller))
-    found = can(c.caller, "tasks.view") ? search_findings(kb, q; projects = visible_projects(kb, c.caller), limit = 5) : NamedTuple[]
+    want = search_kinds(get(params, "kinds", ""))
+    t = @elapsed hits = want.documents ? search(kb, q; limit, layers, keyword, want.kinds, except = unfound_documents(kb, c.caller)) : []
+    found = want.findings && can(c.caller, "tasks.view") ?
+        search_findings(kb, q; projects = visible_projects(kb, c.caller), limit = want.documents ? 5 : 3limit) : NamedTuple[]
     Dict("query" => q, "seconds" => t, "k" => kb.config.rrf_k, "hits" => [hit_json(kb, h) for h in hits],
          "findings" => Any[Dict(pairs(f)) for f in found])
 end

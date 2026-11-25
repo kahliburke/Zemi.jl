@@ -2,8 +2,9 @@
   Search box for the knowledge base. With the knowledge base API running (`zemi` starts it), it
   runs the full hybrid search: keyword and every embedding layer, with the passages that matched.
   Without one (the site as deployed), it searches the titles, summaries and topics in papers.json,
-  which the docs build writes. Live, the projects' findings that match come first, and what is found
-  may be kept to papers, codebases, records or resources; a record says how it was made and when.
+  which the docs build writes. Live, the projects' findings that match follow the documents, and what
+  is found may be kept to papers, codebases, records, resources or findings; a record says how it was
+  made and when.
 -->
 <script setup lang="ts">
 import KBTitle from './KBTitle.vue'
@@ -27,7 +28,7 @@ type Hit = { id: string; slug: string; kind?: string; page?: string; title: stri
 const query = ref('')
 // The kinds of document found: every kind, or one (see src/kinds.jl).
 const KINDS = [{ id: '', label: 'everything' }, { id: 'paper', label: 'papers' }, { id: 'code', label: 'codebases' },
-               { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }]
+               { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }, { id: 'finding', label: 'findings' }]
 const kind = searchKind
 const choose = (k: string) => { searchKind.value = k }
 const hits = ref<Hit[]>([])
@@ -56,8 +57,6 @@ onMounted(() => { const asked = new URLSearchParams(location.search).get('q'); i
 // Words of two or more letters or digits, lower-cased.
 const words = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [])
 
-// A paper the query names by its arXiv id goes above the findings too, not only above the other papers.
-const idFirst = computed(() => hits.value.some(h => h.evidence?.[0]?.ranking === 'id'))
 function searchStatic(q: string): Hit[] {
   const terms = words(q)
   if (!terms.length) return []
@@ -150,15 +149,7 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
       </span>
     </div>
     <p v-if="error" class="kb-error">{{ error }}</p>
-    <div class="kb-results" :class="{ 'id-first': idFirst, stale: busy && !partial }">
-    <div v-if="found.length" class="kb-findings">
-      <div class="kb-findings-head">Findings</div>
-      <a v-for="f in found" :key="f.ref" class="kb-finding" :href="findingHref(f.ref)">
-        <span class="kb-finding-claim">{{ f.claim }}</span>
-        <span class="kb-meta"><span class="kb-finding-ref">{{ f.ref }}</span> · {{ f.status }}
-          <template v-if="!f.snippet.replace(/[\x01\x02]/g, '').startsWith(f.claim.slice(0, 40))"> · <span v-html="markedSnippet(f.snippet)"></span></template></span>
-      </a>
-    </div>
+    <div class="kb-results" :class="{ stale: busy && !partial }">
     <ol class="kb-hits">
       <li v-for="h in hits" :key="h.id" class="kb-hit">
         <a class="kb-title" :href="kbPage(h.page ?? `papers/${h.slug}`)"><KBTitle :text="h.title" /></a>
@@ -196,6 +187,14 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
         </div>
       </li>
     </ol>
+    <div v-if="found.length" class="kb-findings">
+      <div class="kb-findings-head">Findings</div>
+      <a v-for="f in found" :key="f.ref" class="kb-finding" :href="findingHref(f.ref)">
+        <span class="kb-finding-claim">{{ f.claim }}</span>
+        <span class="kb-meta"><span class="kb-finding-ref">{{ f.ref }}</span> · {{ f.status }}
+          <template v-if="!f.snippet.replace(/[\x01\x02]/g, '').startsWith(f.claim.slice(0, 40))"> · <span v-html="markedSnippet(f.snippet)"></span></template></span>
+      </a>
+    </div>
     </div>
     <p v-if="query.trim() && !busy && !hits.length && !found.length && !error" class="kb-note">Nothing found.</p>
   </div>
@@ -220,7 +219,6 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
 .kb-retry { margin-left: 0.4rem; }
 .kb-hits { list-style: none; padding: 0; margin: 1rem 0 0; }
 .kb-results { display: flex; flex-direction: column; }
-.kb-results.id-first .kb-findings { order: 1; }
 .kb-findings { margin: 1rem 0 0; padding: 0.5rem 0.8rem; border-radius: 10px; background: var(--vp-c-bg-soft); }
 .kb-findings-head { font-size: 0.72rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--vp-c-text-2); }
 .kb-finding { display: block; padding: 0.35rem 0; color: inherit; text-decoration: none; }

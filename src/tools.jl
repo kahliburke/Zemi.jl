@@ -73,7 +73,7 @@ end
 Search the knowledge base for papers relevant to `query`, a question or topic in plain
 language. Combines keyword (BM25) search over passages with vector search in the configured search
 layers, fused by reciprocal rank. Returns papers with their best-matching passages, each
-tagged with the section and pages it came from, after the projects' findings that match: what
+tagged with the section and pages it came from, then the projects' findings that match: what
 the group's work has concluded. Codebases and the group's records (notes of its meetings and
 other work, each saying how it was made) are found too.
 
@@ -84,7 +84,7 @@ other work, each saying how it was made) are found too.
 - `layers`: comma-separated layer names to use, or "all" (default: the layers built on the
   strongest model; see `status`).
 - `project`: a project's key, to search only the papers in its library, and its findings.
-- `kind`: "paper", "code" or "record" for only those (a comma list for several).
+- `kind`: "paper", "code", "record" or "finding" for only those (a comma list for several).
 """
 function search_tool(query::String; limit::Int = 8, category::String = "", since::Int = 0,
                      keyword::Bool = true, layers::String = "", project::String = "", kind::String = "")::String
@@ -92,17 +92,17 @@ function search_tool(query::String; limit::Int = 8, category::String = "", since
     only = isempty(project) ? nothing : library_papers(kb(), project)
     only !== nothing && isempty(only) && return "$(uppercase(strip(project)))'s library has no papers yet: see `library`."
     caller = tool_caller()
-    hits = search(kb(), query; limit, keyword, only, except = unfound_documents(kb(), caller),
-        kinds = isempty(kind) ? nothing : split_list(kind),
+    want = search_kinds(kind)
+    hits = !want.documents ? [] : search(kb(), query; limit, keyword, only, except = unfound_documents(kb(), caller), want.kinds,
         category = isempty(category) ? nothing : category,
         since = since == 0 ? nothing : since,
         layers = isempty(layers) ? kb().config.search_layers : layers == "all" ? nothing : split_list(layers))
     seen = isempty(project) ? visible_projects(kb(), caller) : (uppercase(strip(project)),)
-    found = can(caller, "tasks.view") ? search_findings(kb(), query; projects = seen, limit = 5) : NamedTuple[]
+    found = want.findings && can(caller, "tasks.view") ? search_findings(kb(), query; projects = seen, limit = want.documents ? 5 : limit) : NamedTuple[]
     isempty(hits) && isempty(found) && return "No matches for \"$query\"."
-    out = isempty(found) ? "" : "## Findings (read one with `finding`)\n\n" *
-        join(("- $(f.ref) [$(f.status)] $(f.claim)" for f in found), "\n") * "\n\n## Papers\n\n"
-    return out * (isempty(hits) ? "No papers match." : format_hits(hits))
+    findings = isempty(found) ? "" : "## Findings (read one with `finding`)\n\n" * join(("- $(f.ref) [$(f.status)] $(f.claim)" for f in found), "\n")
+    want.documents || return findings
+    return (isempty(hits) ? "No documents match." : format_hits(hits)) * (isempty(findings) ? "" : "\n\n" * findings)
 end
 tool!("search", search_tool; need = "read")
 

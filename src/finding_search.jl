@@ -3,6 +3,20 @@
 # task_vectors.jl). Findings belong to projects, so a search names which ones it may see.
 
 """
+    search_kinds(given) -> (; kinds, documents, findings)
+
+What a search asks for, from its comma-separated kinds (empty for everything): the kinds of
+document (`nothing` for every kind), whether to search documents at all, and whether findings,
+named as the kind `finding`.
+"""
+function search_kinds(given::AbstractString)
+    asked = split_list(given)
+    isempty(asked) && return (; kinds = nothing, documents = true, findings = true)
+    kinds = filter(!=("finding"), asked)
+    return (; kinds, documents = !isempty(kinds), findings = "finding" in asked)
+end
+
+"""
     search_findings(kb, q; projects = nothing, status = "", limit = 10) -> Vector{NamedTuple}
 
 Findings matching search `q`, best first: its words in a finding's claim or write-up, and by

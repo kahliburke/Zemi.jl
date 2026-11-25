@@ -5031,6 +5031,11 @@ end
         @test status == 200 && body["papers"] == 2 && body["processed"] == 1
         status, body = get("/api/search?q=reef+crest")
         @test status == 200 && body["hits"][1]["id"] == id && body["findings"] == []
+        # Findings are a kind of their own: asked for alone, no documents are searched; with other kinds, none.
+        @test K.search_kinds("") == (; kinds = nothing, documents = true, findings = true)
+        @test K.search_kinds("paper, code") == (; kinds = ["paper", "code"], documents = true, findings = false)
+        @test K.search_kinds("finding") == (; kinds = String[], documents = false, findings = true)
+        @test get("/api/search?q=reef+crest&kinds=finding")[2]["hits"] == []
         top = body["hits"][1]
         @test only(top["evidence"])["ranking"] == "keyword" && only(top["evidence"])["rank"] == 1
         @test top["score"] ≈ top["max_score"]                  # first in the only ranking there is

@@ -36,13 +36,13 @@ const months = computed(() => {
     .map(([m, ps]) => ({ id: m, title: monthName(m), papers: ps }))
 })
 
-// The recent documents of the kind the search is set to, while it is set to one.
+// The recent documents of the kind the search is set to, while it is set to one (findings are not documents).
 type Recent = { id: string; page: string; title: string; authors: string[]; kind: string; posted: string }
 const ofKind = ref<Recent[] | null>(null)
 let asked = 0
 watch(searchKind, async k => {
   const n = ++asked
-  if (!props.recent || !k) { ofKind.value = null; return }
+  if (!props.recent || !k || k === 'finding') { ofKind.value = null; return }
   try {
     const got = await getJSON(`/api/recent?kind=${encodeURIComponent(k)}&limit=${props.recent}`) as Recent[]
     if (n === asked) ofKind.value = got
