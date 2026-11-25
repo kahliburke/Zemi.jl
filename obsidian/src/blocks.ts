@@ -67,7 +67,7 @@ async function drawSearch(plugin: ZemiPlugin, el: HTMLElement, f: Map<string, st
   const list = el.createEl('ul', { cls: 'zemi-list' })
   for (const h of hits) {
     const li = list.createEl('li')
-    li.createEl('a', { text: h.title, href: `${plugin.zemi.site}/${h.page}`, cls: 'external-link' })
+    li.createEl('a', { text: h.title, href: h.link, cls: 'external-link' })
     const by = (h.authors ?? []).slice(0, 3).join(', ')
     const meta = [h.kind !== 'paper' ? h.kind : '', by, (h.published ?? '').slice(0, 4)].filter(Boolean).join(' · ')
     if (meta) li.createSpan({ cls: 'zemi-dim', text: ` ${meta}` })

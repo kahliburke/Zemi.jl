@@ -68,7 +68,8 @@ evidence_json(c::Config, es) = [Dict("ranking" => e.ranking, "ranking_label" => 
 
 # Where a hit and its passages are on the site, relative to the knowledge base's pages: its kind's
 # page (see `DocumentKind`), and each passage on its section's page for a kind whose sections have them;
-# and what a reader is told of where it came from (a record's label and date).
+# its page's whole address (`link`), for a client outside the site; and what a reader is told of where
+# it came from (a record's label and date).
 function hit_json(kb::KB, h::PaperHit)
     c = kb.config
     kind = something(document_kind(h.doc_id), PAPER)
@@ -76,7 +77,7 @@ function hit_json(kb::KB, h::PaperHit)
     r = record_row(kb, h.doc_id)
     Dict("id" => h.doc_id, "slug" => slug, "kind" => kind.name, "note" => document_note(kb, h.doc_id),
          "record" => r === nothing ? nothing : Dict("label" => r.label, "day" => record_day(r.happened), "source" => r.source),
-         "page" => kind.page(slug), "title" => h.title, "authors" => first(h.authors, 6),
+         "page" => kind.page(slug), "link" => document_link(c, h.doc_id), "title" => h.title, "authors" => first(h.authors, 6),
          "published" => h.published, "category" => h.category, "score" => h.score, "max_score" => h.max_score,
          "evidence" => evidence_json(c, h.evidence),
          "passages" => [Dict("section" => p.section, "page_start" => p.page_start, "page_end" => p.page_end,

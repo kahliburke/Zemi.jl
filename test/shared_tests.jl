@@ -565,6 +565,7 @@ end
         @test only(call(rowan, "GET", "/api/documents?state=code")[2]["documents"])["access"] == "projects"   # Manage lists every one
         hits(uid) = [h["id"] for h in call(uid, "GET", "/api/search?q=tide")[2]["hits"]]
         @test hits(ada) == [id] && isempty(hits(bea))
+        @test only(call(ada, "GET", "/api/search?q=tide")[2]["hits"])["link"] == K.document_link(kb.config, id)   # its page's whole address
         @test call(ada, "GET", "/api/paper/$id")[1] == 200 && call(bea, "GET", "/api/paper/$id")[1] == 404
         @test call(ada, "GET", "/api/paper-text?id=$id&section=1")[1] == 200 && call(bea, "GET", "/api/paper-text?id=$id&section=1")[1] == 404
         @test call(bea, "GET", "/api/similar/$id")[1] == 404 && call(bea, "GET", "/api/figures?id=$id")[1] == 404

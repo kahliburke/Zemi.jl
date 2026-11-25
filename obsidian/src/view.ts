@@ -80,7 +80,7 @@ export class ZemiView extends ItemView {
   private async searchNear(file: TFile): Promise<Near[]> {
     const text = (await this.app.vault.cachedRead(file)).replace(/^---[\s\S]*?\n---\n/, '').slice(0, 400)
     const got = await this.plugin.zemi.get(`/api/search?q=${encodeURIComponent(file.basename + ' ' + text)}&limit=6`)
-    return (got?.hits ?? []).map((h: any) => ({ doc_id: h.id, title: h.title, page: `${this.plugin.zemi.site}/${h.page}` }))
+    return (got?.hits ?? []).map((h: any) => ({ doc_id: h.id, title: h.title, page: h.link }))
   }
 
   private async drawPaper(root: HTMLElement, id: string, props: Record<string, any>) {
