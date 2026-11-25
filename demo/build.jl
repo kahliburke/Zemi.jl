@@ -13,6 +13,7 @@ base = get(ENV, "ZEMI_PAGES_BASE", "/Zemi.jl/")
 root = dirname(DEMO)
 
 # The demo, static: built at demo/ under the base, with a notice of what it leaves out.
+ENV["ZEMI_PUBLIC_DEMO"] = "1"
 ENV["ZEMI_SITE_NOTEBOOKS"] = "0"
 ENV["ZEMI_SITE_BASE"] = base * "demo/"
 ENV["ZEMI_SITE_NOTICE"] = "A static copy of the demo knowledge base: projects, findings, the tutor and " *

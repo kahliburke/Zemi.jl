@@ -119,9 +119,23 @@ window of its own, with the site's logo as its icon.
 """
 function web_manifest(c::Config)
     name = isempty(c.group.name) ? "Zemi" : c.group.name
-    return Dict("name" => name, "short_name" => first(name, 12), "start_url" => "/", "scope" => "/", "display" => "standalone",
+    return Dict("name" => name, "short_name" => first(name, 12), "start_url" => "./", "scope" => "./", "display" => "standalone",
                 "background_color" => "#1b1b1f", "theme_color" => "#1b1b1f",
-                "icons" => [Dict("src" => "/android-chrome-512x512.png", "sizes" => "256x256", "type" => "image/png", "purpose" => "any")])
+                "icons" => [Dict("src" => "zemi-icon-$n.png", "sizes" => "$(n)x$n", "type" => "image/png") for n in PWA_ICON_SIZES])
+end
+
+const PWA_ICON_SIZES = (192, 512)
+const PWA_ICON_PATHS = ["/zemi-icon-$n.png" for n in PWA_ICON_SIZES]
+
+"Publish the installation files alongside the pages, including for plain static hosts."
+function write_install_files(c::Config, dir::AbstractString)
+    mkpath(dir)
+    write(joinpath(dir, "manifest.webmanifest"), JSON.json(web_manifest(c)))
+    logo = square_image(PNGFiles.load(site_icon(c, "logo.png")))
+    for n in PWA_ICON_SIZES
+        write(joinpath(dir, "zemi-icon-$n.png"), png_bytes(resize_square(logo, n)))
+    end
+    cp(SERVICE_WORKER, joinpath(dir, "zemi-sw.js"); force = true)
 end
 
 "The head line naming the site's icon, for the service's own pages."

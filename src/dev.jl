@@ -33,8 +33,6 @@ function write_dev_pages!(kb::KB; api::AbstractString, all::Bool = true)
     t0 = time()
     run_make(kb.config, dir, Dict("ZEMI_SITE_BUILD" => joinpath(dir, "build"), "ZEMI_SITE_DOCS" => sources); api)
     link_sources!(docs, md)
-    # What a phone installs the site as, from the development server's origin as the pages are.
-    write(joinpath(md, "public", "manifest.webmanifest"), JSON.json(web_manifest(kb.config)))
     @info "[dev] Pages written in $(duration(time() - t0))"
 end
 

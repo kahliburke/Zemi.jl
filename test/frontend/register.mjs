@@ -2,6 +2,7 @@ import { register } from 'node:module'
 // What the site's build defines for the components (see docs/make.jl): the API's address, links
 // with `.html`, and pages made from a template, a kind of each shape.
 globalThis.__KB_API__ = ''
+globalThis.__KB_PUBLIC_DEMO__ = false
 globalThis.__KB_CLEAN_URLS__ = false
 globalThis.__KB_TEMPLATES__ = [
   { name: 'papers', folder: 'generated/kb/papers', template: 'generated/kb/templates/paper' },

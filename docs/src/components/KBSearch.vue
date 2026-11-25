@@ -9,7 +9,7 @@
 <script setup lang="ts">
 import KBTitle from './KBTitle.vue'
 import { ref, shallowRef, computed, onMounted, watch } from 'vue'
-import { mode, connect, getJSON, latest, isStale } from './kbApi'
+import { mode, publicDemo, connect, getJSON, latest, isStale } from './kbApi'
 import { loadPapers, type Paper } from './kbData'
 import { byline } from './kbFormat'
 import { current, vectorless, searchKind } from './kbSearchPrefs'
@@ -48,6 +48,7 @@ async function start(retry = false) {
   if (mode.value === 'static' && !papers.value.length) {
     try {
       papers.value = await loadPapers()
+      if (query.value) runSearch(query.value, 0)
     } catch { error.value = 'Paper list unavailable.' }
   }
 }
@@ -155,7 +156,7 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
     </div>
     <div class="kb-note">
       <span :class="['kb-mode', mode]">{{ mode === 'live' ? 'live' : mode === 'static' ? 'offline' : '…' }}</span>
-      {{ note }}<button type="button" v-if="mode === 'static'" class="kb-link kb-retry" @click="start(true)">retry</button>
+      {{ note }}<button type="button" v-if="mode === 'static' && !publicDemo" class="kb-link kb-retry" @click="start(true)">retry</button>
       <span v-if="busy && partial"> · keyword matches; searching by meaning…</span><span v-else-if="busy"> · searching…</span><span v-else-if="seconds !== null"> · {{ seconds.toFixed(2) }} s</span>
       <span v-if="mode === 'live'" class="kb-kinds">
         <button v-for="k in KINDS" :key="k.id" type="button" :class="['kb-link', { on: kind === k.id }]" @click="choose(k.id)">{{ k.label }}</button>

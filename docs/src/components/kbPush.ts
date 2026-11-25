@@ -2,6 +2,7 @@
 // on (the service worker, the browser's permission and its subscription, handed to the service) and
 // off. They need the service at the page's own address, which serves the service worker and the
 // manifest an iPhone installs the site with.
+import { withBase } from 'vitepress'
 import { api, getJSON, post } from './kbApi'
 
 export type PushSettings = { key: string; sections: string[]; all_sections: { id: string; label: string }[];
@@ -21,14 +22,6 @@ export const pushSupported = () => sameOrigin() && 'serviceWorker' in navigator 
 export const needsHomeScreen = () => typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent) &&
   !(window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone)
 
-// Name the manifest in the page, so the site can be installed (added to a phone's Home Screen).
-export function offerInstall() {
-  if (!sameOrigin() || document.querySelector('link[rel="manifest"]')) return
-  const l = document.createElement('link')
-  l.rel = 'manifest'; l.href = '/manifest.webmanifest'
-  document.head.appendChild(l)
-}
-
 const keyBytes = (b64url: string) => {
   const s = atob(b64url.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - b64url.length % 4) % 4))
   return Uint8Array.from(s, c => c.charCodeAt(0))
@@ -42,12 +35,12 @@ function deviceLabel() {
   return `${browser} on ${os}`
 }
 
-const registration = () => navigator.serviceWorker.register('/zemi-sw.js', { scope: '/' })
+export const registerWorker = () => navigator.serviceWorker.register(withBase('/zemi-sw.js'), { scope: withBase('/') })
 
 // This browser's subscription, if it has one.
 export async function currentSubscription(): Promise<PushSubscription | null> {
   if (!pushSupported()) return null
-  const r = await navigator.serviceWorker.getRegistration('/')
+  const r = await navigator.serviceWorker.getRegistration(withBase('/'))
   return r ? r.pushManager.getSubscription() : null
 }
 
@@ -57,7 +50,7 @@ export async function turnOn(settings: PushSettings): Promise<string> {
   const allowed = await Notification.requestPermission()
   if (allowed === 'default') throw new Error('The browser did not allow notifications: try again, and choose Allow.')
   if (allowed !== 'granted') throw new Error('This browser does not allow notifications from this site. Its settings for the site (in Safari, Settings → Websites → Notifications) can allow them.')
-  const reg = await registration()
+  const reg = await registerWorker()
   await navigator.serviceWorker.ready
   let sub = await reg.pushManager.getSubscription()
   // A subscription made for another key (the service's was replaced) is made again.

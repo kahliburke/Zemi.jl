@@ -74,6 +74,7 @@ jobs:
           echo "::warning::The screenshots could not all be uploaded to the docs-assets release"
           exit 1
       - run: julia --project=app demo/build.jl _site
+      - run: node test/browser/offline.mjs _site/demo
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

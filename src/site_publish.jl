@@ -87,19 +87,20 @@ function site_source_digest(c::Config; package::AbstractString = pkgdir(@__MODUL
 end
 
 """
-    site_packages!(dir) -> Bool
+    site_packages!(dir; public_demo = false) -> Bool
 
-Write the site's npm packages, those `docs/package.json` names less the browser tests', as
+Write the site's npm packages, omitting the browser tests and including Workbox for the public demo, as
 `package.json` in `dir`, beside a build folder: DocumenterVitepress installs from there, and with
 none, from its own template, which lacks the packages the components import. When they change, the
 packages installed there are removed, to be installed afresh. Returns whether they changed.
 """
-function site_packages!(dir::AbstractString)
+function site_packages!(dir::AbstractString; public_demo::Bool = false)
     docs = joinpath(pkgdir(@__MODULE__), "docs")
     mkpath(dir)
     realpath(dir) == realpath(docs) && return false
     p = JSON.parsefile(joinpath(docs, "package.json"))
     p["devDependencies"] = filter(((k, _),) -> k != "playwright-core", get(p, "devDependencies", Dict()))
+    public_demo || delete!(p["devDependencies"], "workbox-build")
     text = JSON.json(p, 2)
     target = joinpath(dir, "package.json")
     changed = !isfile(target) || read(target, String) != text

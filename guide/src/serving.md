@@ -57,6 +57,15 @@ cancel a job, interrupt or close an agent, rebuild the site, back up now and rel
     They are stored in the knowledge base's database and edited through the API. On a static copy
     their pages show only "Needs a running Zemi server."
 
+## Install Zemi
+
+Open the site over HTTPS (or on localhost) and choose **Install Zemi** on the home page.
+On iPhone or iPad, use Safari’s Share menu and **Add to Home Screen**. Notifications are optional.
+
+After the public demo has downloaded its reading files on the first visit, it can reopen offline,
+search papers by keyword, and display their summaries and sections. The personal and shared
+services need a connection to read the knowledge base or make changes.
+
 ## Static copy
 
 A built site is a folder any web server can host. Without the API, search uses `papers.json` and

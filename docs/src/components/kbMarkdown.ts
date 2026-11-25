@@ -7,6 +7,7 @@
 // files as links. Raw HTML in text is shown as text: only what Markdown itself makes is produced.
 // Loaded once, on first use, and shared.
 import { ref } from 'vue'
+import highlight from './kbHighlight.json' with { type: 'json' }
 import { withBase } from 'vitepress'
 import { refsToMarkdown, refsHtml } from './kbRefs'
 import { mediaUrl } from './kbApi'
@@ -21,8 +22,6 @@ import './kbMarkdown.css'
 export type Render = (text: string, options?: { refs?: boolean; inline?: boolean; titles?: ReadonlyMap<string, string> }) => string
 
 // Shiki's names for the languages highlighted; another name for one of them is mapped to it.
-const LANGS = ['julia', 'python', 'bash', 'shellscript', 'json', 'toml', 'yaml', 'c', 'cpp', 'fortran-free-form', 'matlab', 'latex', 'r',
-               'rust', 'javascript', 'typescript', 'vue', 'html', 'css', 'sql', 'diff', 'markdown']
 const ALIASES: Record<string, string> = { jl: 'julia', py: 'python', sh: 'bash', zsh: 'bash', shell: 'shellscript', js: 'javascript',
                                           ts: 'typescript', tex: 'latex', md: 'markdown', yml: 'yaml', fortran: 'fortran-free-form',
                                           f90: 'fortran-free-form' }
@@ -170,8 +169,8 @@ async function build(): Promise<Render> {
   const [{ default: MarkdownIt }, footnote, mj, shiki] = await Promise.all([
     import('markdown-it'), import('markdown-it-footnote'), import('@mdit/plugin-mathjax'), import('shiki')])
   // Only languages the bundle has: asking for another fails the whole highlighter.
-  const langs = LANGS.filter(l => l in shiki.bundledLanguages)
-  const highlighter = await shiki.createHighlighter({ themes: ['github-light', 'github-dark'], langs }).catch(e => {
+  const langs = highlight.languages.filter(l => l in shiki.bundledLanguages)
+  const highlighter = await shiki.createHighlighter({ themes: highlight.themes, langs }).catch(e => {
     console.warn('Code is shown without highlighting', e)
     return null
   })
