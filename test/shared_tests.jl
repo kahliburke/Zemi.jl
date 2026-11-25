@@ -2316,6 +2316,11 @@ end
     ck = ["Cookie" => "kb_session=$(K.start_session!(kb, ada, sh))"]
     page = String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri(P); headers = ck).body)
     @test occursin("keep your library in step with a folder", page) && occursin("prefers-color-scheme:light", page)
+    # A client asking for every scope listed, as claude.ai does, is asking for /mcp.
+    every = join(K.OAUTH_SCOPES, " ")
+    @test K.offered_scope(every, K.OAUTH_SCOPES) == "mcp"
+    @test K.offered_scope("mcp everything", K.OAUTH_SCOPES) === nothing
+    @test occursin("act as", String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P[1:6]; "scope" => every]); headers = ck).body))
     # What the browser comes back to, approved or not.
     @test occursin("zemi connect is approved", K.approval_page("https://kb.example.org", Dict("code" => "c", "state" => "s")))
     @test occursin("You denied it", K.approval_page("https://kb.example.org", Dict("error" => "access_denied")))

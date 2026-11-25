@@ -70,12 +70,15 @@ api_scope(scope::AbstractString) = (names = split(scope); !isempty(names) && all
     offered_scope(scope, scopes) -> Union{String,Nothing}
 
 `scope` as it is kept, if `scopes` offers it: one of them, or several of the API's (in a set order);
-`nothing` if not.
+`nothing` if not. Several including `mcp` are `mcp`, whose token has all the person's permissions,
+the API scopes' among them: clients such as claude.ai ask for every scope the server lists.
 """
 function offered_scope(scope::AbstractString, scopes)
     scope in scopes && return String(scope)
     names = unique(split(scope))
-    api_scope(scope) && all(in(scopes), names) || return nothing
+    !isempty(names) && all(in(scopes), names) || return nothing
+    "mcp" in names && return "mcp"
+    api_scope(scope) || return nothing
     return join(sort(names), " ")
 end
 
