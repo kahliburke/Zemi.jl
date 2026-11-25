@@ -839,8 +839,8 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
         ```
 
         ```@raw html
-        <div class="kb-wide">
-        <h1>Explore</h1>
+        <div class="kb-wide kbx-page">
+        <h1 class="visually-hidden">Explore</h1>
         <KBExplore />
         </div>
         ```

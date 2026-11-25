@@ -486,12 +486,22 @@ function restyle() {
 }
 
 const resize = () => { if (graph && box.value) graph.width(box.value.clientWidth).height(box.value.clientHeight) }
+// The explore frame filling the screen, and back.
+const frame = ref<HTMLDivElement | null>(null)
+const full = ref(false)
+function fullScreen() {
+  if (document.fullscreenElement) document.exitFullscreen()
+  else frame.value?.requestFullscreen?.()
+}
+const onFullScreen = () => { full.value = document.fullscreenElement === frame.value; nextTick(resize) }
 onLive(() => {
   load()
   addEventListener('resize', resize)
+  document.addEventListener('fullscreenchange', onFullScreen)
   addEventListener('keydown', key)
   return () => {
     removeEventListener('resize', resize); removeEventListener('keydown', key)
+    document.removeEventListener('fullscreenchange', onFullScreen)
     clearTimeout(jobTimer); stopDrift(); graph?._destructor?.()
   }
 })
@@ -606,7 +616,7 @@ const showPairs = ref(false)
 
 <template>
   <KBNeedsService>
-    <div class="kbx" :class="{ dark: isDark }">
+    <div ref="frame" class="kbx" :class="{ dark: isDark, full }">
       <div ref="box" class="kbx-canvas"></div>
       <p v-if="loading" class="kbx-status">Loading the map…</p>
       <p v-else-if="error" class="kbx-status kb-error">{{ error }}</p>
@@ -622,6 +632,8 @@ const showPairs = ref(false)
         <button class="kbx-btn" :class="{ on: showPairs }" title="Pairs of documents close in meaning that nothing links yet" @click="showPairs = !showPairs">Suggested links</button>
         <button v-if="data?.abstract_only" class="kbx-btn" :class="{ on: abstracts }" :title="`${data.abstract_only} papers not read in full, placed by their title and abstract`"
                 @click="abstracts = !abstracts">Include abstract only</button>
+        <button class="kbx-btn kbx-full" :title="full ? 'Leave full screen (Esc)' : 'Full screen'" :aria-label="full ? 'Leave full screen' : 'Full screen'"
+                @click="fullScreen">{{ full ? '⤡' : '⤢' }}</button>
       </div>
 
       <details class="kbx-settings">
@@ -736,9 +748,12 @@ const showPairs = ref(false)
 </template>
 
 <style scoped>
-.kbx { position: relative; height: calc(100vh - var(--vp-nav-height, 64px) - 120px); min-height: 480px; border-radius: 10px;
+:global(.kbx-page) { padding: 8px 12px !important; max-width: none !important; }
+.kbx { position: relative; height: calc(100vh - var(--vp-nav-height, 64px) - 16px); min-height: 480px; border-radius: 10px;
        overflow: hidden; border: 1px solid var(--vp-c-divider); background: #fafafa; }
 .kbx.dark { background: #111116; }
+.kbx.full { height: 100vh; border-radius: 0; border: 0; }
+.kbx-full { margin-left: auto; font-size: 15px; line-height: 1; padding: 4px 9px; }
 .kbx-canvas { position: absolute; inset: 0; }
 .kbx-status { position: absolute; top: 45%; width: 100%; text-align: center; color: var(--vp-c-text-2); }
 .kbx-bar { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
@@ -749,11 +764,11 @@ const showPairs = ref(false)
 .kbx-seg button.on { background: var(--vp-c-brand-soft); color: var(--vp-c-text-1); font-weight: 600; }
 .kbx-btn { padding: 4px 10px; font-size: 13px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg); color: var(--vp-c-text-1); }
 .kbx-btn.on { background: var(--vp-c-brand-soft); }
-.kbx-settings { position: absolute; top: 52px; left: 10px; max-width: 31rem; border: 1px solid var(--vp-c-divider);
+.kbx-settings { position: absolute; top: 52px; right: 10px; max-width: 31rem; border: 1px solid var(--vp-c-divider);
                 background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
                 border-radius: 8px; padding: 4px 10px; font-size: 12px; }
 .kbx-settings[open] { padding: 6px 14px 12px; }
-.kbx-settings summary { cursor: pointer; color: var(--vp-c-text-2); }
+.kbx-settings summary { cursor: pointer; color: var(--vp-c-text-2); text-align: right; }
 .kbx-grid { display: grid; grid-template-columns: auto 2.4rem 1fr; gap: 8px 8px; align-items: start; margin-top: 8px; font-size: 12px; }
 .kbx-wide { grid-column: 2 / -1; }
 .kbx-label { color: var(--vp-c-text-2); padding-top: 2px; white-space: nowrap; }
@@ -782,10 +797,10 @@ const showPairs = ref(false)
                 padding: 3px 10px; border-radius: 8px; border: 1px solid var(--vp-c-divider); display: flex; gap: 6px; align-items: center; }
 .kbx-said { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 13px; background: var(--vp-c-bg);
             padding: 3px 12px; border-radius: 8px; border: 1px solid var(--vp-c-divider); cursor: pointer; }
-.kbx-card, .kbx-pairs { position: absolute; top: 52px; right: 10px; width: min(24rem, 45%); max-height: calc(100% - 64px); overflow: auto;
+.kbx-card, .kbx-pairs { position: absolute; top: 52px; left: 10px; width: min(24rem, 45%); max-height: calc(100% - 64px); overflow: auto;
                         background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); border-radius: 10px; padding: 10px 14px; font-size: 13px;
                         box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); }
-.kbx-pairs { right: auto; left: 10px; top: auto; bottom: 46px; max-height: 45%; }
+.kbx-pairs { left: auto; right: 10px; top: auto; bottom: 46px; max-height: 45%; }
 .kbx-card h3 { margin: 6px 0 10px; font-size: 16px; line-height: 1.35; padding-right: 1.2rem; }
 .kbx-card h3 a { color: var(--vp-c-text-1); text-decoration: none; }
 .kbx-card h3 a:hover { color: var(--vp-c-brand-1); }
