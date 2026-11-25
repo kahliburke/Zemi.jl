@@ -363,7 +363,7 @@ async function draw() {
       s.material.depthWrite = false
       s.renderOrder = 1000
       s.position.set(c.x, c.y, c.z)
-      capHeight(s, 10, 15)
+      capHeight(s, 12, 20)
       graph.scene().add(s)
     }
     setTimeout(() => graph?.zoomToFit(800, 30), 300)
@@ -439,7 +439,7 @@ async function showNearest3d() {
     label.material.depthTest = false
     label.renderOrder = 1001
     label.position.set(to.x, to.y + 6, to.z)
-    capHeight(label, 9, 12)
+    capHeight(label, 10, 14)
     group.add(label)
   }
   const geometry = new three.BufferGeometry()
@@ -757,19 +757,29 @@ const showPairs = ref(false)
       <aside v-if="showPairs" class="kbx-pairs">
         <button class="kbx-close" aria-label="Close" @click="showPairs = false">×</button>
         <h4>Suggested links</h4>
-        <div class="kbx-row"><label><input v-model="scope" type="radio" value="all"> everywhere</label>
-          <label><input v-model="scope" type="radio" value="cluster" :disabled="!selected"> in this cluster</label>
-          <label title="Your notes and documents, and the shared ones close to them"><input v-model="scope" type="radio" value="own"> yours and the rest</label></div>
-        <p v-if="!pairs.length" class="kb-dim">None at {{ Math.round(threshold * 100) }}% alike or more.</p>
-        <ul>
+        <div class="kbx-seg kbx-seg-small kbx-scope" role="group" aria-label="Where">
+          <button :class="{ on: scope === 'all' }" @click="scope = 'all'">Everywhere</button>
+          <button :class="{ on: scope === 'cluster' }" :disabled="!selected" :title="selected ? '' : 'Select a document first'"
+                  @click="scope = 'cluster'">This cluster</button>
+          <button :class="{ on: scope === 'own' }" title="Your notes and documents, and the shared ones close to them"
+                  @click="scope = 'own'">Yours</button>
+        </div>
+        <p class="kbx-pairs-hint">Alike in meaning, {{ Math.round(threshold * 100) }}% or more, and not linked.</p>
+        <p v-if="!pairs.length" class="kbx-pairs-hint">None.</p>
+        <ul class="kbx-list kbx-pair-list">
           <li v-for="p in pairs" :key="p.a.id + p.b.id">
-            <a href="#" @click.prevent="goPair(p)">{{ p.a.title }}</a> <span class="kb-dim">and</span>
-            <a href="#" @click.prevent="go(p.b)">{{ p.b.title }}</a>
-            <span class="kb-dim"> {{ Math.round(p.similarity * 100) }}%</span>
-            <span v-if="p.a.kind === 'finding' && p.b.kind !== 'finding' && can('tasks.edit')"> · <a href="#" @click.prevent="addEvidence(p.a, p.b)">add as evidence</a></span>
-            <span v-else-if="p.b.kind === 'finding' && p.a.kind !== 'finding' && can('tasks.edit')"> · <a href="#" @click.prevent="addEvidence(p.b, p.a)">add as evidence</a></span>
-            <span v-else-if="p.a.kind === 'record' && p.b.kind === 'paper'"> · <a href="#" @click.prevent="copyCitation(p.b)">copy its citation</a></span>
-            <span v-else-if="p.b.kind === 'record' && p.a.kind === 'paper'"> · <a href="#" @click.prevent="copyCitation(p.a)">copy its citation</a></span>
+            <div class="kbx-pair">
+              <div class="kbx-pair-doc"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[p.a.kind] ?? '#999' }"></i>
+                <a href="#" :title="p.a.title" @click.prevent="goPair(p)">{{ p.a.title }}</a></div>
+              <div class="kbx-pair-doc"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[p.b.kind] ?? '#999' }"></i>
+                <a href="#" :title="p.b.title" @click.prevent="go(p.b)">{{ p.b.title }}</a></div>
+              <div v-if="(p.a.kind === 'finding') !== (p.b.kind === 'finding') && can('tasks.edit')" class="kbx-pair-act">
+                <a href="#" @click.prevent="p.a.kind === 'finding' ? addEvidence(p.a, p.b) : addEvidence(p.b, p.a)">Add as evidence</a></div>
+              <div v-else-if="(p.a.kind === 'record' && p.b.kind === 'paper') || (p.b.kind === 'record' && p.a.kind === 'paper')" class="kbx-pair-act">
+                <a href="#" @click.prevent="copyCitation(p.a.kind === 'paper' ? p.a : p.b)">Copy the paper's citation</a></div>
+            </div>
+            <span class="kbx-aside"><span class="kbx-bar-track"><span class="kbx-bar-fill"
+              :style="{ width: `${Math.max(4, Math.round(p.similarity * 100))}%` }"></span></span>{{ Math.round(p.similarity * 100) }}%</span>
           </li>
         </ul>
       </aside>
@@ -862,6 +872,15 @@ const showPairs = ref(false)
 .kbx-card h4, .kbx-pairs h4 { margin: 14px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-2); }
 .kbx-card ul, .kbx-pairs ul { padding-left: 1rem; margin: 0; }
 .kbx-card li, .kbx-pairs li { margin: 3px 0; }
+.kbx-scope { margin-top: 8px; }
+.kbx-scope button:disabled { opacity: 0.45; cursor: default; }
+.kbx-pairs-hint { margin: 8px 0 4px; font-size: 12px; color: var(--vp-c-text-3); }
+.kbx-pair-list li { grid-template-columns: 1fr auto; align-items: center; padding: 6px 0; }
+.kbx-pair { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.kbx-pair-doc { display: grid; grid-template-columns: 9px 1fr; align-items: baseline; column-gap: 8px; }
+.kbx-pair-doc a { -webkit-line-clamp: 1; }
+.kbx-pair-act { padding-left: 17px; font-size: 12px; }
+.kbx-pair-act a { color: var(--vp-c-brand-1) !important; }
 .kbx-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
 .kbx-close { position: absolute; top: 4px; right: 8px; font-size: 18px; color: var(--vp-c-text-2); }
 :deep(.kbx-tip) { font: 12px system-ui, sans-serif; max-width: 22rem; }
