@@ -222,6 +222,7 @@ function legendKey(n: Node) {
 const litRow = ref<string | null>(null)
 function goToRow(key: string) {
   if (litRow.value === key) { litRow.value = null; return }
+  stopDrift()                                    // or it selects the next document a moment later
   selected.value = null
   litRow.value = key
   const ns: GNode[] = (graph?.graphData().nodes ?? []).filter((n: GNode) => legendKey(n) === key && n.x !== undefined)
