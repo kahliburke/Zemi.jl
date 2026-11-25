@@ -6910,4 +6910,7 @@ end
     v = kaimon.GATE_SETUP_VERSION
     @test occursin("gate_setup_version = $v", bat) && occursin("\"gate_setup_version\": $v", sh)
     @test occursin("http://localhost:\$(\$kaimon.port)/mcp", bat) && occursin("http://localhost:\${port:-2828}/mcp", sh)
+    # A Kaimon that sets itself up is asked to, with the same model; the answers above are for older ones.
+    @test occursin("'kaimon --setup-defaults --embedding-model $(only(wanted))'", bat) &&
+          occursin("\"\$kaimon\" --setup-defaults --embedding-model $(only(wanted))", sh)
 end

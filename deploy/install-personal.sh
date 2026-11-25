@@ -140,33 +140,39 @@ installed+=("Kaimon" "Zemi")
 
 step "Kaimon settings"
 # The answers to Kaimon's first-run setup, for one person on their own machine: only this account's
-# programs reach it, with no keys. It searches code through Ollama and a Qdrant it runs.
-# Settings already there are left as they are.
-settings=${KAIMON_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/kaimon}/config.json
-if [ -f "$settings" ]; then echo "Found $settings"
+# programs reach it, with no keys; it searches code through Ollama, with the model Zemi uses, and a
+# Qdrant it runs; Claude Code reaches its tools, the knowledge base's among them. A Kaimon that sets
+# itself up so does it; an older one is set up here. Settings already there are left as they are.
+kaimon="$HOME/.julia/bin/kaimon"
+if "$kaimon" --help 2>/dev/null | grep -q -- --setup-defaults; then
+    "$kaimon" --setup-defaults --embedding-model qwen3-embedding:4b
 else
-    mkdir -p "$(dirname "$settings")"
-    # gate_setup_version: other Julia sessions are left alone.
-    printf '{\n  "mode": "lax",\n  "api_keys": [],\n  "allowed_ips": ["127.0.0.1", "::1"],\n  "port": 2828,\n  "created_at": %s,\n  "editor": "vscode",\n  "gate_setup_version": 1\n}\n' \
-        "$(date +%s)" > "$settings"
-    chmod 600 "$settings"
-    echo "Wrote $settings"
-fi
-# Code search through Ollama with the model Zemi uses, so one model serves both.
-search="$(dirname "$settings")/search.json"
-if [ -f "$search" ]; then echo "Found $search"
-else
-    printf '{\n  "version": 1,\n  "projects": {},\n  "embedding_model": "qwen3-embedding:4b",\n  "embedding": {"backend": "ollama"}\n}\n' > "$search"
-    echo "Wrote $search"
-fi
-# Qdrant, where Kaimon runs it from, installed as Kaimon installs it.
-julia --startup-file=no --project="$HOME/.julia/environments/apps/Kaimon" \
-    -e 'import Kaimon; Kaimon.managed_qdrant_installed() || run(Kaimon.qdrant_install_command())'
-# Claude Code reaches Kaimon's tools, and the knowledge base's among them, at Kaimon's address: with
-# no key while Kaimon takes none from this machine's programs.
-port=$(sed -n 's/^ *"port": *\([0-9]*\).*/\1/p' "$settings" | head -1)
-if grep -q '"mode": *"lax"' "$settings" && have claude && ! claude mcp get kaimon >/dev/null 2>&1; then
-    claude mcp add --scope user --transport http kaimon "http://localhost:${port:-2828}/mcp"
+    settings=${KAIMON_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/kaimon}/config.json
+    if [ -f "$settings" ]; then echo "Found $settings"
+    else
+        mkdir -p "$(dirname "$settings")"
+        # gate_setup_version: other Julia sessions are left alone.
+        printf '{\n  "mode": "lax",\n  "api_keys": [],\n  "allowed_ips": ["127.0.0.1", "::1"],\n  "port": 2828,\n  "created_at": %s,\n  "editor": "vscode",\n  "gate_setup_version": 1\n}\n' \
+            "$(date +%s)" > "$settings"
+        chmod 600 "$settings"
+        echo "Wrote $settings"
+    fi
+    # Code search through Ollama with the model Zemi uses, so one model serves both.
+    search="$(dirname "$settings")/search.json"
+    if [ -f "$search" ]; then echo "Found $search"
+    else
+        printf '{\n  "version": 1,\n  "projects": {},\n  "embedding_model": "qwen3-embedding:4b",\n  "embedding": {"backend": "ollama"}\n}\n' > "$search"
+        echo "Wrote $search"
+    fi
+    # Qdrant, where Kaimon runs it from, installed as Kaimon installs it.
+    julia --startup-file=no --project="$HOME/.julia/environments/apps/Kaimon" \
+        -e 'import Kaimon; Kaimon.managed_qdrant_installed() || run(Kaimon.qdrant_install_command())'
+    # Claude Code reaches Kaimon's tools, and the knowledge base's among them, at Kaimon's address: with
+    # no key while Kaimon takes none from this machine's programs.
+    port=$(sed -n 's/^ *"port": *\([0-9]*\).*/\1/p' "$settings" | head -1)
+    if grep -q '"mode": *"lax"' "$settings" && have claude && ! claude mcp get kaimon >/dev/null 2>&1; then
+        claude mcp add --scope user --transport http kaimon "http://localhost:${port:-2828}/mcp"
+    fi
 fi
 zemi kaimon
 

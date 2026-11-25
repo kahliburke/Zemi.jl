@@ -134,39 +134,46 @@ $Done += 'Kaimon', 'Zemi'
 
 Step 'Kaimon settings'
 # The answers to Kaimon's first-run setup, for one person on their own machine: only this account's
-# programs reach it, with no keys. It searches code through Ollama and a Qdrant it runs.
-# Settings already there are left as they are.
-$settings = Join-Path $env:APPDATA 'Kaimon\config.json'
-if (Test-Path $settings) { Write-Host "Found $settings" } else {
-    New-Item -ItemType Directory -Force (Split-Path $settings) | Out-Null
-    $json = [ordered]@{
-        mode = 'lax'; api_keys = @(); allowed_ips = @('127.0.0.1', '::1'); port = 2828
-        created_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); editor = 'vscode'
-        gate_setup_version = 1                               # other Julia sessions are left alone
-    } | ConvertTo-Json
-    [IO.File]::WriteAllText($settings, $json)                # UTF-8 without a byte order mark
-    Write-Host "Wrote $settings"
-}
-# Code search through Ollama with the model Zemi uses, so one model serves both.
-$search = Join-Path (Split-Path $settings) 'search.json'
-if (Test-Path $search) { Write-Host "Found $search" } else {
-    $json = [ordered]@{ version = 1; projects = @{}; embedding_model = 'qwen3-embedding:4b'; embedding = @{ backend = 'ollama' } } | ConvertTo-Json
-    [IO.File]::WriteAllText($search, $json)
-    Write-Host "Wrote $search"
-}
-# Qdrant, where Kaimon runs it from, installed as Kaimon installs it.
-$script = Join-Path $Work 'qdrant.jl'
-Set-Content $script 'import Kaimon; Kaimon.managed_qdrant_installed() || run(Kaimon.qdrant_install_command())'
-& julia --startup-file=no "--project=$(Join-Path $HOME '.julia\environments\apps\Kaimon')" $script
-if ($LASTEXITCODE -ne 0) { throw "Installing Qdrant for Kaimon failed" }
-# Claude Code reaches Kaimon's tools, and the knowledge base's among them, at Kaimon's address: with
-# no key while Kaimon takes none from this machine's programs.
-$kaimon = Get-Content -Raw $settings | ConvertFrom-Json
-if ($kaimon.mode -eq 'lax' -and (Have claude)) {
-    & cmd /c 'claude mcp get kaimon >nul 2>&1'
-    if ($LASTEXITCODE -ne 0) {
-        & cmd /c "claude mcp add --scope user --transport http kaimon http://localhost:$($kaimon.port)/mcp 2>&1"
-        if ($LASTEXITCODE -ne 0) { throw 'Connecting Claude Code to Kaimon failed' }
+# programs reach it, with no keys; it searches code through Ollama, with the model Zemi uses, and a
+# Qdrant it runs; Claude Code reaches its tools, the knowledge base's among them. A Kaimon that sets
+# itself up so does it; an older one is set up here. Settings already there are left as they are.
+$help = & cmd /c 'kaimon --help 2>&1' | Out-String
+if ($help -match '--setup-defaults') {
+    & cmd /c 'kaimon --setup-defaults --embedding-model qwen3-embedding:4b'
+    if ($LASTEXITCODE -ne 0) { throw 'Setting Kaimon up failed' }
+} else {
+    $settings = Join-Path $env:APPDATA 'Kaimon\config.json'
+    if (Test-Path $settings) { Write-Host "Found $settings" } else {
+        New-Item -ItemType Directory -Force (Split-Path $settings) | Out-Null
+        $json = [ordered]@{
+            mode = 'lax'; api_keys = @(); allowed_ips = @('127.0.0.1', '::1'); port = 2828
+            created_at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); editor = 'vscode'
+            gate_setup_version = 1                               # other Julia sessions are left alone
+        } | ConvertTo-Json
+        [IO.File]::WriteAllText($settings, $json)                # UTF-8 without a byte order mark
+        Write-Host "Wrote $settings"
+    }
+    # Code search through Ollama with the model Zemi uses, so one model serves both.
+    $search = Join-Path (Split-Path $settings) 'search.json'
+    if (Test-Path $search) { Write-Host "Found $search" } else {
+        $json = [ordered]@{ version = 1; projects = @{}; embedding_model = 'qwen3-embedding:4b'; embedding = @{ backend = 'ollama' } } | ConvertTo-Json
+        [IO.File]::WriteAllText($search, $json)
+        Write-Host "Wrote $search"
+    }
+    # Qdrant, where Kaimon runs it from, installed as Kaimon installs it.
+    $script = Join-Path $Work 'qdrant.jl'
+    Set-Content $script 'import Kaimon; Kaimon.managed_qdrant_installed() || run(Kaimon.qdrant_install_command())'
+    & julia --startup-file=no "--project=$(Join-Path $HOME '.julia\environments\apps\Kaimon')" $script
+    if ($LASTEXITCODE -ne 0) { throw "Installing Qdrant for Kaimon failed" }
+    # Claude Code reaches Kaimon's tools, and the knowledge base's among them, at Kaimon's address: with
+    # no key while Kaimon takes none from this machine's programs.
+    $kaimon = Get-Content -Raw $settings | ConvertFrom-Json
+    if ($kaimon.mode -eq 'lax' -and (Have claude)) {
+        & cmd /c 'claude mcp get kaimon >nul 2>&1'
+        if ($LASTEXITCODE -ne 0) {
+            & cmd /c "claude mcp add --scope user --transport http kaimon http://localhost:$($kaimon.port)/mcp 2>&1"
+            if ($LASTEXITCODE -ne 0) { throw 'Connecting Claude Code to Kaimon failed' }
+        }
     }
 }
 & zemi kaimon
