@@ -533,7 +533,8 @@ function explore_node(kb::KB, caller::Caller, id::AbstractString)
     wrote = [s for s in query(kb, """SELECT summarizer, text FROM summaries WHERE paper_id = ? AND unit_key LIKE 'p:%'
                                      ORDER BY created_at DESC""", (Int(r.id),))]
     want = kind_summarizer(kb.config, id)
-    pick = something(findfirst(s -> s.summarizer == want, wrote), isempty(wrote) ? nothing : 1)
+    pick = findfirst(s -> s.summarizer == want, wrote)
+    pick === nothing && !isempty(wrote) && (pick = 1)
     summary, topics = pick === nothing ? ("", String[]) : split_topics(String(wrote[pick].text))
     authors = try json_list(r.authors) catch; String[] end
     return Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "authors" => authors,
