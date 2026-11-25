@@ -2184,24 +2184,6 @@ end
     close(kb)
 end
 
-# One's library as `zemi connect` reaches it, answered in this process by the API itself.
-struct InProcessLibrary <: K.LibraryRemote
-    kb::Any
-    caller::Any
-end
-function library_call(r::InProcessLibrary, method, path; body = UInt8[], query = Pair{String,String}[])
-    target = "/api/library/files" * (isempty(path) ? "" : "/" * join(K.HTTP.escapeuri.(split(path, '/')), '/')) *
-             (isempty(query) ? "" : "?" * K.HTTP.escapeuri(query))
-    resp = K.handle(r.kb, K.HTTP.Request(method, target, [], body), r.caller)
-    resp.status < 300 || throw(K.Refusal(resp.status, String(resp.body)))
-    return resp.body
-end
-K.list_files(r::InProcessLibrary) = K.JSON.parse(String(library_call(r, "GET", "")))["files"]
-K.fetch_file(r::InProcessLibrary, path) = library_call(r, "GET", path)
-K.store_file!(r::InProcessLibrary, path, bytes; base, modified) =
-    K.JSON.parse(String(library_call(r, "PUT", path; body = bytes, query = ["base" => something(base, ""), "modified" => string(modified)])))
-K.remove_file!(r::InProcessLibrary, path; base) = library_call(r, "DELETE", path; query = ["base" => something(base, "")])
-
 @zset "a client connects to a knowledge base run for one person" begin
     HTTP = K.HTTP
     kb = open_kb(temp_config())
@@ -2326,7 +2308,7 @@ end
     mk(".zemi.toml", "skip = [\"Private\"]\n")
     mk("Private/Diary.md", "Not for the knowledge base.\n")                # never leaves this machine
     tidal = mk("Reading/Tidal mixing.md", "---\narxiv: \"2401.00001\"\n---\n# Tidal mixing\n\nStrongest at spring tide.\n")
-    remote = InProcessLibrary(kb, caller)
+    remote = K.InProcessLibrary(kb, caller)
     state = Dict{String,Any}()
     r = K.sync_folder!(remote, dir, "Notes", state)
     paths() = sort([f.path for f in K.library_files(kb, "people/$ada")])
@@ -2402,7 +2384,7 @@ end
     sh = kb.config.shared
     ada = K.sign_in!(kb, sh, "Campus", "u1"; email = "ada@x.org", verified = true, name = "Ada")
     K.set_roles!(kb, ada, ["Learner"])
-    remote = InProcessLibrary(kb, K.session_caller(kb, K.start_session!(kb, ada, sh)))
+    remote = K.InProcessLibrary(kb, K.session_caller(kb, K.start_session!(kb, ada, sh)))
     paths() = sort([f["path"] for f in K.list_files(remote)])
     K.READ_LIBRARIES[] = false
     home = mktempdir()
@@ -2503,6 +2485,48 @@ end
     end
 end
 
+
+@zset "the knowledge base run here syncs zemi connect's folders" begin
+    kb = open_kb(temp_config(; layers = Layer[]))
+    K.READ_LIBRARIES[] = false
+    home = mktempdir()
+    t = nothing
+    try
+        withenv("ZEMI_CONFIG" => joinpath(home, "config.toml"), "XDG_DATA_HOME" => joinpath(home, "data")) do
+            vault = mkpath(joinpath(home, "Vault"))
+            write(joinpath(vault, "Tides.md"), "Spring tides.\n")
+            K.add_folder!("local", vault; name = "Notes")
+            here() = [f.path for f in K.library_files(kb, "people/local")]
+            K.STOPPING[] = false
+            t = K.follow_connect(kb; every = 0.2)
+            sleep(0.6)
+            @test !K.synced_by_local() && isempty(here()) && K.syncing_pid() === nothing    # not asked to
+            # Asked to, it syncs them into the library of whoever runs it, in this process, and says it does.
+            @test K.connect_cli(["--background"]) == 0
+            @test K.synced_by_local() && K.load_connect_config()["background"] === true
+            @test timedwait(() -> here() == ["Notes/Tides.md"], 20) == :ok
+            st = K.read_connect_status()
+            @test st["by"] == K.LOCAL_SYNCER && st["pid"] == getpid() && only(st["folders"])["state"] in ("in step", "syncing")
+            # A pass asked for is made at once, and the library's changes come back.
+            write(joinpath(vault, "Currents.md"), "Rip currents.\n")
+            K.request_pass()
+            @test timedwait(() -> sort(here()) == ["Notes/Currents.md", "Notes/Tides.md"], 20) == :ok
+            # Stopped, it lets go of the syncing, which the app or a pass can take up.
+            @test K.connect_cli(["--stop"]) == 0
+            @test !K.synced_by_local() && timedwait(() -> K.syncing_pid() === nothing, 20) == :ok
+            @test K.read_connect_status()["by"] == ""
+            # Folders kept with a knowledge base elsewhere are not its to sync.
+            c = K.load_connect_config(); c["site"] = "https://kb.example.org"; K.save_connect_config!(c)
+            @test_throws "not the knowledge base run here" K.set_background!(true)
+        end
+    finally
+        K.STOPPING[] = true
+        t === nothing || wait(t)
+        K.STOPPING[] = false
+        K.READ_LIBRARIES[] = true
+        close(kb)
+    end
+end
 @zset "linking Zotero groups from the site" begin
     HTTP, JSON = K.HTTP, K.JSON
     # A stand-in Zotero: group 7 public, group 8 private (read with its key alone); each holds one data set.
@@ -2719,7 +2743,7 @@ end
     K.READ_PUT[] = false                                                    # read here, as each comes
     try
         # Ada's vault, synced from her machine and read: hers alone.
-        K.sync_folder!(InProcessLibrary(kb, as(ada)), dir, "Notes", Dict{String,Any}())
+        K.sync_folder!(K.InProcessLibrary(kb, as(ada)), dir, "Notes", Dict{String,Any}())
         K.read_space!(kb, "people/$ada")
         note = K.source_record(kb, "obsidian", "people/$ada/Notes/Survey.md")
         K.read_record!(kb, note)

@@ -409,7 +409,7 @@ function start_local(; port::Integer = local_port(kb().config), dev::Bool = fals
     dev || push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db))
     push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db))
     load_plugins!(db.config)
-    push!(r.tasks, follow_sources(db))
+    push!(r.tasks, follow_sources(db), follow_connect(db))
     catch_up_libraries!(db)
     dev || upgrade_landscape(db)
     start_figure_sweep(db)

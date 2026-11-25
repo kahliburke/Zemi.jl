@@ -248,7 +248,7 @@ members, not hidden from those who run the service.
 zemi connect https://kb.example.org ~/Documents/Obsidian/Notes --skip Private
 zemi connect local ~/Documents/Obsidian/Notes      # the knowledge base run on this machine
 zemi connect                                       # watch and manage the folders
-zemi connect --background                          # sync from now and at every login
+zemi connect --background                          # keep them synced without the app open
 ```
 
 The first time, it opens your browser to sign in and approve it: it gets a token for your library and
@@ -264,8 +264,8 @@ when it last changed and was checked, and each file as it moves. Its keys add a 
 completing the path), remove one (`d`: stop syncing it, or also remove its files from your library),
 choose what of it syncs from a tree of its files and folders (`e`: space switches one on or off),
 sync now (`s`), pause (`p`), open your library's page (`o`), hand the syncing to the background
-service (`b`) and quit (`q`). It syncs while open, unless the background service does; then it shows
-the service's progress, and the service takes up the folders it changes. Off a terminal, `zemi connect` prints a line for each change instead.
+(`b`) and quit (`q`). It syncs while open, unless the background does; then it shows that progress,
+and the folders it changes are taken up there. Off a terminal, `zemi connect` prints a line for each change instead.
 
 ```@raw html
 <figure class="shot">
@@ -273,9 +273,12 @@ the service's progress, and the service takes up the folders it changes. Off a t
 </figure>
 ```
 
-`--background` has a service sync from now and at every login (a launch agent on a Mac, a systemd
-user service on Linux), its log in `~/.local/share/zemi/connect/connect.log`; `--status` says how
-the folders stand, and `--stop` stops it. `--once` syncs once.
+`--background` keeps the folders synced without the app open. For the knowledge base run on this
+machine, the knowledge base syncs them itself, from now and whenever it runs (as the zemi extension,
+`zemi` or `zemi dev`), with nothing else to start. For a knowledge base elsewhere, a service syncs
+them from now and at every login (a launch agent on a Mac, a systemd user service on Linux), its log
+in `~/.local/share/zemi/connect/connect.log`. `--status` says how the folders stand and who syncs
+them, and `--stop` stops either. `--once` syncs once.
 
 **Your library** on the account page shows each folder in your library (its files, the documents read
 from it, whether it is a vault, when it last changed), how much of your space it uses, and each

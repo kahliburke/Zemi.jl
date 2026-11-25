@@ -1,9 +1,9 @@
 # `zemi connect` on a terminal: an app (Tachikoma) that shows the folders kept in step with one's
 # library, how each stands and what moved lately, and manages them: adding and removing folders,
 # setting what of each never leaves this machine, syncing now, pausing, and handing the syncing to
-# the background service. It syncs itself when no other process does (see connect_service.jl);
-# while the background service does, it shows the service's status and changes the folder list the
-# service reads.
+# the knowledge base run here (for folders that go to it) or the background service. It syncs itself
+# when no other process does (see connect_service.jl); while another does, it shows that one's status
+# and changes the folder list it reads.
 #
 #   ↑/↓ choose a folder · a add · d remove · e what of it syncs · s sync now · p pause · o the
 #   library's page · b background · q quit. The mouse resizes the panes and the table's columns,
@@ -93,7 +93,10 @@ function TK.update!(m::ConnectApp, e::TK.TaskEvent)
         if e.value isa Exception
             tell!(m, "The background service did not start: " * failure_message(e.value); error = true)
         else
-            m.farewell = "zemi connect syncs in the background, from now and at every login. `zemi connect` shows how it goes; `zemi connect --stop` stops it."
+            m.farewell = e.value isa Bool ?
+                "The knowledge base run here syncs the folders$(e.value ? ", from now" : ", once it runs") and whenever it runs. " *
+                "`zemi connect` shows how it goes; `zemi connect --stop` stops it." :
+                "zemi connect syncs in the background, from now and at every login. `zemi connect` shows how it goes; `zemi connect --stop` stops it."
             m.quit = true
         end
     end
@@ -236,11 +239,16 @@ function complete_path(text::AbstractString)
     return startswith(text, "~") ? contractuser(done) : done
 end
 
-"Hand the syncing to the background service, and close."
+"Hand the syncing to the knowledge base run here, for folders that go to it, else to the background service, and close."
 function to_background!(m::ConnectApp)
     m.syncer === nothing || (release!(m.syncer); m.syncer = nothing)
-    tell!(m, "Starting the background service")
-    TK.spawn_task!(start_background, m.tq, :background)
+    if get(m.config, "site", "") == "local"
+        tell!(m, "Handing the folders to the knowledge base")
+        TK.spawn_task!(() -> set_background!(true), m.tq, :background)
+    else
+        tell!(m, "Starting the background service")
+        TK.spawn_task!(start_background, m.tq, :background)
+    end
 end
 
 "Open `url` in the browser, saying nothing on the terminal the app draws on."
@@ -381,7 +389,8 @@ function syncing_line(m::ConnectApp)
     m.syncer !== nothing && return m.busy ? "syncing here $(SPINNER[m.tick ÷ 6 % length(SPINNER) + 1])" : "syncing here"
     pid = syncing_pid()
     pid === nothing && return "starting"
-    return background_installed() ? "the background service syncs" : "process $pid syncs"
+    by = get(m.status, "by", "")
+    return !isempty(by) ? "$by syncs" : background_installed() ? "the background service syncs" : "process $pid syncs"
 end
 
 "The table's columns for `folders`."

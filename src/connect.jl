@@ -23,9 +23,10 @@ const CONNECT_HIDDEN = (".obsidian/app.json", ".obsidian/templates.json", ".obsi
 # ── Where the library is: the API, or anything answering as it does ──────────────────────────────
 
 """
-A library as `zemi connect` reaches it: `list(r)` (the files, as `/api/library/files` gives them),
-`fetch(r, path)` (a file's bytes), `store!(r, path, bytes; base, modified)` (a file's row, or throws
-a [`Refusal`](@ref) with the API's status) and `remove!(r, path; base)`.
+A library as `zemi connect` reaches it: `library_request(r, method, path; body, query)` answers as
+`/api/library/files` does, or throws a [`Refusal`](@ref) with its status. From it, `list_files(r)`
+(the files, as the API gives them), `fetch_file(r, path)` (a file's bytes), `store_file!(r, path,
+bytes; base, modified)` (a file's row) and `remove_file!(r, path; base)`.
 """
 abstract type LibraryRemote end
 
@@ -53,11 +54,28 @@ function library_request(r::HTTPLibrary, method, path; body = UInt8[], query = P
     throw(Refusal(401, "The library refused the sign-in: run `zemi connect` with the site again to sign in"))
 end
 
-list_files(r::HTTPLibrary) = JSON.parse(String(library_request(r, "GET", "")))["files"]
-fetch_file(r::HTTPLibrary, path) = library_request(r, "GET", path)
-store_file!(r::HTTPLibrary, path, bytes; base, modified) =
+"""
+One's library answered in this process by the API itself, as `caller`: what the knowledge base
+run on this machine syncs with (see [`follow_connect`](@ref)).
+"""
+struct InProcessLibrary <: LibraryRemote
+    kb::KB
+    caller::Caller
+end
+function library_request(r::InProcessLibrary, method, path; body = UInt8[], query = Pair{String,String}[])
+    target = "/api/library/files" * (isempty(path) ? "" : "/" * join(HTTP.escapeuri.(split(path, '/')), '/')) *
+             (isempty(query) ? "" : "?" * HTTP.escapeuri(query))
+    resp = handle(r.kb, HTTP.Request(method, target, [], body), r.caller)
+    resp.status < 300 && return resp.body
+    msg = try String(get(JSON.parse(String(resp.body)), "error", "")) catch; "" end
+    throw(Refusal(resp.status, isempty(msg) ? "The library answered $(resp.status)" : msg))
+end
+
+list_files(r::LibraryRemote) = JSON.parse(String(library_request(r, "GET", "")))["files"]
+fetch_file(r::LibraryRemote, path) = library_request(r, "GET", path)
+store_file!(r::LibraryRemote, path, bytes; base, modified) =
     JSON.parse(String(library_request(r, "PUT", path; body = bytes, query = ["base" => something(base, ""), "modified" => string(modified)])))
-remove_file!(r::HTTPLibrary, path; base) = library_request(r, "DELETE", path; query = ["base" => something(base, "")])
+remove_file!(r::LibraryRemote, path; base) = library_request(r, "DELETE", path; query = ["base" => something(base, "")])
 
 # ── Syncing a folder ──────────────────────────────────────────────────────────────────────────────
 
