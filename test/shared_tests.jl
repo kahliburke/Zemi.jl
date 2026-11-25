@@ -2490,7 +2490,8 @@ end
     kb = open_kb(temp_config(; layers = Layer[]))
     K.READ_LIBRARIES[] = false
     home = mktempdir()
-    t = nothing
+    # What `zemi connect` tells the running knowledge base, as it would be answered there.
+    follow() = K.handle(kb, K.HTTP.Request("POST", "/api/connect/follow"), K.local_caller())
     try
         withenv("ZEMI_CONFIG" => joinpath(home, "config.toml"), "XDG_DATA_HOME" => joinpath(home, "data")) do
             vault = mkpath(joinpath(home, "Vault"))
@@ -2498,29 +2499,37 @@ end
             K.add_folder!("local", vault; name = "Notes")
             here() = [f.path for f in K.library_files(kb, "people/local")]
             K.STOPPING[] = false
-            t = K.follow_connect(kb; every = 0.2)
-            sleep(0.6)
-            @test !K.synced_by_local() && isempty(here()) && K.syncing_pid() === nothing    # not asked to
+            @test K.follow_connect!(kb) === nothing && !K.synced_by_local()                   # not asked to
+            @test K.JSON.parse(String(follow().body))["syncing"] == false
             # Asked to, it syncs them into the library of whoever runs it, in this process, and says it does.
-            @test K.connect_cli(["--background"]) == 0
+            @test !K.set_background!(true)                                                   # no knowledge base served here to tell
             @test K.synced_by_local() && K.load_connect_config()["background"] === true
+            @test K.JSON.parse(String(follow().body))["syncing"] == true
+            t = K.CONNECT_FOLLOWER[]
+            @test K.follow_connect!(kb) === t                                                # one at a time
             @test timedwait(() -> here() == ["Notes/Tides.md"], 20) == :ok
             st = K.read_connect_status()
             @test st["by"] == K.LOCAL_SYNCER && st["pid"] == getpid() && only(st["folders"])["state"] in ("in step", "syncing")
-            # A pass asked for is made at once, and the library's changes come back.
+            # A pass asked for is made at once.
             write(joinpath(vault, "Currents.md"), "Rip currents.\n")
             K.request_pass()
             @test timedwait(() -> sort(here()) == ["Notes/Currents.md", "Notes/Tides.md"], 20) == :ok
-            # Stopped, it lets go of the syncing, which the app or a pass can take up.
-            @test K.connect_cli(["--stop"]) == 0
-            @test !K.synced_by_local() && timedwait(() -> K.syncing_pid() === nothing, 20) == :ok
-            @test K.read_connect_status()["by"] == ""
+            # Stopped, it lets go of the syncing and ends, which the app or a pass can take up.
+            @test K.connect_cli(["--stop"]) == 0 && !K.synced_by_local()
+            @test K.JSON.parse(String(follow().body))["syncing"] == false && istaskdone(t)
+            @test K.syncing_pid() === nothing && K.read_connect_status()["by"] == ""
+            # Turned on from the command line, and taken up when the knowledge base is told.
+            @test K.connect_cli(["--background"]) == 0 && K.follow_connect!(kb) isa Task
+            K.set_background!(false); follow()
             # Folders kept with a knowledge base elsewhere are not its to sync.
             c = K.load_connect_config(); c["site"] = "https://kb.example.org"; K.save_connect_config!(c)
             @test_throws "not the knowledge base run here" K.set_background!(true)
+            # Only the person running it can tell it.
+            @test K.handle(kb, K.HTTP.Request("POST", "/api/connect/follow"), K.ANONYMOUS).status in (401, 403)
         end
     finally
         K.STOPPING[] = true
+        t = K.CONNECT_FOLLOWER[]
         t === nothing || wait(t)
         K.STOPPING[] = false
         K.READ_LIBRARIES[] = true

@@ -213,13 +213,34 @@ synced_by_local(c::AbstractDict = load_connect_config()) = get(c, "site", "") ==
 "How the knowledge base run here names itself in the status, as the one syncing."
 const LOCAL_SYNCER = "the knowledge base"
 
+"The task syncing `zemi connect`'s folders in the knowledge base run here, while it does (see [`follow_connect!`](@ref))."
+const CONNECT_FOLLOWER = Ref{Union{Task,Nothing}}(nothing)
+const CONNECT_FOLLOWER_LOCK = ReentrantLock()
+
+"""
+    follow_connect!(kb) -> Union{Task,Nothing}
+
+Have the knowledge base run on this machine sync the folders `zemi connect` keeps with it, when it is
+asked to (see [`synced_by_local`](@ref)) and does not already: as it starts, and when `zemi connect
+--background` tells it (`POST /api/connect/follow`). Returns the task syncing them, or `nothing` when
+it is not asked to.
+"""
+function follow_connect!(kb::KB; every::Real = CONNECT_EVERY)
+    lock(CONNECT_FOLLOWER_LOCK) do
+        t = CONNECT_FOLLOWER[]
+        t === nothing || istaskdone(t) || return t
+        (try synced_by_local() catch; false end) || return nothing
+        CONNECT_FOLLOWER[] = follow_connect(kb; every)
+    end
+end
+
 """
     follow_connect(kb) -> Task
 
-While the knowledge base runs on this machine, sync the folders `zemi connect` keeps with it when it
-is asked to (see [`synced_by_local`](@ref)): writing into the library in this process, as whoever runs
-it, and keeping the status the app and `zemi connect --status` show. It lets go of the syncing when
-the setting is cleared, and waits while another process holds it (the app, open on a terminal).
+Sync the folders `zemi connect` keeps with the knowledge base run here, while it is asked to:
+writing into the library in this process, as whoever runs it, and keeping the status the app and
+`zemi connect --status` show. Once the setting is cleared it lets go of the syncing and ends; while
+another process holds it (the app, open on a terminal), it waits.
 """
 function follow_connect(kb::KB; every::Real = CONNECT_EVERY)
     Threads.@spawn begin
@@ -230,11 +251,7 @@ function follow_connect(kb::KB; every::Real = CONNECT_EVERY)
                 was = mtime(connect_config_path())
                 changed() = STOPPING[] || mtime(connect_config_path()) != was
                 wanted = try synced_by_local() catch e; @warn "zemi connect's folders could not be read" exception = e; false end
-                if !wanted
-                    s === nothing || (release!(s); s = nothing)
-                    pause_while(every, changed)
-                    continue
-                end
+                wanted || break
                 s === nothing && (s = claim_syncing(; by = LOCAL_SYNCER))
                 if s === nothing
                     pause(every)                   # another process syncs them now
@@ -253,12 +270,32 @@ function follow_connect(kb::KB; every::Real = CONNECT_EVERY)
     end
 end
 
-"Wait `seconds`, or less once `done()` says so or the knowledge base stops; `done` is asked four times a second."
-function pause_while(seconds::Real, done)
-    until = time() + seconds
-    while !STOPPING[] && time() < until && !done()
-        sleep(min(0.25, until - time()))
+# `zemi connect --background` and `--stop` tell the knowledge base run here to look at the setting
+# now: it starts syncing the folders, or waits until it has let go of them.
+route!("POST", "/api/connect/follow"; need = "library") do c
+    c.caller.via == :local || not_permitted("Not permitted: the folders are those of the person who runs this knowledge base")
+    t = follow_connect!(c.kb)
+    t === nothing && (u = CONNECT_FOLLOWER[]; u === nothing || timedwait(() -> istaskdone(u), 10))
+    Dict("syncing" => t !== nothing)
+end
+
+"""
+    tell_local_server() -> Bool
+
+Have the knowledge base run on this machine look at the setting now (see `/api/connect/follow`);
+whether it was reached and took it up.
+"""
+function tell_local_server()
+    c = load_config()
+    s = local_served(c)
+    s === nothing && return false
+    r = try
+        HTTP.post("$(s.api)/api/connect/follow", ["Authorization" => "Bearer " * local_key(c)]; status_exception = false,
+                  connect_timeout = 5, request_timeout = 30, retry = false)
+    catch
+        return false
     end
+    return r.status == 200
 end
 
 # ── The folders ───────────────────────────────────────────────────────────────────────────────────
@@ -324,8 +361,9 @@ end
     set_background!(on) -> Bool
 
 Have the knowledge base run on this machine sync the folders that go to it, from now and whenever it
-runs, or stop. A background service left from before, syncing these folders, is stopped: the
-knowledge base takes its place. Returns whether the knowledge base runs now, to take it up.
+runs, or stop, telling it now when it runs. A background service left from before, syncing these
+folders, is stopped: the knowledge base takes its place. Returns whether the knowledge base run here
+was told, and so syncs them from now (or has stopped).
 """
 function set_background!(on::Bool)
     c = load_connect_config()
@@ -334,7 +372,7 @@ function set_background!(on::Bool)
     save_connect_config!(c)
     on && background_installed() && (pid = syncing_pid(); pid !== nothing && pid != getpid() && isempty(get(read_connect_status(), "by", ""))) &&
         stop_background()
-    return local_served(load_config()) !== nothing
+    return tell_local_server()
 end
 
 "Pause syncing every folder, or carry on."
@@ -538,8 +576,8 @@ function connect_cli(args::AbstractVector{<:AbstractString})
     elseif !isempty(plain)
         error("Give a folder, or a site and a folder: zemi connect https://kb.example.org ~/Documents/Notes")
     elseif ("--background" in flags || "--install" in flags) && get(load_connect_config(), "site", "") == "local"
-        running = set_background!(true)
-        say(:ok, "The knowledge base run here syncs the folders" * (running ? ", from now" : ", once it runs") * " and whenever it runs",
+        told = set_background!(true)
+        say(:ok, "The knowledge base run here syncs the folders" * (told ? ", from now" : ", once it runs") * " and whenever it runs",
             ("How it goes", "zemi connect --status"), ("To stop it", "zemi connect --stop"))
     elseif "--background" in flags || "--install" in flags
         start_background()

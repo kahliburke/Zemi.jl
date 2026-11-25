@@ -274,8 +274,8 @@ and the folders it changes are taken up there. Off a terminal, `zemi connect` pr
 ```
 
 `--background` keeps the folders synced without the app open. For the knowledge base run on this
-machine, the knowledge base syncs them itself, from now and whenever it runs (as the zemi extension,
-`zemi` or `zemi dev`), with nothing else to start. For a knowledge base elsewhere, a service syncs
+machine, the knowledge base syncs them itself, from the moment it is told and whenever it runs (as
+the zemi extension, `zemi` or `zemi dev`), with nothing else to start; `--stop` stops it at once. For a knowledge base elsewhere, a service syncs
 them from now and at every login (a launch agent on a Mac, a systemd user service on Linux), its log
 in `~/.local/share/zemi/connect/connect.log`. `--status` says how the folders stand and who syncs
 them, and `--stop` stops either. `--once` syncs once.
