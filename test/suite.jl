@@ -2813,10 +2813,10 @@ end
     @test own["mine"] && own["access"] == "private" && !n1["mine"] && n1["access"] == "open"
     # By default only the documents read in full, on their own map; one known by its abstract alone,
     # centred on, brings the rest.
-    read = Set(String(r.doc_id) for r in K.query(kb, "SELECT doc_id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))
+    fully = Set(String(r.doc_id) for r in K.query(kb, "SELECT doc_id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))
     g0 = K.explore_graph(kb, as(ada))
-    @test "2401.00001" in read && !("2401.00002" in read) && ids(g0) == intersect(ids(g), read)
-    @test !g0["abstracts"] && g0["abstract_only"] == length(setdiff(Set(["2401.00001", "2401.00002", rec, mine]), read)) && all(n -> n["read"], g0["nodes"])
+    @test "2401.00001" in fully && !("2401.00002" in fully) && ids(g0) == intersect(ids(g), fully)
+    @test !g0["abstracts"] && g0["abstract_only"] == length(setdiff(Set(["2401.00001", "2401.00002", rec, mine]), fully)) && all(n -> n["read"], g0["nodes"])
     @test K.explore_graph(kb, as(ada); center = "2401.00002")["abstracts"]
     # Another's private note is no node of theirs, nor anyone's neighbour.
     gb = graph(as(bea))
@@ -3054,9 +3054,9 @@ end
         end
         @test K.explore_stale(kb)
         views = K.explore_map!(kb).data["views"]
-        read = Set(String(r.id) for r in K.query(kb, "SELECT doc_id AS id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))
+        fully = Set(String(r.id) for r in K.query(kb, "SELECT doc_id AS id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))
         placed = Set(keys(views["read"]["docs"]))
-        @test issubset(firsts, placed) && placed == intersect(read, keys(views["all"]["docs"])) && length(placed) < length(views["all"]["docs"])
+        @test issubset(firsts, placed) && placed == intersect(fully, keys(views["all"]["docs"])) && length(placed) < length(views["all"]["docs"])
         @test all(n[1] in placed for d in values(views["read"]["docs"]) for n in d["near"])
         close(kb); close(con)
     finally
