@@ -227,9 +227,10 @@ it is not asked to.
 """
 function follow_connect!(kb::KB; every::Real = CONNECT_EVERY)
     lock(CONNECT_FOLLOWER_LOCK) do
+        # Not asked to, a follower still running is letting go: it is not the one syncing.
+        (try synced_by_local() catch; false end) || return nothing
         t = CONNECT_FOLLOWER[]
         t === nothing || istaskdone(t) || return t
-        (try synced_by_local() catch; false end) || return nothing
         CONNECT_FOLLOWER[] = follow_connect(kb; every)
     end
 end
@@ -279,6 +280,9 @@ route!("POST", "/api/connect/follow"; need = "library") do c
     Dict("syncing" => t !== nothing)
 end
 
+"The headers of a change asked of the knowledge base run here from this machine: its key, and the header its changes need (see [`write_allowed`](@ref))."
+local_change_headers(c::Config) = ["Authorization" => "Bearer " * local_key(c), "X-Zemi" => "1"]
+
 """
     tell_local_server() -> Bool
 
@@ -290,7 +294,7 @@ function tell_local_server()
     s = local_served(c)
     s === nothing && return false
     r = try
-        HTTP.post("$(s.api)/api/connect/follow", ["Authorization" => "Bearer " * local_key(c)]; status_exception = false,
+        HTTP.post("$(s.api)/api/connect/follow", local_change_headers(c); status_exception = false,
                   connect_timeout = 5, request_timeout = 30, retry = false)
     catch
         return false

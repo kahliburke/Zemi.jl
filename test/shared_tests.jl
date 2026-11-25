@@ -2490,8 +2490,10 @@ end
     kb = open_kb(temp_config(; layers = Layer[]))
     K.READ_LIBRARIES[] = false
     home = mktempdir()
-    # What `zemi connect` tells the running knowledge base, as it would be answered there.
-    follow() = K.handle(kb, K.HTTP.Request("POST", "/api/connect/follow"), K.local_caller())
+    # What `zemi connect` tells the running knowledge base, as it would be answered there: a change,
+    # from this machine.
+    follow() = K.respond_local(kb, K.HTTP.Request("POST", "/api/connect/follow", K.local_change_headers(kb.config)))
+    @test K.respond_local(kb, K.HTTP.Request("POST", "/api/connect/follow")).status == 403              # not without them
     try
         withenv("ZEMI_CONFIG" => joinpath(home, "config.toml"), "XDG_DATA_HOME" => joinpath(home, "data")) do
             vault = mkpath(joinpath(home, "Vault"))
