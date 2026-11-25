@@ -21,7 +21,7 @@ const DOCS = get(ENV, "ZEMI_SITE_DOCS", @__DIR__)
 const SRC = joinpath(DOCS, "src")
 const NOTEBOOKS = joinpath(DOCS, "notebooks")      # the content's, linked into the sources
 const GENERATED = joinpath(SRC, "generated")
-const KB_PAGES = joinpath(GENERATED, "kb")
+const KB_PAGES = joinpath(SRC, "kb")
 const KB_PUBLIC = joinpath(DOCS, "kb_public")   # build output: copied to the site's root
 # `zemi dev` writes the pages without bundling them, for VitePress's development server to serve,
 # forwarding the API to the knowledge base at ZEMI_DEV_API (see `run_dev`).
@@ -95,7 +95,7 @@ if isempty(ONLY)
 end
 
 # Whether the site's addresses leave out `.html` (see the config's `cleanUrls` below).
-const CLEAN_URLS = false
+const CLEAN_URLS = KBase.clean_site_urls()
 
 # Registers with VitePress the knowledge base's components that its pages name (those that only other
 # components use are imported by them), and ships the site's data files.
@@ -128,8 +128,8 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
                  "h();addEventListener('resize',h)})"
         config = replace(config, "head: [" => "head: [\n    ['style', {}, $(KBase.JSON.json(style))],\n    ['script', {}, $(KBase.JSON.json(script))],"; count = 1)
     end
-    # Page links end in .html: LiveServer (behind zemi) and plain static hosts do not map a clean
-    # URL like /generated/kb/timeline to timeline.html, so a clean URL only loads through the router.
+    config = replace(config, r"(link: *'[^']*/)index'" => s"\1'")
+    # Static file hosts can opt out of extensionless URLs.
     config = replace(config, "cleanUrls: true," => "cleanUrls: $CLEAN_URLS,")
     # The site's search box finds papers by title only, the timeline and topic lists (lists of those
     # titles) by their headings, and code pages without their collapsed source: the knowledge base's
@@ -140,11 +140,11 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
         _render(src, env, md) {
           const path = env.relativePath
           const headings = (re) => (src.match(re) ?? []).join('\n\n')
-          if (path.startsWith('generated/kb/papers/'))
+          if (path.startsWith('kb/papers/'))
             src = headings(/^# .*$/m)
-          else if (path.startsWith('generated/kb/topics') || path.startsWith('generated/kb/timeline'))
+          else if (path.startsWith('kb/topics') || path.startsWith('kb/timeline'))
             src = headings(/^#{1,3} .*$/gm)
-          else if (path.startsWith('generated/kb/'))
+          else if (path.startsWith('kb/'))
             src = src.replace(/^::: details[^\n]*\n[\s\S]*?^:::[ \t]*$/gm, '')
           return md.render(src, env)
         }"""; count = 1)
@@ -314,4 +314,5 @@ if !DEV
     t = time()
     n = KBase.stamp_templates!(site_dir)
     step_time("copied the templates to $n pages", t)
+    CLEAN_URLS || KBase.write_legacy_kb_pages(site_dir)
 end

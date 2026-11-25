@@ -390,7 +390,7 @@ function format_daily(kb::KB, day::AbstractString = ""; site::AbstractString = s
     io = IOBuffer()
     println(io, "Paper of the day, $(d.day): $(d.title) (arXiv:$(d.id))")
     at = rstrip(site, '/')
-    isempty(at) || println(io, "Page: $at/generated/kb/daily/$(d.day)/index.html")
+    isempty(at) || println(io, "Page: $at/kb/daily/$(d.day)/")
     println(io, d.source == "new" ? "New on arXiv" : "From the library", isempty(d.why) ? "" : ". Why: $(d.why)")
     d.relevance === nothing ||
         println(io, "Relevance to the group: $(d.relevance) of 3, $(RELEVANCE[d.relevance+1])", isempty(d.relevance_note) ? "" : ". $(d.relevance_note)")
@@ -452,7 +452,7 @@ function analysis_text(kb::KB, text::AbstractString)
         links = map(ids) do id
             name = title(id)
             name === nothing ? "[arXiv:$id](https://arxiv.org/abs/$id)" :
-                               "[$(replace(name, r"([\[\]])" => s"\\\1"))](/generated/kb/papers/$(page_slug(id)).html)"
+                               "[$(replace(name, r"([\[\]])" => s"\\\1"))]($(page_path("kb/papers/$(page_slug(id))")))"
         end
         "(" * join(links, "; ") * ")"
     end)

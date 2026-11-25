@@ -278,7 +278,7 @@ function notebook_page(nb, id::AbstractString, title::AbstractString)
     println(io, "# ", escape_text(nb.title), "\n")
     # A paper's page is a copy of its template written after the build (see `TEMPLATED`), so the link
     # is HTML, which the build does not look for a page behind.
-    println(io, "```@raw html\n<p><em>A notebook from <a href=\"../", page_slug(id), ".html\">", html_escape(title), "</a>, ",
+    println(io, "```@raw html\n<p><em>A notebook from <a href=\"../", page_slug(id), clean_site_urls() ? "" : ".html", "\">", html_escape(title), "</a>, ",
             html_escape(by), ".</em></p>\n```\n")
     if nb.kind == "agent"           # what it was asked to compute, if it was asked
         println(io, isempty(strip(nb.idea)) ? "*The agent chose what to compute.*\n" :
@@ -290,6 +290,6 @@ function notebook_page(nb, id::AbstractString, title::AbstractString)
     println(io, "```@raw html\n<KBInLibraries kind=\"notebook\" target=\"", html_escape(nb.path), "\" />\n```\n")
     # A site built with ZEMI_SITE_NOTEBOOKS=0 renders no notebooks (no Slate hub to run them).
     get(ENV, "ZEMI_SITE_NOTEBOOKS", "1") == "0" ? println(io, "*Not rendered in this build of the site.*") :
-        println(io, "```@slate ../../../../../notebooks/", rel, "\n```")
+        println(io, "```@slate ../../../../notebooks/", rel, "\n```")
     return String(take!(io))
 end

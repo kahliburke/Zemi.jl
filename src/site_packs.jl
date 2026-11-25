@@ -25,7 +25,7 @@ const HOT = r"^(assets/(app|style)\.|assets/chunks/(metadata|theme|VPLocalSearch
 
 "The pages that list every document, which change whenever one is added (see site.jl)."
 const HUB_PAGES = Set(replace(p, "/" => "_") for p in
-                      ("generated/kb/index", "generated/kb/timeline", "generated/kb/topics", "generated/kb/status", "generated/kb/authors"))
+                      ("kb/index", "kb/timeline", "kb/topics", "kb/status", "kb/authors"))
 
 "The content hash VitePress writes into a file's name (`app.Co2i6kGo.js`, `index.md.Cp4ouCgi.lean.js`)."
 const CONTENT_HASH = r"\.[A-Za-z0-9_-]{8}(?=(\.lean)?\.[A-Za-z0-9]+$)"
@@ -57,7 +57,7 @@ end
 
 """
 The page a file of the site belongs to, as VitePress names a page's script
-(`generated_kb_papers_2609-39376`): a page itself, its scripts, and a document's figures. `nothing`
+(`kb_papers_2609-39376`): a page itself, its scripts, and a document's figures. `nothing`
 for any other file.
 """
 function page_of(rel::AbstractString)
@@ -65,7 +65,7 @@ function page_of(rel::AbstractString)
     m = match(r"^assets/(.+?)\.md\.", rel)
     m === nothing || return String(m[1])
     m = match(r"^assets/(\d{4}-\d{4,5}|doc-[0-9a-f]+)-\d", rel)
-    return m === nothing ? nothing : "generated_kb_papers_" * m[1]
+    return m === nothing ? nothing : "kb_papers_" * m[1]
 end
 
 """
@@ -102,7 +102,7 @@ function pack_names(site::AbstractString, files)
         page = page_of(f)
         f in hot ? "runtime" :
         startswith(f, "assets/chunks/") ? bucket("chunks", stable_path(f), CHUNK_PACKS) :
-        page !== nothing && startswith(page, "generated_kb_papers_") ? bucket("docs", page, DOC_PACKS) :
+        page !== nothing && startswith(page, "kb_papers_") ? bucket("docs", page, DOC_PACKS) :
         page !== nothing && page in HUB_PAGES ? "hub" :
         page === nothing && occursin(r"^[^/]+\.(json|bib|inv)$", f) ? "hub" :
         bucket("pages", something(page, stable_path(f)), PAGE_PACKS)

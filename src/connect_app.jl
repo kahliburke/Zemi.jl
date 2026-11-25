@@ -155,7 +155,7 @@ function TK.update!(m::ConnectApp, e::TK.KeyEvent)
         tell!(m, paused ? "Syncing again" : "Paused: nothing is synced until you press p again")
     elseif k == :char && c == 'o'
         site = get(m.config, "site", "")
-        isempty(site) || site == "local" || open_quietly("$site/account.html")
+        isempty(site) || site == "local" || open_quietly("$site/service/account")
     elseif k == :char && c == 'b'
         to_background!(m)
     end

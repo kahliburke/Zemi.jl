@@ -19,7 +19,7 @@ const signedIn = permissions => async page => page.route(u => new URL(u).pathnam
 
 async function paperPage(prepare) {
   const id = (await api('/api/daily')).find(d => d.day === '2026-10-01').id
-  return open(`/generated/kb/papers/${id.replace(/[./]/g, '-')}`, 'button.kbfig-mention', { prepare })
+  return open(`/kb/papers/${id.replace(/[./]/g, '-')}`, 'button.kbfig-mention', { prepare })
 }
 
 test('a reader is offered no tutor and no notebooks on a paper, which the person running it is', async () => {
@@ -45,9 +45,9 @@ test('signed in, a notebook is attached without asking a name', async () => {
 })
 
 test('a reader is offered no adding of documents', async () => {
-  const mine = await open('/generated/kb/manage', '.kbu-drop')
+  const mine = await open('/kb/manage', '.kbu-drop')
   await mine.close()
-  const { page, errors, close } = await open('/generated/kb/manage', '.kbu', { prepare: signedIn(READER) })
+  const { page, errors, close } = await open('/kb/manage', '.kbu', { prepare: signedIn(READER) })
   await page.waitForSelector('.kbu .kb-dim:has-text("Not permitted")')
   assert.equal(await page.locator('.kbu-drop').count(), 0)
   assert.deepEqual(errors, [])
@@ -55,10 +55,10 @@ test('a reader is offered no adding of documents', async () => {
 })
 
 test('a reader is offered no picking of the paper of the day', async () => {
-  const mine = await open('/generated/kb/daily', '.kbd')
+  const mine = await open('/kb/daily', '.kbd')
   const offered = await mine.page.locator('.kbd-button').count()
   await mine.close()
-  const { page, errors, close } = await open('/generated/kb/daily', 'button.kbfig-mention', { prepare: signedIn(READER) })
+  const { page, errors, close } = await open('/kb/daily', 'button.kbfig-mention', { prepare: signedIn(READER) })
   await page.waitForTimeout(1000)
   assert.ok(offered > 0)
   assert.equal(await page.locator('.kbd-button').count(), 0)

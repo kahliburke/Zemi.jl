@@ -17,7 +17,7 @@ test('over time, papers are placed by when they were published, or by when the g
   const papers = [paper(1, { published: '2015', added: '2026-11-02' }), paper(2, { published: '2021-03', added: '2026-11-03' }),
                   paper(3, { published: '2025-06-01', added: '2026-11-04' }), paper(4, { published: '2026-10-29', added: '2026-11-05' }),
                   paper(5, { published: '', added: '2026-11-06' })]
-  const { page, errors, close } = await open('/generated/kb/landscape', '.kbl', { prepare: serving(landscape(papers)) })
+  const { page, errors, close } = await open('/kb/landscape', '.kbl', { prepare: serving(landscape(papers)) })
   await page.locator('.kbl-tab', { hasText: 'Over time' }).click({ timeout: 30000 })
   assert.equal(await page.locator('.kbl-svg circle').count(), 4)
   assert.match(await page.locator('.kbl-controls').innerText(), /1 without a date/)
@@ -33,7 +33,7 @@ test('over time, papers are placed by when they were published, or by when the g
 
 test('a landscape built before papers had both dates is placed by its one date', async () => {
   const papers = [1, 2, 3, 4, 5].map(i => paper(i, { date: `202${i}-01-01` }))
-  const { page, errors, close } = await open('/generated/kb/landscape', '.kbl', { prepare: serving(landscape(papers)) })
+  const { page, errors, close } = await open('/kb/landscape', '.kbl', { prepare: serving(landscape(papers)) })
   await page.locator('.kbl-tab', { hasText: 'Over time' }).click({ timeout: 30000 })
   assert.equal(await page.locator('.kbl-svg circle').count(), 5)
   assert.deepEqual(errors, [])

@@ -57,7 +57,17 @@ cancel a job, interrupt or close an agent, rebuild the site, back up now and rel
     They are stored in the knowledge base's database and edited through the API. On a static copy
     their pages show only "Needs a running Zemi server."
 
+## Page addresses
+
+Zemi serves pages at addresses such as `/findings`, `/projects` and `/kb/`. Existing
+bookmarks that use `.html`, `/index` or the former `/generated/kb/` prefix redirect
+permanently. Query parameters and fragments still select the same search or finding.
+
 ## Static copy
+
+Set `ZEMI_SITE_CLEAN_URLS=0` when building for a static host that requires literal
+HTML filenames. The public demo uses this setting and includes forwarding pages for
+bookmarks under its old `generated/kb/` directory.
 
 A built site is a folder any web server can host. Without the API, search uses `papers.json` and
 shows *offline*. The demo is a static copy.

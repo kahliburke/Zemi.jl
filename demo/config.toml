@@ -35,7 +35,7 @@ description = "How water moves over and through reefs, and how it carries coral 
 [[group.panels]]
 title = "The reef library"
 text = "What we read on bleaching, heat stress, tipping and larval flow, each paper summarized by section."
-link = "/generated/kb/"
+link = "/kb/"
 
 [[group.panels]]
 title = "Ask the tutor"

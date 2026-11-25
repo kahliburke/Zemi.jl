@@ -11,7 +11,7 @@ function codebase_json(kb::KB, id::AbstractString)
     r = first(query(kb, "SELECT title FROM papers WHERE doc_id = ?", (id,)))
     root = codebase_dir(kb, id)
     return Dict("id" => id, "title" => coalesce(r.title, id), "rev" => isdir(root) ? git_rev(root) : "",
-                "remote" => remote_url(root), "page" => "/generated/kb/code/$(page_slug(id))/index.html")
+                "remote" => remote_url(root), "page" => "/kb/code/$(page_slug(id))/")
 end
 
 """

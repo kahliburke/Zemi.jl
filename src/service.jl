@@ -112,6 +112,8 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             else
                 handle(kb, req, shared_caller(kb, req))
             end
+        elseif req.method in ("GET", "HEAD") && (moved = site_page_redirect(kb.config, uri)) !== nothing
+            moved
         elseif req.method != "GET"
             HTTP.Response(405)
         elseif uri.path == "/zemi-sw.js"
@@ -277,7 +279,7 @@ function serve_local(; kb::KB = kb(), port::Integer = parse(Int, get(ENV, "ZEMI_
         @info "Knowledge base at http://localhost:$port" * (sources ? "" : " (rebuilt when a job changes it)") *
               "; a browser new to it opens $(local_link(c, port)), or run zemi open"
     end
-    SETUP_ANNOUNCED[] = (kb, local_link(c, port, "/service/setup.html"))
+    SETUP_ANNOUNCED[] = (kb, local_link(c, port, "/service/setup"))
     if site && setup_needed(kb)
         current_site(c) === nothing ? @info("Not set up yet: Setup opens in the browser once the site is built, in a few minutes") :
                                       announce_setup()
@@ -417,7 +419,7 @@ function start_local(; port::Integer = local_port(kb().config), dev::Bool = fals
     hosted && push!(r.tasks, start_autosync!(db))
     if dev
         push!(r.stops, start_dev!(db; api = "http://127.0.0.1:$port", dev_port))
-        SETUP_ANNOUNCED[] = (db, local_link(db.config, port, "/service/setup.html"))
+        SETUP_ANNOUNCED[] = (db, local_link(db.config, port, "/service/setup"))
         announce_setup()
     end
     return r

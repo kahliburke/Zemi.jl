@@ -18,25 +18,44 @@ function site_base(c::Config)
     return isempty(at) ? "" : String(rstrip(first(at), '/'))
 end
 
+# Plain static hosts can require literal filenames. The public demo uses such a host.
+clean_site_urls() = get(ENV, "ZEMI_SITE_CLEAN_URLS", "1") == "1"
+
+"Keep bookmarks working on file-only hosts, including sites mounted under a path."
+function write_legacy_kb_pages(site::AbstractString)
+    kb = joinpath(site, "kb")
+    isdir(kb) || return
+    for (root, _, files) in walkdir(kb), file in files
+        endswith(file, ".html") || continue
+        dest = mkpath(joinpath(site, "generated", "kb", relpath(root, kb)))
+        target = join(HTTP.escapeuri.(splitpath(relpath(joinpath(root, file), dest))), '/')
+        target = replace(target, r"/index\.html$" => "/")
+        write(joinpath(dest, file), """<!doctype html><meta charset="utf-8"><a href="$target">Open this page</a>
+            <script>location.replace(document.querySelector('a').href + location.search + location.hash)</script>""")
+    end
+end
+
+function page_path(path::AbstractString)
+    page, tail = match(r"^([^?#]*)(.*)$", path).captures
+    page = replace("/" * lstrip(page, '/'), r"/index(?:\.html)?$" => "/")
+    suffix = clean_site_urls() || endswith(page, "/") ? "" : ".html"
+    return page * suffix * tail
+end
+
 """
     site_link(c, path) -> String
 
 The address of the site's page `path` for an agent to hand people (`findings#KB-F3`,
-`generated/kb/papers/2401-00001`, a directory's page ending in `/`), on [`site_base`](@ref); empty
-where the site is not served. With `.html`, as the site links its own pages (see `pageLink` in
-kbLinks.ts).
+`kb/papers/2401-00001`, a directory's page ending in `/`), on [`site_base`](@ref); empty
+where the site is not served.
 """
 function site_link(c::Config, path::AbstractString)
     base = site_base(c)
-    isempty(base) && return ""
-    i = findfirst('#', path)
-    page, fragment = i === nothing ? (path, "") : (path[1:prevind(path, i)], path[i:end])
-    page = lstrip(page, '/')
-    return string(base, "/", page, isempty(page) || endswith(page, "/") ? "" : ".html", fragment)
+    return isempty(base) ? "" : base * page_path(path)
 end
 
 "The address of document `id`'s page (see [`site_link`](@ref))."
-document_link(c::Config, id::AbstractString) = site_link(c, "generated/kb/" * document_page(id))
+document_link(c::Config, id::AbstractString) = site_link(c, "kb/" * document_page(id))
 "The address of task or finding `ref`'s place on the site: the board, or the findings page."
 ref_link(c::Config, ref::AbstractString) = (r = uppercase(strip(ref)); site_link(c, (is_finding_ref(r) ? "findings#" : "projects#") * r))
 
@@ -64,7 +83,7 @@ end
 function panels_yaml(panels)
     isempty(panels) && return ""
     items = ["  - title: $(yaml_string(p.title))\n    details: $(yaml_string(p.text))" *
-             (isempty(p.link) ? "" : "\n    link: $(yaml_string(p.link))") for p in panels]
+             (isempty(p.link) ? "" : "\n    link: $(yaml_string(replace(p.link, r"^/generated/kb(?=/|$)" => "/kb")))") for p in panels]
     return "features:\n" * join(items, "\n")
 end
 
@@ -92,7 +111,7 @@ function front_page(c::Config)
       actions:
         - theme: brand
           text: Search the knowledge base
-          link: /generated/kb/
+          link: /kb/
         - theme: alt
           text: Findings
           link: /findings
@@ -343,18 +362,18 @@ docs/src/components/kbTemplates.ts, which docs/make.jl gives this table). The fo
 per page of the kind, the template's Markdown, which the documentation build resolves links against
 and the development server builds; VitePress's build leaves them out (`srcExclude`).
 """
-const TEMPLATED = ("papers" => (; folder = "generated/kb/papers", template = "generated/kb/templates/paper", component = "KBPaperPage"),
-                   "topics" => (; folder = "generated/kb/topics", template = "generated/kb/templates/topic", component = "KBTopicPage"),
+const TEMPLATED = ("papers" => (; folder = "kb/papers", template = "kb/templates/paper", component = "KBPaperPage"),
+                   "topics" => (; folder = "kb/topics", template = "kb/templates/topic", component = "KBTopicPage"),
                    # A folder with `*` holds a folder of pages for each name in its place (a codebase's
                    # files); the page's slug is then `<name>/<page>`.
-                   "code" => (; folder = "generated/kb/code/*/files", template = "generated/kb/templates/code-file", component = "KBCodeFilePage"),
+                   "code" => (; folder = "kb/code/*/files", template = "kb/templates/code-file", component = "KBCodeFilePage"),
                    # After `code`: an address is taken for the first kind it fits, and a codebase's
                    # files are beneath its page's folder.
-                   "codebase" => (; folder = "generated/kb/code/*", template = "generated/kb/templates/codebase", component = "KBCodebasePage"),
-                   "daily" => (; folder = "generated/kb/daily/*", template = "generated/kb/templates/day", component = "KBDayPage"),
-                   "resources" => (; folder = "generated/kb/resources", template = "generated/kb/templates/resource", component = "KBResourcePage"),
+                   "codebase" => (; folder = "kb/code/*", template = "kb/templates/codebase", component = "KBCodebasePage"),
+                   "daily" => (; folder = "kb/daily/*", template = "kb/templates/day", component = "KBDayPage"),
+                   "resources" => (; folder = "kb/resources", template = "kb/templates/resource", component = "KBResourcePage"),
                    # Served by the service alone (see site_records.jl): no page of it is built.
-                   "records" => (; folder = "generated/kb/records", template = "generated/kb/templates/record", component = "KBRecordPage"))
+                   "records" => (; folder = "kb/records", template = "kb/templates/record", component = "KBRecordPage"))
 
 "The Markdown of a templated kind's page: its component, which reads the page from its address."
 template_markdown(kind::AbstractString) = "```@raw html\n<$(Dict(TEMPLATED)[kind].component) />\n```\n"

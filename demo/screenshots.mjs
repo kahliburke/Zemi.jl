@@ -70,10 +70,10 @@ async function setupStep(page, n) {
 // gives the part), and how long to let it settle (1.5 s when not given).
 const SHOTS = [
   ['front', '/', '.VPHero'],
-  ['paper', '/generated/kb/papers/2203-05645', '.kb-paper-head'],
-  ['daily', '/generated/kb/daily', '.vp-doc h2'],
-  ['landscape', '/generated/kb/landscape', 'svg'],
-  ['search', '/generated/kb/', '.kb-hit', async page => {
+  ['paper', '/kb/papers/2203-05645', '.kb-paper-head'],
+  ['daily', '/kb/daily', '.vp-doc h2'],
+  ['landscape', '/kb/landscape', 'svg'],
+  ['search', '/kb/', '.kb-hit', async page => {
     await page.fill('.vp-doc input', 'how do larvae settle on ridged surfaces')
     await page.press('.vp-doc input', 'Enter')
   }],
@@ -121,7 +121,7 @@ const SHOTS = [
   ['zotero', '/projects#RB', '.kbz', async page => { await page.click('.kbp-view:has-text("Library")'); await page.mouse.move(0, 0) },
    async page => { const b = await page.locator('.kbl-box').boundingBox(); return { ...b, height: 420 } }],
   ['library-account', '/service/account', '.kbl-table', undefined, 'section.kbl'],
-  ['documents-sharing', '/generated/kb/manage?state=mine', '.kbm-intro', async page => {
+  ['documents-sharing', '/kb/manage?state=mine', '.kbm-intro', async page => {
     await page.waitForSelector('.kbm input[type=checkbox]', { timeout: 30_000 })
     await page.locator('.kbm tbody tr:has-text("Scoring turf") input[type=checkbox]').check()
     await page.addStyleTag({ content: '.kbj { display: none }' })        // the service's jobs, not the library's

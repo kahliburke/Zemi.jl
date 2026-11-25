@@ -732,7 +732,7 @@ end
         K.execute!(kb, "DELETE FROM classifications")
         # From a service, with the addresses of the day's page and its figures, to link to.
         linked = K.format_daily(kb; site = "https://kb.example.org")
-        @test occursin("Page: https://kb.example.org/generated/kb/daily/2026-10-02/index.html", linked)
+        @test occursin("Page: https://kb.example.org/kb/daily/2026-10-02/", linked)
         @test occursin("  Image: https://kb.example.org/api/daily/2026-10-02/2610-00001-1.png", linked) && !occursin("Page: ", latest)
         figure(target) = K.respond_local(kb, K.HTTP.Request("GET", target))
         mkpath(K.figures_dir(kb.config, "2610.00001"))
@@ -749,7 +749,7 @@ end
                                             Dict("day" => "2026-10-01", "id" => "2401.00001", "title" => "A library paper")]
         # Its citations link to the papers' pages (or arXiv); its mathematics stays as written, for the page to render.
         text = main["analysis"][2]["text"]
-        @test occursin("([A library paper](/generated/kb/papers/2401-00001.html); [arXiv:2999.00001](https://arxiv.org/abs/2999.00001))", text)
+        @test occursin("([A library paper](/kb/papers/2401-00001); [arXiv:2999.00001](https://arxiv.org/abs/2999.00001))", text)
         @test occursin("{{ x }} < 1 where \$\\beta < 1\$", text) && occursin("```math\n\\kappa = \\{a\\} < 2\n```", text)
         @test main["idea"] == "Evaluate the scaling."
         @test main["before"] == Dict("day" => "2026-10-01", "title" => "A library paper") && main["after"] === nothing
@@ -781,9 +781,9 @@ end
             @test any(n -> n["title"] == "Shared work" && n["page"] == "from-a-clone" && n["by"] == "added", listed)
             @test any(n -> n["title"] == "A scan" && n["by"] == "added by Ada", listed)
             nbpage = K.notebook_page(first(nbs), "2610.00001", "Paper 2610.00001")
-            @test occursin("<p><em>A notebook from <a href=\"../2610-00001.html\">Paper 2610.00001</a>, made by an agent.</em></p>", nbpage)
+            @test occursin("<p><em>A notebook from <a href=\"../2610-00001\">Paper 2610.00001</a>, made by an agent.</em></p>", nbpage)
             @test occursin("<KBDownload src=\"/notebooks/papers/2610-00001/computed-1.jl\">", nbpage)
-            @test occursin("```@slate ../../../../../notebooks/papers/2610-00001/computed-1.jl\n```", nbpage)
+            @test occursin("```@slate ../../../../notebooks/papers/2610-00001/computed-1.jl\n```", nbpage)
             @test withenv(() -> !occursin("@slate", K.notebook_page(first(nbs), "2610.00001", "P")), "ZEMI_SITE_NOTEBOOKS" => "0")
             @test occursin("**Asked to compute:**\n\n> Evaluate Eq. 3.6\n> for the fore reef, with ``\\bar\\eta < 0``.", nbpage)   # the prompt, its math as math
             @test !occursin("Asked to compute", K.notebook_page(nbs[2], "2610.00001", "P"))             # an attached one has none
@@ -845,7 +845,7 @@ end
     @test occursin("title = {{Reef \\& lagoon}}", bib) && occursin("url = {https://arxiv.org/abs/2609.00001}", bib)
     @test occursin("@misc{handbook,\n  title = {{A handbook}},\n}", bib)   # an upload: a key from its title, no arXiv fields
     @test !occursin("code-", bib) && !occursin("docpage", bib)                # no codebases; no docs-site paths
-    @test occursin("docpage = {generated/kb/papers/2609-00001.md}", bib_entry(kb, "2609.00001"))
+    @test occursin("docpage = {kb/papers/2609-00001.md}", bib_entry(kb, "2609.00001"))
     # In prose: a preprint in its arXiv record; an upload with no authors or date, led by its title, at its page here.
     @test K.citation(kb, "2609.00001") ==
           "Lovelace, A., & Reef Survey Team. (2026). Reef & lagoon. arXiv preprint arXiv:2609.00001. https://arxiv.org/abs/2609.00001"
@@ -2726,14 +2726,14 @@ end
         bib = read(write_study_bib(kb2, study), String)
         @test occursin("@article{arXiv:2401.00001,", bib) && occursin("author = {Lovelace, Ada}", bib)
         @test occursin("journal = {arXiv preprint arXiv:2401.00001}", bib)
-        @test occursin("docpage = {generated/kb/papers/2401-00001.md}", bib) && occursin("url = {https://arxiv.org/abs/2401.00001}", bib)
+        @test occursin("docpage = {kb/papers/2401-00001.md}", bib) && occursin("url = {https://arxiv.org/abs/2401.00001}", bib)
         @test !occursin("2999.99999", bib)                                                   # not in the knowledge base
         md(x) = sprint(show, MIME("text/markdown"), x)
         text = study_text(kb2, study, "restoration-methods")
         @test md(text) == shown && sprint(show, MIME("text/plain"), text) == shown          # whole, either way
         @test occursin("Not drafted yet", md(study_text(kb2, study, "missing")))
         table = md(papers_table(kb2, papers))
-        @test occursin("| [Paper 2401.00001](slate-docpage:generated/kb/papers/2401-00001.md) · Author | abstract |", table)
+        @test occursin("| [Paper 2401.00001](slate-docpage:kb/papers/2401-00001.md) · Author | abstract |", table)
         @test occursin("2401-00002.md", md(crossings_table(ev, "Restoration methods")))
         @test K.document_page_source(kb2, "2401.00001") == "papers/2401-00001.md"
         @test occursin("| Paper 2401.00001 · Author | abstract |", md(papers_table(kb2, [paper("2401.00001", "2024"; page = nothing)])))
@@ -4395,7 +4395,7 @@ end
         @test startswith(bib, "@misc{$(K.cite_key(kb, dem)),") && occursin("author = {{European Space Agency} and Hale, Rowan}", bib)
         @test occursin("howpublished = {Copernicus Data Space}", bib) && !occursin("note = ", bib)
         @test occursin("url = {https://example.org/dem}", bib) && occursin("urldate = {2026-11-05}", bib)
-        @test occursin("docpage = {generated/kb/resources/", bib)
+        @test occursin("docpage = {kb/resources/", bib)
         # A run made by an older reading reads the whole library again: its resources gain what is read
         # now, and items that are one work stay one document.
         resources() = K.scalar(kb, "SELECT count(*) FROM papers WHERE kind = 'resource'")
@@ -4958,7 +4958,7 @@ end
         @test route("GET", "/api/tasks/changes") == ("GET /api/tasks/changes", true)
         @test route("GET", "/api/presence") == ("GET /api/presence", true) && route("POST", "/api/presence") == ("POST /api/presence", false)
         @test route("GET", "/api/nowhere/at/all") == ("GET /api/nowhere", false)
-        @test route("GET", "/auth/sign-in") == ("GET /auth/sign-in", false) && route("GET", "/generated/kb/papers") == ("site", false)
+        @test route("GET", "/auth/sign-in") == ("GET /auth/sign-in", false) && route("GET", "/kb/papers") == ("site", false)
         # A request's work is done on the default threads: HTTP.jl's one interactive thread only waits.
         @test K.on_workers(() -> Threads.threadpool()) == :default
         # A route's first requests compile what they run, so they are counted but not timed.
@@ -5041,7 +5041,7 @@ end
               read(in_site("code-reef", "files", "src_Reef_jl.md"), String) == K.template_markdown("code")
         page = K.JSON.parsefile(in_public("kb-data", "codebase", "code-reef", "index.json"))
         @test page["title"] == "Reef" && page["files"] == 1 && page["access"] == "open" &&
-              page["tree"] == "/code/code-reef.json" && page["pages"] == "/generated/kb/code/code-reef/files/"
+              page["tree"] == "/code/code-reef.json" && page["pages"] == "/kb/code/code-reef/files/"
         @test K.JSON.parsefile(in_public("code", "code-reef.json"))["id"] == open_id &&
               K.JSON.parsefile(in_public("kb-data", "code", "code-reef", "src_Reef_jl.json"))["path"] == "src/Reef.jl"
         @test !ispath(in_site("code-tide")) && !ispath(in_public("code", "code-tide.json")) &&
@@ -5049,7 +5049,7 @@ end
         # A link to a codebase leads to the stub of its page, and there is none to one the site leaves out.
         @test K.document_page_source(kb, open_id) == "code/code-reef/index.md" && isfile(joinpath(site, K.document_page_source(kb, open_id)))
         @test K.document_page_source(kb, closed_id) === nothing
-        @test occursin("docpage = {generated/kb/code/code-reef/index.md}", K.bib_entry(kb, open_id)) &&
+        @test occursin("docpage = {kb/code/code-reef/index.md}", K.bib_entry(kb, open_id)) &&
               !occursin("docpage", K.bib_entry(kb, closed_id))
         listing = read(in_site("index.md"), String)
         @test occursin("[Reef](./code-reef/index.md)", listing) && !occursin("Tide", listing) &&
@@ -5158,35 +5158,40 @@ end
 
         # In the built site, a copy of the built template for each data file, and none left for one gone.
         built = mktempdir()
-        tpl(path...) = joinpath(built, "generated", "kb", path...)
+        tpl(path...) = joinpath(built, "kb", path...)
         write(mkpath(tpl("templates")) * "/paper.html", "<p>template</p>")
         assets(f) = joinpath(mkpath(joinpath(built, "assets")), f)
-        write(assets("generated_kb_templates_paper.md.H1.js"), "script"); write(assets("generated_kb_templates_paper.md.H1.lean.js"), "lean")
-        write(assets("generated_kb_templates_paper.md.H1.lean.js"), "lean {\"relativePath\":\"generated/kb/templates/paper.md\"}")
+        write(assets("kb_templates_paper.md.H1.js"), "script"); write(assets("kb_templates_paper.md.H1.lean.js"), "lean")
+        write(assets("kb_templates_paper.md.H1.lean.js"), "lean {\"relativePath\":\"kb/templates/paper.md\"}")
         foreach(s -> write(joinpath(mkpath(joinpath(built, "kb-data", "papers")), s * ".json"), "{}"), ("a-1", "b-2"))
         write(joinpath(mkpath(tpl("papers", "a-1")), "nb.html"), "a notebook's page")
         @test K.stamp_templates!(built) == 2 && read(tpl("papers", "b-2.html"), String) == "<p>template</p>"
+        write(tpl("index.html"), "search")
+        K.write_legacy_kb_pages(built)
+        legacy(parts...) = read(joinpath(built, "generated", "kb", parts...), String)
+        @test occursin("href=\"../../kb/\"", legacy("index.html"))
+        @test occursin("href=\"../../../kb/papers/b-2.html\"", legacy("papers", "b-2.html"))
         # Each copy's script names its own page, whose address VitePress then keeps.
-        @test read(assets("generated_kb_papers_b-2.md.H1.$(K.TEMPLATE_COPY).js"), String) == "script" &&
-              read(assets("generated_kb_papers_b-2.md.H1.$(K.TEMPLATE_COPY).lean.js"), String) == "lean {\"relativePath\":\"generated/kb/papers/b-2.md\"}"
+        @test read(assets("kb_papers_b-2.md.H1.$(K.TEMPLATE_COPY).js"), String) == "script" &&
+              read(assets("kb_papers_b-2.md.H1.$(K.TEMPLATE_COPY).lean.js"), String) == "lean {\"relativePath\":\"kb/papers/b-2.md\"}"
         @test K.stamp_templates!(built) == 0
         rm(joinpath(built, "kb-data", "papers", "b-2.json"))
         write(tpl("papers", "built.html"), "a page built for itself")
         K.stamp_templates!(built)
         @test !isfile(tpl("papers", "b-2.html")) && isfile(tpl("papers", "a-1.html")) && isfile(tpl("papers", "built.html"))
-        @test !isfile(assets("generated_kb_papers_b-2.md.H1.$(K.TEMPLATE_COPY).js")) && isfile(assets("generated_kb_papers_a-1.md.H1.$(K.TEMPLATE_COPY).js"))
+        @test !isfile(assets("kb_papers_b-2.md.H1.$(K.TEMPLATE_COPY).js")) && isfile(assets("kb_papers_a-1.md.H1.$(K.TEMPLATE_COPY).js"))
         @test isfile(tpl("papers", "a-1", "nb.html"))
 
         # The site served takes the knowledge base's changes without a build: data files and pages.
         @test K.refresh_site!(kb.config) === nothing                       # none served yet
         K.build_site!(kb.config; build = (out, log) -> begin
             write(mkpath(joinpath(out, "1")) * "/index.html", "home")
-            write(mkpath(joinpath(out, "1", "generated", "kb", "templates")) * "/paper.html", "<p>template</p>")
+            write(mkpath(joinpath(out, "1", "kb", "templates")) * "/paper.html", "<p>template</p>")
         end)
         served = K.current_site(kb.config)
-        @test K.refresh_site!(kb.config) >= 0 && read(joinpath(served, "generated", "kb", "papers", "2609-00001.html"), String) == "<p>template</p>"
+        @test K.refresh_site!(kb.config) >= 0 && read(joinpath(served, "kb", "papers", "2609-00001.html"), String) == "<p>template</p>"
         @test K.JSON.parsefile(joinpath(served, "kb-data", "papers", "2609-00001.json"))["title"] == "An arXiv paper"
-        @test K.site_file(kb.config, "/generated/kb/papers/not-copied-yet.html") == joinpath(served, "generated", "kb", "templates", "paper.html")
+        @test K.site_file(kb.config, "/kb/papers/not-copied-yet.html") == joinpath(served, "kb", "templates", "paper.html")
         # A paper changed changes no page the build compiles, so the refresh asks for no build.
         built = read(joinpath(served, K.BUILT_PAGES_FILE), String)
         K.execute!(kb, "UPDATE papers SET title = 'Retitled' WHERE doc_id = '2609.00001'")
@@ -6180,9 +6185,9 @@ end
         @test startswith(as_ada(() -> tools["task_attach"]("DM-11"; data = "eA==")), "⛔ Name the file")
         # Local paths in Markdown: kept and linked by address for an agent here, refused for one elsewhere
         # (which cannot be read here) naming the upload tool; links to the site's pages are left alone.
-        tools["task_note"]("DM-11", "Here: ![p]($file) and [site](/generated/kb/index.html)")
+        tools["task_note"]("DM-11", "Here: ![p]($file) and [site](/kb/index.html)")
         here = last(K.task(kb, "DM-11").activity).text
-        @test occursin("![p](media/", here) && occursin("[site](/generated/kb/index.html)", here)
+        @test occursin("![p](media/", here) && occursin("[site](/kb/index.html)", here)
         refused = as_ada(() -> tools["task_note"]("DM-11", "Mine: ![p]($file)"))
         @test startswith(refused, "⛔") && occursin("media_upload", refused) && !occursin("Mine:", last(K.task(kb, "DM-11").activity).text)
         @test startswith(tools["task_note"]("DM-11", "Gone: ![p](/tmp/no-such-figure.png)"), "⛔ No file /tmp/no-such-figure.png")
@@ -6249,14 +6254,14 @@ end
         K.SERVED_AT[] = "https://kb.example.org"
         try
             at = "https://kb.example.org"
-            @test endswith(tools["findings"]("DM"), "The key papers agree\n  $at/findings.html#DM-F1")
+            @test endswith(tools["findings"]("DM"), "The key papers agree\n  $at/findings#DM-F1")
             out = tools["finding"]("DM-F1")
-            @test occursin("\nPage: $at/findings.html#DM-F1\n", out) && occursin("\n  $at/projects.html#DM-11\n", out)
-            @test as_ada(() -> tools["finding_update"]("DM-F1"; claim = "The key papers agree")) == "Updated DM-F1.\n  $at/findings.html#DM-F1"
-            @test occursin("Page: $at/projects.html#DM-11", tools["task"]("DM-11"))   # (with images, the answer is JSON)
-            @test K.document_link(kb.config, "2402.00785") == "$at/generated/kb/papers/2402-00785.html"
-            @test K.document_link(kb.config, "rec-upload-a") == "$at/generated/kb/records/rec-upload-a.html"
-            @test K.site_link(kb.config, "/generated/kb/code/code-kb/") == "$at/generated/kb/code/code-kb/"
+            @test occursin("\nPage: $at/findings#DM-F1\n", out) && occursin("\n  $at/projects#DM-11\n", out)
+            @test as_ada(() -> tools["finding_update"]("DM-F1"; claim = "The key papers agree")) == "Updated DM-F1.\n  $at/findings#DM-F1"
+            @test occursin("Page: $at/projects#DM-11", tools["task"]("DM-11"))   # (with images, the answer is JSON)
+            @test K.document_link(kb.config, "2402.00785") == "$at/kb/papers/2402-00785"
+            @test K.document_link(kb.config, "rec-upload-a") == "$at/kb/records/rec-upload-a"
+            @test K.site_link(kb.config, "/kb/code/code-kb/") == "$at/kb/code/code-kb/"
         finally
             K.SERVED_AT[] = ""
         end
@@ -6390,9 +6395,9 @@ end
     # Files that change together share a pack: a document's page, scripts and figures; the pages
     # listing every document with the data files; VitePress's scripts that change with any change.
     s = mktempdir()
-    files = Dict("generated/kb/papers/2609-00001.html" => "", "assets/generated_kb_papers_2609-00001.md.Aaaaaaa1.js" => "",
-                 "assets/generated_kb_papers_2609-00001.md.Aaaaaaa1.lean.js" => "", "assets/2609-00001-1.Bbbbbbb1.png" => "",
-                 "generated/kb/timeline.html" => "", "papers.json" => "", "assets/chunks/theme.Ccccccc1.js" => "",
+    files = Dict("kb/papers/2609-00001.html" => "", "assets/kb_papers_2609-00001.md.Aaaaaaa1.js" => "",
+                 "assets/kb_papers_2609-00001.md.Aaaaaaa1.lean.js" => "", "assets/2609-00001-1.Bbbbbbb1.png" => "",
+                 "kb/timeline.html" => "", "papers.json" => "", "assets/chunks/theme.Ccccccc1.js" => "",
                  "assets/chunks/index.Ddddddd1.js" => "import{a}from\"./theme.Ccccccc1.js\";",
                  "assets/chunks/index.Eeeeeee1.js" => "export const b = 1", "notes/x.html" => "")
     for (f, text) in files
@@ -6400,7 +6405,7 @@ end
     end
     names = K.pack_names(s, collect(keys(files)))
     @test length(unique(names[f] for f in keys(files) if occursin("2609-00001", f))) == 1 && startswith(names["assets/2609-00001-1.Bbbbbbb1.png"], "docs-")
-    @test names["generated/kb/timeline.html"] == names["papers.json"] == "hub"
+    @test names["kb/timeline.html"] == names["papers.json"] == "hub"
     @test names["assets/chunks/theme.Ccccccc1.js"] == names["assets/chunks/index.Ddddddd1.js"] == "runtime"
     @test startswith(names["assets/chunks/index.Eeeeeee1.js"], "chunks-") && startswith(names["notes/x.html"], "pages-")
     K.pull!(con; store, site_parts = true)

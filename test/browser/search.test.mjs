@@ -12,7 +12,7 @@ test('a search shows that it is running, and dims what an earlier query found', 
   const held = []
   const prepare = page => page.route(u => new URL(u).pathname.endsWith('/api/search'), r => { held.push(r) })
   const answer = title => Promise.all(held.splice(0).map(r => r.fulfill({ json: { hits: [hit(title)], findings: [], seconds: 0.1 } })))
-  const { page, errors, close } = await open('/generated/kb/', '.kb-search .kb-mode.live', { prepare })
+  const { page, errors, close } = await open('/kb/', '.kb-search .kb-mode.live', { prepare })
   const spinner = page.locator('.kb-search .kb-spinner')
 
   await page.locator('.kb-search input').fill('coral')

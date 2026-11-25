@@ -2,7 +2,7 @@
 // tutor's answers): markdown-it with `$…$`, `$$…$$` and ```math mathematics (MathJax, as SVG), code
 // highlighted in the site's light and dark themes (Shiki), tables, footnotes and linked URLs, and
 // optionally @references and `[arXiv:…]` citations (see kbRefs.ts). Links written from the site's
-// root (`/generated/kb/…`) are kept under the site's base. Files attached to the text, named `media/<hash>/<name>`,
+// root (`/kb/…`) are kept under the site's base. Files attached to the text, named `media/<hash>/<name>`,
 // are shown from where they are served: images (full size on a click), movies as players, other
 // files as links. Raw HTML in text is shown as text: only what Markdown itself makes is produced.
 // Loaded once, on first use, and shared.
@@ -201,7 +201,7 @@ async function build(): Promise<Render> {
     md.renderer.rules.link_open = (tokens, i, options, env, self) => {
       const href = tokens[i].attrGet('href') ?? ''
       if (MEDIA.test(href)) tokens[i].attrSet('href', mediaUrl(href))
-      else if (/^\/(?!\/)/.test(href)) tokens[i].attrSet('href', withBase(href))
+      else if (/^\/(?!\/)/.test(href)) tokens[i].attrSet('href', withBase(href.replace(/^\/generated\/kb(?=\/|$|[?#])/, '/kb')))
       if (/^https?:\/\//.test(href) || MEDIA.test(href)) { tokens[i].attrSet('target', '_blank'); tokens[i].attrSet('rel', 'noopener') }
       return link(tokens, i, options, env, self)
     }

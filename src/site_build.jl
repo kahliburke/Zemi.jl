@@ -220,7 +220,7 @@ function default_site_build(out::AbstractString, log::AbstractString)
         # The knowledge base's pages are written here, where their code is compiled already: a build
         # process of its own would compile it first, which takes longer than writing them.
         t = time()
-        site = write_site(kb(), joinpath(sources, "src", "generated", "kb"), joinpath(sources, "kb_public"))
+        site = write_site(kb(), joinpath(sources, "src", "kb"), joinpath(sources, "kb_public"))
         @info "[site] SiteStep: wrote the knowledge base's pages in $(round(time() - t; digits = 1)) s"
         env["ZEMI_SITE_WRITTEN"] = joinpath(sources, "site.json")
         write(env["ZEMI_SITE_WRITTEN"], site_json(site))
@@ -247,7 +247,7 @@ function site_sources(c::Config, dir::AbstractString)
     rm(dir; recursive = true, force = true)
     mkpath(joinpath(dir, "src"))
     for entry in readdir(joinpath(docs, "src"))
-        entry == "generated" || cp(joinpath(docs, "src", entry), joinpath(dir, "src", entry))
+        entry in ("generated", "kb") || cp(joinpath(docs, "src", entry), joinpath(dir, "src", entry))
     end
     # The package's files are read-only where it is installed, and the copies would be too.
     chmod(joinpath(dir, "src"), 0o755; recursive = true)

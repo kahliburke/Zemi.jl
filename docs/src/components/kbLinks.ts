@@ -7,10 +7,11 @@ declare const __KB_CLEAN_URLS__: boolean
 // A link to one of the site's pages, as VitePress writes its own: with `.html` unless the site uses
 // clean URLs. A directory's page (ending in `/`) needs neither.
 export function pageLink(path: string) {
+  path = path.replace(/\/index$/, '/')
   return withBase(path.endsWith('/') || __KB_CLEAN_URLS__ ? path : `${path}.html`)
 }
 
-const KB = '/generated/kb/'
+const KB = '/kb/'
 
 /** A page of the knowledge base's, as the API and the site's data name them: `papers/2401-00001`, `code/code-kb/`. */
 export const kbPage = (path: string) => pageLink(KB + path)

@@ -400,7 +400,7 @@ end
 
 "The front page's panels when the group names none."
 const DEFAULT_PANELS = [
-    Panel("Papers", "Read in full, summarized by section, searchable by keyword and by meaning.", "/generated/kb/"),
+    Panel("Papers", "Read in full, summarized by section, searchable by keyword and by meaning.", "/kb/"),
     Panel("Tutor", "Ask about a paper. The tutor has read it and its neighbours, and adjusts to your background.", ""),
     Panel("Findings", "The group's conclusions, each citing its papers, notebooks and results.", "/findings"),
     Panel("Projects", "Tasks that people and agents plan, take and report on.", "/projects"),

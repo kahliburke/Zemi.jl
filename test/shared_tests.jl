@@ -173,12 +173,12 @@ end
         @test !K.shared_config(Dict("providers" => [Dict("name" => "C")])).providers[1].email_verified
 
         # Each sign-in is bound to the browser that starts it, by a secret in its cookie.
-        url = K.begin_sign_in(sh, "campus-login"; return_to = "/generated/kb/papers/x", browser = "b1")
+        url = K.begin_sign_in(sh, "campus-login"; return_to = "/kb/papers/x", browser = "b1")
         v = visit(url)
         @test startswith(url, "$base/authorize?") && v.q["redirect_uri"] == "http://127.0.0.1:8800/auth/callback/campus-login"
         @test v.q["code_challenge_method"] == "S256" && v.q["scope"] == "openid email profile"
         r = K.finish_sign_in(kb, sh, "campus-login", v.back; browser = "b1")
-        @test r.return_to == "/generated/kb/papers/x" && K.user_roles(kb, r.user_id) == ["Curator"]
+        @test r.return_to == "/kb/papers/x" && K.user_roles(kb, r.user_id) == ["Curator"]
         @test only(K.users(kb)).name == "Una Ames"
         @test_throws ErrorException K.finish_sign_in(kb, sh, "campus-login", v.back; browser = "b1")   # a state is used once
         # Another browser cannot finish it, so nobody is signed in as someone who started a sign-in.
@@ -566,7 +566,7 @@ end
         hits(uid) = [h["id"] for h in call(uid, "GET", "/api/search?q=tide")[2]["hits"]]
         @test hits(ada) == [id] && isempty(hits(bea))
         @test only(call(ada, "GET", "/api/search?q=tide")[2]["hits"])["link"] == K.document_link(kb.config, id)   # its page's whole address
-        searched = K.site_link(kb.config, "generated/kb/index")                # the site's search page, asked the same
+        searched = K.site_link(kb.config, "kb/index")                # the site's search page, asked the same
         @test call(ada, "GET", "/api/search?q=tide%20pools")[2]["link"] == (isempty(searched) ? "" : searched * "?q=tide%20pools")
         @test call(ada, "GET", "/api/paper/$id")[1] == 200 && call(bea, "GET", "/api/paper/$id")[1] == 404
         @test call(ada, "GET", "/api/paper-text?id=$id&section=1")[1] == 200 && call(bea, "GET", "/api/paper-text?id=$id&section=1")[1] == 404
@@ -601,24 +601,24 @@ end
         # at a built codebase's addresses, to those who may see it, and the 404 page to anyone else.
         K.build_site!(kb.config; build = (out, log) -> begin
             root = mkpath(joinpath(out, "1"))
-            write(mkpath(joinpath(root, "generated", "kb", "templates")) * "/codebase.html", "<p>codebase template</p>")
-            write(joinpath(root, "generated", "kb", "templates", "code-file.html"), "<p>file template</p>")
-            write(mkpath(joinpath(root, "assets")) * "/generated_kb_templates_codebase.md.H1.js",
-                  "page {\"relativePath\":\"generated/kb/templates/codebase.md\"}")
+            write(mkpath(joinpath(root, "kb", "templates")) * "/codebase.html", "<p>codebase template</p>")
+            write(joinpath(root, "kb", "templates", "code-file.html"), "<p>file template</p>")
+            write(mkpath(joinpath(root, "assets")) * "/kb_templates_codebase.md.H1.js",
+                  "page {\"relativePath\":\"kb/templates/codebase.md\"}")
             write(joinpath(root, "index.html"), "home"); write(joinpath(root, "404.html"), "not here")
             write(log, "built")
         end)
         site(uid, path) = K.respond_shared(kb, HTTP.Request("GET", path, ["Cookie" => "kb_session=$(K.start_session!(kb, uid, sh))"]))
         text(r) = String(r.body)
-        for path in ("/generated/kb/code/$id/", "/generated/kb/code/$id/files/src_Tide_jl.html", "/kb-data/codebase/$id/index.json",
+        for path in ("/kb/code/$id/", "/kb/code/$id/files/src_Tide_jl", "/kb-data/codebase/$id/index.json",
                      "/code/$id.json", "/kb-data/code/$id/src_Tide_jl.json", "/code/$id/notebooks/src_notes_jl.json",
-                     "/assets/generated_kb_code_$(id)_index.md.H1.c1.js")
+                     "/assets/kb_code_$(id)_index.md.H1.c1.js")
             r = site(bea, path)
             @test r.status == 404 && text(r) == "not here"
         end
-        @test text(site(ada, "/generated/kb/code/$id/")) == "<p>codebase template</p>"
-        @test text(site(ada, "/generated/kb/code/$id/files/src_Tide_jl.html")) == "<p>file template</p>"
-        @test text(site(ada, "/assets/generated_kb_code_$(id)_index.md.H1.c1.js")) == "page {\"relativePath\":\"generated/kb/code/$id/index.md\"}"
+        @test text(site(ada, "/kb/code/$id/")) == "<p>codebase template</p>"
+        @test text(site(ada, "/kb/code/$id/files/src_Tide_jl")) == "<p>file template</p>"
+        @test text(site(ada, "/assets/kb_code_$(id)_index.md.H1.c1.js")) == "page {\"relativePath\":\"kb/code/$id/index.md\"}"
         page = site(ada, "/kb-data/codebase/$id/index.json")
         @test HTTP.header(page, "Cache-Control") == "no-store" && JSON.parse(text(page))["title"] == "Tide" &&
               JSON.parse(text(page))["access"] == "projects"
@@ -948,24 +948,24 @@ end
         @test K.site_from_json(K.site_json(nav)).records == "records.md"
         K.build_site!(kb.config; build = (out, log) -> begin
             root = mkpath(joinpath(out, "1"))
-            write(mkpath(joinpath(root, "generated", "kb", "templates")) * "/record.html", "<p>record template</p>")
-            write(mkpath(joinpath(root, "assets")) * "/generated_kb_templates_record.md.H1.js",
-                  "page {\"relativePath\":\"generated/kb/templates/record.md\"}")
+            write(mkpath(joinpath(root, "kb", "templates")) * "/record.html", "<p>record template</p>")
+            write(mkpath(joinpath(root, "assets")) * "/kb_templates_record.md.H1.js",
+                  "page {\"relativePath\":\"kb/templates/record.md\"}")
             write(joinpath(root, "index.html"), "home"); write(joinpath(root, "404.html"), "not here")
             write(log, "built")
         end)
         site(uid, path) = K.respond_shared(kb, HTTP.Request("GET", path, ["Cookie" => "kb_session=$(K.start_session!(kb, uid, sh))"]))
         text(r) = String(r.body)
-        for path in ("/generated/kb/records/$id.html", "/kb-data/records/$id.json", "/assets/generated_kb_records_$(id).md.H1.c1.js")
+        for path in ("/kb/records/$id", "/kb-data/records/$id.json", "/assets/kb_records_$(id).md.H1.c1.js")
             r = site(bea, path)
             @test r.status == 404 && text(r) == "not here"
         end
         @test site(ada, "/kb-data/records/rec-notes-none.json").status == 404
         # The pages need `read`: a token made without it is refused them.
-        bearer(token) = K.respond_shared(kb, HTTP.Request("GET", "/index.html", ["Authorization" => "Bearer $token"]))
+        bearer(token) = K.respond_shared(kb, HTTP.Request("GET", "/", ["Authorization" => "Bearer $token"]))
         @test bearer(tutor_only).status == 403 && text(bearer(K.create_token!(kb, ada; name = "pages", permissions = ["read"]).token)) == "home"
-        @test text(site(ada, "/generated/kb/records/$id.html")) == "<p>record template</p>"
-        @test text(site(ada, "/assets/generated_kb_records_$(id).md.H1.c1.js")) == "page {\"relativePath\":\"generated/kb/records/$id.md\"}"
+        @test text(site(ada, "/kb/records/$id")) == "<p>record template</p>"
+        @test text(site(ada, "/assets/kb_records_$(id).md.H1.c1.js")) == "page {\"relativePath\":\"kb/records/$id.md\"}"
         page = site(ada, "/kb-data/records/$id.json")
         data = JSON.parse(text(page))
         @test HTTP.header(page, "Cache-Control") == "no-store" && data["title"] == "Pump test review" && data["day"] == "2 October 2026" &&
@@ -1154,6 +1154,12 @@ end
     end
     @test length(read(K.site_icon(kb.config))) < 16_000                                             # the small one is small
     @test occursin("""<link rel="icon" type="image/png" href="/favicon.png">""", page)
+    for (old, canonical) in ("/findings.html?q=a%26b" => "/findings?q=a%26b", "/index.html" => "/",
+                             "/generated/kb" => "/kb/", "/generated/kb/index.html?q=reef" => "/kb/?q=reef",
+                             "/generated/kb/topics.html" => "/kb/topics", "/service/setup.html" => "/service/setup")
+        r = req("GET", old)
+        @test r.status == 308 && HTTP.header(r, "Location") == canonical
+    end
     @test req("GET", "/api/status").status == 401
     @test !HTTP.hasheader(req("GET", "/api/status"), "Access-Control-Allow-Origin")       # no other site reads its answers
 
@@ -1515,13 +1521,13 @@ end
         # one edited since, and a page of a removed paper as removed.
         src, pub = mktempdir(), mktempdir()
         written, removed = K.diff_site_pages!(kb, src, pub)
-        @test "generated/kb/index.md" in written && isempty(removed)
-        index = joinpath(src, "generated", "kb", "index.md")
-        gone = joinpath(src, "generated", "kb", "papers", "gone.md")
+        @test "kb/index.md" in written && isempty(removed)
+        index = joinpath(src, "kb", "index.md")
+        gone = joinpath(src, "kb", "papers", "gone.md")
         write(index, "edited"); mkpath(dirname(gone)); write(gone, "a removed paper")
         written, removed = K.diff_site_pages!(kb, src, pub)
-        @test "generated/kb/index.md" in written && !("generated/kb/timeline.md" in written)
-        @test removed == ["generated/kb/papers/gone.md"] && read(index, String) != "edited"
+        @test "kb/index.md" in written && !("kb/timeline.md" in written)
+        @test removed == ["kb/papers/gone.md"] && read(index, String) != "edited"
         # Files whose contents differ are copied; the rest are left alone.
         to = mktempdir()
         @test K.sync_files!(pub, to) > 0 && K.sync_files!(pub, to) == 0
@@ -2154,10 +2160,10 @@ end
     call(ada, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Order spares", "assignee" => "bea@x.org"))
     round(200); round(270)
     @test to("bea")[end]["title"] == "Assigned to you · PU-2" && to("bea")[end]["body"] == "Order spares" &&
-          to("bea")[end]["url"] == "/projects.html#PU-2"
+          to("bea")[end]["url"] == "/projects#PU-2"
     # A question, or an answer, opens its task at the question.
     @test K.notification(kb.config, [Dict("section" => "questions", "key" => "questions:41", "ref" => "PU-1", "text" => "Which gasket?")])["url"] ==
-          "/projects.html#PU-1/41"
+          "/projects#PU-1/41"
     # What they did themselves is not pushed to them.
     call(bea, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Clean the filter", "assignee" => "bea@x.org"))
     round(300); round(370)
