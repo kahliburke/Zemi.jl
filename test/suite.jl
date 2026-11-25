@@ -745,7 +745,7 @@ end
         @test [(f.bytes, f.type) for f in K.daily_figures(kb)] == [(UInt8[0x89, 0x50, 0x4e, 0x47], "image/png")]
         @test isempty(K.daily_figures(kb, "2026-10-01"))
         @test startswith(K.format_daily(kb, "2026-09-30"), "No paper of the day on 2026-09-30. Days with one: 2026-10-02, 2026-10-01")
-        @test K.daily_json(dailies(kb)) == [Dict("day" => "2026-10-02", "id" => "2610.00001", "title" => "2610.00001"),
+        @test K.daily_json(dailies(kb)) == [Dict("day" => "2026-10-02", "id" => "2610.00001", "title" => "Paper 2610.00001"),
                                             Dict("day" => "2026-10-01", "id" => "2401.00001", "title" => "A library paper")]
         # Its citations link to the papers' pages (or arXiv); its mathematics stays as written, for the page to render.
         text = main["analysis"][2]["text"]
