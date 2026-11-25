@@ -1071,6 +1071,8 @@ end
         version[] += 1
         mkpath(joinpath(out, "1", "assets")); mkpath(joinpath(out, "1", "papers"))
         write(joinpath(out, "1", "index.html"), "home $(version[])")
+        write(joinpath(mkpath(joinpath(out, "1", "kb")), "index.html"), "search")
+        write(joinpath(out, "1", "findings.html"), "findings")
         write(joinpath(out, "1", "papers", "a.html"), "paper a")
         write(joinpath(out, "1", "assets", "chunk.Hash000$(version[]).js"), "chunk $(version[])")
         write(log, "built")
@@ -1154,12 +1156,6 @@ end
     end
     @test length(read(K.site_icon(kb.config))) < 16_000                                             # the small one is small
     @test occursin("""<link rel="icon" type="image/png" href="/favicon.png">""", page)
-    for (old, canonical) in ("/findings.html?q=a%26b" => "/findings?q=a%26b", "/index.html" => "/",
-                             "/generated/kb" => "/kb/", "/generated/kb/index.html?q=reef" => "/kb/?q=reef",
-                             "/generated/kb/topics.html" => "/kb/topics", "/service/setup.html" => "/service/setup")
-        r = req("GET", old)
-        @test r.status == 308 && HTTP.header(r, "Location") == canonical
-    end
     @test req("GET", "/api/status").status == 401
     @test !HTTP.hasheader(req("GET", "/api/status"), "Access-Control-Allow-Origin")       # no other site reads its answers
 
@@ -1167,6 +1163,8 @@ end
     secret = K.start_session!(kb, uid, sh)
     signed = ["Cookie" => "other=1; kb_session=$secret"]
     @test String(req("GET", "/papers/a"; headers = signed).body) == "paper a"
+    @test String(req("GET", "/kb/?q=reef"; headers = signed).body) == "search"
+    @test String(req("GET", "/findings"; headers = signed).body) == "findings"
     @test req("GET", "/api/status"; headers = signed).status == 200
     # A change with the cookie must come from the site's own pages, with the API's header.
     add = JSON.json(Dict("arxiv" => "2609.00002"))

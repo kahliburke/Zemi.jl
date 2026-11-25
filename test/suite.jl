@@ -5166,11 +5166,6 @@ end
         foreach(s -> write(joinpath(mkpath(joinpath(built, "kb-data", "papers")), s * ".json"), "{}"), ("a-1", "b-2"))
         write(joinpath(mkpath(tpl("papers", "a-1")), "nb.html"), "a notebook's page")
         @test K.stamp_templates!(built) == 2 && read(tpl("papers", "b-2.html"), String) == "<p>template</p>"
-        write(tpl("index.html"), "search")
-        K.write_legacy_kb_pages(built)
-        legacy(parts...) = read(joinpath(built, "generated", "kb", parts...), String)
-        @test occursin("href=\"../../kb/\"", legacy("index.html"))
-        @test occursin("href=\"../../../kb/papers/b-2.html\"", legacy("papers", "b-2.html"))
         # Each copy's script names its own page, whose address VitePress then keeps.
         @test read(assets("kb_papers_b-2.md.H1.$(K.TEMPLATE_COPY).js"), String) == "script" &&
               read(assets("kb_papers_b-2.md.H1.$(K.TEMPLATE_COPY).lean.js"), String) == "lean {\"relativePath\":\"kb/papers/b-2.md\"}"

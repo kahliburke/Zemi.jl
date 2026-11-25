@@ -53,7 +53,7 @@ The addresses of a record's page, its script (a copy of its kind's template's, s
 [`page_slug`](@ref) leaves as it is).
 """
 const RECORD_ADDRESSES = [
-    r"^kb/records/(?<slug>rec-[a-z0-9-]+)(?:\.html)?$" => :page,
+    r"^(?:generated/)?kb/records/(?<slug>rec-[a-z0-9-]+)(?:\.html)?$" => :page,
     r"^assets/(?:generated_)?kb_records_(?<slug>rec-[a-z0-9-]+)\.md(?<tail>\..+\.js)$" => :page_script,
     r"^kb-data/records/(?<slug>rec-[a-z0-9-]+)\.json$" => :page_data]
 
@@ -106,7 +106,7 @@ end
 
 "The addresses of a paper's page, its script and its data on the site, each with the paper's slug (see [`page_slug`](@ref))."
 const PAPER_ADDRESSES = [
-    r"^kb/papers/(?<slug>[^/]+?)(?:\.html)?$" => :page,
+    r"^(?:generated/)?kb/papers/(?<slug>[^/]+?)(?:\.html)?$" => :page,
     r"^assets/(?:generated_)?kb_papers_(?<slug>[^/]+?)\.md(?<tail>\..+\.js)$" => :page_script,
     r"^kb-data/papers/(?<slug>[^/]+)\.json$" => :page_data]
 

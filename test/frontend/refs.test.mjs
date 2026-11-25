@@ -39,6 +39,16 @@ test('pages, each kind built one way', () => {
   assert.equal(links.findingHref('new/KB-12'), '/findings.html#new/KB-12')
 })
 
+test('links on a Zemi server open the selected search, task or finding', t => {
+  const previous = globalThis.__KB_CLEAN_URLS__
+  t.after(() => { globalThis.__KB_CLEAN_URLS__ = previous })
+  globalThis.__KB_CLEAN_URLS__ = true
+  assert.equal(links.kbPage('index'), '/kb/')
+  assert.equal(links.authorHref('hale|r'), '/kb/authors?a=hale%7Cr')
+  assert.equal(links.taskHref('KB-12'), '/projects#KB-12')
+  assert.equal(links.findingHref('KB-F3'), '/findings#KB-F3')
+})
+
 test('where a reference leads', () => {
   setCodebase('')
   assert.equal(href('code', 'src/tasks.jl#update_project!'), '')                                 // no codebase open

@@ -21,20 +21,6 @@ end
 # Plain static hosts can require literal filenames. The public demo uses such a host.
 clean_site_urls() = get(ENV, "ZEMI_SITE_CLEAN_URLS", "1") == "1"
 
-"Keep bookmarks working on file-only hosts, including sites mounted under a path."
-function write_legacy_kb_pages(site::AbstractString)
-    kb = joinpath(site, "kb")
-    isdir(kb) || return
-    for (root, _, files) in walkdir(kb), file in files
-        endswith(file, ".html") || continue
-        dest = mkpath(joinpath(site, "generated", "kb", relpath(root, kb)))
-        target = join(HTTP.escapeuri.(splitpath(relpath(joinpath(root, file), dest))), '/')
-        target = replace(target, r"/index\.html$" => "/")
-        write(joinpath(dest, file), """<!doctype html><meta charset="utf-8"><a href="$target">Open this page</a>
-            <script>location.replace(document.querySelector('a').href + location.search + location.hash)</script>""")
-    end
-end
-
 function page_path(path::AbstractString)
     page, tail = match(r"^([^?#]*)(.*)$", path).captures
     page = replace("/" * lstrip(page, '/'), r"/index(?:\.html)?$" => "/")

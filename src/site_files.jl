@@ -8,29 +8,6 @@ const CONTENT_TYPES = Dict(".html" => "text/html; charset=utf-8", ".js" => "text
     ".bib" => "text/plain; charset=utf-8", ".jl" => "text/plain; charset=utf-8", ".pdf" => "application/pdf", ".xml" => "application/xml",
     ".map" => "application/json", ".wasm" => "application/wasm")
 
-"Redirect old page addresses, preserving the original query string. Fragments are inherited by the browser."
-function site_page_redirect(c::Config, uri)
-    path = uri.path
-    occursin(r"^/(?:assets|api|auth|oauth|mcp|kb-data|notebooks|\.well-known)(?:/|$)", path) && return nothing
-    page = replace(path, r"^/generated/kb(?=/|$)" => "/kb")
-    page in ("/account", "/account.html") && (page = "/service/account")
-    if clean_site_urls()
-        page = replace(page, r"/index(?:\.html)?$" => "/")
-        if endswith(page, ".html")
-            page = chopsuffix(page, ".html")
-        elseif !endswith(page, "/") && isempty(splitext(page)[2])
-            f = site_file(c, page)
-            if page == "/kb" || occursin(r"^/kb/(?:code/code-[a-z0-9-]+|daily/\d{4}-\d{2}-\d{2})$", page) || (f !== nothing && basename(f) == "index.html")
-                page *= "/"
-            end
-        end
-    end
-    page == path && return nothing
-    target = isempty(uri.query) ? page : page * "?" * uri.query
-    safe_return(target) == target || return nothing
-    return HTTP.Response(308, ["Location" => target])
-end
-
 """
     site_file(c, path) -> Union{String,Nothing}
 

@@ -314,5 +314,4 @@ if !DEV
     t = time()
     n = KBase.stamp_templates!(site_dir)
     step_time("copied the templates to $n pages", t)
-    CLEAN_URLS || KBase.write_legacy_kb_pages(site_dir)
 end

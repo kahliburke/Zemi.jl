@@ -112,8 +112,6 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             else
                 handle(kb, req, shared_caller(kb, req))
             end
-        elseif req.method in ("GET", "HEAD") && (moved = site_page_redirect(kb.config, uri)) !== nothing
-            moved
         elseif req.method != "GET"
             HTTP.Response(405)
         elseif uri.path == "/zemi-sw.js"

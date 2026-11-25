@@ -150,8 +150,8 @@ The addresses of a codebase's pages, scripts and data on the site, each with the
 page's script (a copy of its kind's template's, see [`stamp_templates!`](@ref)), or a data file.
 """
 const CODEBASE_ADDRESSES = [
-    r"^kb/code/(?<slug>code-[a-z0-9-]+)(?:/|/index|/index\.html)?$" => :page,
-    r"^kb/code/(?<slug>code-[a-z0-9-]+)/files/(?<page>[^/]+?)(?:\.html)?$" => :file_page,
+    r"^(?:generated/)?kb/code/(?<slug>code-[a-z0-9-]+)(?:/|/index|/index\.html)?$" => :page,
+    r"^(?:generated/)?kb/code/(?<slug>code-[a-z0-9-]+)/files/(?<page>[^/]+?)(?:\.html)?$" => :file_page,
     r"^assets/(?:generated_)?kb_code_(?<slug>code-[a-z0-9-]+)_index\.md(?<tail>\..+\.js)$" => :page_script,
     r"^assets/(?:generated_)?kb_code_(?<slug>code-[a-z0-9-]+)_files_(?<page>.+)\.md(?<tail>\..+\.js)$" => :file_script,
     r"^kb-data/codebase/(?<slug>code-[a-z0-9-]+)/index\.json$" => :page_data,
