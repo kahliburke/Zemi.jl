@@ -329,6 +329,27 @@ function add_folder!(site::AbstractString, dir::AbstractString; name::Union{Abst
 end
 
 """
+    connect_folder!(site, dir; name = nothing, skip = []) -> Dict
+
+`zemi connect SITE FOLDER`: keep `dir` in step with one's library at `site` (see [`add_folder!`](@ref)),
+signed in there first when it is elsewhere. Synced once now when nothing syncs the folders, else at
+the next pass of whatever does.
+"""
+function connect_folder!(site::AbstractString, dir::AbstractString; name::Union{AbstractString,Nothing} = nothing, skip = String[])
+    dir = abspath(expand_home(dir))
+    isdir(dir) || error("$dir is not a folder here")
+    c = load_connect_config()
+    get(c, "site", site) == site || error("zemi connect keeps folders in step with $(site_label(c["site"])) already")
+    if site != "local" && get(load_connect_auth(), "site", "") != site
+        save_connect_auth!(sign_in_library(site))
+    end
+    f = add_folder!(site, dir; name, skip)
+    say(:ok, "$(f["name"]) syncs with $(site_label(site))", ("Folder", contractuser(f["path"])))
+    syncing_pid() === nothing ? connect_once_cli() : request_pass()
+    return f
+end
+
+"""
     remove_folder!(name; from_library = false)
 
 Stop keeping the folder named `name` in step. With `from_library`, its files are also removed from
@@ -573,16 +594,7 @@ function connect_cli(args::AbstractVector{<:AbstractString})
         length(plain) == 1 && !isdir(expand_home(plain[1])) &&
             error("$(plain[1]) is not a folder here: give a folder, or a site and a folder (zemi connect https://kb.example.org ~/Documents/Notes)")
         site = length(plain) == 2 ? connect_site(plain[1]) : default_connect_site()
-        dir = abspath(expand_home(last(plain)))
-        isdir(dir) || error("$dir is not a folder here")
-        c = load_connect_config()
-        get(c, "site", site) == site || error("zemi connect keeps folders in step with $(site_label(c["site"])) already")
-        if site != "local" && get(load_connect_auth(), "site", "") != site
-            save_connect_auth!(sign_in_library(site))
-        end
-        f = add_folder!(site, dir; name, skip = given("--skip"))
-        say(:ok, "$(f["name"]) syncs with $(site_label(site))", ("Folder", contractuser(f["path"])))
-        syncing_pid() === nothing ? connect_once_cli() : request_pass()
+        connect_folder!(site, last(plain); name, skip = given("--skip"))
         synced_by_local() || say(:info, "To keep it synced", ("Watch it", "zemi connect"),
                                  ("Or", "zemi connect --background", site == "local" ? "the knowledge base syncs it while it runs" : "syncs after each login"))
     elseif !isempty(plain)

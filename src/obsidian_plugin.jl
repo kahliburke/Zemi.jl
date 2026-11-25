@@ -108,13 +108,66 @@ function install_plugin!(vault::AbstractString, built::AbstractString)
     return to
 end
 
-"`zemi obsidian [VAULT]`: build the plugin and install it in VAULT, returning what to tell."
-function obsidian_cli(rest::AbstractVector{<:AbstractString}; build = nothing, known = obsidian_vaults())
-    vault = find_vault(isempty(rest) ? "" : rest[1], known)
+"""
+    plugin_settings!(to, site, folder)
+
+Point the plugin installed at `to` at the knowledge base at `site` and at the vault's `folder` in
+one's library, keeping the rest of its settings (a sign-in to the same site stays).
+"""
+function plugin_settings!(to::AbstractString, site::AbstractString, folder::AbstractString)
+    file = joinpath(to, "data.json")
+    d = isfile(file) ? JSON.parsefile(file) : Dict{String,Any}()
+    d["site"], d["folder"] = site, folder
+    write(file, JSON.json(d))
+end
+
+"Where the plugin reaches the knowledge base `zemi connect` names `site`: the address it is opened at, for the one run here."
+function plugin_site(site::AbstractString, c::Config)
+    site == "local" || return String(site)
+    s = local_served(c)
+    return s === nothing ? "http://localhost:$(local_port(c))" : s.url
+end
+
+"""
+    obsidian_cli(args) -> Vector{String}
+
+`zemi obsidian [VAULT] [--name NAME]`: build the plugin and install it in VAULT, and have `zemi
+connect` keep the vault in step with one's library (as NAME), as the plugin needs: at the site it
+keeps folders at, else the knowledge base run here, which then syncs them while it runs when nothing
+else does. The plugin is pointed at the site and the folder. Returns what to tell.
+"""
+function obsidian_cli(args::AbstractVector{<:AbstractString}; build = nothing, known = obsidian_vaults())
+    named = findfirst(==("--name"), args)
+    name = named === nothing || named == length(args) ? nothing : args[named+1]
+    plain = [a for (j, a) in enumerate(args) if !startswith(a, "--") && (named === nothing || j != named + 1)]
+    vault = find_vault(isempty(plain) ? "" : plain[1], known)
     c = load_config()
     built = build === nothing ? built_plugin(c) : built_plugin(c; build)
     to = install_plugin!(vault, built)
     v = JSON.parsefile(joinpath(built, "manifest.json"))["version"]
-    return ["Installed Zemi's plugin $v in $to.",
-            "In Obsidian: reload it (or the app), and allow community plugins in the vault if it asks; then sign in from the plugin's settings."]
+    say(:ok, "Installed Zemi's plugin $v", ("In", contractuser(to)))
+
+    cc = load_connect_config()
+    i = findfirst(f -> same_path(expand_home(f["path"]), vault), get(cc, "folders", Any[]))
+    if i === nothing || (name !== nothing && cc["folders"][i]["name"] != name)
+        site = default_connect_site()
+        f = connect_folder!(site, vault; name)
+    else
+        site, f = cc["site"], cc["folders"][i]
+        say(:ok, "$(f["name"]) syncs with $(site_label(site)) already")
+    end
+    if !synced_by_local() && syncing_pid() === nothing
+        if site == "local"
+            told = set_background!(true)
+            say(:ok, "The knowledge base on this machine syncs it while it runs" * (told ? "" : ", from its next start"),
+                ("To stop", "zemi connect --stop"))
+        else
+            say(:info, "To keep it synced", ("Watch it", "zemi connect"), ("Or", "zemi connect --background", "syncs after each login"))
+        end
+    end
+    address = plugin_site(site, c)
+    plugin_settings!(to, address, f["name"])
+    return ["In Obsidian: reload it (or the app), and allow community plugins in the vault if it asks.",
+            "Then sign in from the plugin's settings, to $address." *
+            (site == "local" ? " Your default browser needs the knowledge base's key: run zemi open first if it has not opened it." : "")]
 end

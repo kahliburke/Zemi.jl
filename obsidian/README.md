@@ -5,7 +5,7 @@ notes nearest the open note, citations to insert (`[@key]`), and notes for paper
 id or DOI. See the guide's "Projects, records and findings" page, under Obsidian, for what it does.
 
 ```sh
-zemi obsidian VAULT      # build it and install it in VAULT, turned on
+zemi obsidian VAULT      # build it, install it in VAULT turned on, and connect the vault
 ```
 
 Then reload Obsidian and sign in from the plugin's settings. Desktop only: signing in listens on a

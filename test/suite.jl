@@ -6995,6 +6995,31 @@ end
         @test K.JSON.parsefile(joinpath(vault, ".obsidian", "community-plugins.json")) == ["other", "zemi"]
         K.install_plugin!(other, built)
         @test K.JSON.parsefile(joinpath(other, ".obsidian", "community-plugins.json")) == ["zemi"]
+
+        # The vault connected as zemi connect does, and the plugin pointed at the site and its folder.
+        free = let s = K.Sockets.listen(K.Sockets.localhost, 0); p = Int(K.Sockets.getsockname(s)[2]); close(s); p end
+        withenv("ZEMI_CONFIG" => joinpath(dir, "config.toml"), "XDG_DATA_HOME" => joinpath(dir, "data"), "ZEMI_PORT" => string(free)) do
+            stub = d -> write(joinpath(d, "main.js"), "plugin")
+            data(v) = K.JSON.parsefile(joinpath(v, ".obsidian", "plugins", "zemi", "data.json"))
+            K.add_folder!("https://kb.example.org", vault; name = "Notes")
+            write(joinpath(vault, ".obsidian", "plugins", "zemi", "data.json"), K.JSON.json(Dict("site" => "x", "papersFolder" => "Refs")))
+            said = redirect_stdout(devnull) do
+                K.obsidian_cli(["Notes"]; build = stub, known)
+            end
+            @test data(vault) == Dict("site" => "https://kb.example.org", "folder" => "Notes", "papersFolder" => "Refs")
+            @test occursin("https://kb.example.org", last(said)) && !occursin("zemi open", last(said))
+            @test length(K.load_connect_config()["folders"]) == 1                     # connected already: kept
+
+            # The knowledge base run here: the vault connected, and synced by it while it runs.
+            K.save_connect_config!(Dict("site" => "local"))
+            said = redirect_stdout(devnull) do
+                K.obsidian_cli([other, "--name", "Work notes"]; build = stub, known)
+            end
+            cc = K.load_connect_config()
+            @test [f["name"] for f in cc["folders"]] == ["Work notes"] && K.synced_by_local(cc)
+            @test data(other) == Dict("site" => "http://localhost:$free", "folder" => "Work notes")
+            @test occursin("zemi open", last(said))
+        end
     end
     rm(dir; recursive = true, force = true)
 end

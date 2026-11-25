@@ -27,8 +27,9 @@ const CLI_HELP = """
                                          here), its SUBFOLDERs never sent. `zemi connect` alone: an app that
                                          shows and manages the folders; --background syncs from every login
                                          (--status, --stop), --once once
-    zemi obsidian [VAULT]                build Zemi's Obsidian plugin and install it in VAULT (its folder, or
-                                         the name of a vault Obsidian has opened; alone, the one it knows)
+    zemi obsidian [VAULT] [--name NAME]  build Zemi's Obsidian plugin and install it in VAULT (its folder, or
+                                         the name of a vault Obsidian has opened; alone, the one it knows),
+                                         and connect the vault as zemi connect does (as NAME in your library)
     zemi token create NAME --out FILE [--write]
                                          issue NAME a key to the dataset's bucket, saved to FILE (read-only,
                                          or read and write with --write)
