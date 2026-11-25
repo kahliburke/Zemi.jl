@@ -760,11 +760,11 @@ function go(n: Node, remember = true) {
   const g = graph?.graphData().nodes.find((x: GNode) => x.id === n.id)
   if (!g || g.x === undefined) return
   if (view.value === '2d') {
-    graph.centerAt(g.x, g.y, 900)
-    graph.zoom(Math.max(graph.zoom(), 3), 900)
+    graph.centerAt(g.x, g.y, moveMs(900))
+    graph.zoom(Math.max(graph.zoom(), 3), moveMs(900))
   } else {
     const d = 90, r = Math.hypot(g.x, g.y, g.z) || 1
-    graph.cameraPosition({ x: g.x * (1 + d / r), y: g.y * (1 + d / r), z: g.z * (1 + d / r) }, g, 1400)
+    graph.cameraPosition({ x: g.x * (1 + d / r), y: g.y * (1 + d / r), z: g.z * (1 + d / r) }, g, moveMs(1400))
   }
 }
 function back() { const n = trail.pop(); if (n) go(n, false) }
@@ -809,15 +809,24 @@ function drift() {
   seen.clear(); seen.add(start.id)
   driftTrail.value = [{ node: start }]
   go(start)
-  driftTimer = setInterval(() => {
-    const here = selected.value
-    const nextOne = (nearOf.value.get(here?.id ?? '') ?? []).find(x => !seen.has(x.node.id) && visibleNode(x.node))
-    if (!nextOne) { stopDrift(); return }
-    seen.add(nextOne.node.id)
-    driftTrail.value.push({ node: nextOne.node, similarity: nextOne.similarity })
-    go(nextOne.node)
-  }, 4500)
+  driftTimer = setInterval(driftStep, driftEvery.value * 1000)
 }
+function driftStep() {
+  const here = selected.value
+  const nextOne = (nearOf.value.get(here?.id ?? '') ?? []).find(x => !seen.has(x.node.id) && visibleNode(x.node))
+  if (!nextOne) { stopDrift(); return }
+  seen.add(nextOne.node.id)
+  driftTrail.value.push({ node: nextOne.node, similarity: nextOne.similarity })
+  go(nextOne.node)
+}
+// How long a drift stays at each document, in seconds; changed while drifting, from the next step.
+const driftEvery = ref<number>(stored('drift', 4.5))
+watch(driftEvery, v => {
+  keep('drift', v)
+  if (drifting.value) { clearInterval(driftTimer); driftTimer = setInterval(driftStep, v * 1000) }
+})
+// The view's move to a document: quicker when drifting fast, so it arrives before the next step.
+const moveMs = (most: number) => (drifting.value ? Math.min(most, driftEvery.value * 600) : most)
 function stopDrift() { drifting.value = false; clearInterval(driftTimer) }
 // The trail as text: a numbered list of the documents, how alike each was to the one before, and their pages.
 async function copyTrail() {
@@ -914,6 +923,10 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
           <button :class="{ on: view === '3d' }" @click="view = '3d'">Space</button>
         </div>
         <button class="kbx-btn" :class="{ on: drifting }" title="Move from document to document along the nearest in meaning, one every few seconds" @click="drift">{{ drifting ? 'Stop' : 'Drift' }}</button>
+        <label v-if="drifting" class="kbx-speed" title="Seconds at each document">
+          <input v-model.number="driftEvery" type="range" min="1" max="10" step="0.5" aria-label="Seconds at each document">
+          <span>{{ driftEvery }} s</span>
+        </label>
         <button class="kbx-btn" :class="{ on: showPairs }" title="Pairs of documents close in meaning that nothing links yet" @click="showPairs = !showPairs">Suggested links</button>
         <button v-if="data?.abstract_only" class="kbx-btn" :class="{ on: abstracts }" :title="`${data.abstract_only} papers not read in full, placed by their title and abstract`"
                 @click="abstracts = !abstracts">Include abstract only</button>
@@ -1090,6 +1103,9 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-seg { display: inline-flex; border: 1px solid var(--vp-c-divider); border-radius: 8px; overflow: hidden; background: var(--vp-c-bg); }
 .kbx-seg button { padding: 4px 12px; font-size: 13px; color: var(--vp-c-text-2); }
 .kbx-seg button.on { background: var(--vp-c-brand-soft); color: var(--vp-c-text-1); font-weight: 600; }
+.kbx-speed { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--vp-c-text-2); font-variant-numeric: tabular-nums; }
+.kbx-speed input { width: 6rem; accent-color: var(--vp-c-brand-1); }
+.kbx-speed span { min-width: 2.6rem; }
 .kbx-btn { padding: 4px 10px; font-size: 13px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg); color: var(--vp-c-text-1); }
 .kbx-btn.on { background: var(--vp-c-brand-soft); }
 .kbx-settings { position: absolute; top: 52px; right: 10px; max-width: 31rem; border: 1px solid var(--vp-c-divider);
