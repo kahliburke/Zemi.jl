@@ -675,7 +675,7 @@ function format_status(kb::KB)
     for r in query(kb, """SELECT summarizer, model, count(*) AS n, count(DISTINCT paper_id) AS papers,
                           sum(input_tokens) AS tin, sum(output_tokens) AS tout FROM summaries GROUP BY summarizer""")
         println(io, "Summaries by $(r.summarizer) ($(r.model)): $(r.n) for $(r.papers) paper(s), ",
-            "$(coalesce(r.tin, 0)) input / $(coalesce(r.tout, 0)) output tokens")
+            "$(coalesce(r.tin, "unknown")) input / $(coalesce(r.tout, "unknown")) output tokens")
     end
     println(io, "\nLayers:")
     counts = Dict(r.layer => r.n for r in query(kb, "SELECT layer, count(*) AS n FROM embeddings GROUP BY layer"))

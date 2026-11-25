@@ -450,9 +450,11 @@ end
 Store summaries written outside the pipeline (by an agent, say) as the summarizer `s`'s:
 `sections` maps a section's `ord` to its summary, and `paper` is the paper summary with its
 "Topics:" line. Sections the pipeline would not summarize are rejected, so imported and generated
-summaries cover the same units and can be compared. Returns the number stored.
+summaries cover the same units and can be compared. Optional `tokens` are the reported input
+and output for the whole turn. Store them once on the paper row. Returns the number stored.
 """
-function import_summaries!(kb::KB, s::Summarizer, doc_id::AbstractString; sections::AbstractDict, paper::AbstractString)
+function import_summaries!(kb::KB, s::Summarizer, doc_id::AbstractString; sections::AbstractDict, paper::AbstractString,
+                           tokens = (missing, missing))
     sections = Dict{Int,String}(Int(k) => String(v) for (k, v) in sections)
     p = paper_row(kb, doc_id)
     listed = section_texts(kb, doc_id)
@@ -465,7 +467,7 @@ function import_summaries!(kb::KB, s::Summarizer, doc_id::AbstractString; sectio
         for (ord, text) in sections
             save_summary!(kb, p.id, "s:$doc_id:$ord", s, input_sha(inputs.sections[ord]), strip(text), missing, missing)
         end
-        save_summary!(kb, p.id, "p:$doc_id", s, input_sha(inputs.paper), strip(paper), missing, missing)
+        save_summary!(kb, p.id, "p:$doc_id", s, input_sha(inputs.paper), strip(paper), tokens...)
     end
     return length(sections) + 1
 end
