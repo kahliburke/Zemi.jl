@@ -306,7 +306,7 @@ end
 # sign-in it sends the request round, a refusal.
 function open_pdf(url::AbstractString)
     r = try
-        HTTP.get(url; status_exception = false, connect_timeout = 20, readtimeout = 120, redirect_limit = 5)
+        HTTP.get(url; status_exception = false, connect_timeout = 20, read_idle_timeout = 120, redirect_limit = 5)
     catch e
         e isa InterruptException && rethrow()
         @warn "An open copy could not be fetched" url exception = e

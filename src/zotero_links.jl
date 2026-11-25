@@ -32,7 +32,7 @@ many items its library holds. Refused when Zotero has no such group, or it may n
 function zotero_group(id::AbstractString; key::AbstractString = "")
     headers = ["Zotero-API-Version" => "3"; isempty(key) ? Pair{String,String}[] : ["Zotero-API-Key" => key]]
     get_(path, query = Pair{String,String}[]) =
-        HTTP.get("$(ZOTERO_API[])/groups/$id$path"; headers, query, status_exception = false, connect_timeout = 20, readtimeout = 30)
+        HTTP.get("$(ZOTERO_API[])/groups/$id$path"; headers, query, status_exception = false, connect_timeout = 20, read_idle_timeout = 30)
     r = get_("/items/top", ["limit" => "1", "format" => "json"])
     r.status == 404 && not_found("Zotero has no group $id")
     r.status in (401, 403) && error(isempty(key) ? "Group $id is private: give an API key that may read its library" :

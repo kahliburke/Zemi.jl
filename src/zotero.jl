@@ -33,7 +33,7 @@ function zotero_items(group::AbstractString, since::Integer; key::AbstractString
     chosen = keys === nothing ? Pair{String,String}[] : ["itemKey" => join(keys, ',')]
     while true
         query = vcat(["since" => string(since), "format" => "json", "limit" => "100", "start" => string(start)], chosen)
-        r = HTTP.get("$(ZOTERO_API[])/groups/$group/items"; headers, query, status_exception = false, connect_timeout = 20, readtimeout = 60)
+        r = HTTP.get("$(ZOTERO_API[])/groups/$group/items"; headers, query, status_exception = false, connect_timeout = 20, read_idle_timeout = 60)
         r.status == 304 && return (; items, version)
         r.status == 403 && error("Zotero refused group $group: it is not public, and no key that may read it is set")
         r.status == 200 || error("Zotero answered HTTP $(r.status) for group $group")
