@@ -1492,7 +1492,7 @@ end
         """; modified = K.DateTime(2020, 1, 1, 12))                         # last changed long ago
     mk("Topics/Estuaries.md", "Where rivers meet the sea: see [[Tidal mixing]] and [[A note not written]].\n")
     daily = "Daily/2026/11/2026-11-09.md"
-    mk(daily, "---\ntags: [daily]\n---\nRead about tides.\n")
+    mk(daily, "---\ntags: [daily]\n---\nRead about tides [see @arXiv:2401.00001, p. 2; @nobody], not [a link @x](https://example.org).\n")
     K.READ_PUT[] = false
     try
         s = K.registered_source("obsidian")
@@ -1519,6 +1519,17 @@ end
         @test occursin("![A plot](img-1)", text(t)) && length(K.record_document(kb, t)["figures"]) == 1
         @test !occursin("dataview", text(t)) && !occursin("reminder", text(t))
         @test occursin("see @[Tidal mixing](paper:2401.00001) and A note not written.", text(e))
+        # A citation names the documents it can, labelled as in prose, keeping its words; a link's text is no citation.
+        @test occursin(r"tides \(see @\[[^\]]+\]\(paper:2401\.00001\), p\. 2; @nobody\), not \[a link @x\]\(https://example.org\)", text(d))
+        @test K.cited_document(kb, "arXiv:2401.00001") == "2401.00001" && K.cited_document(kb, "nobody") === nothing
+        @test K.cited_document(kb, K.cite_key(kb, e)) == e && K.cite_label(kb, e) == "Estuaries" * (isempty(K.key_base(kb, e)[2]) ? "" : ", " * K.key_base(kb, e)[2])
+        # What the Obsidian plugin asks of a note, as Ada: its record and how it is cited; and how a document is cited.
+        as_ada = K.Caller(ada, "Ada", "ada@x.org", Set(K.PERMISSION_NAMES), :session, nothing)
+        ask(target) = (r = K.handle(kb, K.HTTP.Request("GET", target), as_ada); (r.status, r.status == 200 ? K.JSON.parse(String(r.body)) : nothing))
+        st, got = ask("/api/library/note?path=Notes/Topics/Estuaries.md")
+        @test st == 200 && got["id"] == e && got["cite"]["cite"] == "[@$(K.cite_key(kb, e))]"
+        @test ask("/api/library/note?path=Notes/Topics/Nothing.md")[1] == 404
+        @test ask("/api/cite/2401.00001")[2]["cite"] == "[@arXiv:2401.00001]"
         # Read for searching, not summarized.
         layers = [Layer(; name = "text", model = "m", unit = :chunk), Layer(; name = "over", model = "m", unit = :section, source = "writer")]
         @test [l.name for l in K.document_layers(kb, t, layers)] == ["text"]
@@ -1527,6 +1538,7 @@ end
         # Given its reference in the library's copy, and nothing else of it changed; Zemi's own writing is not read as an edit.
         after = note(tidal)
         @test occursin("\nzemi: \"2401.00001\"\n", after) && join(filter(l -> !startswith(l, "zemi"), split(after, '\n')), '\n') == before
+        @test occursin("\nzemi-cite: \"[@arXiv:2401.00001]\"\n", after)                 # to copy into another note
         @test K.record_row(kb, t).happened == "2020-01-01"                    # dated as before Zemi wrote into it
         shas() = Dict(r.doc_id => r.content_sha for r in K.query(kb, "SELECT p.doc_id, x.content_sha FROM records x JOIN papers p ON p.id = x.paper_id"))
         was = shas()
@@ -1537,6 +1549,7 @@ end
         K.read_space!(kb, space)
         props = K.note_properties(K.split_frontmatter(note(tidal)).yaml)
         @test props["authors"] == ["Ada Lovelace"] && !haskey(props, "title") && props["zemi"] == "2401.00001"
+        @test startswith(K.cite_label(kb, "2401.00001"), "Lovelace")
         # Not over a version changed meanwhile: the person's edit stands, and is read in the next run.
         @test_throws "has changed" K.put_library_file!(kb, space, "Notes/$tidal", Vector{UInt8}("x"); base = "0"^64)
         # A note moved keeps its record; one deleted is removed.

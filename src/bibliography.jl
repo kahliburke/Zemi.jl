@@ -55,6 +55,40 @@ function cite_keys!(kb::KB, ids)
     return out
 end
 
+"""
+    cited_document(kb, key) -> Union{String,Nothing}
+
+The document a citation key names (see [`cite_key`](@ref)): a paper by `arXiv:<id>`, else the
+document given that key here; `nothing` for none.
+"""
+function cited_document(kb::KB, key::AbstractString)
+    m = match(r"^arxiv:(.+)$"i, key)
+    m === nothing || return ismissing(paper_id(kb, String(m[1]))) ? nothing : String(m[1])
+    r = query(kb, "SELECT doc_id FROM papers WHERE cite_key = ?", (String(key),))
+    return isempty(r) ? nothing : String(first(r).doc_id)
+end
+
+"""
+    cite_label(kb, id) -> String
+
+Document `id` as a citation in prose names it: its authors' surnames and its year (`Hale 2024`, `Hale
+and Bea 2024`, `Hale et al. 2024`), or with no authors (a record, say) its title, cut short, and year.
+"""
+function cite_label(kb::KB, id::AbstractString)
+    p = first(query(kb, "SELECT title, authors, published, kind FROM papers WHERE doc_id = ?", (id,)))
+    year = key_base(kb, id)[2]
+    authors = json_list(p.authors)
+    surname(a) = (a = strip(a); occursin(',', a) ? strip(first(split(a, ','))) : last(split(a)))
+    who = if p.kind == RECORD.name || isempty(authors)
+        words = split(String(coalesce(p.title, id)))
+        length(words) <= 5 ? join(words, " ") : join(first(words, 4), " ") * " …"
+    else
+        length(authors) == 1 ? surname(authors[1]) : length(authors) == 2 ? "$(surname(authors[1])) and $(surname(authors[2]))" :
+                               "$(surname(authors[1])) et al."
+    end
+    return isempty(year) ? who : (p.kind == RECORD.name || isempty(authors) ? "$who, $year" : "$who $year")
+end
+
 "Words a key is not made from: those a title starts with that say nothing of it."
 const KEY_SKIP_WORDS = Set(["a", "an", "the", "on", "of", "in", "for", "and", "to", "with", "from", "at", "by", "towards", "toward"])
 

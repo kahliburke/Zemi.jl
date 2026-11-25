@@ -506,6 +506,9 @@ route!("GET", "/api/sync"; need = "sync") do c
     Dict("tasks" => tasks, "unread" => count(t -> t.reason == UNREAD, plan), "dataset" => dataset,
          "job" => running === nothing ? nothing : running.id)
 end
+# How a document is cited (see `cite_json`), for a client inserting a citation.
+route!(c -> cite_json(c.kb, known_paper(c.kb, seen_document(c.kb, c.caller, normalize_id(c[:paper])))), "GET", "/api/cite/*paper")
+
 # The bibliography the caller may see, as BibTeX: `?keys=k1,k2` for only the documents cited by those
 # keys (any not here are left out). Its ETag is its content's, so a client asks again cheaply.
 route!("GET", "/api/bib") do c

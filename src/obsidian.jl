@@ -175,14 +175,49 @@ struct VaultIndex
     read::Function                         # a file's path in the vault => its bytes, or `nothing`
     records::Dict{String,String}           # a note's key => its record's id
     papers::Dict{String,String}            # a paper note's key => the paper's id
+    cite::Function                         # a citation key => `(; id, label)` of the document it names, or `nothing`
 end
 
-function VaultIndex(notes, files, records::AbstractDict, papers::AbstractDict; read::Function = p -> nothing)
+function VaultIndex(notes, files, records::AbstractDict, papers::AbstractDict; read::Function = p -> nothing,
+                    cite::Function = k -> nothing)
     by_name(ps) = (d = Dict{String,Vector{String}}(); foreach(p -> push!(get!(d, lowercase(splitext(basename(p))[1]), String[]), p), ps); d)
     names = by_name(first.(notes))
     fnames = Dict{String,Vector{String}}()
     foreach(p -> push!(get!(fnames, lowercase(basename(p)), String[]), p), first.(files))
-    return VaultIndex(names, fnames, read, Dict{String,String}(records), Dict{String,String}(papers))
+    return VaultIndex(names, fnames, read, Dict{String,String}(records), Dict{String,String}(papers), cite)
+end
+
+"The document citation key `key` names in knowledge base `kb`, as a note's citation shows it: `(; id, label)`, or `nothing`."
+function cite_in(kb::KB, key::AbstractString)
+    id = cited_document(kb, key)
+    return id === nothing ? nothing : (; id, label = cite_label(kb, id))
+end
+
+# A citation as Pandoc writes it, and as a notebook cites the knowledge base: `[@key]`, several in one
+# (`[@a; @b]`), each with words before or a locator after (`[see @a, p. 3]`). Not a link's text.
+const NOTE_CITATION = r"\[([^\[\]\n]*(?:^|[\s;\[-])?@[^\[\]\n]*)\](?!\()"
+const CITE_ITEM = r"^(\s*(?:.*?[\s-])?)-?@(\w(?:[\w:.#$%&+?<>~/-]*\w)?)(.*)$"s
+
+"""
+    cite_text(index, inner) -> Union{String,Nothing}
+
+A citation's text in a record (`inner`, within its brackets): in parentheses, each document it names
+a reference to it labelled as in prose (`(Hale 2024; Water levels, 2026)`), keeping the words around
+it. `nothing` when it names no document here, to be left as written.
+"""
+function cite_text(ix::VaultIndex, inner::AbstractString)
+    found = false
+    parts = map(split(inner, ';')) do item
+        m = match(CITE_ITEM, item)
+        m === nothing && return String(strip(item))
+        doc = ix.cite(String(m[2]))
+        doc === nothing && return String(strip(item))
+        found = true
+        label = replace(doc.label, ']' => ')', '[' => '(')
+        kind = startswith(doc.id, "rec-") ? "record" : "paper"
+        return String(strip(m[1] * "@[$label]($kind:$(doc.id))" * m[3]))
+    end
+    return found ? "(" * join(parts, "; ") * ")" : nothing
 end
 
 """
@@ -228,7 +263,8 @@ const FIGURE_FILES = (".png", ".jpg", ".jpeg", ".webp")
     note_text(index, text) -> (; text, figures, links)
 
 A note's text as a record holds it: wikilinks become references to the papers and records their notes
-are (see [`link_text`](@ref)), an embedded image a figure placed in the text, Obsidian's comments
+are (see [`link_text`](@ref)), citations (`[@key]`) references to the documents they name (see
+[`cite_text`](@ref)), an embedded image a figure placed in the text, Obsidian's comments
 (`%% … %%`) and the blocks of plugins computing views of the vault (Dataview, Bases) are left out.
 Code is left as it is. Returns the figures, and the keys of the notes it links to.
 """
@@ -242,6 +278,7 @@ function note_text(ix::VaultIndex, text::AbstractString)
             continue
         end
         piece = replace(piece, r"%%[\s\S]*?%%" => "")
+        piece = replace(piece, NOTE_CITATION => s -> something(cite_text(ix, match(NOTE_CITATION, s)[1]), s))
         print(out, replace(piece, WIKILINK => function (s)
             m = match(WIKILINK, s)
             l = wikilink_parts(m[2])
@@ -332,7 +369,7 @@ end
 # ── A note as a record ────────────────────────────────────────────────────────────────────────────
 
 "The properties Zemi writes into a paper note, and never shows as the note's own."
-const ZEMI_PROPERTIES = ("zemi", "zemi-page")
+const ZEMI_PROPERTIES = ("zemi", "zemi-page", "zemi-cite")
 
 "A record's key for a note: its path in the vault, or for one too long, its start and a hash of it."
 note_key(p::AbstractString) = length(p) <= RECORD_LIMITS.key ? String(p) : first(p, RECORD_LIMITS.key - 10) * "#" * bytes2hex(sha256(p))[1:8]
@@ -424,8 +461,9 @@ end
 """
     note_references(kb, v, paper, props) -> Vector{Pair{String,Any}}
 
-The properties to set on a paper note so it refers to `paper`: those Zemi owns (`zemi`, and `zemi-page`
-where this knowledge base is served), where they differ from `props`, and the paper's title,
+The properties to set on a paper note so it refers to `paper`: those Zemi owns (`zemi`, `zemi-cite`,
+the citation to copy into another note, and `zemi-page` where this knowledge base is served), where
+they differ from `props`, and the paper's title,
 authors, arXiv id and DOI where the note has the property but leaves it empty (as a template makes
 it) and the paper's record has them. A property the note does not use is not added.
 """
@@ -436,6 +474,8 @@ function note_references(kb::KB, v::VaultConfig, paper::AbstractString, props::A
     page = document_link(kb.config, paper)
     string(something(get(props, "zemi", nothing), "")) == paper || push!(out, "zemi" => paper)
     isempty(page) || string(something(get(props, "zemi-page", nothing), "")) == page || push!(out, "zemi-page" => page)
+    cite = "[@" * cite_key(kb, paper) * "]"
+    string(something(get(props, "zemi-cite", nothing), "")) == cite || push!(out, "zemi-cite" => cite)
     fill(k, x) = haskey(props, k) && empty_property(props[k]) && !empty_property(x) && push!(out, k => x)
     fill("title", coalesce(p.title, ""))
     fill("authors", json_list(p.authors))
@@ -591,7 +631,7 @@ function read_vault!(run::SourceRun, v::VaultConfig)
             push!(changed, k)
         end
         ix = VaultIndex(vf.notes, vf.files, Dict(k => get(records, vault_key(v, k), record_id("obsidian", vault_key(v, k))) for (k, _) in vf.notes),
-                        papers; read = p -> read_library_file(kb, v.space, in_space(v, p)))
+                        papers; read = p -> read_library_file(kb, v.space, in_space(v, p)), cite = key -> cite_in(kb, key))
         for (i, k) in enumerate(changed)
             i % 50 == 0 && progress(run, "$i of $(length(changed)) notes read")
             entry = Dict{String,Any}("sha" => bytes2hex(sha256(texts[k])), "modified" => files[k].modified, "ref" => refs[k],
@@ -642,7 +682,7 @@ end
 "The properties of a paper note its references are worked out from (see [`note_references`](@ref)), as they are in `text`."
 function reference_properties(v::VaultConfig, text::AbstractString)
     props = note_properties(split_frontmatter(text).yaml)
-    return Dict{String,Any}(k => props[k] for k in ["zemi", "zemi-page", "title", "authors", first(v.arxiv), first(v.doi)] if haskey(props, k))
+    return Dict{String,Any}(k => props[k] for k in [ZEMI_PROPERTIES..., "title", "authors", first(v.arxiv), first(v.doi)] if haskey(props, k))
 end
 
 """
@@ -679,3 +719,13 @@ end
 # polls nor reads uploads, and a library holds many notes, so a run may write many.
 record_source!("obsidian"; label = "From an Obsidian vault", summarized = false, about = "a person's own note",
                budget = (; records = 100_000, figure_bytes = 10_000_000_000, seconds = 86_400.0), api = PLUGIN_API)
+
+# The record a note of one's vault is read as (`?path=`, its place in one's library as `zemi connect`
+# keeps it: `Notes/Topics/Estuaries.md`), with how it is cited: what the Obsidian plugin shows beside it.
+route!("GET", "/api/library/note"; need = "library") do c
+    path = vault_path(get(c.params, "path", ""))
+    isempty(path) && error("Name the note: ?path=")
+    id = source_record(c.kb, "obsidian", note_key(library_space(c.caller) * "/" * path))
+    id === nothing && not_found("No note $path has been read from your library")
+    Dict("id" => id, "cite" => cite_json(c.kb, id))
+end
