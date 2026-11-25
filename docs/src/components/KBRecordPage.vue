@@ -12,6 +12,7 @@ import { api, mode, connect, can, post, getJSON } from './kbApi'
 import KBChat from './KBChat.vue'
 import KBPaperFindings from './KBPaperFindings.vue'
 import KBCite from './KBCite.vue'
+import KBNeighbourhood from './KBNeighbourhood.vue'
 
 type Access = 'open' | 'projects' | 'private'
 type Project = { key: string; name: string }
@@ -106,6 +107,7 @@ async function link(key: string, remove = false) {
     <p v-else-if="!r.read" class="kb-dim">Not read yet.</p>
     <KBChat :id="r.id" :title="r.title" />
     <KBPaperFindings :id="r.id" />
+    <KBNeighbourhood :id="r.id" />
 
     <template v-for="(s, i) in r.sections" :key="i">
       <h2 :id="`part-${i + 1}`">{{ s.heading }}</h2>

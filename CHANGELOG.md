@@ -4,8 +4,8 @@
 
 ### Breaking
 
-- The database moves from schema 22 to 24 on first start, keeping a snapshot first
-  (`data.backups/kept/before-schema-24`); 0.5 cannot read it afterwards.
+- The database moves from schema 22 to 25 on first start, keeping a snapshot first
+  (`data.backups/kept/before-schema-25`); 0.5 cannot read it afterwards.
 - The shared knowledge base is exported as `default_kb()`; `kb` is no longer exported, so code and
   notebooks can name their own knowledge base `kb`.
 
@@ -26,6 +26,9 @@
   development site included, and follows it when it moves. `zemi connect --background` for it has
   the knowledge base sync the folders itself whenever it runs, with no login service.
   `zemi connect --status` says where the folders go, what syncs them and whether it is syncing now.
+- **Explore**: every document one may see placed by meaning, on a map or in a 3D space to fly
+  through, with the links people made between them (citations, references, evidence, task links)
+  and the pairs most alike that no link joins yet. A paper's or record's page shows its neighbourhood.
 - **The Obsidian plugin** (`zemi obsidian VAULT` installs it) puts the knowledge base beside one's
   notes: a pane with a paper note's summary and figures and the documents nearest the note, search
   to insert a citation, and paper notes added by arXiv id or DOI. A note's citations link to what

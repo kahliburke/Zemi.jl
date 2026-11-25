@@ -258,6 +258,15 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
             end
         end
     end
+    # As does the explore page's map, with the links read from what changed.
+    if !cancelled() && isempty(cannot_run(kb, "explore", DocumentKind[]))
+        try
+            explore!(kb; progress, cancelled)
+        catch e
+            e isa InterruptException && rethrow()
+            push!(failed, "explore" => failure_message(e))
+        end
+    end
     published = nothing
     # Not after a failed import: this knowledge base may not hold what its stream does.
     pull && pulled === nothing && publish && (push!(failed, "publishing" => "not published, as the dataset could not be imported"); publish = false)

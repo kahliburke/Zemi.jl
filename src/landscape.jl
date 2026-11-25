@@ -271,13 +271,13 @@ function spherical_kmeans(X::AbstractMatrix, k::Integer; iterations::Integer = 1
 end
 
 """
-    tsne(X; perplexity = 30, iterations = 1000) -> Matrix
+    tsne(X; perplexity = 30, iterations = 1000, dims = 2) -> Matrix
 
-A 2D layout of the unit columns of `X` (one row per column) by t-SNE over their cosine distances,
-starting from their two principal components, so the layout is the same for the same vectors and
-moves little as papers are added.
+A layout in `dims` dimensions of the unit columns of `X` (one row per column) by t-SNE over their
+cosine distances, starting from their principal components, so the layout is the same for the same
+vectors and moves little as papers are added.
 """
-function tsne(X::AbstractMatrix; perplexity::Real = 30, iterations::Integer = 1000)
+function tsne(X::AbstractMatrix; perplexity::Real = 30, iterations::Integer = 1000, dims::Integer = 2)
     n = size(X, 2)
     D = max.(2 .- 2 .* (X' * X), 0)                 # squared distances between unit vectors
     P = zeros(n, n)
@@ -305,12 +305,12 @@ function tsne(X::AbstractMatrix; perplexity::Real = 30, iterations::Integer = 10
     # Start from the principal components, each signed so its skew is positive, at a small scale.
     centred = X .- sum(X; dims = 2) ./ n
     U, S, _ = svd(centred')
-    Y = U[:, 1:2] .* S[1:2]'
-    for a in 1:2
+    Y = U[:, 1:dims] .* S[1:dims]'
+    for a in 1:dims
         sum(Y[:, a] .^ 3) < 0 && (Y[:, a] .*= -1)
     end
     Y .*= 1e-4 / max(sqrt(sum(abs2, Y[:, 1]) / n), eps())
-    gains, step = ones(n, 2), zeros(n, 2)
+    gains, step = ones(n, dims), zeros(n, dims)
     rate = max(n / 48, 50.0)
     for it in 1:iterations
         exaggeration, momentum = it <= 250 ? (12.0, 0.5) : (1.0, 0.8)

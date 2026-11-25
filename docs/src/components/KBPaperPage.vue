@@ -18,6 +18,7 @@ import KBExpandAll from './KBExpandAll.vue'
 import KBSectionText from './KBSectionText.vue'
 import KBPdf from './KBPdf.vue'
 import KBCite from './KBCite.vue'
+import KBNeighbourhood from './KBNeighbourhood.vue'
 import { mode } from './kbApi'
 
 type Link = { id: string; slug: string; title: string; page: string }
@@ -172,6 +173,7 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
         <h2 :id="anchors.fixed['Related papers']">Related papers</h2>
         <ul><li v-for="r in paper.related" :key="r.slug"><a :href="linkHref(r)">{{ r.title }}</a></li></ul>
       </template>
+      <KBNeighbourhood :id="paper.id" />
 
       <div v-if="!paper.processed" class="tip custom-block"><p class="custom-block-title">Abstract only</p><p>Not read in full yet.</p></div>
     </template>
