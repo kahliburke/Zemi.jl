@@ -112,12 +112,14 @@ end
     plugin_settings!(to, site, folder)
 
 Point the plugin installed at `to` at the knowledge base at `site` and at the vault's `folder` in
-one's library, keeping the rest of its settings (a sign-in to the same site stays).
+one's library, keeping the rest of its settings (a sign-in to the same site stays). It is given the
+file asking whoever syncs the folders for a pass now (`syncNow`, see [`request_pass`](@ref)), which
+it touches once a note is saved.
 """
 function plugin_settings!(to::AbstractString, site::AbstractString, folder::AbstractString)
     file = joinpath(to, "data.json")
     d = isfile(file) ? JSON.parsefile(file) : Dict{String,Any}()
-    d["site"], d["folder"] = site, folder
+    d["site"], d["folder"], d["syncNow"] = site, folder, connect_request_path()
     write(file, JSON.json(d))
 end
 

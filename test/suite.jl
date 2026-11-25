@@ -7082,7 +7082,8 @@ end
             said = redirect_stdout(devnull) do
                 K.obsidian_cli(["Notes"]; build = stub, known)
             end
-            @test data(vault) == Dict("site" => "https://kb.example.org", "folder" => "Notes", "papersFolder" => "Refs")
+            @test data(vault) == Dict("site" => "https://kb.example.org", "folder" => "Notes", "papersFolder" => "Refs",
+                                      "syncNow" => K.connect_request_path())         # touched on a save, for a pass now
             @test occursin("https://kb.example.org", last(said)) && !occursin("zemi open", last(said))
             @test length(K.load_connect_config()["folders"]) == 1                     # connected already: kept
 
@@ -7093,7 +7094,7 @@ end
             end
             cc = K.load_connect_config()
             @test [f["name"] for f in cc["folders"]] == ["Work notes"] && K.synced_by_local(cc)
-            @test data(other) == Dict("site" => "http://localhost:$free", "folder" => "Work notes")
+            @test data(other) == Dict("site" => "http://localhost:$free", "folder" => "Work notes", "syncNow" => K.connect_request_path())
             @test occursin("zemi open", last(said))
         end
     end

@@ -9,8 +9,9 @@ import type { AddressInfo } from 'net'
 export type Tokens = { access: string; refresh: string; expires: number; client: string; tokenEndpoint: string; site: string; scope?: string }
 
 /** What the plugin keeps: the knowledge base's address, the vault's folder in one's library, where
- *  notes for added papers go, and the sign-in. */
-export type Settings = { site: string; folder: string; papersFolder: string; tokens: Tokens | null }
+ *  notes for added papers go, the sign-in, and the file asking `zemi connect` for a pass now
+ *  (`syncNow`, given by `zemi obsidian`), touched after a save unless `syncOnSave` is off. */
+export type Settings = { site: string; folder: string; papersFolder: string; tokens: Tokens | null; syncNow?: string; syncOnSave?: boolean }
 
 export class SignedOut extends Error {}
 

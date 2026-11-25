@@ -366,6 +366,10 @@ before. It gives:
   findings (or those of `status:`). A sign-in from before the plugin asked for tasks shows no tasks or
   findings: sign out and in again.
 
+- **Sync on save**: a moment after you stop editing, the plugin asks whoever syncs the vault (`zemi
+  connect`, or the knowledge base run here) for a pass now, rather than at its next. `zemi obsidian`
+  sets it up; the plugin's settings turn it off.
+
 The plugin writes nothing into the vault but the citations, links and paper notes you ask for.
 
 **A PDF** anywhere in a library is read in full as a document, its owner's. The same file in two
