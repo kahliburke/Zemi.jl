@@ -19,6 +19,8 @@ delete!(ENV, "OPENCODE_API_KEY")
 K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
 K.DOI_COPIES[] = (doi; contact = "") -> (; arxiv = nothing, pdfs = String[])
 K.ARXIV_TITLE_SEARCH[] = (title, c) -> K.PaperMeta[]
+# OpenCode is not asked what its models take in: a test that needs it says.
+K.OPENCODE_MODELS[] = provider -> ""
 # The Zotero prescreen leaves each item to its Zotero type, unless a test sorts them.
 K.ZOTERO_PRESCREEN[] = (kb, items, notes) -> Dict(String(it["key"]) => (; as = "", type = "", sure = true, why = "") for it in items)
 include("s3_standin.jl")

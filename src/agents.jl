@@ -265,7 +265,7 @@ end
 
 Copy paper `id`'s figures and tables, as cut from its PDF, into `dir/figures`, and list each file with its
 caption in `dir/figures.md`, for an agent that views images but not a PDF (see
-[`agent_views_images`](@ref)). Returns whether there were any.
+[`agent_reading`](@ref)). Returns whether there were any.
 """
 function give_figures!(kb::KB, id::AbstractString, dir::AbstractString)
     from = figures_dir(kb.config, id)
@@ -316,8 +316,8 @@ function agent_summarize_paper!(kb::KB, s::Summarizer, doc_id::AbstractString; p
     mkpath(dir)
     prompts = summary_prompts(doc_id)
     # A document not read from a PDF, from its text; with its figures, for an agent that sees images.
-    reads = !is_kind(k -> k.pdf, doc_id) ? :text : reads_pdf(s) ? :pdf :
-            s.kind == :agent && agent_views_images(s.model) && give_figures!(kb, doc_id, dir) ? :figures : :text
+    reads = !is_kind(k -> k.pdf, doc_id) ? :text : reading(s)
+    reads == :figures && !give_figures!(kb, doc_id, dir) && (reads = :text)
     write(joinpath(dir, "BRIEF.md"), prompts.agent_brief(reads))
     write(joinpath(dir, "task.md"), "Paper: $(coalesce(p.title, doc_id))\n\nSections to summarize (ord: heading path):\n" *
         join(("- $(t.ord): $(t.path)\n" for t in sections)))

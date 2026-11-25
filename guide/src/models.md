@@ -39,9 +39,10 @@ Two kinds of model:
 - **API**: one request per section to an OpenAI-compatible endpoint (OpenCode Zen, OpenAI, Ollama's
   `/v1`).
 - **Agent**: Claude Code, or an agent supporting ACP (Codex, Gemini, OpenCode), run through Kaimon;
-  reads the whole paper before summarizing. Claude reads the PDF, figures included, or the extracted
-  text; Codex reads the text and looks at the figures and tables Zemi cut from the PDF; the others
-  read the text. Needs a Kaimon running on this machine, or Kaimon running the
+  reads the whole paper before summarizing. Claude reads the PDF, figures included; Codex reads the
+  text and looks at the figures and tables Zemi cut from the PDF; OpenCode does whichever its model
+  takes in, which Zemi asks OpenCode when the model is chosen and the configuration page shows;
+  others read the text. Needs a Kaimon running on this machine, or Kaimon running the
   knowledge base as its extension.
 
 Built in:
@@ -91,7 +92,7 @@ config file, and can then be chosen under **Who does what**:
 name = "local-agent"
 kind = "agent"
 model = "ollama:qwen3:32b"      # or "sonnet", "acp:codex", "acp:opencode:opencode/glm-5.3-flash", ...
-reads = "text"                  # default "pdf": Claude reads the PDF, other agents the text (Codex with the figures)
+reads = "text"                  # "pdf" (the default), "figures" or "text", as far as the agent can
 
 [[summarizers]]
 name = "local-api"

@@ -46,9 +46,10 @@ kinds:
   Kaimon session: the `zemi` extension, a Slate notebook, or the `zemi` command). `model` is any model
   Kaimon's agents take: `"opus"` or `"sonnet"` for Claude through a Claude subscription,
   `"ollama:<tag>"` for a local model, `"acp:opencode:<model>"` for OpenCode. The agent reads the
-  whole paper first, from its PDF (`reads = :pdf`, for Claude; other agents read the text) or its
-  extracted text (`reads = :text`), then
-  writes every summary; for a codebase, agents read its files in batches, then one writes the
+  whole paper first, then writes every summary: from its PDF (`reads = :pdf`), from its extracted
+  text with its figures and tables cut as images (`:figures`), or from the text alone (`:text`), as
+  far as the agent can (see `agent_reading`: Claude the PDF, Codex the figures, an OpenCode model
+  what it takes in, found when it is chosen); for a codebase, agents read its files in batches, then one writes the
   directory and codebase summaries. `timeout` bounds one agent's turn, in seconds.
 
 `price_in` and `price_out` are dollars per million input and output tokens, for costing (an agent
@@ -86,7 +87,7 @@ default_summarizers() = [
     Summarizer(; name = "sonnet-agent-pdf", kind = :agent, model = "sonnet", reads = :pdf),
     Summarizer(; name = "sonnet-agent-code", kind = :agent, model = "sonnet"),
     # Other agents Kaimon runs, on their own default models, for the tutor and other agent work.
-    Summarizer(; name = "codex-agent", kind = :agent, model = "acp:codex", reads = :text),
+    Summarizer(; name = "codex-agent", kind = :agent, model = "acp:codex", reads = :figures),
     Summarizer(; name = "gemini-agent", kind = :agent, model = "acp:gemini", reads = :text),
     Summarizer(; name = "opencode-agent", kind = :agent, model = "acp:opencode", reads = :text),
 ]
@@ -918,7 +919,7 @@ function validate(c::Config)
     for s in c.summarizers
         s.kind in (:api, :agent) || error("Summarizer $(s.name): kind must be api or agent, got $(s.kind)")
         s.kind == :api && isempty(s.url) && error("Summarizer $(s.name): an api summarizer needs a url")
-        s.kind == :agent && !(s.reads in (:pdf, :text)) && error("Summarizer $(s.name): reads must be pdf or text")
+        s.kind == :agent && !(s.reads in READINGS) && error("Summarizer $(s.name): reads must be pdf, figures or text")
     end
     return c
 end

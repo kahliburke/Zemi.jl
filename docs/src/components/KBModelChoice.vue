@@ -75,6 +75,22 @@ watch(() => choice.value.id, id => {
   if (props.info.models.find(x => x.id === id)?.needs === 'acp') choice.value.model = props.info.model.id === id ? props.info.model.model : ''
 }, { immediate: true })
 
+// What an agent chosen reads of each paper: its PDF, its text and figures, or its text, as its model
+// takes in (OpenCode is asked about the model named), checked once typing pauses.
+const reading = ref<{ reading: string; says: string }>({ reading: '', says: '' })
+let readingTimer: number | undefined
+watch(() => [choice.value.id, choice.value.model], () => {
+  window.clearTimeout(readingTimer)
+  if (!chosen.value?.agent) { reading.value = { reading: '', says: '' }; return }
+  readingTimer = window.setTimeout(async () => {
+    const asked = { ...choice.value }
+    try {
+      const r = await getJSON(`/api/config/model/reading?id=${encodeURIComponent(asked.id)}&model=${encodeURIComponent(asked.model)}`)
+      if (asked.id === choice.value.id && asked.model === choice.value.model) reading.value = r
+    } catch { reading.value = { reading: '', says: '' } }
+  }, 400)
+}, { immediate: true })
+
 // Trying choices on one section, as the knowledge base summarizes each section of a paper: one of
 // its papers', the sample, or a passage pasted. Each answer is kept beside the others to compare, the
 // latest first, one for each model.
@@ -190,6 +206,7 @@ const keyFor = computed(() => chosen.value?.needs === 'opencode' ? 'OpenCode' : 
               <span v-else-if="!m.agents" class="kbmc-help">Run the knowledge base in Kaimon (<code>zemi kaimon</code>).</span>
               <input v-model="choice.model" :disabled="!editable" placeholder="Model (empty for the agent's own default)" />
             </span>
+            <span v-if="x.agent && reading.says" class="kbmc-sub kbmc-help">{{ reading.says }}</span>
 
             <span v-if="x.needs === 'custom'" class="kbmc-sub">
               <input v-model="choice.url" placeholder="Address: https://api.example.com/v1" />

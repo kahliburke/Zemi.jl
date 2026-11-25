@@ -272,7 +272,8 @@ function choice_summarizer(c::Config, m::AbstractDict)
         model = strip(String(get(m, "model", "")))
         occursin(r"^[A-Za-z0-9._/:\[\]-]*$", model) || error("Not a model's name: $model")
         return Summarizer(; name = "$(a.agent)-agent" * (isempty(model) ? "" : "-" * replace(model, r"[^A-Za-z0-9.]+" => "-")),
-                          kind = :agent, model = "acp:$(a.agent)" * (isempty(model) ? "" : ":$model"), reads = :text), ""
+                          kind = :agent, model = "acp:$(a.agent)" * (isempty(model) ? "" : ":$model"),
+                          reads = agent_reading("acp:$(a.agent)" * (isempty(model) ? "" : ":$model"))), ""
     elseif id == "opencode"
         model = strip(String(get(m, "model", "")))
         isempty(model) && (model = ZEN_DEFAULT)
@@ -312,7 +313,8 @@ function model_choice(c::Config, m::AbstractDict; config_dir::AbstractString)
         t = Dict{String,Any}("name" => s.name, "url" => s.url, "model" => s.model, "key" => isempty(key) ? "" : save_key_file(s.name, key))
         return (; summarizer = s.name, code = s.name, summarizers = [t])
     elseif other_agent(id) !== nothing
-        t = Dict{String,Any}("name" => s.name, "kind" => "agent", "model" => s.model, "reads" => "text")
+        # As much of a paper as its model takes in, found now (see `agent_reading`).
+        t = Dict{String,Any}("name" => s.name, "kind" => "agent", "model" => s.model, "reads" => string(s.reads))
         return (; summarizer = s.name, code = s.name, summarizers = [t])
     end
     if id == "opencode"
@@ -378,6 +380,26 @@ function current_choice(c::Config)
     s.kind == :api && s.key == "opencode" && return Dict("id" => "opencode", "model" => s.model, "url" => "")
     s.kind == :api && startswith(s.url, rstrip(c.ollama_url, '/')) && return Dict("id" => "ollama", "model" => s.model, "url" => "")
     return Dict("id" => "custom", "model" => s.model, "url" => s.url)
+end
+
+"""
+    choice_reading(c, m) -> Dict
+
+What an agent the choice `m` makes reads of each paper, found as choosing it would save it (see
+[`agent_reading`](@ref)): `reading` (`pdf`, `figures` or `text`) and `says`, a sentence for the
+configuration page; both empty for a choice that is not an agent.
+"""
+function choice_reading(c::Config, m::AbstractDict)
+    s = try first(choice_summarizer(c, m)) catch; nothing end
+    (s === nothing || s.kind != :agent) && return Dict("reading" => "", "says" => "")
+    r = reading(s)
+    unnamed = startswith(s.model, "acp:opencode") && isempty(last(acp_parts(s.model)))
+    says = r == :pdf ? "Reads each paper's PDF, its figures and equations included." :
+           r == :figures ? "Reads each paper's text, and looks at its figures and tables as cut from the PDF." :
+           unnamed ? "Reads each paper's text. Name a model to have its inputs checked: one that takes images or PDFs sees the figures." :
+           startswith(s.model, "acp:opencode") ? "Reads each paper's text only: OpenCode lists this model as taking no images or PDFs." :
+           "Reads each paper's text only."
+    return Dict("reading" => string(r), "says" => says)
 end
 
 # ── Trying a choice ───────────────────────────────────────────────────────────────────────────────

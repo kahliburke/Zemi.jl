@@ -2288,10 +2288,25 @@ end
         keyfile = only(other.summarizers)["key"][6:end]
         @test other.summarizer == "reader-2" && strip(read(keyfile, String)) == "sk-1" && filemode(keyfile) & 0o777 == 0o600
         @test_throws "address and model" K.model_choice(c, Dict("id" => "custom"); config_dir = dir)
-        # Another agent Kaimon runs: its own default model or one named, reading the text of papers and codebases both.
+        # Another agent Kaimon runs: its own default model or one named, for papers and codebases both,
+        # reading as much of a paper as it takes in, found as it is chosen.
         codex = K.model_choice(c, Dict("id" => "codex"); config_dir = dir)
         @test (codex.summarizer, codex.code) == ("codex-agent", "codex-agent") &&
-              only(codex.summarizers) == Dict("name" => "codex-agent", "kind" => "agent", "model" => "acp:codex", "reads" => "text")
+              only(codex.summarizers) == Dict("name" => "codex-agent", "kind" => "agent", "model" => "acp:codex", "reads" => "figures")
+        @test K.choice_reading(c, Dict("id" => "codex"))["reading"] == "figures"
+        @test K.choice_reading(c, Dict("id" => "ollama", "model" => "qwen3:14b")) == Dict("reading" => "", "says" => "")   # not an agent
+        saved_models = K.OPENCODE_MODELS[]
+        K.OPENCODE_MODELS[] = provider -> "zen/sees\n{\n  \"capabilities\": {\"input\": {\"image\": true}}\n}\n"
+        try
+            empty!(K.OPENCODE_INPUTS)
+            @test only(K.model_choice(c, Dict("id" => "opencode-agent", "model" => "zen/sees"); config_dir = dir).summarizers)["reads"] == "figures"
+            @test only(K.model_choice(c, Dict("id" => "opencode-agent", "model" => "zen/plain"); config_dir = dir).summarizers)["reads"] == "text"
+            @test occursin("no images or PDFs", K.choice_reading(c, Dict("id" => "opencode-agent", "model" => "zen/plain"))["says"])
+            @test occursin("Name a model", K.choice_reading(c, Dict("id" => "opencode-agent"))["says"])
+        finally
+            K.OPENCODE_MODELS[] = saved_models
+            empty!(K.OPENCODE_INPUTS)
+        end
         @test only(K.model_choice(c, Dict("id" => "opencode-agent", "model" => "anthropic/claude-sonnet-5"); config_dir = dir).summarizers)["model"] ==
               "acp:opencode:anthropic/claude-sonnet-5"
         @test_throws "Not a model's name" K.model_choice(c, Dict("id" => "gemini", "model" => "x; rm"); config_dir = dir)
@@ -3735,11 +3750,45 @@ end
         end
         @test opened("ollama:qwen3:14b")["only"] === true            # a local model: as the CLI
         @test K.acp_model("acp:codex") && !K.acp_model("opus") && !K.acp_model("ollama:qwen3:14b")
-        # Only Claude reads a PDF whole; a summarizer asked to read the PDF on another agent reads the text.
-        pdf(model) = K.reads_pdf(K.Summarizer(; name = "s", kind = :agent, model, reads = :pdf))
-        @test pdf("opus") && pdf("acp:claude") && pdf("acp:claude:sonnet")
-        @test !pdf("acp:codex") && !pdf("acp:opencode:opencode/minimax-m3") && !pdf("acp:gemini") && !pdf("ollama:qwen3:14b")
-        @test !K.reads_pdf(K.Summarizer(; name = "s", kind = :agent, model = "opus", reads = :text))
+        # What each agent reads of a paper: as much as its config asks, as far as the agent can. Claude
+        # reads the PDF; Codex the text and the figures; an OpenCode model what its config says, found
+        # when it was chosen; other agents and local models the text.
+        reads(model, r = :pdf) = K.reading(K.Summarizer(; name = "s", kind = :agent, model, reads = r))
+        @test reads("opus") == reads("acp:claude") == reads("acp:claude:sonnet") == :pdf
+        @test reads("acp:codex") == :figures && reads("acp:gemini") == reads("ollama:qwen3:14b") == :text
+        @test reads("acp:opencode:opencode/minimax-m3") == :pdf && reads("acp:opencode:opencode/minimax-m3", :figures) == :figures
+        @test reads("opus", :text) == reads("acp:codex", :text) == :text && reads("opus", :figures) == :figures
+        @test K.reads_pdf(K.Summarizer(; name = "s", kind = :agent, model = "opus")) &&
+              !K.reads_pdf(K.Summarizer(; name = "s", kind = :agent, model = "acp:codex"))
+        # OpenCode is asked what its models take in, once for each provider.
+        saved_models = K.OPENCODE_MODELS[]
+        lists = Ref(0)
+        K.OPENCODE_MODELS[] = provider -> (lists[] += 1; provider == "zen" ? """
+            zen/sees
+            {
+              "id": "sees",
+              "capabilities": {"input": {"text": true, "image": true, "pdf": false}}
+            }
+            zen/reads
+            {
+              "id": "reads",
+              "capabilities": {"input": {"text": true, "image": true, "pdf": true}}
+            }
+            zen/words
+            {
+              "id": "words",
+              "capabilities": {"input": {"text": true, "image": false}}
+            }
+            """ : error("no provider $provider"))
+        try
+            empty!(K.OPENCODE_INPUTS)
+            @test K.agent_reading("acp:opencode:zen/reads") == :pdf && K.agent_reading("acp:opencode:zen/sees") == :figures
+            @test K.agent_reading("acp:opencode:zen/words") == K.agent_reading("acp:opencode:zen/other") == :text && lists[] == 1
+            @test K.agent_reading("acp:opencode:gone/x") == K.agent_reading("acp:opencode") == :text && lists[] == 2
+        finally
+            K.OPENCODE_MODELS[] = saved_models
+            empty!(K.OPENCODE_INPUTS)
+        end
         # A shared service runs only agents whose tools Kaimon binds: not Codex or Gemini, which run their own.
         @test K.agent_tools_bound("opus") && K.agent_tools_bound("ollama:qwen3:14b") && K.agent_tools_bound("acp:claude") &&
               K.agent_tools_bound("acp:opencode:opencode/minimax-m3")

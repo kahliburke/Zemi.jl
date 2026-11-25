@@ -18,20 +18,67 @@ paper_input(sections) = join((t.text for t in sections), "\n\n")
 "The hash a summary is stored with: its input, and what wrote it from that input."
 summary_input_sha(s::Summarizer, text::AbstractString) = text_sha("$(s.model)|$(prompt_version(s))|$text")
 
-"""
-Whether the agent `model` names reads a PDF whole, figures included, with its file tool: Claude,
-through its CLI or over ACP. Other ACP agents read a file as bytes, and local models see no images.
-"""
-agent_reads_pdf(model::AbstractString) = !occursin(':', model) || startswith(model, "acp:claude")
+"How much of a paper read from a PDF an agent takes in, least first: its text; that and its figures and tables, cut as images; the PDF whole."
+const READINGS = (:text, :figures, :pdf)
 
 """
-Whether the agent `model` names views an image file with its own tools, though not a PDF: Codex. It is
-given a paper's figures and tables as cut from the PDF (see [`give_figures!`](@ref)), beside its text.
-"""
-agent_views_images(model::AbstractString) = startswith(model, "acp:codex")
+    agent_reading(model) -> Symbol
 
-"Whether `s` is an agent that reads a paper's PDF rather than the text extracted from it: one asked to and able to (see [`agent_reads_pdf`](@ref))."
-reads_pdf(s::Summarizer) = s.kind == :agent && s.reads == :pdf && agent_reads_pdf(s.model)
+The most of a paper the agent `model` names can read with its own file tools (see `READINGS`): Claude
+the PDF; Codex the figures, as it views images but not a PDF; OpenCode what its model takes in, as
+OpenCode says (see [`opencode_inputs`](@ref)); other agents and local models the text.
+"""
+function agent_reading(model::AbstractString)
+    (!occursin(':', model) || startswith(model, "acp:claude")) && return :pdf
+    startswith(model, "acp:codex") && return :figures
+    if startswith(model, "acp:opencode:")
+        inputs = opencode_inputs(last(acp_parts(model)))
+        return :pdf in inputs ? :pdf : :image in inputs ? :figures : :text
+    end
+    return :text
+end
+
+"""
+    agent_most(s) -> Symbol
+
+The most of a paper summarizer `s` can read (see [`agent_reading`](@ref)): for an OpenCode model,
+what its config says, as it was found when the model was chosen (see [`model_choice`](@ref)), so
+summarizing never asks OpenCode.
+"""
+agent_most(s::Summarizer) = s.kind != :agent ? :text : startswith(s.model, "acp:opencode") ? s.reads : agent_reading(s.model)
+
+"How summarizer `s` reads a paper read from a PDF (see `READINGS`): as its config says (`reads`), as far as it can."
+reading(s::Summarizer) = READINGS[min(something(findfirst(==(s.reads), READINGS), 1), findfirst(==(agent_most(s)), READINGS))]
+
+"OpenCode's models of a provider, as `opencode models <provider> --verbose` lists them: each one's id and its details as JSON."
+const OPENCODE_MODELS = Ref{Function}(provider -> read(`opencode models $provider --verbose`, String))
+const OPENCODE_INPUTS = Dict{String,Set{Symbol}}()
+const OPENCODE_INPUTS_LOCK = ReentrantLock()
+
+"""
+    opencode_inputs(model) -> Set{Symbol}
+
+What OpenCode's `model` (`provider/model`) takes in besides text, `:pdf` and `:image`, as OpenCode
+lists it; nothing for a model it does not list, or when it cannot be asked. Asked once a process for
+each provider.
+"""
+function opencode_inputs(model::AbstractString)
+    provider = first(split(model, '/'))
+    lock(OPENCODE_INPUTS_LOCK) do
+        get!(OPENCODE_INPUTS, "provider:$provider") do
+            listed = try OPENCODE_MODELS[](provider) catch; "" end
+            for m in eachmatch(r"^(\S+/\S+)[ \t]*\n(\{.*?\n\})"ms, listed)
+                given = try get(get(JSON.parse(m[2]), "capabilities", Dict()), "input", Dict()) catch; Dict() end
+                OPENCODE_INPUTS[m[1]] = Set(Symbol(k) for k in ("pdf", "image") if get(given, k, false) === true)
+            end
+            Set{Symbol}()
+        end
+        return get(OPENCODE_INPUTS, model, Set{Symbol}())
+    end
+end
+
+"Whether `s` reads a paper's PDF rather than the text extracted from it (see [`reading`](@ref))."
+reads_pdf(s::Summarizer) = reading(s) == :pdf
 
 """
     summary_inputs(kb, s, doc_id, sections) -> (; paper, sections)

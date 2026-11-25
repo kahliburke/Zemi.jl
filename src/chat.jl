@@ -130,8 +130,7 @@ function chat_folder(kb::KB, chat::AbstractString, id::AbstractString)
     f = query(kb, "SELECT path FROM files WHERE paper_id = ?", (paper_id(kb, id),))
     pdf = joinpath(dir, "paper.pdf")
     isempty(f) || ispath(pdf) || link_file(first(f).path, pdf)
-    tutor = purpose(kb.config, :tutor).model
-    !agent_reads_pdf(tutor) && agent_views_images(tutor) && is_kind(k -> k.pdf, id) && give_figures!(kb, id, dir)
+    agent_most(purpose(kb.config, :tutor)) == :figures && is_kind(k -> k.pdf, id) && give_figures!(kb, id, dir)
     return dir
 end
 
@@ -244,7 +243,7 @@ function ask_chat!(kb::KB, id::AbstractString, message::AbstractString; chat = n
         text = if agent.fresh
             earlier = [m for m in chat_messages(kb, chat).messages[1:end-2] if m.status == "done"]
             "Start from context.md: it summarizes the paper and describes the group. " *
-            (agent_reads_pdf(purpose(kb.config, :tutor).model) ? "The paper itself is in paper.pdf, its text in paper.txt. " :
+            (agent_most(purpose(kb.config, :tutor)) == :pdf ? "The paper itself is in paper.pdf, its text in paper.txt. " :
               "The paper's text is in paper.txt. " * (isfile(joinpath(agents_dir("chats", chat), "figures.md")) ?
               "Its figures and tables are images in figures/, listed with their captions in figures.md: look at one to discuss it. " : "")) *
             "Your folder is $(agents_dir("chats", chat)).\n\n" * note *
