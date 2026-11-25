@@ -363,6 +363,7 @@ async function draw() {
       s.material.depthWrite = false
       s.renderOrder = 1000
       s.position.set(c.x, c.y, c.z)
+      capHeight(s, 10, 15)
       graph.scene().add(s)
     }
     setTimeout(() => graph?.zoomToFit(800, 30), 300)
@@ -403,6 +404,20 @@ function drawNearest2d(ctx: CanvasRenderingContext2D, scale: number) {
   for (const { to, similarity } of lines) ctx.fillText(`${Math.round(similarity * 100)}%`, to.x + 6 / scale, to.y)
   ctx.restore()
 }
+// A text sprite in the space kept between `least` and `most` pixels tall on screen: smaller with distance
+// within that, never too small to read nor growing past `most` as the camera nears it. Set as it is drawn,
+// from the camera's distance and the canvas's height.
+function capHeight(sprite: any, least: number, most: number) {
+  const base = sprite.scale.clone()
+  const at = new (sprite.position.constructor)()
+  sprite.onBeforeRender = (renderer: any, _scene: any, camera: any) => {
+    const d = camera.position.distanceTo(sprite.getWorldPosition(at))
+    const perPixel = 2 * d * Math.tan((camera.fov * Math.PI) / 360) / renderer.domElement.clientHeight
+    const px = Math.max(least, Math.min(most, base.y / perPixel))
+    sprite.scale.copy(base).multiplyScalar((px * perPixel) / base.y)
+    sprite.updateMatrixWorld()
+  }
+}
 let three: any = null
 let nearest3d: any = null
 async function showNearest3d() {
@@ -424,6 +439,7 @@ async function showNearest3d() {
     label.material.depthTest = false
     label.renderOrder = 1001
     label.position.set(to.x, to.y + 6, to.z)
+    capHeight(label, 9, 12)
     group.add(label)
   }
   const geometry = new three.BufferGeometry()
