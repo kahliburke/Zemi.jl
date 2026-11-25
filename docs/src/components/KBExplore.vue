@@ -271,7 +271,8 @@ async function draw() {
     graph.d3Force('charge')?.strength(-10)
     graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
     const fog = (await import('three')).FogExp2
-    graph.scene().fog = new fog(isDark.value ? 0x111116 : 0xfafafa, 0.0011)
+    // A little depth: a tenth faded across the space as first framed, a quarter beyond it.
+    graph.scene().fog = new fog(isDark.value ? 0x111116 : 0xfafafa, 0.00035)
     for (const c of clusterCentres(nodes)) {
       if (!c.name) continue
       const s = new SpriteText(c.name, 10, isDark.value ? 'rgba(235,235,245,0.85)' : 'rgba(30,30,40,0.8)')
