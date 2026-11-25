@@ -220,8 +220,43 @@ function graphData() {
     if (showUnlinked.value && !linked && s >= threshold.value && ids.has(a) && ids.has(b))
       links.push({ source: a, target: b, kind: 'similar', similarity: s })
   }
+  placeTheRest(nodes, links, deep)
   return { nodes, links }
 }
+
+// The nodes with no place by meaning (findings, tasks, documents only linked to), fixed where they stand
+// among those linked to them, a little aside; those linked to none on a ring just outside the map.
+// Every node fixed, nothing drifts once drawn.
+function placeTheRest(nodes: GNode[], links: GLink[], deep: boolean) {
+  const at = new Map(nodes.map(n => [n.id, n]))
+  const neighbours = new Map<string, string[]>()
+  for (const l of links) {
+    if (l.kind === 'similar') continue
+    neighbours.set(l.source, [...(neighbours.get(l.source) ?? []), l.target])
+    neighbours.set(l.target, [...(neighbours.get(l.target) ?? []), l.source])
+  }
+  const loose = nodes.filter(n => n.fx === undefined)
+  const scale = deep ? SCALE_3D : SCALE_2D
+  for (let pass = 0; pass < 3; pass++) {                    // those linked only to the unplaced, once those are
+    for (const n of loose) {
+      if (n.fx !== undefined) continue
+      const placed = (neighbours.get(n.id) ?? []).map(id => at.get(id)!).filter(m => m && m.fx !== undefined)
+      if (!placed.length) continue
+      const mean = (k: 'fx' | 'fy' | 'fz') => placed.reduce((t, m) => t + (m[k] ?? 0), 0) / placed.length
+      const turn = hashTurn(n.id), aside = scale * 0.03
+      n.fx = mean('fx') + aside * Math.cos(turn); n.fy = mean('fy') + aside * Math.sin(turn)
+      if (deep) n.fz = mean('fz') + aside * Math.sin(2 * turn)
+    }
+  }
+  const rest = loose.filter(n => n.fx === undefined)
+  rest.forEach((n, i) => {
+    const turn = (2 * Math.PI * i) / Math.max(rest.length, 1)
+    n.fx = scale * 1.15 * Math.cos(turn); n.fy = scale * 1.15 * Math.sin(turn)
+    if (deep) n.fz = 0
+  })
+}
+// A steady angle from an id, so a node stands on the same side of its neighbours each time.
+const hashTurn = (id: string) => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) / 0xffffffff * 2 * Math.PI
 
 function linkColour(l: GLink) {
   if (l.kind === 'similar') return isDark.value ? 'rgba(200,200,255,0.45)' : 'rgba(60,60,140,0.4)'
@@ -243,6 +278,8 @@ function clusterCentres(nodes: GNode[]) {
   return [...sums].filter(([, s]) => s.n >= 3).map(([id, s]) => ({ id, name: clusterName(id), x: s.x / s.n, y: s.y / s.n, z: s.z / s.n }))
 }
 
+// The 2D map's cluster names, where they are drawn.
+let centres: ReturnType<typeof clusterCentres> = []
 async function draw() {
   if (!box.value || !data.value) return
   graph?._destructor?.()
@@ -253,7 +290,7 @@ async function draw() {
   const label = (n: Node) => `<div class="kbx-tip"><b>${esc(n.title)}</b><br>${esc([kindName(n.kind), n.year, clusterName(n.cluster)].filter(Boolean).join(' · '))}</div>`
   if (view.value === '2d') {
     const ForceGraph = (await import('force-graph')).default as any
-    const centres = clusterCentres(nodes)
+    centres = clusterCentres(nodes)
     graph = new ForceGraph(el)
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
@@ -265,7 +302,7 @@ async function draw() {
       .linkDirectionalArrowRelPos(1)
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null })
       .enableNodeDrag(false)                                                     // placed by meaning, not by hand
-      .cooldownTicks(120)
+      .cooldownTicks(1)
       .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => drawNearest2d(ctx, scale))
       .onRenderFramePost((ctx: CanvasRenderingContext2D, scale: number) => {
         // Cluster names, a constant size on screen; faded out as one comes close.
@@ -308,7 +345,7 @@ async function draw() {
       .linkDirectionalArrowRelPos(1)
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null })
       .enableNodeDrag(false)
-      .cooldownTicks(120)
+      .cooldownTicks(1)
     graph.d3Force('charge')?.strength(-10)
     graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
     const fog = (await import('three')).FogExp2
@@ -419,7 +456,20 @@ const relation = (kind: string, out: boolean) => (RELATIONS[kind] ?? [kind, kind
 const kindName = (k: string) => ({ paper: 'paper', record: 'note or record', code: 'codebase', resource: 'resource', finding: 'finding', task: 'task' }[k] ?? k)
 
 // Redrawn as what is shown changes; recoloured as the selection, hits and colours do.
-watch([view, fly, layout, shownLinks, shownKinds, threshold, showUnlinked, isDark], () => draw(), { deep: true })
+watch([view, fly, layout, isDark], () => draw())
+// What is shown changing leaves the view where it is: only the data is given again, once a change settles.
+let refreshTimer: ReturnType<typeof setTimeout> | undefined
+watch([shownLinks, shownKinds, threshold, showUnlinked], () => {
+  clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(refresh, 120)
+}, { deep: true })
+function refresh() {
+  if (!graph) return
+  const { nodes, links } = graphData()
+  if (view.value === '2d') centres = clusterCentres(nodes)
+  graph.graphData({ nodes, links })
+  restyle()
+}
 watch([selected, hits, colourBy], restyle)
 // Recoloured and resized in place: the space's discs directly, the map's through its accessors.
 function restyle() {
@@ -578,13 +628,13 @@ const showPairs = ref(false)
         <div class="kbx-grid">
           <template v-if="data?.nodes.some(n => n.ux)">
             <span class="kbx-label">Layout</span>
-            <div class="kbx-seg kbx-seg-small" role="group" aria-label="Layout">
+            <div class="kbx-seg kbx-seg-small kbx-wide" role="group" aria-label="Layout">
               <button :class="{ on: layout === 'tsne' }" title="Keeps each document's close neighbourhood" @click="layout = 'tsne'">t-SNE</button>
               <button :class="{ on: layout === 'umap' }" title="Keeps more of how the groups lie to each other" @click="layout = 'umap'">UMAP</button>
             </div>
           </template>
           <span class="kbx-label">Colour by</span>
-          <div>
+          <div class="kbx-wide">
             <div class="kbx-seg kbx-seg-small" role="group" aria-label="Colour by">
               <button v-for="[k, l] in COLOUR_BY" :key="k" :class="{ on: colourBy === k }" @click="colourBy = k">{{ l }}</button>
             </div>
@@ -593,19 +643,19 @@ const showPairs = ref(false)
             </div>
           </div>
           <span class="kbx-label">Links</span>
+          <button class="kbx-all" @click="all(shownLinks, LINK_KINDS)">{{ shownLinks.length === LINK_KINDS.length ? 'None' : 'All' }}</button>
           <div class="kbx-chips">
             <button v-for="[k, l] in LINK_KINDS" :key="k" class="kbx-chip" :class="{ on: shownLinks.includes(k) }" :aria-pressed="shownLinks.includes(k)"
                     @click="toggle(shownLinks, k)"><i class="kbx-swatch" :style="{ background: LINK_COLOURS[k] }"></i>{{ l }}</button>
-            <button class="kbx-all" @click="all(shownLinks, LINK_KINDS)">{{ shownLinks.length === LINK_KINDS.length ? 'None' : 'All' }}</button>
           </div>
           <span class="kbx-label">Documents</span>
+          <button class="kbx-all" @click="all(shownKinds, NODE_KINDS)">{{ shownKinds.length === NODE_KINDS.length ? 'None' : 'All' }}</button>
           <div class="kbx-chips">
             <button v-for="[k, l] in NODE_KINDS" :key="k" class="kbx-chip" :class="{ on: shownKinds.includes(k) }" :aria-pressed="shownKinds.includes(k)"
                     @click="toggle(shownKinds, k)"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[k] }"></i>{{ l }}</button>
-            <button class="kbx-all" @click="all(shownKinds, NODE_KINDS)">{{ shownKinds.length === NODE_KINDS.length ? 'None' : 'All' }}</button>
           </div>
           <span class="kbx-label">Unlinked pairs</span>
-          <div class="kbx-pairs-row">
+          <div class="kbx-pairs-row kbx-wide">
             <button class="kbx-chip" :class="{ on: showUnlinked }" :aria-pressed="showUnlinked" title="Draw the pairs close in meaning that no link joins"
                     @click="showUnlinked = !showUnlinked">{{ showUnlinked ? 'Shown' : 'Hidden' }}</button>
             <input v-model.number="threshold" type="range" min="0.5" max="0.98" step="0.01" :disabled="!showUnlinked" aria-label="How alike">
@@ -698,23 +748,26 @@ const showPairs = ref(false)
 .kbx-seg button.on { background: var(--vp-c-brand-soft); color: var(--vp-c-text-1); font-weight: 600; }
 .kbx-btn { padding: 4px 10px; font-size: 13px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg); color: var(--vp-c-text-1); }
 .kbx-btn.on { background: var(--vp-c-brand-soft); }
-.kbx-settings { position: absolute; top: 52px; left: 10px; max-width: 34rem; background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider);
-                border-radius: 8px; padding: 4px 10px; font-size: 13px; }
+.kbx-settings { position: absolute; top: 52px; left: 10px; max-width: 31rem; border: 1px solid var(--vp-c-divider);
+                background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+                border-radius: 8px; padding: 4px 10px; font-size: 12px; }
 .kbx-settings[open] { padding: 6px 14px 12px; }
 .kbx-settings summary { cursor: pointer; color: var(--vp-c-text-2); }
-.kbx-grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; align-items: start; margin-top: 10px; font-size: 13px; }
-.kbx-label { color: var(--vp-c-text-2); padding-top: 3px; white-space: nowrap; }
+.kbx-grid { display: grid; grid-template-columns: auto 2.4rem 1fr; gap: 8px 8px; align-items: start; margin-top: 8px; font-size: 12px; }
+.kbx-wide { grid-column: 2 / -1; }
+.kbx-label { color: var(--vp-c-text-2); padding-top: 2px; white-space: nowrap; }
 .kbx-seg-small button { padding: 2px 10px; font-size: 12px; }
 .kbx-grid > .kbx-seg { justify-self: start; }
+.kbx-grid > .kbx-label { padding-right: 4px; }
 .kbx-legend { display: flex; gap: 12px; margin-top: 6px; font-size: 12px; color: var(--vp-c-text-2); }
 .kbx-legend span { display: inline-flex; align-items: center; gap: 5px; }
-.kbx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.kbx-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; font-size: 12px; border-radius: 999px;
+.kbx-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.kbx-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; font-size: 11.5px; line-height: 1.6; border-radius: 999px;
             border: 1px solid var(--vp-c-divider); color: var(--vp-c-text-3); background: transparent; transition: background 0.15s, color 0.15s; }
 .kbx-chip .kbx-swatch { opacity: 0.35; }
 .kbx-chip.on { color: var(--vp-c-text-1); background: var(--vp-c-default-soft); border-color: transparent; }
 .kbx-chip.on .kbx-swatch { opacity: 1; }
-.kbx-all { font-size: 12px; color: var(--vp-c-brand-1); padding: 2px 4px; }
+.kbx-all { font-size: 11px; color: var(--vp-c-brand-1); padding: 2px 0; text-align: left; justify-self: start; }
 .kbx-pairs-row { display: flex; align-items: center; gap: 10px; }
 .kbx-pairs-row input[type=range] { flex: 1; min-width: 6rem; accent-color: var(--vp-c-brand-1); }
 .kbx-pairs-row input:disabled { opacity: 0.4; }
