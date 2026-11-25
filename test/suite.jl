@@ -2836,6 +2836,16 @@ end
     @test f == "RF-F1" && "RF-F1" in ids(g) && ("2401.00002", "RF-F1") in pairs(g, "links")
     @test !("RF-F1" in ids(graph(as(bea))))
     @test ids(graph(as(ada); project = "RF")) == Set(["RF-F1", "2401.00002"])
+    # A document's card: a paper's own details, a watched paper's from the watch; another's note is none.
+    K.execute!(kb, "UPDATE papers SET abstract = 'Surveys, fast.' WHERE doc_id = '2401.00002'")
+    K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score, nearest, found_at)
+                      VALUES ('2401.00006', 'Later work, watched', '["Bo Bard"]', 'Later.', '2024-01-02', 'q-bio', 0.5, '', 0, '[]', ?)""", (K.now_iso(),))
+    card(id, who = ada) = K.handle(kb, K.HTTP.Request("GET", "/api/graph/node?id=$id"), as(who))
+    c2 = JSON.parse(String(card("2401.00002").body))
+    @test c2["title"] == "Fast surveys of reefs" && c2["abstract"] == "Surveys, fast." && c2["authors"] == ["Tomi Ames"] && !c2["read"]
+    c6 = JSON.parse(String(card("2401.00006").body))
+    @test c6["title"] == "Later work" && c6["abstract"] == "Later." && c6["authors"] == ["Bo Bard"] && c6["published"] == "2024-01-02"
+    @test card(mine).status == 200 && card(mine, bea).status == 404 && card("2401.09999").status == 404
     # Through the API, which starts reading the links behind; the map is made only where Qdrant
     # answers (here none: nothing more to do once the links are read).
     @test K.links_behind(kb) && !K.can_map(kb)

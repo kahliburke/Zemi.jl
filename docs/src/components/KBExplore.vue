@@ -10,6 +10,7 @@ import KBNeedsService from './KBNeedsService.vue'
 import { ref, shallowRef, computed, watch, nextTick } from 'vue'
 import { useData } from 'vitepress'
 import { getJSON, post, can, onLive } from './kbApi'
+import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 
 type Node = { id: string; kind: string; title: string; year?: string; page: string; links: number; status?: string; project?: string
               access?: 'open' | 'projects' | 'private'; mine?: boolean; read?: boolean
@@ -49,16 +50,38 @@ const colourBy = ref<'cluster' | 'kind' | 'whose'>(stored('colour', 'cluster'))
 const shownLinks = ref<string[]>(stored('links', ['cites', 'refers', 'evidence']))
 const shownKinds = ref<string[]>(stored('kinds', ['paper', 'record', 'code', 'resource', 'finding']))
 const threshold = ref<number>(stored('threshold', 0.8))
-const showUnlinked = ref<boolean>(stored('unlinked', true))
+// Pairs close in meaning across the whole map: off at first, the selected document's own being drawn from it.
+const showUnlinked = ref<boolean>(stored('pairs', false))
 // The papers known only by their abstract (the watch's, and those recorded but not yet read): left out
 // unless asked for, the map then being of every document.
 const abstracts = ref<boolean>(stored('abstracts', false))
 watch(abstracts, v => { keep('abstracts', v); if (data.value && data.value.abstracts !== v) load() })
 watch(view, v => keep('view', v)); watch(colourBy, v => keep('colour', v)); watch(shownLinks, v => keep('links', v), { deep: true })
-watch(shownKinds, v => keep('kinds', v), { deep: true }); watch(threshold, v => keep('threshold', v)); watch(showUnlinked, v => keep('unlinked', v))
+watch(shownKinds, v => keep('kinds', v), { deep: true }); watch(threshold, v => keep('threshold', v)); watch(showUnlinked, v => keep('pairs', v))
 
 const data = shallowRef<Graph | null>(null)
 const selected = ref<Node | null>(null)
+// What the card says of the document selected, asked for once each (see /api/graph/node).
+type Detail = { id: string; title: string; authors: string[]; published: string; venue: string; abstract: string; summary: string;
+                topics: string[]; read: boolean }
+const detail = ref<Detail | null>(null)
+const details = new Map<string, Detail>()
+const more = ref(false)
+const render = shallowRef<Render>(escapeText)
+watch(selected, async n => {
+  more.value = false
+  if (!n || n.kind === 'finding' || n.kind === 'task') { detail.value = null; return }
+  detail.value = details.get(n.id) ?? null
+  if (detail.value) return
+  try {
+    const d: Detail = await getJSON(`/api/graph/node?id=${encodeURIComponent(n.id)}`)
+    details.set(n.id, d)
+    if (selected.value?.id === n.id) detail.value = d
+  } catch { /* the card stays as the map has it */ }
+  render.value = await loadMarkdown()
+})
+const byline = (d: Detail) => [d.authors.length > 3 ? `${d.authors.slice(0, 3).join(', ')} et al.` : d.authors.join(', '),
+                               d.venue || d.published.slice(0, 10)].filter(Boolean).join(' · ')
 const error = ref('')
 const building = ref('')
 const loading = ref(true)
@@ -237,7 +260,9 @@ async function draw() {
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 3 : 0))
       .linkDirectionalArrowRelPos(1)
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null })
+      .enableNodeDrag(false)                                                     // placed by meaning, not by hand
       .cooldownTicks(120)
+      .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => drawNearest2d(ctx, scale))
       .onRenderFramePost((ctx: CanvasRenderingContext2D, scale: number) => {
         // Cluster names, a constant size on screen; faded out as one comes close.
         const fade = Math.max(0, Math.min(1, (2.2 - scale) / 1.4))
@@ -278,6 +303,7 @@ async function draw() {
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 2.5 : 0))
       .linkDirectionalArrowRelPos(1)
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null })
+      .enableNodeDrag(false)
       .cooldownTicks(120)
     graph.d3Force('charge')?.strength(-10)
     graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
@@ -292,7 +318,70 @@ async function draw() {
       graph.scene().add(s)
     }
     setTimeout(() => graph?.zoomToFit(800, 30), 300)
+    three = THREE
+    nearest3d = null
+    showNearest3d()
   }
+}
+
+// The selected document's nearest in meaning, drawn from it: brighter and, on the map, wider the more
+// alike, with how alike beside each. Their nodes are the ones left lit (see `shade`).
+const BRAND = '#8b7cf6'
+function nearestShown() {
+  const s = selected.value
+  if (!s || !graph) return []
+  const at = new Map<string, GNode>(graph.graphData().nodes.map((n: GNode) => [n.id, n]))
+  const from = at.get(s.id)
+  if (!from) return []
+  const xs = nearSelected.value.filter(x => at.has(x.node.id))
+  const lo = Math.min(...xs.map(x => x.similarity)), hi = Math.max(...xs.map(x => x.similarity))
+  // Strength 0 to 1: mostly how alike the pair is, a little where it stands among these.
+  return xs.map(x => ({ from, to: at.get(x.node.id)!, similarity: x.similarity,
+                        t: 0.7 * Math.max(0, Math.min(1, (x.similarity - 0.4) / 0.5)) + 0.3 * (hi > lo ? (x.similarity - lo) / (hi - lo) : 1) }))
+}
+function drawNearest2d(ctx: CanvasRenderingContext2D, scale: number) {
+  const lines = nearestShown()
+  if (!lines.length) return
+  ctx.save()
+  ctx.lineCap = 'round'
+  for (const { from, to, t } of lines) {
+    ctx.strokeStyle = BRAND + Math.round((0.12 + 0.8 * t) * 255).toString(16).padStart(2, '0')
+    ctx.lineWidth = (0.5 + 3 * t) / scale
+    ctx.beginPath(); ctx.moveTo(from.x, from.y); ctx.lineTo(to.x, to.y); ctx.stroke()
+  }
+  ctx.font = `${11 / scale}px system-ui, sans-serif`
+  ctx.fillStyle = isDark.value ? 'rgba(230,230,245,0.9)' : 'rgba(40,40,60,0.9)'
+  ctx.textBaseline = 'middle'
+  for (const { to, similarity } of lines) ctx.fillText(`${Math.round(similarity * 100)}%`, to.x + 6 / scale, to.y)
+  ctx.restore()
+}
+let three: any = null
+let nearest3d: any = null
+async function showNearest3d() {
+  if (!graph || view.value !== '3d' || !three) return
+  if (nearest3d) { graph.scene().remove(nearest3d); nearest3d.traverse((o: any) => { o.geometry?.dispose?.(); o.material?.map?.dispose?.(); o.material?.dispose?.() }) }
+  nearest3d = null
+  const lines = nearestShown()
+  if (!lines.length) return
+  const SpriteText = (await import('three-spritetext')).default as any
+  const group = new three.Group()
+  const pos: number[] = [], col: number[] = []
+  const brand = new three.Color(BRAND), bg = new three.Color(isDark.value ? 0x111116 : 0xfafafa)
+  for (const { from, to, t } of lines) {
+    const c = bg.clone().lerp(brand, 0.15 + 0.85 * t)
+    pos.push(from.x, from.y, from.z, to.x, to.y, to.z)
+    col.push(c.r, c.g, c.b, c.r, c.g, c.b)
+    const label = new SpriteText(`${Math.round(lines.find(l => l.to === to)!.similarity * 100)}%`, 4,
+                                 isDark.value ? 'rgba(230,230,245,0.9)' : 'rgba(40,40,60,0.9)')
+    label.position.set(to.x, to.y + 6, to.z)
+    group.add(label)
+  }
+  const geometry = new three.BufferGeometry()
+  geometry.setAttribute('position', new three.Float32BufferAttribute(pos, 3))
+  geometry.setAttribute('color', new three.Float32BufferAttribute(col, 3))
+  group.add(new three.LineSegments(geometry, new three.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95 })))
+  nearest3d = group
+  graph.scene().add(group)
 }
 const COLOUR_BY = [['cluster', 'Cluster'], ['kind', 'Kind'], ['whose', 'Whose']] as const
 // One of a list of shown kinds turned on or off.
@@ -329,6 +418,7 @@ watch([selected, hits, colourBy], restyle)
 function restyle() {
   if (!graph) return
   graph.linkColor(linkColour)
+  showNearest3d()
   if (view.value === '2d') { graph.nodeColor(shade).nodeVal(size); return }
   for (const { sprite, node } of sprites.values()) {
     sprite.material.color.set(shade(node))
@@ -470,8 +560,8 @@ const showPairs = ref(false)
           <button :class="{ on: view === '2d' }" @click="view = '2d'">Map</button>
           <button :class="{ on: view === '3d' }" @click="view = '3d'">Space</button>
         </div>
-        <button class="kbx-btn" :class="{ on: drifting }" title="Wander from here along the nearest documents" @click="drift">{{ drifting ? 'Stop' : 'Drift' }}</button>
-        <button class="kbx-btn" :class="{ on: showPairs }" title="Documents close in meaning that no link joins" @click="showPairs = !showPairs">Close, but not linked</button>
+        <button class="kbx-btn" :class="{ on: drifting }" title="Move from document to document along the nearest in meaning, one every few seconds" @click="drift">{{ drifting ? 'Stop' : 'Drift' }}</button>
+        <button class="kbx-btn" :class="{ on: showPairs }" title="Pairs of documents close in meaning that nothing links yet" @click="showPairs = !showPairs">Suggested links</button>
         <button v-if="data?.abstract_only" class="kbx-btn" :class="{ on: abstracts }" :title="`${data.abstract_only} papers not read in full, placed by their title and abstract`"
                 @click="abstracts = !abstracts">Include abstract only</button>
       </div>
@@ -518,6 +608,15 @@ const showPairs = ref(false)
           v-if="selected.year"> · {{ selected.year }}</template><template v-if="selected.read === false"> · abstract only</template></p>
         <p v-if="clusterName(selected.cluster)" class="kbx-cluster" :title="clusterName(selected.cluster)">{{ clusterName(selected.cluster) }}</p>
         <h3><a :href="selected.page" target="_blank" rel="noopener">{{ selected.title }}</a></h3>
+        <template v-if="detail && detail.id === selected.id">
+          <p v-if="byline(detail)" class="kbx-byline">{{ byline(detail) }}</p>
+          <div v-if="detail.summary || detail.abstract" class="kbx-summary" :class="{ open: more }">
+            <p class="kbx-sum-head">{{ detail.summary ? 'Summary' : 'Abstract' }}</p>
+            <div class="kbx-sum-text" v-html="render(detail.summary || detail.abstract)"></div>
+          </div>
+          <button v-if="(detail.summary || detail.abstract).length > 420" class="kbx-more" @click="more = !more">{{ more ? 'Less' : 'More' }}</button>
+          <div v-if="detail.topics.length" class="kbx-topics"><span v-for="t in detail.topics" :key="t">{{ t }}</span></div>
+        </template>
         <div class="kbx-actions">
           <button class="kbx-btn kbx-small" @click="open(selected)">Open</button>
           <button v-if="selected.kind !== 'finding' && selected.kind !== 'task'" class="kbx-btn kbx-small" @click="copyCitation(selected)">Copy citation</button>
@@ -539,7 +638,8 @@ const showPairs = ref(false)
             <li v-for="x in nearSelected" :key="x.node.id">
               <i class="kbx-swatch" :style="{ background: KIND_COLOURS[x.node.kind] ?? '#999' }"></i>
               <a href="#" :title="x.node.title" @click.prevent="go(x.node)">{{ x.node.title }}</a>
-              <span class="kbx-aside"><span v-if="x.linked" class="kbx-tag">linked</span>{{ Math.round(x.similarity * 100) }}%</span>
+              <span class="kbx-aside"><span v-if="x.linked" class="kbx-tag">linked</span><span class="kbx-bar-track"><span class="kbx-bar-fill"
+                :style="{ width: `${Math.max(4, Math.round(x.similarity * 100))}%` }"></span></span>{{ Math.round(x.similarity * 100) }}%</span>
             </li>
           </ul>
         </template>
@@ -547,7 +647,7 @@ const showPairs = ref(false)
 
       <aside v-if="showPairs" class="kbx-pairs">
         <button class="kbx-close" aria-label="Close" @click="showPairs = false">×</button>
-        <h4>Close, but not linked</h4>
+        <h4>Suggested links</h4>
         <div class="kbx-row"><label><input v-model="scope" type="radio" value="all"> everywhere</label>
           <label><input v-model="scope" type="radio" value="cluster" :disabled="!selected"> in this cluster</label>
           <label title="Your notes and documents, and the shared ones close to them"><input v-model="scope" type="radio" value="own"> yours and the rest</label></div>
@@ -626,6 +726,20 @@ const showPairs = ref(false)
 .kbx-list li:last-child { border-bottom: 0; }
 .kbx-list a { color: var(--vp-c-text-1); text-decoration: none; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .kbx-list a:hover { color: var(--vp-c-brand-1); }
+.kbx-byline { margin: -4px 0 8px; font-size: 12px; color: var(--vp-c-text-2); }
+.kbx-summary { position: relative; max-height: 9.5em; overflow: hidden; font-size: 13px; line-height: 1.5; }
+.kbx-summary:not(.open)::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2.5em;
+                                 background: linear-gradient(transparent, var(--vp-c-bg)); }
+.kbx-summary.open { max-height: none; }
+.kbx-sum-head { margin: 0 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-3); }
+.kbx-sum-text :deep(p) { margin: 0 0 6px; }
+.kbx-sum-text :deep(ul) { margin: 0 0 6px; padding-left: 1.1rem; }
+.kbx-more { font-size: 12px; color: var(--vp-c-brand-1); margin: 2px 0 6px; }
+.kbx-topics { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
+.kbx-topics span { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--vp-c-default-soft); color: var(--vp-c-text-2); }
+.kbx-bar-track { display: inline-block; width: 44px; height: 4px; margin-right: 6px; border-radius: 2px; vertical-align: middle;
+                 background: var(--vp-c-default-soft); overflow: hidden; }
+.kbx-bar-fill { display: block; height: 100%; border-radius: 2px; background: #8b7cf6; }
 .kbx-aside { font-size: 12px; color: var(--vp-c-text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .kbx-tag { margin-right: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--vp-c-divider); color: var(--vp-c-text-3); }
 .kbx-card h4, .kbx-pairs h4 { margin: 14px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-2); }

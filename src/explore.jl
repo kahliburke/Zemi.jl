@@ -513,3 +513,36 @@ route!("GET", "/api/graph") do c
     g["job"] = job === nothing ? nothing : job.id
     return g
 end
+
+"""
+    explore_node(kb, caller, id) -> Dict
+
+What the explore page's card says of document `id`, as far as `caller` may see it: its title, authors,
+date, venue and abstract (the watch's where the document has none of its own yet), its summary and
+topics as the summarizer shown for its kind wrote them, and whether it was read in full.
+"""
+function explore_node(kb::KB, caller::Caller, id::AbstractString)
+    seen_document(kb, caller, id)
+    rows = query(kb, """
+        SELECT p.id, p.kind, coalesce(p.title, w.title) AS title, coalesce(p.authors, w.authors) AS authors,
+               coalesce(p.published, w.published) AS published, p.journal_ref, coalesce(p.abstract, w.abstract) AS abstract,
+               EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read
+        FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id WHERE p.doc_id = ?""", (id,))
+    isempty(rows) && not_found("No document $id in the knowledge base")
+    r = only(rows)
+    wrote = [s for s in query(kb, """SELECT summarizer, text FROM summaries WHERE paper_id = ? AND unit_key LIKE 'p:%'
+                                     ORDER BY created_at DESC""", (Int(r.id),))]
+    want = kind_summarizer(kb.config, id)
+    pick = something(findfirst(s -> s.summarizer == want, wrote), isempty(wrote) ? nothing : 1)
+    summary, topics = pick === nothing ? ("", String[]) : split_topics(String(wrote[pick].text))
+    authors = try json_list(r.authors) catch; String[] end
+    return Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "authors" => authors,
+                            "published" => coalesce(r.published, ""), "venue" => coalesce(r.journal_ref, ""),
+                            "abstract" => coalesce(r.abstract, ""), "summary" => summary, "topics" => topics,
+                            "read" => Bool(r.read), "page" => document_link(kb.config, id))
+end
+
+# What the explore page's card says of one document (`?id=`, see `explore_node`).
+route!("GET", "/api/graph/node") do c
+    explore_node(c.kb, c.caller, get(c.params, "id", ""))
+end
