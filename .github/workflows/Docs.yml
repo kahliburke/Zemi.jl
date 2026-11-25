@@ -57,15 +57,22 @@ jobs:
           until curl -s localhost:11434/api/tags > /dev/null; do sleep 1; done
           ollama pull qwen3-embedding:4b
       - run: node demo/screenshots.mjs
-      # Kept in a release rather than the repository, at addresses that stay, for the README.
+      # Kept in a release rather than the repository, at addresses that stay, for the README. Only the
+      # README reads them, so the guide is built and deployed even when GitHub refuses an upload.
       - name: Screenshots to the docs-assets release
         if: github.ref == 'refs/heads/main'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view docs-assets || gh release create docs-assets --prerelease --title "Documentation assets" \
             --notes "The guide's screenshots, made by the Docs workflow."
-          gh release upload docs-assets guide/src/assets/screenshots/*.png --clobber
+          for try in 1 2 3; do
+            gh release upload docs-assets guide/src/assets/screenshots/*.png --clobber && exit 0
+            sleep $((30 * try))
+          done
+          echo "::warning::The screenshots could not all be uploaded to the docs-assets release"
+          exit 1
       - run: julia --project=app demo/build.jl _site
       - uses: actions/upload-pages-artifact@v3
         with:
