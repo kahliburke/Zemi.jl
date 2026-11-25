@@ -61,8 +61,10 @@ export async function signIn(site: string): Promise<Tokens> {
         if (u.pathname !== '/callback') { res.writeHead(404).end(); return }
         const code = u.searchParams.get('code'), error = u.searchParams.get('error')
         const ours = u.searchParams.get('state') === state
+        const why = !ours ? 'this approval was for another sign-in' : error === 'access_denied' ? 'it was declined' : error ?? ''
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-          .end(DONE_PAGE(ours && code ? 'Signed in to Zemi. You can close this tab.' : 'Not signed in. Try again from Obsidian.'))
+          .end(DONE_PAGE(ours && code ? 'Signed in to Zemi. You can close this tab.'
+                         : `Not signed in${why ? ` (${why.replace(/[<>&"]/g, '')})` : ''}. Try again from Obsidian.`))
         if (!ours) return
         clearTimeout(timer)
         code ? ok(code) : fail(new Error(error === 'access_denied' ? 'Signing in was declined' : `Not signed in: ${error}`))

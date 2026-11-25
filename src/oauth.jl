@@ -57,6 +57,27 @@ const API_SCOPES = ("library", "read")
 "The scopes a knowledge base run for one person offers: it has no /mcp."
 const OWNER_SCOPES = API_SCOPES
 
+"""
+    api_scope(scope) -> Bool
+
+Whether `scope`, scopes separated by spaces as OAuth gives them, is for the API: one or more of
+`API_SCOPES`, whose tokens have those permissions alone.
+"""
+api_scope(scope::AbstractString) = (names = split(scope); !isempty(names) && all(in(API_SCOPES), names))
+
+"""
+    offered_scope(scope, scopes) -> Union{String,Nothing}
+
+`scope` as it is kept, if `scopes` offers it: one of them, or several of the API's (in a set order);
+`nothing` if not.
+"""
+function offered_scope(scope::AbstractString, scopes)
+    scope in scopes && return String(scope)
+    names = unique(split(scope))
+    api_scope(scope) && all(in(scopes), names) || return nothing
+    return join(sort(names), " ")
+end
+
 "How long an access token, an authorization code and an unused refresh token last."
 const OAUTH_ACCESS = Hour(1)
 const OAUTH_CODE = Minute(5)
@@ -152,12 +173,13 @@ function authorization_request(kb::KB, params::AbstractDict; scopes = OAUTH_SCOP
     isempty(uri) && length(registered) == 1 && (uri = only(registered))
     uri in registered || error("That address is not one the client registered")
     allowed_redirect(uri) || error("That address is not one clients may be sent back to")
-    scope = strip(get(params, "scope", ""))
+    asked = strip(get(params, "scope", ""))
+    scope = offered_scope(isempty(asked) ? "mcp" : asked, scopes)
     out = (; client_id = String(id), client_name = String(c.name), redirect_uri = String(uri), state = get(params, "state", ""),
-             challenge = get(params, "code_challenge", ""), scope = isempty(scope) ? "mcp" : String(scope))
+             challenge = get(params, "code_challenge", ""), scope = something(scope, String(asked)))
     problem = get(params, "response_type", "") != "code" ? "unsupported_response_type" :
               isempty(out.challenge) || get(params, "code_challenge_method", "") != "S256" ? "invalid_request" :
-              out.scope in scopes ? "" : "invalid_scope"
+              scope === nothing ? "invalid_scope" : ""
     return merge(out, (; error = problem))
 end
 
@@ -199,7 +221,7 @@ Base.showerror(io::IO, e::OAuthError) = print(io, e.code, ": ", e.description)
 The token endpoint: exchange a code (`grant_type=authorization_code`, with `code_verifier`) or a
 refresh token (`grant_type=refresh_token`) for an access token and a new refresh token. A code
 makes a token for its person (or the person who runs a knowledge base for one person), named for
-the client, with their permissions (for a scope of `API_SCOPES`, that one alone, where they have it); a refresh replaces that token's secrets in place, so the old
+the client, with their permissions (for scopes of `API_SCOPES`, those alone, where they have them); a refresh replaces that token's secrets in place, so the old
 ones stop working. Refuses (`OAuthError`) what does not match.
 """
 function oauth_token!(kb::KB, form::AbstractDict)
@@ -225,7 +247,7 @@ function oauth_token!(kb::KB, form::AbstractDict)
         scope = String(c.scope)
         owner = ismissing(c.user_id)                  # the person who runs it for one person
         perms = collect(owner ? PERMISSION_NAMES : user_permissions(kb, c.user_id))
-        scope in API_SCOPES && (perms = intersect(perms, [scope]))
+        api_scope(scope) && (perms = intersect(perms, split(scope)))
         execute!(kb, """INSERT INTO api_tokens (user_id, name, token_hash, prefix, permissions, created_at, expires_at, client_id, refresh_hash, scope)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                  (c.user_id, "$name (connected)", secret_hash(access), first(access, 10), JSON.json(perms), now_iso(),
@@ -252,6 +274,15 @@ end
 
 attr_escape(s) = html_escape(s)          # a field's value in a form
 
+"What a client given `scope` could do, as `who`, in a sentence or two of the approval page."
+function scope_text(scope::AbstractString, who::AbstractString)
+    names = split(scope)
+    api_scope(scope) || return "It would act as $who, with your roles and projects."
+    names == ["library"] && return "It would keep your library in step with a folder, as $who: read and write your library's files, and nothing else."
+    names == ["read"] && return "It would read this knowledge base as $who: its documents, search and bibliography. It changes nothing."
+    return "It would read this knowledge base as $who: its documents, search and bibliography; and read and write your library's files. It changes nothing else."
+end
+
 """
 The page where a signed-in person (or the person who runs a knowledge base for one person, `owner`)
 approves a client: who asks, as whom it would act, and what it could do, with Allow and Deny. The
@@ -262,11 +293,7 @@ function consent_page(request, who::AbstractString, params::AbstractDict, form_k
     style = """.a{display:flex;gap:.6rem;margin-top:1.5rem}button{flex:1;padding:.7rem 1rem;border-radius:8px;border:0;font:inherit;font-weight:600;cursor:pointer}
                .y{background:var(--brand);color:var(--bg)}.n{background:var(--muted);color:var(--fg)}"""
     return service_page("Connect $(request.client_name)", """
-        <p>$(request.scope == "library" ?
-             "It would keep your library in step with a folder, as <b>$(html_escape(who))</b>: read and write your library's files, and nothing else." :
-             request.scope == "read" ?
-             "It would read this knowledge base as <b>$(html_escape(who))</b>: its documents, search and bibliography. It changes nothing." :
-             "It would act as <b>$(html_escape(who))</b>, with your roles and projects.") It is sent back to
+        <p>$(scope_text(request.scope, "<b>$(html_escape(who))</b>")) It is sent back to
         <b>$(html_escape(something(tryparse_host(request.redirect_uri), request.redirect_uri)))</b>.</p>
         <p>Revoke it $(owner ? "in Settings, under Connections" : "under Your account, Tokens").</p>
         <form method="post" action="/oauth/authorize">$fields<input type="hidden" name="form_key" value="$(attr_escape(form_key))">

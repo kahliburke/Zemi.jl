@@ -2253,6 +2253,22 @@ end
     @test serve("GET", "/api/bib"; headers = auth).status == 401
     @test serve("POST", "/oauth/token"; headers = formed,
                 body = HTTP.escapeuri(["grant_type" => "refresh_token", "refresh_token" => t["refresh_token"], "client_id" => client])).status == 400
+    # Reading and the library both, as a client beside one's notes asks: a token with those two alone.
+    @test startswith(location(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P[1:6]; "scope" => "read mcp"]); headers = owner)), "$back?error=invalid_scope")
+    both = [P[1:6]; "scope" => "read library"]
+    page = String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri(both); headers = owner).body)
+    @test occursin("read and write your library's files", page) && occursin("It would read this knowledge base", page)
+    allowed = serve("POST", "/oauth/authorize"; headers = [owner; formed], body = HTTP.escapeuri([both;
+                    ["form_key" => match(r"name=\"form_key\" value=\"([^\"]+)\"", page)[1], "decision" => "allow"]]))
+    t3 = js(serve("POST", "/oauth/token"; headers = formed,
+                  body = HTTP.escapeuri(["grant_type" => "authorization_code", "code" => HTTP.queryparams(HTTP.URI(location(allowed)))["code"],
+                                         "client_id" => client, "redirect_uri" => back, "code_verifier" => verifier])))
+    @test t3["scope"] == "library read"
+    a3 = ["Authorization" => "Bearer $(t3["access_token"])"]
+    @test serve("GET", "/api/bib"; headers = a3).status == 200
+    @test serve("GET", "/api/library/files"; headers = a3).status == 200
+    @test serve("POST", "/api/actions"; headers = a3, body = "{}").status == 403
+    @test K.token_caller(kb, t3["access_token"]).permissions == Set(["library", "read"])
     # A token of the person who runs it for one person is nothing to a shared service.
     t2 = K.oauth_token!(kb, Dict("grant_type" => "authorization_code", "client_id" => client, "redirect_uri" => back,
         "code_verifier" => verifier, "code" => HTTP.queryparams(HTTP.URI(K.issue_code!(kb, K.authorization_request(kb, Dict(P); scopes = K.OWNER_SCOPES), nothing)))["code"]))

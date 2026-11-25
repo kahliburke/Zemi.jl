@@ -154,7 +154,7 @@ function obsidian_cli(args::AbstractVector{<:AbstractString}; build = nothing, k
         f = connect_folder!(site, vault; name)
     else
         site, f = cc["site"], cc["folders"][i]
-        say(:ok, "$(f["name"]) syncs with $(site_label(site)) already")
+        say(:ok, "$(f["name"]) already syncs with $(site_label(site))")
     end
     if !synced_by_local() && syncing_pid() === nothing
         if site == "local"

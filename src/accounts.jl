@@ -461,8 +461,8 @@ function token_caller(kb::KB, token::AbstractString; mcp::Bool = false)
     t = first(r)
     (ismissing(t.revoked_at) && (ismissing(t.expires_at) || t.expires_at > now_iso())) || return ANONYMOUS
     # A token an MCP client got by OAuth is for /mcp: its tools, not the whole API. One got for a
-    # library or for reading (see `API_SCOPES`) is for the API, with that permission alone.
-    mcp || ismissing(t.client_id) || coalesce(t.scope, "mcp") in API_SCOPES || return ANONYMOUS
+    # library or for reading, or both (see `API_SCOPES`), is for the API, with those permissions alone.
+    mcp || ismissing(t.client_id) || api_scope(coalesce(t.scope, "mcp")) || return ANONYMOUS
     # A token of the person who runs a knowledge base for one person, who has no account, is nothing
     # to the shared service.
     ismissing(t.user_id) && SHARED_MODE[] && return ANONYMOUS
