@@ -14,7 +14,7 @@ import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 
 type Node = { id: string; kind: string; title: string; year?: string; page: string; links: number; status?: string; project?: string
               access?: 'open' | 'projects' | 'private'; mine?: boolean; read?: boolean
-              x?: [number, number]; p?: [number, number, number]; cluster?: number }
+              x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]; cluster?: number }
 type Cluster = { id: number; name: string; description: string; size: number }
 type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean][]; clusters: Cluster[];
                built_at: string | null; job: string | null; abstracts: boolean; abstract_only: number }
@@ -46,6 +46,9 @@ const stored = <T,>(key: string, fallback: T): T => {
 const keep = (key: string, v: unknown) => { try { localStorage.setItem(`kb-explore-${key}`, JSON.stringify(v)) } catch { /* private mode */ } }
 const view = ref<'2d' | '3d'>(stored('view', '2d'))
 const fly = ref(false)
+// Where documents are placed: by t-SNE (close neighbourhoods kept) or UMAP (more of how groups lie to each other).
+const layout = ref<'tsne' | 'umap'>(stored('layout', 'tsne'))
+watch(layout, v => keep('layout', v))
 const colourBy = ref<'cluster' | 'kind' | 'whose'>(stored('colour', 'cluster'))
 const shownLinks = ref<string[]>(stored('links', ['cites', 'refers', 'evidence']))
 const shownKinds = ref<string[]>(stored('kinds', ['paper', 'record', 'code', 'resource', 'finding']))
@@ -200,8 +203,9 @@ function graphData() {
   const deep = view.value === '3d'
   const nodes: GNode[] = g.nodes.filter(visibleNode).map(n => {
     const o: GNode = { ...n } as GNode
-    if (n.x && !deep) { o.fx = n.x[0] * SCALE_2D; o.fy = -n.x[1] * SCALE_2D }
-    if (n.p && deep) { o.fx = n.p[0] * SCALE_3D; o.fy = n.p[1] * SCALE_3D; o.fz = n.p[2] * SCALE_3D }
+    const flat = layout.value === 'umap' && n.ux ? n.ux : n.x, space = layout.value === 'umap' && n.up ? n.up : n.p
+    if (flat && !deep) { o.fx = flat[0] * SCALE_2D; o.fy = -flat[1] * SCALE_2D }
+    if (space && deep) { o.fx = space[0] * SCALE_3D; o.fy = space[1] * SCALE_3D; o.fz = space[2] * SCALE_3D }
     return o
   })
   const ids = new Set(nodes.map(n => n.id))
@@ -386,6 +390,9 @@ async function showNearest3d() {
 const COLOUR_BY = [['cluster', 'Cluster'], ['kind', 'Kind'], ['whose', 'Whose']] as const
 // One of a list of shown kinds turned on or off.
 const toggle = (list: string[], k: string) => { const i = list.indexOf(k); i < 0 ? list.push(k) : list.splice(i, 1) }
+// Every one of a list's kinds on, or, all on already, none.
+const all = (list: string[], kinds: readonly (readonly [string, string])[]) =>
+  list.splice(0, list.length, ...(list.length === kinds.length ? [] : kinds.map(([k]) => k)))
 // The space's node discs, by id, with the nodes they draw.
 const sprites = new Map<string, { sprite: any; node: GNode }>()
 // A disc's width: as wide as the sphere 3d-force-graph would draw for the node (radius 4·∛val).
@@ -412,7 +419,7 @@ const relation = (kind: string, out: boolean) => (RELATIONS[kind] ?? [kind, kind
 const kindName = (k: string) => ({ paper: 'paper', record: 'note or record', code: 'codebase', resource: 'resource', finding: 'finding', task: 'task' }[k] ?? k)
 
 // Redrawn as what is shown changes; recoloured as the selection, hits and colours do.
-watch([view, fly, shownLinks, shownKinds, threshold, showUnlinked, isDark], () => draw(), { deep: true })
+watch([view, fly, layout, shownLinks, shownKinds, threshold, showUnlinked, isDark], () => draw(), { deep: true })
 watch([selected, hits, colourBy], restyle)
 // Recoloured and resized in place: the space's discs directly, the map's through its accessors.
 function restyle() {
@@ -569,6 +576,13 @@ const showPairs = ref(false)
       <details class="kbx-settings">
         <summary>Show</summary>
         <div class="kbx-grid">
+          <template v-if="data?.nodes.some(n => n.ux)">
+            <span class="kbx-label">Layout</span>
+            <div class="kbx-seg kbx-seg-small" role="group" aria-label="Layout">
+              <button :class="{ on: layout === 'tsne' }" title="Keeps each document's close neighbourhood" @click="layout = 'tsne'">t-SNE</button>
+              <button :class="{ on: layout === 'umap' }" title="Keeps more of how the groups lie to each other" @click="layout = 'umap'">UMAP</button>
+            </div>
+          </template>
           <span class="kbx-label">Colour by</span>
           <div>
             <div class="kbx-seg kbx-seg-small" role="group" aria-label="Colour by">
@@ -582,11 +596,13 @@ const showPairs = ref(false)
           <div class="kbx-chips">
             <button v-for="[k, l] in LINK_KINDS" :key="k" class="kbx-chip" :class="{ on: shownLinks.includes(k) }" :aria-pressed="shownLinks.includes(k)"
                     @click="toggle(shownLinks, k)"><i class="kbx-swatch" :style="{ background: LINK_COLOURS[k] }"></i>{{ l }}</button>
+            <button class="kbx-all" @click="all(shownLinks, LINK_KINDS)">{{ shownLinks.length === LINK_KINDS.length ? 'None' : 'All' }}</button>
           </div>
           <span class="kbx-label">Documents</span>
           <div class="kbx-chips">
             <button v-for="[k, l] in NODE_KINDS" :key="k" class="kbx-chip" :class="{ on: shownKinds.includes(k) }" :aria-pressed="shownKinds.includes(k)"
                     @click="toggle(shownKinds, k)"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[k] }"></i>{{ l }}</button>
+            <button class="kbx-all" @click="all(shownKinds, NODE_KINDS)">{{ shownKinds.length === NODE_KINDS.length ? 'None' : 'All' }}</button>
           </div>
           <span class="kbx-label">Unlinked pairs</span>
           <div class="kbx-pairs-row">
@@ -689,6 +705,7 @@ const showPairs = ref(false)
 .kbx-grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; align-items: start; margin-top: 10px; font-size: 13px; }
 .kbx-label { color: var(--vp-c-text-2); padding-top: 3px; white-space: nowrap; }
 .kbx-seg-small button { padding: 2px 10px; font-size: 12px; }
+.kbx-grid > .kbx-seg { justify-self: start; }
 .kbx-legend { display: flex; gap: 12px; margin-top: 6px; font-size: 12px; color: var(--vp-c-text-2); }
 .kbx-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .kbx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -697,6 +714,7 @@ const showPairs = ref(false)
 .kbx-chip .kbx-swatch { opacity: 0.35; }
 .kbx-chip.on { color: var(--vp-c-text-1); background: var(--vp-c-default-soft); border-color: transparent; }
 .kbx-chip.on .kbx-swatch { opacity: 1; }
+.kbx-all { font-size: 12px; color: var(--vp-c-brand-1); padding: 2px 4px; }
 .kbx-pairs-row { display: flex; align-items: center; gap: 10px; }
 .kbx-pairs-row input[type=range] { flex: 1; min-width: 6rem; accent-color: var(--vp-c-brand-1); }
 .kbx-pairs-row input:disabled { opacity: 0.4; }

@@ -99,7 +99,7 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 3
+const EXPLORE_VERSION = 4
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -192,8 +192,8 @@ const EXPLORE_VIEWS = ("read", "all")
 Make the maps of the documents with a vector in the landscape's layer (see [`landscape_layer`](@ref)),
 whoever may see them: those read in full, and those with the papers known only by their abstract (see
 [`EXPLORE_VIEWS`](@ref)). In each, every document's nearest documents, its position on a 2D map and in
-a 3D space (t-SNE, the most often near others first where there are more than `EXPLORE_LAYOUT_LIMIT`),
-and its cluster. The clusters are the landscape's, named from documents every reader sees; a document
+a 3D space by t-SNE (the most often near others first where there are more than `EXPLORE_LAYOUT_LIMIT`)
+and by UMAP (see [`umap`](@ref)), and its cluster. The clusters are the landscape's, named from documents every reader sees; a document
 the landscape leaves out joins the cluster whose centre is nearest. Without a landscape a map makes its
 own, labelled by the words of the open documents' titles. Saved as `explore.json` in the data
 directory; returns `(; data, changed)`, or `nothing` with fewer than three documents. Nothing is made
@@ -248,6 +248,10 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     cancelled() && return nothing
     progress("Exploring $n $what: laying out the space")
     deep = centred(tsne(X[:, laid]; dims = 3))
+    cancelled() && return nothing
+    # UMAP too, which keeps more of how the groups lie to each other: every document, its cost growing with their number.
+    progress("Exploring $n $what: laying out the map and the space by UMAP")
+    uflat, udeep = centred(umap(X; dims = 2)), centred(umap(X; dims = 3))
     pos2, pos3 = zeros(n, 2), zeros(n, 3)
     pos2[laid, :], pos3[laid, :] = flat, deep
     # The rest among their nearest laid out, a little apart.
@@ -291,7 +295,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     end
 
     r4(x) = round(x; digits = 4)
-    docs = Dict(r.id => Dict("x" => r4.(pos2[i, :]), "p" => r4.(pos3[i, :]), "c" => assign[i],
+    docs = Dict(r.id => Dict("x" => r4.(pos2[i, :]), "p" => r4.(pos3[i, :]), "ux" => r4.(uflat[i, :]), "up" => r4.(udeep[i, :]), "c" => assign[i],
                              "near" => [[rows[m].id, r4(s)] for (m, s) in near[i]])
                 for (i, r) in enumerate(rows))
     return Dict("clusters" => clusters, "docs" => docs)
@@ -479,6 +483,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
                              "access" => coalesce(r.access, "open"), "mine" => id in held, "read" => Bool(r.read))
         if d !== nothing
             n["x"], n["p"], n["cluster"] = d["x"], d["p"], d["c"]
+            haskey(d, "ux") && (n["ux"] = d["ux"]; n["up"] = d["up"])
         end
         n
     end

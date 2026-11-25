@@ -2789,7 +2789,7 @@ end
     mine = first(K.put_record!(kb, "upload", (; key = "diary", title = "Diary", date = "2026-10-02", sections = ["Notes" => "Mine."]); read = false))
     K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (mine,))
     K.execute!(kb, "INSERT INTO document_holders (paper_id, user_id) VALUES (?, ?)", (K.paper_id(kb, mine), ada))
-    place(near) = Dict("x" => [0.1, 0.2], "p" => [0.1, 0.2, 0.3], "c" => 1, "near" => near)
+    place(near) = Dict("x" => [0.1, 0.2], "p" => [0.1, 0.2, 0.3], "ux" => [0.3, 0.4], "up" => [0.3, 0.4, 0.5], "c" => 1, "near" => near)
     reefs = [Dict("id" => 1, "name" => "Reefs", "description" => "")]
     write(K.explore_path(kb.config), JSON.json(Dict("version" => 3, "input_sha" => "", "built_at" => "then", "layer" => "l", "views" => Dict(
         "all" => Dict("clusters" => [reefs; Dict("id" => 2, "name" => "", "description" => "", "closed_name" => "diary")],
@@ -2807,7 +2807,7 @@ end
     @test near[("2401.00001", "2401.00002")] == (0.9, false) && near[Tuple(sort(["2401.00005", rec]))] == (0.8, true)
     @test pairs(g, "links") == Set([("2401.00001", "2401.00005"), ("2401.00001", "2401.00006"), Tuple(sort([rec, "2401.00005"]))])
     n1 = only(n for n in g["nodes"] if n["id"] == "2401.00001")
-    @test n1["x"] == [0.1, 0.2] && n1["cluster"] == 1 && n1["year"] == "2017" && n1["links"] == 2 && first(g["clusters"])["name"] == "Reefs"
+    @test n1["x"] == [0.1, 0.2] && n1["ux"] == [0.3, 0.4] && n1["cluster"] == 1 && n1["year"] == "2017" && n1["links"] == 2 && first(g["clusters"])["name"] == "Reefs"
     @test !haskey(only(n for n in g["nodes"] if n["id"] == "2401.00006"), "x")         # linked, not placed: no vector
     own = only(n for n in g["nodes"] if n["id"] == mine)
     @test own["mine"] && own["access"] == "private" && !n1["mine"] && n1["access"] == "open"
@@ -2922,6 +2922,11 @@ end
             @test length(doc["x"]) == 2 && length(doc["p"]) == 3 && all(v -> -1 <= v <= 1, [doc["x"]; doc["p"]])
         end
         @test all(length(unique(m["docs"][id]["c"] for id in keys(topic_of) if topic_of[id] == t)) == 1 for t in topics)
+        # Laid out by UMAP as well, each paper nearest one of its own topic there too.
+        @test all(d -> length(d["ux"]) == 2 && length(d["up"]) == 3 && all(v -> -1 <= v <= 1, [d["ux"]; d["up"]]), values(m["docs"]))
+        ux = Dict(id => d["ux"] for (id, d) in m["docs"])
+        nearest_by_umap(id) = argmin(o -> o == id ? Inf : sum(abs2, ux[o] .- ux[id]), collect(keys(ux)))
+        @test all(id -> topic_of[nearest_by_umap(id)] == topic_of[id], collect(keys(ux)))
         @test !K.explore_map!(kb).changed && !K.explore_stale(kb)
         # Without a landscape, clusters of the map's own, labelled by their titles' words.
         mv(K.landscape_path(c), K.landscape_path(c) * ".kept")

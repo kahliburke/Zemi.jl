@@ -270,6 +270,17 @@ function spherical_kmeans(X::AbstractMatrix, k::Integer; iterations::Integer = 1
     return [renumber[a] for a in assign], C[:, order]
 end
 
+"The columns of `X` on their first `dims` principal components (one row each), each signed so its skew is positive."
+function principal_start(X::AbstractMatrix, dims::Integer)
+    centred = X .- sum(X; dims = 2) ./ size(X, 2)
+    U, S, _ = svd(centred')
+    Y = U[:, 1:dims] .* S[1:dims]'
+    for a in 1:dims
+        sum(Y[:, a] .^ 3) < 0 && (Y[:, a] .*= -1)
+    end
+    return Y
+end
+
 """
     tsne(X; perplexity = 30, iterations = 1000, dims = 2) -> Matrix
 
@@ -302,13 +313,8 @@ function tsne(X::AbstractMatrix; perplexity::Real = 30, iterations::Integer = 10
         P[:, i] = p ./ sum(p)
     end
     P = max.((P .+ P') ./ (2n), 1e-12)
-    # Start from the principal components, each signed so its skew is positive, at a small scale.
-    centred = X .- sum(X; dims = 2) ./ n
-    U, S, _ = svd(centred')
-    Y = U[:, 1:dims] .* S[1:dims]'
-    for a in 1:dims
-        sum(Y[:, a] .^ 3) < 0 && (Y[:, a] .*= -1)
-    end
+    # Start from the principal components, at a small scale.
+    Y = principal_start(X, dims)
     Y .*= 1e-4 / max(sqrt(sum(abs2, Y[:, 1]) / n), eps())
     gains, step = ones(n, dims), zeros(n, dims)
     rate = max(n / 48, 50.0)
@@ -327,4 +333,98 @@ function tsne(X::AbstractMatrix; perplexity::Real = 30, iterations::Integer = 10
         Y .-= sum(Y; dims = 1) ./ n
     end
     return Y
+end
+
+"""
+    umap(X; neighbours = 15, epochs = 500, min_dist = 0.1, dims = 2, seed = 1) -> Matrix
+
+A layout in `dims` dimensions of the unit columns of `X` (one row per column) by UMAP over their cosine
+distances: each column's `neighbours` nearest make a fuzzy graph, whose edges draw their ends together
+while sampled pairs are pushed apart, from the principal components. More of the arrangement between
+groups is kept than by [`tsne`](@ref); seeded, so the layout is the same for the same vectors.
+"""
+function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500, min_dist::Real = 0.1, dims::Integer = 2,
+              seed::Integer = 1)
+    n = size(X, 2)
+    k = min(neighbours, n - 1)
+    near = nearest_columns(X, k)
+    # Each column's neighbours, weighted so its own nearest is 1 and the weights sum to log2(k).
+    I, J, W = Int[], Int[], Float64[]
+    for i in 1:n
+        d = [max(1 - s, 0.0) for (_, s) in near[i]]
+        rho = minimum(d)
+        lo, hi, sigma = 0.0, Inf, 1.0
+        for _ in 1:64
+            total = sum(exp(-max(x - rho, 0) / sigma) for x in d)
+            abs(total - log2(k)) < 1e-5 && break
+            if total > log2(k)
+                hi = sigma; sigma = (lo + hi) / 2
+            else
+                lo = sigma; sigma = isinf(hi) ? 2sigma : (lo + hi) / 2
+            end
+        end
+        for ((j, _), x) in zip(near[i], d)
+            push!(I, i); push!(J, j); push!(W, exp(-max(x - rho, 0) / max(sigma, 1e-12)))
+        end
+    end
+    # The fuzzy union of both directions: a + b - ab.
+    w = Dict{Tuple{Int,Int},Float64}()
+    for (i, j, x) in zip(I, J, W)
+        key = i < j ? (i, j) : (j, i)
+        y = get(w, key, 0.0)
+        w[key] = y + x - y * x
+    end
+    edges = collect(keys(w))
+    weight = [w[e] for e in edges]
+    # The curve 1/(1 + a d^2b) that takes distances under `min_dist` as touching (for spread 1).
+    a, b = umap_curve(min_dist)
+    Y = principal_start(X, dims)
+    Y .*= 10 / max(maximum(abs, Y), eps())
+    Y = permutedims(Y)                                         # a column each, for speed
+    rng = Random.Xoshiro(seed)
+    every = maximum(weight) ./ weight                          # epochs between an edge's samplings
+    next = copy(every)
+    negatives = 5
+    clip(g) = clamp(g, -4.0, 4.0)
+    for epoch in 1:epochs
+        rate = 1 - (epoch - 1) / epochs
+        for (e, (i, j)) in enumerate(edges)
+            next[e] > epoch && continue
+            next[e] += every[e]
+            d2 = sum(abs2, view(Y, :, i) .- view(Y, :, j))
+            if d2 > 0
+                g = -2a * b * d2^(b - 1) / (1 + a * d2^b)
+                for c in 1:dims
+                    step = clip(g * (Y[c, i] - Y[c, j])) * rate
+                    Y[c, i] += step; Y[c, j] -= step
+                end
+            end
+            for _ in 1:negatives
+                m = rand(rng, 1:n)
+                m == i && continue
+                d2 = sum(abs2, view(Y, :, i) .- view(Y, :, m))
+                g = 2b / ((0.001 + d2) * (1 + a * d2^b))
+                for c in 1:dims
+                    Y[c, i] += (d2 > 0 ? clip(g * (Y[c, i] - Y[c, m])) : 4.0) * rate
+                end
+            end
+        end
+    end
+    return permutedims(Y)
+end
+
+"""
+The parameters `(a, b)` of UMAP's curve `1/(1 + a d^2b)` for `min_dist` (spread 1): fitted by least squares,
+on a grid, to 1 below `min_dist` and `exp(-(d - min_dist))` above.
+"""
+function umap_curve(min_dist::Real)
+    ds = range(0, 3; length = 300)
+    target = [d < min_dist ? 1.0 : exp(-(d - min_dist)) for d in ds]
+    err(a, b) = sum(abs2, 1 ./ (1 .+ a .* ds .^ (2b)) .- target)
+    best = (Inf, 1.0, 1.0)
+    for a in range(0.1, 5; length = 120), b in range(0.3, 2; length = 120)
+        e = err(a, b)
+        e < best[1] && (best = (e, a, b))
+    end
+    return best[2], best[3]
 end

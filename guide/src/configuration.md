@@ -96,6 +96,8 @@ out and clustered afresh.
 
 - **Map** lays them out flat; **Space** in three dimensions, to turn with the mouse, or fly through
   with F (WASD to move, the mouse to steer). The clusters are the landscape's, named where they lie.
+- **Show** chooses the layout: **t-SNE** keeps each document's close neighbourhood; **UMAP** keeps
+  more of how the groups lie to each other. Either way, close together means alike.
 - Clicking a document moves there and shows its card: its authors, its summary or abstract, its
   links, and the documents nearest it in meaning, with lines drawn to them, fainter the less alike.
   Double-click opens its page; Backspace goes back.
