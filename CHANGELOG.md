@@ -42,6 +42,11 @@
   "make it a task of its own" on its page takes it out.
 - **The installers** have Kaimon set itself up (`kaimon --setup-defaults`) where it can.
 
+## 0.5.2 (2026-11-25)
+
+- **Connecting claude.ai**: a client that asks for every scope the server lists, as claude.ai's
+  connectors do, is given access to `/mcp`, which includes the library.
+
 ## 0.5.1 (2026-11-23)
 
 - **Figures in series of their own**: captions such as "Fig. S2", "Supplementary Figure 1",
