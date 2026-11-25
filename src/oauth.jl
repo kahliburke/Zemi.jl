@@ -292,9 +292,10 @@ end
 """
 The page where a signed-in person (or the person who runs a knowledge base for one person, `owner`)
 approves a client: who asks, as whom it would act, and what it could do, with Allow and Deny. The
-request's fields ride along in the form.
+request's fields ride along in the form. Its colors are `theme`'s, the asking app's (see [`service_colors`](@ref)).
 """
-function consent_page(request, who::AbstractString, params::AbstractDict, form_key::AbstractString; owner::Bool = false)
+function consent_page(request, who::AbstractString, params::AbstractDict, form_key::AbstractString; owner::Bool = false,
+                      theme::AbstractString = "")
     fields = join(("<input type=\"hidden\" name=\"$(attr_escape(k))\" value=\"$(attr_escape(v))\">" for (k, v) in params), "")
     style = """.a{display:flex;gap:.6rem;margin-top:1.5rem}button{flex:1;padding:.7rem 1rem;border-radius:8px;border:0;font:inherit;font-weight:600;cursor:pointer}
                .y{background:var(--brand);color:var(--bg)}.n{background:var(--muted);color:var(--fg)}"""
@@ -304,7 +305,7 @@ function consent_page(request, who::AbstractString, params::AbstractDict, form_k
         <p>Revoke it $(owner ? "in Settings, under Connections" : "under Your account, Tokens").</p>
         <form method="post" action="/oauth/authorize">$fields<input type="hidden" name="form_key" value="$(attr_escape(form_key))">
         <div class="a"><button class="n" name="decision" value="deny">Deny</button><button class="y" name="decision" value="allow">Allow</button></div>
-        </form>"""; style)
+        </form>"""; style, theme)
 end
 
 """
@@ -344,20 +345,23 @@ function oauth_response(kb::KB, sh::SharedConfig, req::HTTP.Request, parts, para
         end
     elseif parts == ["oauth", "authorize"]
         fields = req.method == "POST" ? form_body(req) : params
+        # As the app asking is, light or dark (`theme`), where it says.
+        theme = get(fields, "theme", "") in ("dark", "light") ? fields["theme"] : ""
+        page(title, body) = service_page(title, body; theme)
         request = try authorization_request(kb, fields; scopes) catch e
             msg = reason(e)
             msg === nothing && rethrow()
-            return html(service_page("Not connected", "<p>$(html_escape(msg)).</p>"); status = 400)
+            return html(page("Not connected", "<p>$(html_escape(msg)).</p>"); status = 400)
         end
         isempty(request.error) || return redirect(back_to(request.redirect_uri, "error" => request.error, "state" => request.state))
         keep() = Dict(k => v for (k, v) in fields if k in ("client_id", "redirect_uri", "state", "code_challenge",
-                                                            "code_challenge_method", "response_type", "scope", "resource"))
+                                                            "code_challenge_method", "response_type", "scope", "resource", "theme"))
         if owner
             # Bound to the knowledge base's key, which only its owner's browser has: no other page can
             # post an approval here.
             key = secret_hash("oauth|$(local_key(kb.config))|$(request.client_id)|$(request.redirect_uri)")
-            req.method == "GET" && return html(consent_page(request, something(local_user(), "you"), keep(), key; owner = true))
-            get(fields, "form_key", "") == key || return html(service_page("Not connected", "<p>This approval did not come from this knowledge base's page.</p>"); status = 403)
+            req.method == "GET" && return html(consent_page(request, something(local_user(), "you"), keep(), key; owner = true, theme))
+            get(fields, "form_key", "") == key || return html(page("Not connected", "<p>This approval did not come from this knowledge base's page.</p>"); status = 403)
             get(fields, "decision", "") == "allow" ||
                 return redirect(back_to(request.redirect_uri, "error" => "access_denied", "state" => request.state))
             return redirect(issue_code!(kb, request, nothing))
@@ -367,11 +371,11 @@ function oauth_response(kb::KB, sh::SharedConfig, req::HTTP.Request, parts, para
         caller.via == :session || return redirect("/auth/sign-in?return_to=" * HTTP.escapeuri(req.target))
         # An admin viewing as someone acts for them in nothing that outlasts the view, as tokens do.
         caller.admin === nothing ||
-            return html(service_page("Not connected", "<p>Stop viewing as $(html_escape(caller.name)) to connect a client as yourself.</p>"); status = 403)
+            return html(page("Not connected", "<p>Stop viewing as $(html_escape(caller.name)) to connect a client as yourself.</p>"); status = 403)
         # The approval comes from the page this service showed this person for this client.
         key = secret_hash("oauth|$session|$(request.client_id)|$(request.redirect_uri)")
-        req.method == "GET" && return html(consent_page(request, caller_label(caller), keep(), key))
-        get(fields, "form_key", "") == key || return html(service_page("Not connected", "<p>This approval did not come from this service's page.</p>"); status = 403)
+        req.method == "GET" && return html(consent_page(request, caller_label(caller), keep(), key; theme))
+        get(fields, "form_key", "") == key || return html(page("Not connected", "<p>This approval did not come from this service's page.</p>"); status = 403)
         get(fields, "decision", "") == "allow" ||
             return redirect(back_to(request.redirect_uri, "error" => "access_denied", "state" => request.state))
         return redirect(issue_code!(kb, request, caller.user_id))

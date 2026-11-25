@@ -36,9 +36,12 @@ function tokensFrom(t: any, client: string, tokenEndpoint: string, site: string)
            client, tokenEndpoint, site, scope: t.scope }
 }
 
-const DONE_PAGE = (text: string) => `<!doctype html><meta charset="utf-8"><title>Zemi</title>
-<style>body{font:16px system-ui,sans-serif;background:#0d1120;color:#d4d8e8;display:grid;place-items:center;height:90vh}
-@media (prefers-color-scheme: light){body{background:#f6f7fb;color:#1d2233}}</style><p>${text}</p>`
+/** Obsidian's theme, light or dark (dark unless it says light), for the pages signing in opens. */
+const obsidianTheme = () => document.body.classList.contains('theme-light') ? 'light' : 'dark'
+
+const DONE_PAGE = (text: string, theme: string) => `<!doctype html><meta charset="utf-8"><title>Zemi</title>
+<style>body{font:16px system-ui,sans-serif;display:grid;place-items:center;height:90vh;
+${theme === 'light' ? 'background:#f6f7fb;color:#1d2233' : 'background:#0d1120;color:#d4d8e8'}}</style><p>${text}</p>`
 
 /**
  * Sign in to the knowledge base at `site` in the browser: register a client sent back to a port of
@@ -58,6 +61,7 @@ export async function signIn(site: string): Promise<Tokens> {
     const verifier = base64url(crypto.randomBytes(32))
     const state = base64url(crypto.randomBytes(16))
     const challenge = base64url(crypto.createHash('sha256').update(verifier).digest())
+    const theme = obsidianTheme()
     const asked = new Promise<string>((ok, fail) => {
       const timer = setTimeout(() => fail(new Error('No sign-in within ten minutes')), SIGN_IN_MINUTES * 60_000)
       server.on('request', (req, res) => {
@@ -68,7 +72,7 @@ export async function signIn(site: string): Promise<Tokens> {
         const why = !ours ? 'this approval was for another sign-in' : error === 'access_denied' ? 'it was declined' : error ?? ''
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
           .end(DONE_PAGE(ours && code ? 'Signed in to Zemi. You can close this tab.'
-                         : `Not signed in${why ? ` (${why.replace(/[<>&"]/g, '')})` : ''}. Try again from Obsidian.`))
+                         : `Not signed in${why ? ` (${why.replace(/[<>&"]/g, '')})` : ''}. Try again from Obsidian.`, theme))
         if (!ours) return
         clearTimeout(timer)
         code ? ok(code) : fail(new Error(error === 'access_denied' ? 'Signing in was declined' : `Not signed in: ${error}`))
@@ -76,7 +80,7 @@ export async function signIn(site: string): Promise<Tokens> {
     })
     const url = new URL(meta.authorization_endpoint)
     for (const [k, v] of Object.entries({ response_type: 'code', client_id: client, redirect_uri: redirect, scope: SCOPE,
-                                          code_challenge: challenge, code_challenge_method: 'S256', state }))
+                                          code_challenge: challenge, code_challenge_method: 'S256', state, theme }))
       url.searchParams.set(k, v)
     window.open(url.toString())
     const code = await asked

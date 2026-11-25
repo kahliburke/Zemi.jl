@@ -2224,6 +2224,12 @@ end
     @test startswith(location(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P[1:6]; "scope" => "mcp"]); headers = owner)), "$back?error=invalid_scope")
     page = String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri(P); headers = owner).body)
     @test occursin("It would read this knowledge base", page) && occursin("Settings, under Connections", page)
+    # Light or dark as the system is, or as the app asking says it is; the theme rides along to the approval.
+    @test occursin("prefers-color-scheme:light", page)
+    dark = String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P; "theme" => "dark"]); headers = owner).body)
+    @test occursin("color-scheme:dark;", dark) && !occursin("prefers-color-scheme", dark) && occursin("name=\"theme\" value=\"dark\"", dark)
+    @test occursin("color-scheme:light;", String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P; "theme" => "light"]); headers = owner).body))
+    @test occursin("prefers-color-scheme:light", String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P; "theme" => "red"]); headers = owner).body))
     key = match(r"name=\"form_key\" value=\"([^\"]+)\"", page)[1]
     approve(form_key) = serve("POST", "/oauth/authorize"; headers = [owner; formed],
                               body = HTTP.escapeuri([P; ["form_key" => form_key, "decision" => "allow"]]))
