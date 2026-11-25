@@ -16,6 +16,9 @@ the milestone is due, by assignee (yours first), by when tasks last changed, or 
 ranked alike keep the dragged order. The browser keeps the choice. Sorted otherwise, dragging still
 moves a card between columns or under another task; reordering by hand needs the dragged order.
 
+A subtask stays under its task wherever it is dragged, unless it is dropped onto another task, which
+puts it under that one. **Make it a task of its own**, on the subtask's page, takes it out.
+
 A card's colours hint at what concerns you: an amber edge and **your answer** where a question waits
 on you, a purple edge and **answered** where your question has an answer, an edge in the board's
 accent on your own tasks. A blue dot marks a task others changed (people, or agents, yours too):

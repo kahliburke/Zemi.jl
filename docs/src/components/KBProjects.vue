@@ -985,6 +985,8 @@ function dropped(): Task | undefined {
   if (pending) { pending = false; setTimeout(applyUpdate) }
   return board.value?.tasks.find(x => x.ref === r) ?? open.value?.subtasks_list.find(x => x.ref === r)
 }
+// A subtask keeps its task wherever it is dragged, but onto another task (into it): it is made a task
+// of its own only by asking, from its page. Placed before a card, it is put in order among its siblings.
 function drop(status: string, onto?: Task) {
   const zone = target.value?.zone
   if (sorted.value && zone !== 'into') onto = undefined
@@ -994,26 +996,23 @@ function drop(status: string, onto?: Task) {
   if (onto && zone === 'into') fields.parent = onto.ref
   else {
     if (t.status !== status) fields.status = status
-    if (onto) { fields.before = onto.ref; if (t.parent !== onto.parent) fields.parent = onto.parent }
-    else if (t.parent) fields.parent = ''
+    if (onto && t.parent === onto.parent) fields.before = onto.ref
   }
   if (Object.keys(fields).length) change(t.ref, fields)
 }
-// The top of each column, while a card is dragged: dropped there, the card goes to that column, at
-// its top and at the top level, however full of cards it is.
+// The top of each column, while a card is dragged: dropped there, the card goes to that column, a
+// task at its top, however full of cards it is, and a subtask still under its task.
 const topOf = ref('')
 const draggedStatus = computed(() => board.value?.tasks.find(x => x.ref === dragging.value)?.status ?? '')
-const draggedParent = computed(() => board.value?.tasks.find(x => x.ref === dragging.value)?.parent ?? '')
-// Sorted otherwise than by hand, a column's top is only for moving a card there, or a subtask out of its task.
-const topStrip = (s: string) => !sorted.value || draggedStatus.value !== s || !!draggedParent.value
+// Sorted otherwise than by hand, a column's top is only for moving a card there.
+const topStrip = (s: string) => !sorted.value || draggedStatus.value !== s
 function dropTop(status: string) {
   const t = dropped()
   if (!t) return
   const fields: Record<string, any> = {}
   if (t.status !== status) fields.status = status
-  if (t.parent) fields.parent = ''
   const first = column(status).find(x => !x.parent && x.ref !== t.ref)
-  if (first && !sorted.value) fields.before = first.ref
+  if (first && !sorted.value && !t.parent) fields.before = first.ref
   if (Object.keys(fields).length) change(t.ref, fields)
 }
 // A milestone's chip, while a card is dragged: dropped there, the task goes into that milestone, or
@@ -1650,7 +1649,8 @@ function keepRecordsOpen(open: boolean) {
         </template>
         <div class="kbp-panel" @click="followRef" @keydown="followRef">
         <h2 class="kbp-panel-title">{{ plainRefs(open.title) }}</h2>
-        <p class="kb-dim kbp-dim">By {{ open.created_by }}{{ open.by_agent ? ' (agent)' : '' }}, {{ when(open.created_at) }}<template v-if="open.parent"> · part of <button class="kbp-reflink" @click="show({ ref: open.parent })">{{ open.parent }}</button></template></p>
+        <p class="kb-dim kbp-dim">By {{ open.created_by }}{{ open.by_agent ? ' (agent)' : '' }}, {{ when(open.created_at) }}<template v-if="open.parent"> · part of <button class="kbp-reflink" @click="show({ ref: open.parent })">{{ open.parent }}</button><template v-if="editable">
+          · <button class="kb-link kbp-link" :disabled="busy(`task:${open.ref}`)" @click="change(open.ref, { parent: '' })">make it a task of its own</button></template></template></p>
         <p v-if="atWork.has(open.ref)" class="kbp-at-work"><span class="kbp-working"></span> At work: {{ workTitle(open.ref) }}</p>
         <div v-if="open.archived_at" class="kbp-proposal">
           Archived {{ when(open.archived_at) }}. <button v-if="editable" class="kb-primary kbp-button kbp-secondary" :disabled="busy(`task:${open.ref}`)" @click="archiveTask(true)"><KBIcon name="unarchive" :size="15" />Unarchive</button>
@@ -1696,7 +1696,7 @@ function keepRecordsOpen(open: boolean) {
           <h3>Subtasks <span v-if="open.subtasks" class="kb-dim kbp-dim">{{ open.subtasks_done }}/{{ open.subtasks }}</span></h3>
           <ul class="kbp-subtasks">
             <li v-for="s in open.subtasks_list" :key="s.ref" :class="{ done: s.status === 'done' }"
-                :draggable="editable" @dragstart="startDrag(s.ref)" @dragend="dragEnded" title="Drag onto a column to make it a task of its own">
+                :draggable="editable" @dragstart="startDrag(s.ref)" @dragend="dragEnded" title="Drag onto a column to move it there, or onto another task to put it under that one">
               <input v-if="editable" type="checkbox" :data-control="`subtask:${s.ref}`" :checked="s.status === 'done'"
                      @change="($event.target as HTMLInputElement).checked = s.status === 'done'; change(s.ref, { status: s.status === 'done' ? 'backlog' : 'done' })" />
               <button class="kbp-reflink" @click="show(s)">{{ s.ref }}</button> {{ plainRefs(s.title) }}
