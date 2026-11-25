@@ -4032,6 +4032,27 @@ end
     # A larger k flattens rank differences: at k = 0 one first place outweighs two second places.
     two = ["a" => ["c:x:0", "c:y:0"], "b" => ["c:z:0", "c:y:0"], "c" => ["c:x:0"]]
     @test K.ranked_papers(fuse(two; k = 0))[1] == "x"
+    # A summary layer counts with its text layer as one ranking: a record, not summarized, and a
+    # paper with the same ranks score alike.
+    layered = ["keyword" => ["c:rec:0", "c:p1:0"], "paper" => ["p:p1", "p:rec"], "paper-summary" => ["p:p1"]]
+    @test K.ranked_papers(fuse(layered)) == ["p1", "rec"]
+    g = fuse(layered; groups = Dict("paper-summary" => "paper"))
+    @test g.paper_score["p1"] ≈ g.paper_score["rec"] && g.max_score ≈ 2 / (K.RRF_K + 1)
+    @test [e.ranking for e in g.paper_evidence["p1"]] == ["keyword", "paper"]                      # its best in the group, the first of a tie
+    ahead = fuse(["paper" => ["p:rec", "p:p1"], "paper-summary" => ["p:p1"]]; groups = Dict("paper-summary" => "paper"))
+    @test only(e for e in ahead.paper_evidence["p1"]).ranking == "paper-summary" && ahead.paper_score["p1"] ≈ 1 / (K.RRF_K + 1)
+    @test fuse(layered; groups = Dict("paper-summary" => "paper"), weights = Dict("paper-summary" => 2.0)).max_score ≈ 3 / (K.RRF_K + 1)
+    # A document a ranking cannot find is scored on the rankings that can.
+    unembedded = ["keyword" => ["c:new:0", "c:p1:0"], "chunks" => ["c:p1:0"]]
+    @test K.ranked_papers(fuse(unembedded)) == ["p1", "new"]
+    r = fuse(unembedded; reach = p -> p == "new" ? Set(["keyword"]) : nothing)
+    @test K.ranked_papers(r) == ["new", "p1"] && r.paper_score["new"] ≈ r.max_score
+    @test fuse(unembedded; reach = p -> Set{String}()).paper_score["p1"] ≈ fuse(unembedded).paper_score["p1"]   # found in both
+    ls = [Layer(; name = "paper", model = "m", unit = :paper), Layer(; name = "paper-sum", model = "m", unit = :paper, source = "s"),
+          Layer(; name = "section-n", model = "n", unit = :section), Layer(; name = "section", model = "m", unit = :section),
+          Layer(; name = "section-sum", model = "m", unit = :section, source = "s"),
+          Layer(; name = "other-sum", model = "x", unit = :section, source = "s"), Layer(; name = "chunk-sum", model = "m", unit = :chunk, source = "s")]
+    @test K.ranking_groups(ls) == Dict("paper-sum" => "paper", "section-sum" => "section", "other-sum" => "section-n")
     # Tasks and findings: unweighted, and one named by its reference first.
     @test K.rrf_scores([1, 2], [2]) == Dict(1 => 1 / 11, 2 => 1 / 12 + 1 / 11)
     ids, score = K.rank_found([3], [1, 2], [2, 3])
@@ -5189,6 +5210,41 @@ end
     @test [h.doc_id for h in hits] == ["2609.00001", "2610.00746"] && all(h -> h.score == h.max_score, hits)
     @test first(first(hits).evidence).ranking == "id" && K.ranking_label(kb.config, "id") == "arXiv id"
     @test first(K.search(kb, "larval transport in 2610.00746"; layers = String[])).doc_id == "2610.00746"
+    close(kb)
+end
+
+@zset "a search for a passage word for word" begin
+    kb = open_kb(temp_config(layers = [Layer(; name = "chunk-x", model = "m", unit = :chunk)]))
+    note(key, text) = first(put_record!(kb, "notes", (; key, title = key, date = "2026-10-02", sections = ["Notes" => text]); read = false))
+    counts = note("point counts", "Ten minutes per station, all birds seen or heard.")
+    stations = note("stations", "Station minutes: ten per station, station minutes per ten, station per minutes ten.")
+    foreach(id -> K.read_record!(kb, id), (counts, stations))
+    q = "ten minutes per station"
+    @test K.unit_paper(first(K.keyword_ranking(kb, q))) == stations          # more of the words, so first by BM25
+    @test K.unit_paper.(K.verbatim_ranking(kb, q)) == [counts]
+    @test K.unit_paper.(K.verbatim_ranking(kb, "TEN minute, per station!")) == [counts]   # as the index reads words
+    @test isempty(K.verbatim_ranking(kb, "per station"))                     # too few words to name a passage
+    hits = K.search(kb, q; layers = String[])
+    @test [h.doc_id for h in hits] == [counts, stations] && first(hits).score == first(hits).max_score
+    @test first(first(hits).evidence).ranking == "verbatim" && K.ranking_label(kb.config, "verbatim") == "word for word"
+    @test first(first(first(hits).passages).evidence).ranking == "verbatim" && occursin("Ten minutes per station", first(first(hits).passages).text)
+    @test first(K.search(kb, "per station"; layers = String[])).doc_id == stations          # a short query is ranked as before
+    @test isempty(K.search(kb, q; layers = String[], keyword = false))                    # meaning only: not by its words
+    @test [h.doc_id for h in K.search(kb, q; layers = String[], except = Set([counts]))] == [stations]
+    # When more documents hold the words than are asked for, they do not pick out one.
+    also = note("also", "We kept ten minutes per station there too.")
+    K.read_record!(kb, also)
+    @test length(K.verbatim_ranking(kb, q)) == 2
+    @test all(e -> e.ranking != "verbatim", first(K.search(kb, q; layers = String[], limit = 1)).evidence)
+    @test Set(h.doc_id for h in K.search(kb, q; layers = String[], limit = 2)) == Set([counts, also])
+
+    # A ranking reaches the documents with units in its layer, and those of no layer (keyword) every one.
+    K.execute!(kb, "INSERT INTO layers VALUES ('chunk-x', 'm', 'chunk', 3, 'c', '2026-10-02T00:00:00Z')")
+    K.execute!(kb, "INSERT INTO embeddings VALUES ('chunk-x', ?, ?, 'sha', 'pt', '2026-10-02T00:00:00Z')",
+               ("c:$stations:1", K.paper_id(kb, stations)))
+    ranked = ["keyword" => ["c:$counts:1", "c:$stations:1"], "chunk-x" => ["c:$stations:1"]]
+    reach = K.ranking_reach(kb, ranked, Dict{String,String}())
+    @test reach(counts) == Set(["keyword"]) && reach(stations) == Set(["keyword", "chunk-x"]) && reach("elsewhere") === nothing
     close(kb)
 end
 

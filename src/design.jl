@@ -125,7 +125,8 @@ after another, an upper bound (search runs them concurrently).
 function design_point(d::DesignData; weights, k::Real = RRF_K, corpus::Integer = 492, threshold::Real = 0.05)
     w = Dict{String,Float64}(String(n) => (x >= threshold ? Float64(x) : 0.0) for (n, x) in pairs(weights))
     used = sort!([n for (n, x) in w if x > 0])
-    q = score_ranking(d.probes; weights = w, k)
+    q = score_ranking(d.probes; weights = w, k,
+                      groups = ranking_groups([(; name = c.layer, c.unit, c.model, c.source) for c in values(d.layers)]))
     layers = [d.layers[n] for n in used if haskey(d.layers, n)]
     sources = unique(c.source for c in layers if !isempty(c.source))
     per_paper(f, xs) = sum(f, xs; init = 0.0)

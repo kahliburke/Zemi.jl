@@ -77,6 +77,26 @@ function keyword_ranking(kb::KB, q::AbstractString; limit::Integer = 50)
     return ["c:$(r.doc_id):$(r.ord)" for r in rows]
 end
 
+"The fewest words a query has for the passages holding it word for word to be found first (see [`verbatim_ranking`](@ref))."
+const VERBATIM_WORDS = 3
+
+"""
+    verbatim_ranking(kb, q; limit = 200) -> Vector{String}
+
+The passages holding query `q`'s words in its order, as a phrase (each word as the keyword index
+stems it), best first by BM25. None for a query of fewer than `VERBATIM_WORDS` words, too few to
+name a passage.
+"""
+function verbatim_ranking(kb::KB, q::AbstractString; limit::Integer = 200)
+    words = [m.match for m in eachmatch(r"[\p{L}\p{N}\p{M}]+", q)]
+    length(words) < VERBATIM_WORDS && return String[]
+    rows = query(kb, """
+        SELECT p.doc_id, c.ord FROM chunks_fts f
+        JOIN chunks c ON c.id = f.rowid JOIN papers p ON p.id = c.paper_id
+        WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) LIMIT ?""", ("text : \"$(join(words, ' '))\"", limit))
+    return ["c:$(r.doc_id):$(r.ord)" for r in rows]
+end
+
 # Queries' vectors by endpoint, model and text, for searches asked again: emptied when it holds
 # `QUERY_CACHE_MAX`, a few megabytes. Embedding is done outside the lock, so searches (and a
 # search's layers) embed at once.
@@ -143,40 +163,117 @@ end
 unit_paper(key::AbstractString) = split(key, ':'; limit = 3)[2]
 
 """
-    fuse(ranked; weights = nothing, k = RRF_K) -> Fused
+    fuse(ranked; weights = nothing, k = RRF_K, groups = nothing, reach = nothing) -> Fused
 
 Weighted reciprocal rank fusion over the output of [`rankings`](@ref). A paper scores
 `w / (k + rank)` from each ranking, at the rank of its best unit there; a chunk scores the same
 from each ranking it appears in. `weights` maps ranking names (`"keyword"`, layer names) to their
 weight: a missing name weighs 1 and a weight of 0 leaves that ranking out. Larger `k` flattens the
 difference between the top ranks.
+
+Rankings `groups` puts together (a ranking's name => its group's, see [`ranking_groups`](@ref))
+count as one, with the largest of their weights: a paper or chunk scores once from them, at its
+best rank in any. With `reach` (a paper => the groups it can be found in, `nothing` for all, see
+[`ranking_reach`](@ref)), a paper's score is scaled from the groups it can be in to all of them,
+so a ranking that has no units of it is not counted as one that missed it.
 """
-function fuse(ranked; weights = nothing, k::Real = RRF_K)
-    paper_score, paper_evidence = Dict{String,Float64}(), Dict{String,Vector{Evidence}}()
-    chunk_score, chunk_evidence = Dict{String,Float64}(), Dict{String,Vector{Evidence}}()
-    paper_chunks = Dict{String,Vector{String}}()
-    max_score = 0.0
+function fuse(ranked; weights = nothing, k::Real = RRF_K, groups = nothing, reach = nothing)
+    group(name) = groups === nothing ? String(name) : String(get(groups, name, name))
+    # Each group's weight, and each paper's and chunk's best (rank, ranking, unit) in it, kept in
+    # the order first found.
+    weight = Dict{String,Float64}()
+    best_paper, best_chunk = Dict{Tuple{String,String},Tuple{Int,String,String}}(), Dict{Tuple{String,String},Tuple{Int,String,String}}()
+    papers_found, chunks_found = Tuple{String,String}[], Tuple{String,String}[]
+    function better!(best, found, at, rank, name, key)
+        b = get(best, at, nothing)
+        b === nothing && push!(found, at)
+        (b === nothing || rank < b[1]) && (best[at] = (rank, String(name), String(key)))
+    end
     for (name, keys) in ranked
         w = weights === nothing ? 1.0 : Float64(get(weights, name, 1.0))
         w > 0 || continue
-        max_score += w / (k + 1)
-        seen = Set{String}()
+        g = group(name)
+        weight[g] = max(get(weight, g, 0.0), w)
         for (rank, key) in enumerate(keys)
-            c = w / (k + rank)
-            paper = unit_paper(key)
-            if !(paper in seen)
-                push!(seen, paper)
-                paper_score[paper] = get(paper_score, paper, 0.0) + c
-                push!(get!(Vector{Evidence}, paper_evidence, paper), Evidence(name, rank, key, c))
-            end
-            if startswith(key, "c:")
-                haskey(chunk_score, key) || push!(get!(Vector{String}, paper_chunks, paper), key)
-                chunk_score[key] = get(chunk_score, key, 0.0) + c
-                push!(get!(Vector{Evidence}, chunk_evidence, key), Evidence(name, rank, key, c))
-            end
+            better!(best_paper, papers_found, (g, unit_paper(key)), rank, name, key)
+            startswith(key, "c:") && better!(best_chunk, chunks_found, (g, key), rank, name, key)
         end
     end
-    return Fused(paper_score, paper_evidence, chunk_score, chunk_evidence, paper_chunks, max_score)
+    paper_score, paper_evidence = Dict{String,Float64}(), Dict{String,Vector{Evidence}}()
+    chunk_score, chunk_evidence = Dict{String,Float64}(), Dict{String,Vector{Evidence}}()
+    paper_chunks = Dict{String,Vector{String}}()
+    for at in papers_found
+        rank, name, key = best_paper[at]
+        c = weight[at[1]] / (k + rank)
+        paper_score[at[2]] = get(paper_score, at[2], 0.0) + c
+        push!(get!(Vector{Evidence}, paper_evidence, at[2]), Evidence(name, rank, key, c))
+    end
+    for at in chunks_found
+        rank, name, key = best_chunk[at]
+        c = weight[at[1]] / (k + rank)
+        haskey(chunk_score, key) || push!(get!(Vector{String}, paper_chunks, unit_paper(key)), key)
+        chunk_score[key] = get(chunk_score, key, 0.0) + c
+        push!(get!(Vector{Evidence}, chunk_evidence, key), Evidence(name, rank, key, c))
+    end
+    total = sum(values(weight); init = 0.0)
+    if reach !== nothing
+        for (paper, s) in paper_score
+            can = reach(paper)
+            can === nothing && continue
+            w = sum(x for (g, x) in weight if g in can || haskey(best_paper, (g, paper)); init = 0.0)
+            w > 0 && (paper_score[paper] = s * total / w)
+        end
+    end
+    return Fused(paper_score, paper_evidence, chunk_score, chunk_evidence, paper_chunks, total / (k + 1))
+end
+
+"""
+    ranking_groups(layers) -> Dict{String,String}
+
+The rankings search counts as one (see [`fuse`](@ref)): each summary layer (one with a `source`)
+=> the layer of the same unit embedding the text itself, of the same model where there is one. A
+summary is another view of the unit its text layer embeds, and documents that are not summarized
+(records, codebases) are in the one but not the other. `layers` are [`Layer`](@ref)s, or anything
+with their `name`, `unit`, `model` and `source`.
+"""
+function ranking_groups(layers)
+    out = Dict{String,String}()
+    for l in layers
+        isempty(l.source) && continue
+        text = [m for m in layers if isempty(m.source) && m.unit == l.unit]
+        isempty(text) && continue
+        out[l.name] = text[something(findfirst(m -> m.model == l.model, text), 1)].name
+    end
+    return out
+end
+
+"""
+    ranking_reach(kb, ranked, groups) -> (paper -> Union{Set{String},Nothing})
+
+The rankings (their groups, see [`ranking_groups`](@ref)) each paper `ranked` found can be found
+in: every ranking that is no layer's (keyword), and the layers it has units embedded in. A layer
+not yet run over a document, or of a unit it has none of, does not reach it.
+"""
+function ranking_reach(kb::KB, ranked, groups)
+    byname = Dict(l.name => l for l in kb.config.layers)
+    group(name) = String(get(groups, name, name))
+    always = Set(group(n) for (n, _) in ranked if !haskey(byname, n))
+    papers = unique(unit_paper(key) for (_, keys) in ranked for key in keys)
+    reached = Dict(p => copy(always) for p in papers)
+    isempty(papers) && return p -> get(reached, p, nothing)
+    marks = join(fill("?", length(papers)), ", ")
+    for (n, _) in ranked
+        l = get(byname, n, nothing)
+        l === nothing && continue
+        u = Dict(:paper => "p", :section => "s", :chunk => "c")[l.unit]
+        has = u == "p" ? "e.unit_key = 'p:' || p.doc_id" :
+              "e.unit_key >= '$u:' || p.doc_id || ':' AND e.unit_key < '$u:' || p.doc_id || ';'"
+        for r in query(kb, """SELECT p.doc_id FROM papers p WHERE p.doc_id IN ($marks)
+                              AND EXISTS (SELECT 1 FROM embeddings e WHERE e.layer = ? AND $has)""", (papers..., l.name))
+            push!(reached[String(r.doc_id)], group(n))
+        end
+    end
+    return p -> get(reached, p, nothing)
 end
 
 # An arXiv id anywhere in a query: new style (2401.00001, with or without its version) or old
@@ -203,9 +300,15 @@ ranked_papers(f::Fused) = [p for (p, _) in sort!(collect(f.paper_score); by = la
 
 Hybrid search. Each enabled ranking (keyword BM25 over chunks, plus one vector search per layer)
 produces an ordered list of units, and [`fuse`](@ref) combines them: papers by weighted reciprocal
-rank fusion, and within a paper its chunks the same way. Papers the query names by arXiv id come
-first, as strong as a match can be (see [`named_papers`](@ref)); a query of ids alone is not ranked
-otherwise, so nothing is embedded for it. `only`, a set of paper ids, searches among those alone
+rank fusion, and within a paper its chunks the same way. A summary layer counts with the layer of its
+unit's text as one ranking, and a document is scored on the rankings that can find it (see
+[`ranking_groups`](@ref), [`ranking_reach`](@ref)).
+
+Papers the query names by arXiv id come first, as strong as a match can be (see
+[`named_papers`](@ref)); a query of ids alone is not ranked otherwise, so nothing is embedded for
+it. Then, as strong, the documents holding the rest of the query word for word, with the passages
+that do (see [`verbatim_ranking`](@ref)), when no more than `limit` documents do: with the keyword
+index only. `only`, a set of paper ids, searches among those alone
 (a project's library, see [`library_papers`](@ref)); those in `except` are left out (the documents
 the caller may not see, see [`hidden_documents`](@ref)). `kinds` names the kinds of document found
 (see [`DocumentKind`](@ref): `["paper", "record"]`), `nothing` for any.
@@ -220,31 +323,52 @@ function search(kb::KB, q::AbstractString; limit::Integer = 10, layers = kb.conf
                 keyword::Bool = kb.config.search_keyword, category = nothing, since = nothing, passages::Integer = 3,
                 weights = kb.config.rank_weights, k::Real = kb.config.rrf_k, only = nothing, except = (), kinds = nothing)
     named, rest = named_papers(kb, q)
-    only === nothing || filter!(in(only), named)
-    filter!(!in(except), named)
-    wanted(id) = kinds === nothing || (kind = document_kind(id); kind !== nothing && kind.name in kinds)
-    filter!(wanted, named)
+    seen(id) = (only === nothing || id in only) && !(id in except) &&
+               (kinds === nothing || (kind = document_kind(id); kind !== nothing && kind.name in kinds))
+    row(id) = (r = query(kb, "SELECT * FROM papers WHERE doc_id = ?", (id,)); isempty(r) ? nothing : first(r))
+    filter!(seen, named)
     # Within a set of papers, the rankings reach further down, since most of what they find is left out.
-    f = fuse(isempty(rest) && !isempty(named) ? Pair{String,Vector{String}}[] :
-             rankings(kb, q; layers, keyword, since, depth = only === nothing ? 60 : 400); weights, k)
+    ranked = isempty(rest) && !isempty(named) ? Pair{String,Vector{String}}[] :
+             rankings(kb, q; layers, keyword, since, depth = only === nothing ? 60 : 400)
+    groups = ranking_groups(kb.config.layers)
+    f = fuse(ranked; weights, k, groups, reach = ranking_reach(kb, ranked, groups))
     top = f.max_score > 0 ? f.max_score : 1.0
+    # The documents holding the query word for word come next, with those passages first: when no
+    # more of them than are asked for do, for then the words pick out what was searched for.
+    verbatim = Dict{String,Vector{Tuple{Int,String}}}()
+    exact = String[]
+    for (rank, key) in enumerate(keyword ? verbatim_ranking(kb, rest) : String[])
+        paper = unit_paper(key)
+        (paper in named || !seen(paper)) && continue
+        haskey(verbatim, paper) || push!(exact, paper)
+        push!(get!(Vector{Tuple{Int,String}}, verbatim, paper), (rank, key))
+    end
+    filter!(id -> (p = row(id); p !== nothing && matches_filter(p, category, since)), exact)
+    length(exact) > limit && empty!(exact)
     hits = PaperHit[]
-    for paper in [named; [p for p in ranked_papers(f) if !(p in named) && (only === nothing || p in only) && !(p in except) && wanted(p)]]
+    for paper in [named; exact; [p for p in ranked_papers(f) if !(p in named) && !(p in exact) && seen(p)]]
         length(hits) >= limit && break
-        rows = query(kb, "SELECT * FROM papers WHERE doc_id = ?", (paper,))
-        isempty(rows) && continue
-        p = first(rows)
-        by_id = paper in named
+        p = row(paper)
+        p === nothing && continue
+        by_id, word_for_word = paper in named, paper in exact
         by_id || matches_filter(p, category, since) || continue
-        ckeys = sort(get(f.paper_chunks, paper, String[]); by = c -> -f.chunk_score[c])
         label = unit_labeler(kb, p)
         strongest(es) = sort!([Evidence(e.ranking, e.rank, e.unit, e.contribution, label(e.unit)) for e in es];
                               by = e -> -e.contribution)
-        ps = [load_passage(kb, p, c, f.chunk_score[c], strongest(f.chunk_evidence[c])) for c in first(ckeys, passages)]
+        holding = word_for_word ? Dict(key => Evidence("verbatim", rank, key, top) for (rank, key) in verbatim[paper]) : Dict{String,Evidence}()
+        ckeys = unique([word_for_word ? last.(verbatim[paper]) : String[];
+                        sort(get(f.paper_chunks, paper, String[]); by = c -> -f.chunk_score[c])])
+        ps = map(first(ckeys, passages)) do c
+            e = get(f.chunk_evidence, c, Evidence[])
+            v = get(holding, c, nothing)
+            load_passage(kb, p, c, get(f.chunk_score, c, 0.0) + (v === nothing ? 0.0 : top), strongest(v === nothing ? e : [v; e]))
+        end
         found = strongest(get(f.paper_evidence, paper, Evidence[]))
+        word_for_word && pushfirst!(found, Evidence("verbatim", first(verbatim[paper])[1], first(verbatim[paper])[2], top,
+                                                     label(first(verbatim[paper])[2])))
         by_id && pushfirst!(found, Evidence("id", 1, "p:$paper", top, "its arXiv id"))
         push!(hits, PaperHit(paper, coalesce(p.title, paper), json_list(p.authors),
-            coalesce(p.published, ""), coalesce(p.primary_category, ""), by_id ? top : f.paper_score[paper], top,
+            coalesce(p.published, ""), coalesce(p.primary_category, ""), by_id || word_for_word ? top : f.paper_score[paper], top,
             filter(!isnothing, ps), found))
     end
     return hits
@@ -313,6 +437,7 @@ Embedding 4B"`): the summarizer's model, or its name.
 function ranking_label(c::Config, name::AbstractString)
     name == "keyword" && return "keyword"
     name == "id" && return "arXiv id"
+    name == "verbatim" && return "word for word"
     i = findfirst(l -> l.name == name, c.layers)
     i === nothing && return String(name)
     l = c.layers[i]

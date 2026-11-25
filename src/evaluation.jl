@@ -92,15 +92,15 @@ function metrics(ranks)
 end
 
 """
-    score_ranking(prs; weights = nothing, k = RRF_K) -> NamedTuple
+    score_ranking(prs; weights = nothing, k = RRF_K, groups = nothing) -> NamedTuple
 
 How well fused search with these settings finds each question's paper: hit@1, hit@5 and mean
 reciprocal rank for broad questions, specific questions and all of them (`mrr_broad`,
 `hit5_specific`, `mrr`, …). Cheap enough to call many times, since it only re-fuses the stored
-rankings.
+rankings. `groups` are the rankings fused as one, as search does (see [`ranking_groups`](@ref)).
 """
-function score_ranking(prs::AbstractVector{ProbeRankings}; weights = nothing, k::Real = RRF_K)
-    ranks = [(pr.question.kind, paper_rank(ranked_papers(fuse(pr.ranked; weights, k)), pr.question.paper)) for pr in prs]
+function score_ranking(prs::AbstractVector{ProbeRankings}; weights = nothing, k::Real = RRF_K, groups = nothing)
+    ranks = [(pr.question.kind, paper_rank(ranked_papers(fuse(pr.ranked; weights, k, groups)), pr.question.paper)) for pr in prs]
     b = metrics([r for (kind, r) in ranks if kind == :broad])
     s = metrics([r for (kind, r) in ranks if kind == :specific])
     a = metrics(last.(ranks))
@@ -129,11 +129,12 @@ function probe_passages(kb::KB, questions::AbstractVector{ProbeQuestion})
 end
 
 """
-    evaluate_rankings(prs; passages = Dict()) -> (summary, details)
+    evaluate_rankings(prs; passages = Dict(), groups = nothing) -> (summary, details)
     evaluate_rankings(kb, questions; depth = 30)
 
 For every question, the rank at which each ranking first reaches the question's paper, and where
-equal-weight fusion of all of them puts it (`level = :paper`). With `passages` (see
+equal-weight fusion of all of them puts it (`level = :paper`), with the rankings `groups` puts
+together fused as one, as search does (see [`ranking_groups`](@ref)). With `passages` (see
 [`probe_passages`](@ref)), each specific question is also scored at `level = :passage`: where a
 ranking of passages puts the exact passage it was written from, and a ranking of sections that
 passage's section. Finding the paper is easy in a small corpus, so the passage level is the one
@@ -142,10 +143,11 @@ hit@5 and mean reciprocal rank (a miss within the search depth counts as 0). `de
 per question, ranking and level.
 """
 function evaluate_rankings(kb::KB, questions::AbstractVector{ProbeQuestion}; depth::Integer = 30)
-    evaluate_rankings(probe_rankings(kb, questions; depth); passages = probe_passages(kb, questions))
+    evaluate_rankings(probe_rankings(kb, questions; depth); passages = probe_passages(kb, questions),
+                      groups = ranking_groups(kb.config.layers))
 end
 
-function evaluate_rankings(prs::AbstractVector{ProbeRankings}; passages = Dict{String,Tuple{String,String}}())
+function evaluate_rankings(prs::AbstractVector{ProbeRankings}; passages = Dict{String,Tuple{String,String}}(), groups = nothing)
     details = []
     for pr in prs
         q = pr.question
@@ -159,7 +161,7 @@ function evaluate_rankings(prs::AbstractVector{ProbeRankings}; passages = Dict{S
             push!(details, (; level = :passage, q.kind, ranking = name,
                               rank = something(findfirst(==(unit == "c" ? target[1] : target[2]), keys), 0), q.question))
         end
-        push!(details, (; level = :paper, q.kind, ranking = "fused", rank = paper_rank(ranked_papers(fuse(pr.ranked)), q.paper), q.question))
+        push!(details, (; level = :paper, q.kind, ranking = "fused", rank = paper_rank(ranked_papers(fuse(pr.ranked; groups)), q.paper), q.question))
     end
     summary = []
     for level in (:paper, :passage), kind in (:broad, :specific, :all), name in unique(d.ranking for d in details)
