@@ -51,8 +51,21 @@ async function start(retry = false) {
     } catch { error.value = 'Paper list unavailable.' }
   }
 }
-// A search asked for by its address (`?q=…`, as the palette does), run as the page opens.
-onMounted(() => { const asked = new URLSearchParams(location.search).get('q'); if (asked) query.value = asked; start() })
+// A search asked for by its address (`?q=…`, as the palette and links from elsewhere do), run once the
+// knowledge base has answered, so it is the live search with the reader's settings, on a reload too.
+onMounted(async () => {
+  const asked = new URLSearchParams(location.search).get('q')
+  if (asked) query.value = asked
+  await start()
+  if (asked) runSearch(query.value, 0)
+})
+
+// The address keeps the query, so a reload or a copied link searches the same.
+function keepQuery(q: string) {
+  const u = new URL(location.href)
+  q.trim() ? u.searchParams.set('q', q) : u.searchParams.delete('q')
+  if (u.href !== location.href) history.replaceState(history.state, '', u.href)
+}
 
 // Words of two or more letters or digits, lower-cased.
 const words = (s: string) => (s.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [])
@@ -113,7 +126,7 @@ function runSearch(q: string, delay = 350) {
     busy.value = false
   }, delay)
 }
-watch(query, q => runSearch(q))
+watch(query, q => { keepQuery(q); runSearch(q) })
 watch(kind, () => runSearch(query.value, 0))
 // A change in the settings button's choice searches again.
 watch(current, () => runSearch(query.value, 0), { deep: true })
