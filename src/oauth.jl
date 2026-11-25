@@ -46,13 +46,14 @@ migration!(23, [
     "ALTER TABLE oauth_codes_new RENAME TO oauth_codes"])
 
 """
-What a client may ask for: the tools at /mcp, one's library through the API, or reading the knowledge
-base through the API (its pages' data, search, the bibliography), as a notebook citing it does.
+What a client may ask for: the tools at /mcp, one's library through the API, reading the knowledge
+base through the API (its pages' data, search, the bibliography), as a notebook citing it does, or
+seeing the projects' tasks and findings, as notes showing them do.
 """
-const OAUTH_SCOPES = ("mcp", "library", "read")
+const OAUTH_SCOPES = ("mcp", "library", "read", "tasks.view")
 
 "The scopes whose tokens act at the API, each with the one permission of its name."
-const API_SCOPES = ("library", "read")
+const API_SCOPES = ("library", "read", "tasks.view")
 
 "The scopes a knowledge base run for one person offers: it has no /mcp."
 const OWNER_SCOPES = API_SCOPES
@@ -280,7 +281,12 @@ function scope_text(scope::AbstractString, who::AbstractString)
     api_scope(scope) || return "It would act as $who, with your roles and projects."
     names == ["library"] && return "It would keep your library in step with a folder, as $who: read and write your library's files, and nothing else."
     names == ["read"] && return "It would read this knowledge base as $who: its documents, search and bibliography. It changes nothing."
-    return "It would read this knowledge base as $who: its documents, search and bibliography; and read and write your library's files. It changes nothing else."
+    seen = String[]
+    "read" in names && push!(seen, "its documents, search and bibliography")
+    "tasks.view" in names && push!(seen, "the tasks and findings of your projects")
+    what = "It would read this knowledge base as $who: " * join(seen, "; ")
+    "library" in names || return what * ". It changes nothing."
+    return what * "; and read and write your library's files. It changes nothing else."
 end
 
 """

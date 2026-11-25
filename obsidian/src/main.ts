@@ -1,27 +1,41 @@
 // Zemi in Obsidian: a pane beside the open note (see view.ts), searching the knowledge base to insert
-// a citation, and adding the paper an arXiv id or DOI names as a note of its own, which Zemi brings in
-// and fills once `zemi connect` has synced the vault. It writes nothing into the vault but what it is
-// asked to: Zemi gives paper notes their references itself.
+// a citation, a note's citations linked to what they cite (see citations.ts), `zemi` blocks showing
+// what the knowledge base has (see blocks.ts), and adding the paper an arXiv id or DOI names as a note
+// of its own, which Zemi brings in and fills once `zemi connect` has synced the vault. It writes
+// nothing into the vault but what it is asked to: Zemi gives paper notes their references itself.
 import { App, Editor, MarkdownView, Notice, Plugin, PluginSettingTab, Setting, SuggestModal, normalizePath } from 'obsidian'
 import { Settings, SignedOut, Zemi, paperReference, signIn } from './zemi'
 import { VIEW_TYPE, ZemiView } from './view'
+import { CitedKeys, citationExtension, linkCitations } from './citations'
+import { STARTER_BLOCK, drawBlock } from './blocks'
 
 const DEFAULTS = (app: App): Settings => ({ site: 'http://localhost:8000', folder: app.vault.getName(), papersFolder: 'Papers', tokens: null })
 
 export default class ZemiPlugin extends Plugin {
   settings!: Settings
   zemi!: Zemi
+  cited!: CitedKeys
 
   async onload() {
     this.settings = { ...DEFAULTS(this.app), ...(await this.loadData()) }
     this.zemi = new Zemi(() => this.settings, async t => { this.settings.tokens = t; await this.saveData(this.settings) })
+    this.cited = new CitedKeys(this.zemi)
     this.registerView(VIEW_TYPE, leaf => new ZemiView(leaf, this))
+    this.registerMarkdownPostProcessor((el, ctx) => { if (this.zemi.signedIn) return linkCitations(el, ctx, this.cited) })
+    this.registerEditorExtension(citationExtension(this.cited))
+    this.registerMarkdownCodeBlockProcessor('zemi', (source, el, ctx) => drawBlock(this, source, el, ctx))
     this.addRibbonIcon('library', 'Zemi', () => this.openPane())
     this.addCommand({ id: 'open-pane', name: 'Open the Zemi pane', callback: () => this.openPane() })
     this.addCommand({ id: 'cite', name: 'Search Zemi and insert a citation',
                       editorCallback: (editor: Editor) => new CiteModal(this.app, this, editor).open() })
     this.addCommand({ id: 'add-paper', name: 'Add the paper named here (arXiv id or DOI)',
                       editorCallback: (editor: Editor) => this.addPaper(editor) })
+    this.addCommand({ id: 'insert-block', name: 'Insert a Zemi block',
+                      editorCallback: (editor: Editor) => {
+                        const c = editor.getCursor()
+                        editor.replaceRange((c.ch ? '\n' : '') + STARTER_BLOCK, c)
+                        editor.setCursor({ line: c.line + (c.ch ? 2 : 1), ch: 'search: '.length })
+                      } })
     this.addSettingTab(new ZemiSettings(this.app, this))
   }
 
@@ -34,6 +48,17 @@ export default class ZemiPlugin extends Plugin {
   }
 
   async save() { await this.saveData(this.settings) }
+
+  /** Whether the sign-in lets the plugin see tasks and findings: one made before it asked for them does not. */
+  get seesTasks() { return (this.settings.tokens?.scope ?? '').split(' ').includes('tasks.view') }
+
+  /** Insert document `id`'s citation where the cursor is in the note last edited. */
+  async insertCitation(id: string) {
+    const md = this.app.workspace.getMostRecentLeaf()?.view
+    if (!(md instanceof MarkdownView)) { new Notice('Open a note to cite into'); return }
+    const c = await this.zemi.get(`/api/cite/${encodeURIComponent(id)}`)
+    c ? md.editor.replaceSelection(c.cite) : new Notice(`Zemi has no ${id}`)
+  }
 
   // The selection, else the line the cursor is on, naming a paper: a note for it in the papers folder,
   // linked from here. Zemi fills its title and authors once it has read it.
@@ -100,15 +125,19 @@ class ZemiSettings extends PluginSettingTab {
     const s = this.plugin.settings
     el.empty()
     new Setting(el).setName('Knowledge base').setDesc('Its address: the one run on this machine, or a group\'s.')
-      .addText(t => t.setPlaceholder('http://localhost:8000').setValue(s.site).onChange(async v => { s.site = v.trim(); await this.plugin.save(); this.display() }))
+      .addText(t => t.setPlaceholder('http://localhost:8000').setValue(s.site).onChange(async v => {
+        s.site = v.trim(); this.plugin.cited.clear(); await this.plugin.save(); this.display() }))
     new Setting(el).setName('Folder in your library').setDesc('The name zemi connect keeps this vault under (its folder\'s name, unless given --name).')
       .addText(t => t.setValue(s.folder).onChange(async v => { s.folder = v.trim(); await this.plugin.save() }))
     new Setting(el).setName('Papers folder').setDesc('Where a paper added by its arXiv id or DOI gets its note.')
       .addText(t => t.setValue(s.papersFolder).onChange(async v => { s.papersFolder = v.trim() || 'Papers'; await this.plugin.save() }))
     const signed = this.plugin.zemi.signedIn
     new Setting(el).setName(signed ? 'Signed in' : 'Not signed in')
-      .setDesc(signed ? `To ${s.site}, reading it and your library.` : 'Sign in in your browser: Zemi asks you to approve this vault reading it.')
+      .setDesc(!signed ? 'Sign in in your browser: Zemi asks you to approve this vault reading it.'
+               : this.plugin.seesTasks ? `To ${s.site}, reading it, your library, and your projects' tasks and findings.`
+               : `To ${s.site}, reading it and your library. Sign out and in again to show tasks and findings in notes.`)
       .addButton(b => b.setButtonText(signed ? 'Sign out' : 'Sign in').setCta().onClick(async () => {
+        this.plugin.cited.clear()
         if (signed) { s.tokens = null; await this.plugin.save(); this.display(); return }
         try {
           s.tokens = await signIn(s.site)

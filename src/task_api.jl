@@ -207,6 +207,17 @@ route!("GET", "/api/tasks/search"; need = "tasks.view") do c
     Any[merge(task_json(t), Dict(:matches => [Dict(pairs(m)) for m in t.matches])) for t in hits if sees(c, t.ref)]
 end
 
+# A project's tasks (`?project=KEY`), each with its page, as a note listing them shows them: those of the
+# top level in board order, `?status=` and `?milestone=` narrowing them, `?all=1` with their subtasks.
+route!("GET", "/api/tasks"; need = "tasks.view") do c
+    key = named_project(c)
+    isempty(key) && error("Name a project: ?project=KEY")
+    p = c.params
+    found = tasks(c.kb; project = key, status = get(p, "status", ""), milestone = get(p, "milestone", ""),
+                  top = get(p, "all", "") != "1", limit = int_param(p, "limit", 50, 1:500))
+    Any[merge(task_json(t), Dict(:page => ref_link(c.kb.config, t.ref))) for t in found]
+end
+
 # The tasks that changed a codebase's file.
 route!("GET", "/api/tasks/file-work"; need = "tasks.view") do c
     codebase = seen_document(c.kb, c.caller, get(c.params, "codebase", ""))
@@ -323,7 +334,7 @@ end
 # ── Findings ──────────────────────────────────────────────────────────────────────────────────────
 
 # The findings resting on a paper (`?paper=`), in the projects the caller sees, for its page; or a
-# project's (`?project=`), found by `?q=` or all of them.
+# project's (`?project=`), found by `?q=` or all of them, each with its page.
 route!("GET", "/api/findings"; need = "tasks.view") do c
     kb, params = c.kb, c.params
     if haskey(params, "paper")
@@ -335,7 +346,7 @@ route!("GET", "/api/findings"; need = "tasks.view") do c
     q = strip(get(params, "q", ""))
     found = isempty(q) ? findings(kb; project = named, status = get(params, "status", ""), archived = get(params, "archived", "") == "1") :
                          search_findings(kb, q; projects = (named,), status = get(params, "status", ""), limit = 50)
-    Any[Dict(pairs(f)) for f in found]
+    Any[merge(Dict(pairs(f)), Dict(:page => ref_link(kb.config, f.ref))) for f in found]
 end
 
 route!("POST", "/api/findings"; need = "tasks.edit") do c

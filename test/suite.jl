@@ -1530,6 +1530,18 @@ end
         @test st == 200 && got["id"] == e && got["cite"]["cite"] == "[@$(K.cite_key(kb, e))]"
         @test ask("/api/library/note?path=Notes/Topics/Nothing.md")[1] == 404
         @test ask("/api/cite/2401.00001")[2]["cite"] == "[@arXiv:2401.00001]"
+        # The documents a note's citation keys name, for the plugin to link them; a key naming none, or a document
+        # the caller may not see, is nothing.
+        st, got = ask("/api/cited?keys=arXiv:2401.00001,$(K.cite_key(kb, e)),nobody")
+        @test st == 200 && got["nobody"] === nothing && got["arXiv:2401.00001"]["id"] == "2401.00001"
+        @test got[K.cite_key(kb, e)]["kind"] == "record" && got[K.cite_key(kb, e)]["label"] == K.cite_label(kb, e)
+        bea = K.Caller(ada + 1, "Bea", "bea@x.org", Set(K.PERMISSION_NAMES), :session, nothing)
+        @test K.JSON.parse(String(K.handle(kb, K.HTTP.Request("GET", "/api/cited?keys=$(K.cite_key(kb, e))"), bea).body))[K.cite_key(kb, e)] === nothing
+        # A note's page opens it in Obsidian, in the vault named by its folder, or as its settings name it.
+        @test K.obsidian_link(kb, e) == "obsidian://open?vault=Notes&file=Topics%2FEstuaries.md" && K.obsidian_link(kb, "2401.00001") == ""
+        @test K.record_page_json(kb, K.paper_row(kb, e))["obsidian"] == K.obsidian_link(kb, e)
+        mk(".zemi.toml", "skip = [\"Private\"]\nvault = \"Field notes\"\n")
+        @test startswith(K.obsidian_link(kb, e), "obsidian://open?vault=Field%20notes&file=")
         # Read for searching, not summarized.
         layers = [Layer(; name = "text", model = "m", unit = :chunk), Layer(; name = "over", model = "m", unit = :section, source = "writer")]
         @test [l.name for l in K.document_layers(kb, t, layers)] == ["text"]
@@ -5946,7 +5958,7 @@ end
     # Findings through the API: made, listed, given evidence (named), changed, and their versions.
     s, f = api("POST", "/api/findings", Dict("project" => "WEB", "claim" => "The board loads fast"))
     @test s == 200 && f["ref"] == "WEB-F1" && f["status"] == "draft"
-    @test [x["ref"] for x in api("GET", "/api/findings?project=WEB")[2]] == ["WEB-F1"]
+    @test [(x["ref"], x["page"]) for x in api("GET", "/api/findings?project=WEB")[2]] == [("WEB-F1", K.ref_link(kb.config, "WEB-F1"))]
     s, f = api("POST", "/api/findings/WEB-F1/evidence", Dict("kind" => "task", "target" => "WEB-1"))
     @test s == 200 && only(f["sources"])["label"] == "Draw the board" && only(f["sources"])["evidence"] == only(f["evidence"])["id"]
     @test api("POST", "/api/findings/WEB-F1", Dict("status" => "contested"))[1] == 400          # without a reason

@@ -452,6 +452,8 @@ end
     @test call(other, "POST", "/api/tasks", Dict("project" => "MN", "title" => "Sneak in"))[1] == 404
     @test call(other, "GET", "/api/tasks/MN-1")[1] == 404 && call(other, "POST", "/api/tasks/MN-1/notes", Dict("text" => "hi"))[1] == 404
     @test isempty(call(other, "GET", "/api/tasks/search?q=probe")[2])               # nor found by search
+    @test call(other, "GET", "/api/tasks?project=MN")[1] == 404                        # nor listed
+    @test [(t["ref"], t["page"]) for t in call(maker, "GET", "/api/tasks?project=MN")[2]] == [("MN-1", K.ref_link(kb.config, "MN-1"))]
     @test !any(t -> t["ref"] == "MN-1", call(other, "GET", "/api/tasks/waiting")[2]["mine"])
 
     # Roles: a viewer looks, a contributor changes work, a maintainer manages the project; admins manage its members.
@@ -2202,7 +2204,7 @@ end
     owner = ["Cookie" => "$(K.local_cookie())=$(K.local_key(kb.config))"]
     formed = ["Content-Type" => "application/x-www-form-urlencoded"]
     # What a client asks before the owner approves it needs no key: it has none yet.
-    @test js(serve("GET", "/.well-known/oauth-authorization-server"))["scopes_supported"] == ["library", "read"]   # no /mcp here
+    @test js(serve("GET", "/.well-known/oauth-authorization-server"))["scopes_supported"] == ["library", "read", "tasks.view"]   # no /mcp here
     # Its addresses are where the owner opens it, whose browser holds its key: the development server's,
     # though the server passes the request on naming the service's own host.
     try
@@ -2253,22 +2255,24 @@ end
     @test serve("GET", "/api/bib"; headers = auth).status == 401
     @test serve("POST", "/oauth/token"; headers = formed,
                 body = HTTP.escapeuri(["grant_type" => "refresh_token", "refresh_token" => t["refresh_token"], "client_id" => client])).status == 400
-    # Reading and the library both, as a client beside one's notes asks: a token with those two alone.
+    # Reading, the library and the tasks, as a client beside one's notes asks: a token with those alone.
     @test startswith(location(serve("GET", "/oauth/authorize?" * HTTP.escapeuri([P[1:6]; "scope" => "read mcp"]); headers = owner)), "$back?error=invalid_scope")
-    both = [P[1:6]; "scope" => "read library"]
+    both = [P[1:6]; "scope" => "read library tasks.view"]
     page = String(serve("GET", "/oauth/authorize?" * HTTP.escapeuri(both); headers = owner).body)
     @test occursin("read and write your library's files", page) && occursin("It would read this knowledge base", page)
+    @test occursin("the tasks and findings of your projects", page)
     allowed = serve("POST", "/oauth/authorize"; headers = [owner; formed], body = HTTP.escapeuri([both;
                     ["form_key" => match(r"name=\"form_key\" value=\"([^\"]+)\"", page)[1], "decision" => "allow"]]))
     t3 = js(serve("POST", "/oauth/token"; headers = formed,
                   body = HTTP.escapeuri(["grant_type" => "authorization_code", "code" => HTTP.queryparams(HTTP.URI(location(allowed)))["code"],
                                          "client_id" => client, "redirect_uri" => back, "code_verifier" => verifier])))
-    @test t3["scope"] == "library read"
+    @test t3["scope"] == "library read tasks.view"
     a3 = ["Authorization" => "Bearer $(t3["access_token"])"]
     @test serve("GET", "/api/bib"; headers = a3).status == 200
     @test serve("GET", "/api/library/files"; headers = a3).status == 200
+    @test serve("GET", "/api/projects"; headers = a3).status == 200
     @test serve("POST", "/api/actions"; headers = a3, body = "{}").status == 403
-    @test K.token_caller(kb, t3["access_token"]).permissions == Set(["library", "read"])
+    @test K.token_caller(kb, t3["access_token"]).permissions == Set(["library", "read", "tasks.view"])
     # A token of the person who runs it for one person is nothing to a shared service.
     t2 = K.oauth_token!(kb, Dict("grant_type" => "authorization_code", "client_id" => client, "redirect_uri" => back,
         "code_verifier" => verifier, "code" => HTTP.queryparams(HTTP.URI(K.issue_code!(kb, K.authorization_request(kb, Dict(P); scopes = K.OWNER_SCOPES), nothing)))["code"]))

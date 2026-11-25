@@ -307,7 +307,12 @@ write = true                               # give paper notes their references (
 dates = ["date", "created", "timestamp"]   # the properties a note's date is taken from
 arxiv = ["arxiv"]                          # the properties naming a paper by its arXiv id
 doi = ["doi"]                              # and by its DOI
+vault = "Field notes"                      # the vault's name in Obsidian, if not its folder's
 ```
+
+A note's page in Zemi has **Open in Obsidian**, which opens the note in the vault Obsidian names by
+its folder. If the vault was connected under another name (`zemi connect --name`), give its name in
+Obsidian as `vault`.
 
 A note naming a paper by an arXiv id or DOI (its `arxiv` or `doi` property) brings the paper in,
 private to its owner unless the group has it, and the note's record and the notes linking to it refer
@@ -327,7 +332,8 @@ Obsidian has opened), turned on, and connects the vault as `zemi connect` does, 
 needs: with the site `zemi connect` keeps folders at, else the knowledge base run here, which then
 syncs it while it runs. The plugin is set to that site and the vault's folder in your library. Reload
 Obsidian, allow community plugins in the vault if it asks, and sign in from the plugin's settings, in
-your default browser, where you approve it reading the knowledge base and your library. For the
+your default browser, where you approve it reading the knowledge base, your library, and the tasks
+and findings of your projects. For the
 knowledge base run here, that browser needs its key: run `zemi open` first if it has not opened it
 before. It gives:
 
@@ -339,6 +345,24 @@ before. It gives:
 - **Add the paper named here**: an arXiv id or DOI in the selection or on the line gets a note of its
   own in the papers folder (`Papers` unless set), linked from here; once the vault is synced, Zemi
   brings the paper in and fills the note's title and authors.
+- **Citations as links**: each `@key` of a citation the knowledge base has a document for links to
+  its page in reading view. In the editor it is underlined: hover over it for the document's title,
+  authors and year, and Cmd-click (Ctrl-click) it to open its page. The note's text stays `[@key]`.
+- **Zemi blocks**: a `zemi` code block shows what the knowledge base has, drawn each time the note is
+  shown and never written into it. Its first line says what (**Insert a Zemi block** starts one):
+
+  ````md
+  ```zemi
+  search: tidal mixing in estuaries
+  limit: 5
+  ```
+  ````
+
+  `search: <words>` lists the documents found, each with a button inserting its citation; `cited:`
+  the documents the note cites, as references; `tasks: <PROJECT>` a project's tasks (narrowed by
+  `status:` or `milestone:`, with subtasks given `all: yes`); `findings: <PROJECT>` its accepted
+  findings (or those of `status:`). A sign-in from before the plugin asked for tasks shows no tasks or
+  findings: sign out and in again.
 
 The plugin writes nothing into the vault but the citations, links and paper notes you ask for.
 

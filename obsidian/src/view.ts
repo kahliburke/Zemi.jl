@@ -1,7 +1,7 @@
 // The pane beside the open note: for a paper note (one Zemi gave `zemi`, the paper's id), the paper's
 // summary, topics and figures; for any note, the papers and notes nearest it in the knowledge base;
 // each with its citation to insert and its page in Zemi to open.
-import { ItemView, MarkdownRenderer, MarkdownView, Notice, TFile, WorkspaceLeaf } from 'obsidian'
+import { ItemView, MarkdownRenderer, Notice, TFile, WorkspaceLeaf } from 'obsidian'
 import type ZemiPlugin from './main'
 import { SignedOut } from './zemi'
 
@@ -72,10 +72,7 @@ export class ZemiView extends ItemView {
       const li = list.createEl('li')
       li.createEl('a', { text: n.title, href: n.page })
       const cite = li.createEl('button', { text: 'cite', cls: 'zemi-small', attr: { title: 'Insert its citation in the note' } })
-      cite.onclick = async () => {
-        const c = await zemi.get(`/api/cite/${encodeURIComponent(n.doc_id)}`)
-        c && this.insert(c.cite)
-      }
+      cite.onclick = () => this.plugin.insertCitation(n.doc_id)
     }
   }
 
@@ -123,12 +120,5 @@ export class ZemiView extends ItemView {
       b.onclick = async () => { await navigator.clipboard.writeText(cite); new Notice('Citation copied') }
     }
     if (page) row.createEl('a', { text: 'Open in Zemi', href: page })
-  }
-
-  // Into the note last edited, where its cursor is.
-  private insert(text: string) {
-    const md = this.app.workspace.getMostRecentLeaf()?.view
-    if (!(md instanceof MarkdownView)) { new Notice('Open a note to cite into'); return }
-    md.editor.replaceSelection(text)
   }
 }

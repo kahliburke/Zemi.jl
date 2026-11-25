@@ -515,6 +515,15 @@ route!("GET", "/api/cite/*paper") do c
     merge(cite_json(c.kb, id), Dict("page" => document_link(c.kb.config, id)))
 end
 
+# The documents citation keys name (`?keys=a,b`, as notes cite them, see `cite_key`), for a client
+# making a note's citations into links: each key's document, or `nothing` where it names none the
+# caller may see.
+route!("GET", "/api/cited") do c
+    keys = unique([String(strip(k)) for k in split(get(c.params, "keys", ""), ',') if !isempty(strip(k))])
+    length(keys) <= 200 || error("At most 200 keys at once")
+    Dict{String,Any}(k => cited_json(c.kb, c.caller, k) for k in keys)
+end
+
 # The bibliography the caller may see, as BibTeX: `?keys=k1,k2` for only the documents cited by those
 # keys (any not here are left out). Its ETag is its content's, so a client asks again cheaply.
 route!("GET", "/api/bib") do c

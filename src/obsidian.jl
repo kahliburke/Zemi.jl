@@ -16,6 +16,7 @@
 #     dates = ["date", "created", "timestamp"]   # the properties a note's date is taken from, the first set
 #     arxiv = ["arxiv"]                          # the properties naming a paper by its arXiv id
 #     doi = ["doi"]                              # and by its DOI
+#     vault = "Field notes"                      # the vault's name in Obsidian, where its folder here is named otherwise
 
 """
     VaultConfig
@@ -35,6 +36,7 @@ Base.@kwdef struct VaultConfig
     templates::String = ""
     daily_folder::String = ""
     daily_format::String = "YYYY-MM-DD"
+    vault::String = ""
 end
 
 "A path in the vault as notes are keyed and folders compared: with `/`, in Unicode's composed form."
@@ -63,7 +65,8 @@ function vault_config(kb::KB, space::AbstractString, root::AbstractString)
                        doi = names("doi", ["doi"]),
                        templates = vault_path(string(something(get(own("templates.json"), "folder", nothing), ""))),
                        daily_folder = vault_path(string(something(get(daily, "folder", nothing), ""))),
-                       daily_format = isempty(format) ? "YYYY-MM-DD" : format)
+                       daily_format = isempty(format) ? "YYYY-MM-DD" : format,
+                       vault = strip(string(something(get(s, "vault", nothing), ""))))
 end
 
 "Whether vault path `p` is folder `dir` or within it."
@@ -728,4 +731,35 @@ route!("GET", "/api/library/note"; need = "library") do c
     id = source_record(c.kb, "obsidian", note_key(library_space(c.caller) * "/" * path))
     id === nothing && not_found("No note $path has been read from your library")
     Dict("id" => id, "cite" => cite_json(c.kb, id), "page" => document_link(c.kb.config, id))
+end
+
+"""
+    obsidian_link(kb, id) -> String
+
+The address that opens record `id`, a note of a vault, in Obsidian (`obsidian://open?vault=…&file=…`),
+the vault named as Obsidian names it: by its folder, unless its `.zemi.toml` gives its name (`vault`).
+Empty for any other record, and for a vault at the root of a space that gives no name.
+"""
+function obsidian_link(kb::KB, id::AbstractString)
+    r = query(kb, "SELECT x.key FROM records x JOIN papers p ON p.id = x.paper_id WHERE p.doc_id = ? AND x.source = 'obsidian'", (id,))
+    isempty(r) && return ""
+    key = String(first(r).key)
+    prefix = source_state_key("obsidian") * ":"
+    # The vault holding it: the deepest whose folder its key is in (a vault within another is its own).
+    vaults = [Tuple(split(String(x.key)[ncodeunits(prefix)+1:end], ':'; limit = 2))
+              for x in query(kb, "SELECT key FROM kv WHERE key LIKE ?", (prefix * "%",))]
+    within(space, root) = space * "/" * (isempty(root) ? "" : root * "/")
+    filter!(((space, root),) -> startswith(key, within(space, root)), vaults)
+    isempty(vaults) && return ""
+    space, root = String.(argmax(((s, r),) -> ncodeunits(r), vaults))
+    v = vault_config(kb, space, root)
+    file = key[ncodeunits(within(space, root))+1:end]
+    if note_key(within(space, root) * file) != key        # a key cut short: the note's place is in the vault's index
+        i = findfirst(e -> get(e, "id", nothing) == id, load_vault_index(kb, v))
+        i === nothing && return ""
+        file = i
+    end
+    name = isempty(v.vault) ? (isempty(root) ? "" : basename(root)) : v.vault
+    isempty(name) && return ""
+    return "obsidian://open?vault=$(HTTP.escapeuri(name))&file=$(HTTP.escapeuri(file))"
 end

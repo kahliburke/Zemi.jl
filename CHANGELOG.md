@@ -26,6 +26,11 @@
   development site included, and follows it when it moves. `zemi connect --background` for it has
   the knowledge base sync the folders itself whenever it runs, with no login service.
   `zemi connect --status` says where the folders go, what syncs them and whether it is syncing now.
+- **The Obsidian plugin** (`zemi obsidian VAULT` installs it) puts the knowledge base beside one's
+  notes: a pane with a paper note's summary and figures and the documents nearest the note, search
+  to insert a citation, and paper notes added by arXiv id or DOI. A note's citations link to what
+  they cite, with the document shown on hover, and `zemi` blocks in a note show a search, the note's
+  references, or a project's tasks or findings. A note's page in Zemi opens it in Obsidian.
 - **Codebases** a project adds are read at once; one not read yet says so rather than showing no
   files.
 - **Search** shows references as links in results and on a record's page, and the recently posted

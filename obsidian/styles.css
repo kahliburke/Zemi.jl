@@ -10,3 +10,16 @@
 .zemi-figures figure { margin: 0.5rem 0; }
 .zemi-figures img { max-width: 100%; border-radius: 4px; background: var(--background-secondary); }
 .zemi-figures figcaption { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.zemi-cite { text-decoration: underline dotted; text-underline-offset: 2px; }
+.cm-editor .zemi-cite { cursor: pointer; color: var(--link-external-color); }
+.zemi-cite-tip { padding: 0.35rem 0.6rem; max-width: 28rem; font-size: var(--font-ui-small); }
+.zemi-cite-title { font-weight: 600; }
+.zemi-block { border-left: 2px solid var(--interactive-accent); padding: 0.25rem 0.75rem; }
+.zemi-block h4 { margin: 0.25rem 0; }
+.zemi-list { padding-left: 1rem; margin: 0.25rem 0; }
+.zemi-list li { margin: 0.2rem 0; }
+.zemi-list button { margin-left: 0.4rem; }
+.zemi-chip { font-size: var(--font-ui-smaller); padding: 0 0.4rem; border-radius: 4px; background: var(--background-modifier-hover); }
+.zemi-status-done { opacity: 0.7; }
+.zemi-status-in_progress, .zemi-status-review { background: var(--interactive-accent); color: var(--text-on-accent); }
+.zemi-small-link { font-size: var(--font-ui-smaller); }

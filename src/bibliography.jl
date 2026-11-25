@@ -362,3 +362,19 @@ How document `id` is cited, for its page's Cite panel: its `@` reference, its ci
 cite_json(kb::KB, id::AbstractString) =
     Dict("reference" => "@" * cited_as(id), "cite" => "[@" * cite_key(kb, id) * "]", "citation" => citation(kb, id),
          "bibtex" => bib_entry(kb, id; docpage = false))
+
+"""
+    cited_json(kb, caller, key) -> Union{Dict,Nothing}
+
+The document citation key `key` names, as a note's citation links to it: its id, kind, title, authors,
+year, label in prose ([`cite_label`](@ref)) and page. `nothing` for a key naming no document `caller`
+may see.
+"""
+function cited_json(kb::KB, caller::Caller, key::AbstractString)
+    id = cited_document(kb, key)
+    (id === nothing || !document_visible(kb, caller, id)) && return nothing
+    p = first(query(kb, "SELECT title, authors, kind FROM papers WHERE doc_id = ?", (id,)))
+    return Dict("id" => id, "kind" => String(p.kind), "title" => coalesce(p.title, id),
+                "authors" => json_list(p.authors), "year" => key_base(kb, id)[2], "label" => cite_label(kb, id),
+                "page" => document_link(kb.config, id))
+end

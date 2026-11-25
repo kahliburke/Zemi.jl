@@ -17,7 +17,7 @@ type Access = 'open' | 'projects' | 'private'
 type Project = { key: string; name: string }
 type Segment = { speaker: string; start: number; end: number; text: string }
 type Record = { id: string; slug: string; title: string; date: string; day: string; people: string[]; label: string; source: string
-                url: string; access: Access; note: string; projects: Project[]; summary: string; topics: string[]; read: boolean
+                url: string; obsidian?: string; access: Access; note: string; projects: Project[]; summary: string; topics: string[]; read: boolean
                 sections: { heading: string; text: string }[]; figures: { name: string; caption: string; src: string; placed: boolean }[]
                 transcript: Segment[]; cite?: { reference: string; citation: string; bibtex: string } }
 
@@ -73,7 +73,7 @@ async function link(key: string, remove = false) {
     <h1 id="record-title">{{ r.title }}</h1>
     <p class="kbr-made"><span class="kb-chip">record</span> {{ r.day }}<template v-if="r.people.length"> · {{ r.people.join(', ') }}</template></p>
     <p class="kb-dim">{{ r.label }}.<template v-if="r.url"> <a :href="r.url" target="_blank" rel="noopener">The original</a>.</template></p>
-    <div class="kb-buttons"><KBCite v-if="r.cite" :cite="r.cite" :title="r.title" /><a class="kb-button kb-live-only" :href="manageHref(r.id)">Manage</a></div>
+    <div class="kb-buttons"><KBCite v-if="r.cite" :cite="r.cite" :title="r.title" /><a v-if="r.obsidian" class="kb-button" :href="r.obsidian">Open in Obsidian</a><a class="kb-button kb-live-only" :href="manageHref(r.id)">Manage</a></div>
     <p class="kbr-projects">
       <template v-if="linked.length">Linked to
         <span v-for="k in linked" :key="k" class="kbr-project"><a :href="projectHref(k)">{{ name(k) }}</a>

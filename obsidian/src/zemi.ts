@@ -6,7 +6,7 @@ import * as http from 'http'
 import * as crypto from 'crypto'
 import type { AddressInfo } from 'net'
 
-export type Tokens = { access: string; refresh: string; expires: number; client: string; tokenEndpoint: string; site: string }
+export type Tokens = { access: string; refresh: string; expires: number; client: string; tokenEndpoint: string; site: string; scope?: string }
 
 /** What the plugin keeps: the knowledge base's address, the vault's folder in one's library, where
  *  notes for added papers go, and the sign-in. */
@@ -14,7 +14,11 @@ export type Settings = { site: string; folder: string; papersFolder: string; tok
 
 export class SignedOut extends Error {}
 
-const SCOPE = 'read library'
+/** A request the knowledge base refused, with its status. */
+export class Refused extends Error { constructor(message: string, public status: number) { super(message) } }
+
+// Reading the knowledge base, one's library, and the tasks and findings of one's projects.
+export const SCOPE = 'read library tasks.view'
 const SIGN_IN_MINUTES = 10
 
 const base64url = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -29,7 +33,7 @@ async function postForm(url: string, form: Record<string, string>): Promise<any>
 
 function tokensFrom(t: any, client: string, tokenEndpoint: string, site: string): Tokens {
   return { access: t.access_token, refresh: t.refresh_token, expires: Date.now() + 1000 * (t.expires_in ?? 3600),
-           client, tokenEndpoint, site }
+           client, tokenEndpoint, site, scope: t.scope }
 }
 
 const DONE_PAGE = (text: string) => `<!doctype html><meta charset="utf-8"><title>Zemi</title>
@@ -111,7 +115,7 @@ export class Zemi {
       const r = await requestUrl({ url: this.site + path, headers: { Authorization: `Bearer ${await this.token(renew)}` }, throw: false })
       if (r.status === 401 && !renew) continue
       if (r.status === 404) return null
-      if (r.status >= 300) throw new Error(r.json?.error ?? `Zemi answered ${r.status}`)
+      if (r.status >= 300) throw new Refused(r.json?.error ?? `Zemi answered ${r.status}`, r.status)
       return binary ? r.arrayBuffer : r.json
     }
   }
