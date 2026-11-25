@@ -39,6 +39,19 @@ claude mcp add --transport http --scope user zemi https://kb.example.org/mcp
 
 then `/mcp`, `zemi`, Authenticate.
 
+### Codex and Gemini
+
+Their command-line agents sign in the same way, in the browser:
+
+```
+codex mcp add zemi --url https://kb.example.org/mcp
+codex mcp login zemi
+
+gemini mcp add --scope user --transport http zemi https://kb.example.org/mcp
+```
+
+Gemini asks to sign in when it first uses the server, or on `/mcp auth zemi`.
+
 ### Other clients
 
 Signing in sends a client back only to claude.ai, claude.com or `localhost`, so a client running
@@ -52,7 +65,8 @@ on one's own machine signs in through OAuth with only the address:
 }
 ```
 
-Any other client uses an API token made on the Account page (in the account menu):
+A client sent back elsewhere, such as ChatGPT's connectors or Cursor, uses an API token made on the
+Account page (in the account menu), where it takes one:
 
 ```json
 {
