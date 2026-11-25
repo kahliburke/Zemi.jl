@@ -80,6 +80,8 @@ end
 
 Check an authorization request: a code (`response_type`) for a registered client, sent back to one
 of its addresses, with an S256 challenge, for a scope of `OAUTH_SCOPES` (`mcp` when none is named).
+Several including `mcp` are `mcp`, whose token has all the person's permissions, `library` among
+them: clients such as claude.ai ask for every scope the server lists.
 Returns `(; client_id, client_name, redirect_uri, state, challenge, scope)`. A request that cannot be sent back (no such client, or an address it did not register)
 is refused outright; any other problem is `(; …, error)`, for the client to be told at its address.
 """
@@ -93,9 +95,10 @@ function authorization_request(kb::KB, params::AbstractDict)
     isempty(uri) && length(registered) == 1 && (uri = only(registered))
     uri in registered || error("That address is not one the client registered")
     allowed_redirect(uri) || error("That address is not one clients may be sent back to")
-    scope = strip(get(params, "scope", ""))
+    asked = unique(split(get(params, "scope", "")))
+    scope = isempty(asked) || ("mcp" in asked && all(in(OAUTH_SCOPES), asked)) ? "mcp" : join(asked, " ")
     out = (; client_id = String(id), client_name = String(c.name), redirect_uri = String(uri), state = get(params, "state", ""),
-             challenge = get(params, "code_challenge", ""), scope = isempty(scope) ? "mcp" : String(scope))
+             challenge = get(params, "code_challenge", ""), scope)
     problem = get(params, "response_type", "") != "code" ? "unsupported_response_type" :
               isempty(out.challenge) || get(params, "code_challenge_method", "") != "S256" ? "invalid_request" :
               out.scope in OAUTH_SCOPES ? "" : "invalid_scope"
