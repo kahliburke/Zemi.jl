@@ -405,8 +405,8 @@ async function draw() {
       .cooldownTicks(1)
       .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => drawNearest2d(ctx, scale))
       .onRenderFramePost((ctx: CanvasRenderingContext2D, scale: number) => {
-        drawFocus2d(ctx, scale)
         drawNearestLabels2d(ctx, scale)
+        drawFocus2d(ctx, scale)                                              // its title over the rest
         // Cluster names, a constant size on screen. Close in, those of what is in view stay; the rest fade
         // to `DIMMED`, as they do anywhere once something is in view.
         const fade = DIMMED + (1 - DIMMED) * Math.max(0, Math.min(1, (2.2 - scale) / 1.4))
@@ -428,6 +428,7 @@ async function draw() {
   } else {
     const ForceGraph3D = (await import('3d-force-graph')).default as any
     const SpriteText = (await import('three-spritetext')).default as any
+    SpriteTextOf = SpriteText
     const THREE = await import('three')
     const disc = discTexture(THREE)
     sprites.clear()
@@ -478,6 +479,7 @@ async function draw() {
     three = THREE
     nearest3d = null
     ring3d = null
+    title3d = null
     restyle()
   }
 }
@@ -590,7 +592,48 @@ function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
   ctx.beginPath(); ctx.arc(n.x, n.y, r + 4 / scale, 0, 2 * Math.PI); ctx.stroke()
   ctx.strokeStyle = BRAND + '50'; ctx.lineWidth = 5 / scale
   ctx.beginPath(); ctx.arc(n.x, n.y, r + 11 / scale, 0, 2 * Math.PI); ctx.stroke()
+  // Its title above the ring, on a backing, a constant size on screen.
+  const text = shortTitle(n.title)
+  ctx.font = `600 ${13 / scale}px system-ui, sans-serif`
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+  const w = ctx.measureText(text).width + 12 / scale, h = 20 / scale, y = n.y - r - 14 / scale - h / 2
+  ctx.fillStyle = isDark.value ? 'rgba(17,17,22,0.85)' : 'rgba(250,250,250,0.9)'
+  ctx.beginPath(); ctx.roundRect(n.x - w / 2, y - h / 2, w, h, 4 / scale); ctx.fill()
+  ctx.strokeStyle = BRAND; ctx.lineWidth = 1 / scale; ctx.stroke()
+  ctx.fillStyle = isDark.value ? '#f0f0f8' : '#1a1a24'
+  ctx.fillText(text, n.x, y)
   ctx.restore()
+}
+// A title short enough to label a node with.
+const shortTitle = (t: string) => (t.length > 70 ? t.slice(0, 68).trimEnd() + '…' : t)
+// In the space, the selected document's title, kept above its disc whichever way the camera turns.
+let SpriteTextOf: any = null
+let title3d: any = null
+function showTitle3d() {
+  const f = selected.value && sprites.get(selected.value.id)
+  if (title3d && title3d.userData.id !== f?.node.id) {
+    graph?.scene().remove(title3d); title3d.material.map?.dispose(); title3d.material.dispose(); title3d = null
+  }
+  if (!f || title3d || !SpriteTextOf || !graph) return
+  const t = new SpriteTextOf(shortTitle(f.node.title), 5, isDark.value ? '#f0f0f8' : '#1a1a24')
+  t.fontWeight = '600'
+  t.backgroundColor = isDark.value ? 'rgba(17,17,22,0.85)' : 'rgba(250,250,250,0.9)'
+  t.borderColor = BRAND; t.borderWidth = 0.4; t.borderRadius = 3; t.padding = [3, 1.5]
+  t.material.depthTest = false; t.material.depthWrite = false
+  t.renderOrder = 1002
+  t.userData.id = f.node.id
+  capHeight(t, 18, 22)
+  const sized = t.onBeforeRender
+  const up = new three.Vector3()
+  t.onBeforeRender = (renderer: any, scene: any, camera: any) => {
+    sized(renderer, scene, camera)
+    // Above the disc on screen: along the camera's up, by the disc's radius and half the label's height.
+    up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
+    t.position.copy(f.sprite.position).addScaledVector(up, f.sprite.scale.y * 1.1 + t.scale.y / 2)
+    t.updateMatrixWorld()
+  }
+  title3d = t
+  graph.scene().add(t)
 }
 // In the space, a ring sprite over the selected disc, drawn over everything but the labels, breathing slowly.
 let ring3d: any = null
@@ -618,6 +661,7 @@ function showRing3d() {
     graph.scene().add(ring3d)
   }
   ring3d.visible = !!(selected.value && sprites.has(selected.value.id))
+  showTitle3d()
 }
 let three: any = null
 let nearest3d: any = null
