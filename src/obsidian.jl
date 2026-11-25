@@ -727,5 +727,5 @@ route!("GET", "/api/library/note"; need = "library") do c
     isempty(path) && error("Name the note: ?path=")
     id = source_record(c.kb, "obsidian", note_key(library_space(c.caller) * "/" * path))
     id === nothing && not_found("No note $path has been read from your library")
-    Dict("id" => id, "cite" => cite_json(c.kb, id))
+    Dict("id" => id, "cite" => cite_json(c.kb, id), "page" => document_link(c.kb.config, id))
 end

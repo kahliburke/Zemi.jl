@@ -311,9 +311,33 @@ doi = ["doi"]                              # and by its DOI
 
 A note naming a paper by an arXiv id or DOI (its `arxiv` or `doi` property) brings the paper in,
 private to its owner unless the group has it, and the note's record and the notes linking to it refer
-to the paper. Zemi writes only references into the vault: on each paper note, `zemi` (the paper's id)
-and `zemi-page` (its page here), and the paper's title, authors, arXiv id and DOI into those of the
-note's properties left empty, as a template leaves them. Only those lines of the note change.
+to the paper. Zemi writes only references into the vault: on each paper note, `zemi` (the paper's id),
+`zemi-cite` (its citation, `[@arXiv:2401.00001]`, to copy into another note) and `zemi-page` (its page
+here), and the paper's title, authors, arXiv id and DOI into those of the note's properties left empty,
+as a template leaves them. Only those lines of the note change.
+
+A citation in a note, `[@key]` as a notebook writes them (several as `[@a; @b]`, with words around
+them as `[see @a, p. 3]`), becomes in the note's record references to the documents its keys name,
+labelled as in prose: `(see Hale 2024, p. 3)`. A key the knowledge base has no document for is left
+as written.
+
+**The Obsidian plugin**, in `obsidian/` (desktop only), keeps the knowledge base beside your notes.
+Build it with `npm install && npm run build` there, and copy `main.js`, `manifest.json` and
+`styles.css` into your vault's `.obsidian/plugins/zemi/`; then turn it on under Community plugins. Its
+settings take the knowledge base's address (`http://localhost:8000`, the development site's
+`http://localhost:5173`, or a group's) and sign in in the browser, where you approve it reading the
+knowledge base and your library. It gives:
+
+- **The Zemi pane** (the ribbon's library icon): for a paper note, the paper's summary, topics and
+  figures with its citation; for any note read into your library, its citation; and for either, the
+  papers and notes nearest it, each with its page and a button inserting its citation.
+- **Search Zemi and insert a citation**: search as you type, and the chosen document's `[@key]` goes
+  where the cursor is.
+- **Add the paper named here**: an arXiv id or DOI in the selection or on the line gets a note of its
+  own in the papers folder (`Papers` unless set), linked from here; once the vault is synced, Zemi
+  brings the paper in and fills the note's title and authors.
+
+The plugin writes nothing into the vault but the citations, links and paper notes you ask for.
 
 **A PDF** anywhere in a library is read in full as a document, its owner's. The same file in two
 people's libraries is one document, held for both; one no longer in anyone's library is removed.

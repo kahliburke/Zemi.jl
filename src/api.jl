@@ -258,9 +258,12 @@ route!("GET", "/api/pdf/*paper") do c
     r
 end
 
-# The papers nearest by their paper-level vectors.
-route!(c -> related_papers(c.kb, seen_document(c.kb, c.caller, normalize_id(c[:paper])); limit = int_param(c.params, "limit", 8, 1:50),
-                           except = unfound_documents(c.kb, c.caller)), "GET", "/api/similar/*paper")
+# The papers nearest by their paper-level vectors, each with the address of its page.
+route!("GET", "/api/similar/*paper") do c
+    near = related_papers(c.kb, seen_document(c.kb, c.caller, normalize_id(c[:paper])); limit = int_param(c.params, "limit", 8, 1:50),
+                          except = unfound_documents(c.kb, c.caller))
+    [Dict("doc_id" => h.doc_id, "title" => h.title, "score" => h.score, "page" => document_link(c.kb.config, h.doc_id)) for h in near]
+end
 
 # A paper's figures and tables (`?id=…`), and one of them, cut when it was read: sent as it is looked
 # at, never built into the site. A document added here is named by its id (its slug), and its figures
@@ -507,7 +510,10 @@ route!("GET", "/api/sync"; need = "sync") do c
          "job" => running === nothing ? nothing : running.id)
 end
 # How a document is cited (see `cite_json`), for a client inserting a citation.
-route!(c -> cite_json(c.kb, known_paper(c.kb, seen_document(c.kb, c.caller, normalize_id(c[:paper])))), "GET", "/api/cite/*paper")
+route!("GET", "/api/cite/*paper") do c
+    id = known_paper(c.kb, seen_document(c.kb, c.caller, normalize_id(c[:paper])))
+    merge(cite_json(c.kb, id), Dict("page" => document_link(c.kb.config, id)))
+end
 
 # The bibliography the caller may see, as BibTeX: `?keys=k1,k2` for only the documents cited by those
 # keys (any not here are left out). Its ETag is its content's, so a client asks again cheaply.

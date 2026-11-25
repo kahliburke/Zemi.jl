@@ -2235,6 +2235,7 @@ end
     K.execute!(kb, "INSERT INTO papers (doc_id, title, added_at, kind, access) VALUES ('rec-note', 'Note', '2026-11-01T00:00:00Z', 'record', 'projects')")
     @test K.document_visible(kb, caller, "rec-note") && isempty(K.hidden_documents(kb, caller))
     @test !K.document_visible(kb, K.ANONYMOUS, "rec-note")
+    @test K.library_space(caller) == "people/local"                                # the owner's library, as theirs
     # The owner's connections, and revoking one ends it, its refresh too.
     conn = only(K.owner_tokens(kb))
     @test conn.scope == "read" && occursin("Slate", conn.name) && !conn.revoked

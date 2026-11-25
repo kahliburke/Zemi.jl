@@ -1,0 +1,12 @@
+.zemi-pane { padding: 0.5rem 0.75rem; }
+.zemi-pane h3 { margin: 0.25rem 0; }
+.zemi-dim { color: var(--text-muted); font-size: var(--font-ui-small); }
+.zemi-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0; }
+.zemi-small { font-size: var(--font-ui-smaller); padding: 0 0.5rem; height: auto; }
+.zemi-summary { font-size: var(--font-ui-small); }
+.zemi-near { padding-left: 1rem; }
+.zemi-near li { margin: 0.25rem 0; }
+.zemi-near button { margin-left: 0.4rem; }
+.zemi-figures figure { margin: 0.5rem 0; }
+.zemi-figures img { max-width: 100%; border-radius: 4px; background: var(--background-secondary); }
+.zemi-figures figcaption { color: var(--text-muted); font-size: var(--font-ui-smaller); }

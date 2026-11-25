@@ -1,0 +1,9 @@
+{
+  "id": "zemi",
+  "name": "Zemi",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Your Zemi knowledge base beside your notes: a paper's summary and figures, the papers and notes nearest the open note, and citations to insert.",
+  "author": "Zemi",
+  "isDesktopOnly": true
+}

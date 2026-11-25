@@ -28,10 +28,11 @@ library_limit(c::Config) = round(Int, c.library_max_gb * 1e9)
     library_space(caller) -> String
 
 The space of the person `caller` is: `people/<user id>`, or `people/local` for whoever runs the
-knowledge base on their own machine. Refused for a caller who is no one.
+knowledge base on their own machine, and the clients they connected to it. Refused for a caller who
+is no one.
 """
 function library_space(caller::Caller)
-    caller.via == :local && return "people/local"
+    caller.via in (:local, :owner) && return "people/local"
     caller.user_id === nothing && not_permitted("A library is a person's: sign in")
     return "people/$(caller.user_id)"
 end
