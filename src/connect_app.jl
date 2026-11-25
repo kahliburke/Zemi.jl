@@ -94,9 +94,10 @@ function TK.update!(m::ConnectApp, e::TK.TaskEvent)
             tell!(m, "The background service did not start: " * failure_message(e.value); error = true)
         else
             m.farewell = e.value isa Bool ?
-                "The knowledge base run here syncs the folders$(e.value ? ", from now" : ", once it runs") and whenever it runs. " *
-                "`zemi connect` shows how it goes; `zemi connect --stop` stops it." :
-                "zemi connect syncs in the background, from now and at every login. `zemi connect` shows how it goes; `zemi connect --stop` stops it."
+                "The knowledge base on this machine syncs the folders while it runs$(e.value ? "" : ", from its next start"). " *
+                "`zemi connect --status` shows how they stand; `zemi connect --stop` stops it." :
+                "The background service syncs the folders now and after each login. " *
+                "`zemi connect --status` shows how they stand; `zemi connect --stop` stops it."
             m.quit = true
         end
     end

@@ -149,7 +149,7 @@ function sync_pass!(s::Syncer; remote::Union{LibraryRemote,Nothing} = nothing)
             try
                 r = sync_folder!(remote, dir, name, state; skip = get(f, "skip", String[]), report = (what, p) -> note!(s, name, what, p))
                 e["state"] = r.waiting > 0 ? "waiting" : "in step"
-                e["message"] = r.full ? "your library is full" : r.waiting > 0 ? "$(r.waiting) for the next pass" : ""
+                e["message"] = r.full ? "your library is full" : r.waiting > 0 ? "$(r.waiting) files wait for the next sync" : ""
                 r.up + r.down + r.removed_here + r.removed_there > 0 && (e["changed"] = now_iso())
             catch err
                 err isa InterruptException && rethrow()
@@ -518,20 +518,28 @@ function stop_background()
     return true
 end
 
-"`zemi connect --status`: who syncs, and how each folder stands."
+"A folder's state (see [`Syncer`](@ref)) as `zemi connect --status` says it."
+const FOLDER_STATE_TEXT = Dict("in step" => "up to date", "syncing" => "syncing", "waiting" => "partly synced",
+                               "paused" => "paused", "missing" => "folder not found", "error" => "sync failed")
+
+"`zemi connect --status`: where the folders go, what syncs them, and how each one stands."
 function connect_status_cli()
     pid, st = syncing_pid(), read_connect_status()
     by = get(st, "by", "")
-    who = pid === nothing ? "nothing syncs now" : !isempty(by) ? "$by syncs (process $pid)" :
-          background_installed() && pid != getpid() ? "the background service syncs (process $pid)" : "process $pid syncs"
-    service = synced_by_local() ? ("Background", "the knowledge base run here, whenever it runs") :
-              ("Service", background_installed() ? "set up, starts at login" : "not set up")
-    say(:info, "zemi connect: $who", ("Site", isempty(st["site"]) ? "none yet" : st["site"]), service,
-        (synced_by_local() ? () : (("Log", contractuser(connect_log())),))...)
-    isempty(st["error"]) || say(:warn, "The last pass stopped", st["error"])
+    site = get(st, "site", "")
+    by_local = synced_by_local()
+    syncer = by_local ? "the knowledge base on this machine, while it runs" :
+             background_installed() ? "the background service, from login" : "zemi connect, while it is open"
+    doing = pid === nothing ? "not syncing" :
+          by == LOCAL_SYNCER ? "syncing (the knowledge base, process $pid)" :
+          background_installed() && pid != getpid() ? "syncing (the background service, process $pid)" : "syncing (process $pid)"
+    say(:info, "zemi connect", ("Library", isempty(site) ? "none yet: add a folder" : site_label(site)),
+        ("Synced by", syncer), ("Now", doing), (by_local ? () : (("Log", contractuser(connect_log())),))...)
+    isempty(st["error"]) || say(:warn, "The last sync stopped", st["error"])
     for f in st["folders"]
-        say(f["state"] in ("in step", "syncing") ? :ok : :warn, "$(f["name"]): $(f["state"])",
-            ("Folder", f["path"]), ("Files", string(f["files"])), ("Checked", isempty(f["checked"]) ? "never" : f["checked"]),
+        say(f["state"] in ("in step", "syncing") ? :ok : :warn, "$(f["name"]): $(get(FOLDER_STATE_TEXT, f["state"], f["state"]))",
+            ("Folder", contractuser(f["path"])), ("Files", string(f["files"])),
+            ("Last sync", isempty(f["checked"]) ? "never" : shown_time(f["checked"])),
             (isempty(f["message"]) ? () : (("Note", f["message"]),))...)
     end
     return 0
@@ -569,24 +577,24 @@ function connect_cli(args::AbstractVector{<:AbstractString})
             save_connect_auth!(sign_in_library(site))
         end
         f = add_folder!(site, dir; name, skip = given("--skip"))
-        say(:ok, "$(f["name"]) is kept in step with $(site_label(site))", ("Folder", f["path"]))
+        say(:ok, "$(f["name"]) syncs with $(site_label(site))", ("Folder", contractuser(f["path"])))
         syncing_pid() === nothing ? connect_once_cli() : request_pass()
-        synced_by_local() || say(:info, "Keep it in step", "`zemi connect` to watch and manage the folders, `zemi connect --background` to " *
-                                 (site == "local" ? "have the knowledge base sync them whenever it runs" : "sync from every login"))
+        synced_by_local() || say(:info, "To keep it synced", ("Watch it", "zemi connect"),
+                                 ("Or", "zemi connect --background", site == "local" ? "the knowledge base syncs it while it runs" : "syncs after each login"))
     elseif !isempty(plain)
         error("Give a folder, or a site and a folder: zemi connect https://kb.example.org ~/Documents/Notes")
     elseif ("--background" in flags || "--install" in flags) && get(load_connect_config(), "site", "") == "local"
         told = set_background!(true)
-        say(:ok, "The knowledge base run here syncs the folders" * (told ? ", from now" : ", once it runs") * " and whenever it runs",
-            ("How it goes", "zemi connect --status"), ("To stop it", "zemi connect --stop"))
+        say(:ok, "The knowledge base on this machine syncs the folders while it runs" * (told ? "" : ", from its next start"),
+            ("Status", "zemi connect --status"), ("To stop", "zemi connect --stop"))
     elseif "--background" in flags || "--install" in flags
         start_background()
-        say(:ok, "zemi connect syncs in the background, from now and at every login",
-            ("Its log", contractuser(connect_log())), ("How it goes", "zemi connect --status"), ("To stop it", "zemi connect --stop"))
+        say(:ok, "The background service syncs the folders now and after each login",
+            ("Log", contractuser(connect_log())), ("Status", "zemi connect --status"), ("To stop", "zemi connect --stop"))
     elseif "--stop" in flags
         if synced_by_local()
             set_background!(false)
-            say(:ok, "The knowledge base no longer syncs the folders", ("To sync them", "zemi connect, or zemi connect --background"))
+            say(:ok, "The knowledge base stopped syncing the folders", ("To sync", "zemi connect, or zemi connect --background"))
         else
             stop_background() ? say(:ok, "The background service stopped") : say(:info, "No background service is set up")
         end
