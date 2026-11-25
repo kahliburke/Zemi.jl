@@ -281,9 +281,12 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
         k = c.landscape_clusters > 0 ? c.landscape_clusters : clamp(round(Int, sqrt(n / 4)), 2, 16)
         assign, _ = spherical_kmeans(X, k)
         open_titles = [coalesce(r.title, "") for r in rows if coalesce(r.access, "open") == "open"]
+        all_titles = [coalesce(r.title, "") for r in rows]
         clusters = map(1:maximum(assign)) do j
             titles = [coalesce(rows[i].title, "") for i in 1:n if assign[i] == j && coalesce(rows[i].access, "open") == "open"]
-            Dict("id" => j, "name" => isempty(titles) ? "" : keyword_label(titles, open_titles), "description" => "")
+            # One of documents only some see is labelled for those who see them all (see `explore_graph`).
+            Dict("id" => j, "name" => isempty(titles) ? "" : keyword_label(titles, open_titles), "description" => "",
+                 "closed_name" => keyword_label([all_titles[i] for i in 1:n if assign[i] == j], all_titles))
         end
     end
 
@@ -479,13 +482,17 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
         end
         n
     end
-    clusters = v === nothing ? [] : [Dict("id" => cl["id"], "name" => cl["name"], "description" => cl["description"],
+    # A cluster no open document names is labelled by its own titles for one who sees every document in it.
+    sees_all(j) = all(id -> !(id in hidden), (id for (id, d) in docs if d["c"] == j))
+    name(cl) = !isempty(cl["name"]) || !haskey(cl, "closed_name") || !sees_all(cl["id"]) ? cl["name"] : cl["closed_name"]
+    clusters = v === nothing ? [] : [Dict("id" => cl["id"], "name" => name(cl), "description" => cl["description"],
                                           "size" => count(n -> get(n, "cluster", 0) == cl["id"], nodes)) for cl in v["clusters"]]
+    everything = m === nothing ? Dict() : get(get(get(m, "views", Dict()), "all", Dict()), "docs", Dict())
     return Dict{String,Any}("nodes" => nodes,
                 "links" => [Any[at[a], at[b], k] for (a, b, k) in E if haskey(at, a) && haskey(at, b)],
                 "similar" => [Any[at[a], at[b], s, (a, b) in linked] for ((a, b), s) in S if haskey(at, a) && haskey(at, b)],
                 "clusters" => clusters, "built_at" => m === nothing ? nothing : m["built_at"], "abstracts" => abstracts,
-                "abstract_only" => count(((id, r),) -> seen(id) && !Bool(r.read), rows))
+                "abstract_only" => count(id -> seen(id) && !Bool(rows[id].read), keys(everything)))
 end
 
 # The graph of what the caller may see, for the explore page (see `explore_graph`): `?center=<id>` and

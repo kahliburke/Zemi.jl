@@ -2792,9 +2792,10 @@ end
     place(near) = Dict("x" => [0.1, 0.2], "p" => [0.1, 0.2, 0.3], "c" => 1, "near" => near)
     reefs = [Dict("id" => 1, "name" => "Reefs", "description" => "")]
     write(K.explore_path(kb.config), JSON.json(Dict("version" => 3, "input_sha" => "", "built_at" => "then", "layer" => "l", "views" => Dict(
-        "all" => Dict("clusters" => reefs, "docs" => Dict("2401.00001" => place([["2401.00002", 0.9], [rec, 0.6]]),
-                      "2401.00002" => place([["2401.00001", 0.9], [mine, 0.7]]), rec => place([["2401.00005", 0.8]]), mine => place([["2401.00002", 0.7]]))),
-        "read" => Dict("clusters" => reefs, "docs" => Dict("2401.00001" => place([]))))))))
+        "all" => Dict("clusters" => [reefs; Dict("id" => 2, "name" => "", "description" => "", "closed_name" => "diary")],
+                      "docs" => Dict("2401.00001" => place([["2401.00002", 0.9], [rec, 0.6]]), "2401.00002" => place([["2401.00001", 0.9], [mine, 0.7]]),
+                                     rec => place([["2401.00005", 0.8]]), mine => merge(place([["2401.00002", 0.7]]), Dict("c" => 2)))),
+        "read" => Dict("clusters" => reefs, "docs" => Dict("2401.00001" => place([])))))))
     as(uid) = K.Caller(uid, "Someone", "x@x.org", Set(["read", "library", "tasks.view"]), :session, nothing)
     ids(g) = Set(n["id"] for n in g["nodes"])
     graph(who; kw...) = K.explore_graph(kb, who; abstracts = true, kw...)
@@ -2806,7 +2807,7 @@ end
     @test near[("2401.00001", "2401.00002")] == (0.9, false) && near[Tuple(sort(["2401.00005", rec]))] == (0.8, true)
     @test pairs(g, "links") == Set([("2401.00001", "2401.00005"), ("2401.00001", "2401.00006"), Tuple(sort([rec, "2401.00005"]))])
     n1 = only(n for n in g["nodes"] if n["id"] == "2401.00001")
-    @test n1["x"] == [0.1, 0.2] && n1["cluster"] == 1 && n1["year"] == "2017" && n1["links"] == 2 && only(g["clusters"])["name"] == "Reefs"
+    @test n1["x"] == [0.1, 0.2] && n1["cluster"] == 1 && n1["year"] == "2017" && n1["links"] == 2 && first(g["clusters"])["name"] == "Reefs"
     @test !haskey(only(n for n in g["nodes"] if n["id"] == "2401.00006"), "x")         # linked, not placed: no vector
     own = only(n for n in g["nodes"] if n["id"] == mine)
     @test own["mine"] && own["access"] == "private" && !n1["mine"] && n1["access"] == "open"
@@ -2815,11 +2816,13 @@ end
     read = Set(String(r.doc_id) for r in K.query(kb, "SELECT doc_id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))
     g0 = K.explore_graph(kb, as(ada))
     @test "2401.00001" in read && !("2401.00002" in read) && ids(g0) == intersect(ids(g), read)
-    @test !g0["abstracts"] && g0["abstract_only"] == length(setdiff(ids(g), read)) && all(n -> n["read"], g0["nodes"])
+    @test !g0["abstracts"] && g0["abstract_only"] == length(setdiff(Set(["2401.00001", "2401.00002", rec, mine]), read)) && all(n -> n["read"], g0["nodes"])
     @test K.explore_graph(kb, as(ada); center = "2401.00002")["abstracts"]
     # Another's private note is no node of theirs, nor anyone's neighbour.
     gb = graph(as(bea))
     @test !(mine in ids(gb)) && !any(p -> mine in p, pairs(gb, "similar"))
+    # A cluster no open document names is labelled by its titles only for one who sees them all.
+    @test [cl["name"] for cl in g["clusters"]] == ["Reefs", "diary"] && [cl["name"] for cl in gb["clusters"]] == ["Reefs", ""]
     # Around one document, a step or two; the most linked kept past a limit; only some kinds of link.
     @test ids(graph(as(ada); center = "2401.00005")) == Set(["2401.00005", "2401.00001", rec])
     @test ids(graph(as(ada); center = "2401.00005", depth = 2)) == Set(["2401.00005", "2401.00001", rec, "2401.00002", "2401.00006"])
