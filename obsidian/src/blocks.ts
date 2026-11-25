@@ -129,26 +129,33 @@ function excerpt(el: HTMLElement, text: string, words: string[], n = 220) {
 
 type Evidence = { ranking: string; ranking_label: string; rank: number; matched: string; contribution: number }
 
-/** Why a hit is where it is: each ranking that found it, its place there, what it matched and its share. */
-function whyCard(li: HTMLElement, h: any, place: number) {
+/** A hit's card, shown on hover: its strength, the best passage with the words searched for marked,
+ *  and why it is where it is: each ranking that found it, its place there, what it matched and its share. */
+function hitCard(li: HTMLElement, h: any, place: number, words: string[]) {
   const card = li.createDiv({ cls: 'zemi-why', attr: { role: 'tooltip' } })
   const strength = h.score && h.max_score ? Math.round(100 * h.score / h.max_score) : 0
-  card.createDiv({ cls: 'zemi-why-head', text: `#${place} · ${strength}% of a first place in every ranking` })
+  const head = card.createDiv({ cls: 'zemi-why-head' })
+  head.createSpan({ text: `#${place}` })
+  head.createSpan({ cls: 'zemi-meter' }).createSpan({ attr: { style: `width: ${strength}%` } })
+  head.createSpan({ text: `${strength}%`, cls: 'zemi-dim', attr: { title: 'Against a first place in every ranking' } })
+  const p = h.passages?.[0]
+  if (p?.text) {
+    if (p.section) card.createDiv({ cls: 'zemi-why-section', text: p.section })
+    excerpt(card.createDiv({ cls: 'zemi-excerpt' }), plainText(p.text), words)
+  }
   const evidence: Evidence[] = h.evidence ?? []
-  if (!evidence.length) { card.createDiv({ cls: 'zemi-dim', text: 'Named in the search.' }); return }
+  if (!evidence.length) return
+  card.createDiv({ cls: 'zemi-why-label', text: 'Why' })
   const table = card.createEl('table')
   for (const e of evidence) {
     const tr = table.createEl('tr')
     tr.createEl('td', { text: e.ranking_label })
     tr.createEl('td', { text: `#${e.rank}`, cls: 'zemi-why-rank' })
     const share = h.score ? Math.round(100 * e.contribution / h.score) : 0
-    const bar = tr.createEl('td').createSpan({ cls: 'zemi-meter is-small' })
-    bar.createSpan({ attr: { style: `width: ${share}%` } })
+    tr.createEl('td').createSpan({ cls: 'zemi-meter is-small' }).createSpan({ attr: { style: `width: ${share}%` } })
     tr.createEl('td', { text: `${share}%`, cls: 'zemi-dim' })
-    if (e.matched) table.createEl('tr').createEl('td', { text: `matched ${e.matched}`, cls: 'zemi-dim zemi-why-matched', attr: { colspan: '4' } })
+    if (e.matched) table.createEl('tr').createEl('td', { text: e.matched, cls: 'zemi-dim zemi-why-matched', attr: { colspan: '4' } })
   }
-  const p = h.passages?.[0]
-  if (p?.section) card.createDiv({ cls: 'zemi-dim', text: `Best passage: ${p.section}` })
 }
 
 async function drawSearch(plugin: ZemiPlugin, { body, info }: Parts, f: Map<string, string>) {
@@ -163,23 +170,14 @@ async function drawSearch(plugin: ZemiPlugin, { body, info }: Parts, f: Map<stri
   const list = body.createEl('ol', { cls: 'zemi-hits' })
   hits.forEach((h, i) => {
     const li = list.createEl('li', { cls: 'zemi-hit' })
-    const top = li.createDiv({ cls: 'zemi-hit-top' })
-    top.createEl('a', { text: h.title, href: h.link, cls: 'external-link zemi-hit-title' })
-    const b = top.createEl('button', { text: 'cite', cls: 'zemi-small', attr: { 'aria-label': 'Insert its citation where the cursor is' } })
-    b.onclick = () => plugin.insertCitation(h.id)
-    const meta = li.createDiv({ cls: 'zemi-hit-meta' })
-    const strength = h.score && h.max_score ? h.score / h.max_score : 0
-    const meter = meta.createSpan({ cls: 'zemi-meter' })
-    meter.createSpan({ attr: { style: `width: ${Math.round(100 * strength)}%` } })
-    meta.createSpan({ cls: 'zemi-why-hint', text: `${Math.round(100 * strength)}% · why` })
-    if (h.record) meta.createSpan({ cls: 'zemi-chip', text: `${h.record.label}${h.record.day ? ' · ' + h.record.day : ''}` })
-    else if (h.kind && h.kind !== 'paper') meta.createSpan({ cls: 'zemi-chip', text: h.kind })
+    li.createEl('a', { text: h.title, href: h.link, cls: 'external-link zemi-hit-title' })
     const by = (h.authors ?? []).slice(0, 3).join(', ') + ((h.authors ?? []).length > 3 ? ' et al.' : '')
-    const line = [by, h.record ? '' : (h.published ?? '').slice(0, 4)].filter(Boolean).join(' · ')
-    if (line) meta.createSpan({ cls: 'zemi-dim', text: line })
-    const p = h.passages?.[0]
-    if (p?.text) excerpt(li.createDiv({ cls: 'zemi-excerpt' }), plainText(p.text), words)
-    whyCard(li, h, i + 1)
+    const meta = h.record ? [h.record.label, h.record.day] : [h.kind !== 'paper' ? h.kind : '', by, (h.published ?? '').slice(0, 4)]
+    const line = meta.filter(Boolean).join(' · ')
+    if (line) li.createSpan({ cls: 'zemi-dim', text: ` ${line}` })
+    const b = li.createEl('button', { text: 'cite', cls: 'zemi-small', attr: { 'aria-label': 'Insert its citation where the cursor is' } })
+    b.onclick = () => plugin.insertCitation(h.id)
+    hitCard(li, h, i + 1, words)
   })
 }
 
