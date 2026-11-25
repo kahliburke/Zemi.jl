@@ -2919,11 +2919,11 @@ end
         @test length(m["docs"]) == 18 && sort([cl["name"] for cl in m["clusters"]]) == sort([cl["name"] for cl in d["clusters"]])
         for (id, doc) in m["docs"]
             @test length(doc["near"]) == K.EXPLORE_NEIGHBOURS && all(topic_of[n[1]] == topic_of[id] for n in doc["near"][1:5])
-            @test length(doc["x"]) == 2 && length(doc["p"]) == 3 && all(v -> -1 <= v <= 1, [doc["x"]; doc["p"]])
+            @test length(doc["x"]) == 2 && length(doc["p"]) == 3 && all(v -> -1.3 <= v <= 1.3, [doc["x"]; doc["p"]])
         end
         @test all(length(unique(m["docs"][id]["c"] for id in keys(topic_of) if topic_of[id] == t)) == 1 for t in topics)
         # Laid out by UMAP as well, each paper nearest one of its own topic there too.
-        @test all(d -> length(d["ux"]) == 2 && length(d["up"]) == 3 && all(v -> -1 <= v <= 1, [d["ux"]; d["up"]]), values(m["docs"]))
+        @test all(d -> length(d["ux"]) == 2 && length(d["up"]) == 3 && all(v -> -1.3 <= v <= 1.3, [d["ux"]; d["up"]]), values(m["docs"]))
         ux = Dict(id => d["ux"] for (id, d) in m["docs"])
         nearest_by_umap(id) = argmin(o -> o == id ? Inf : sum(abs2, ux[o] .- ux[id]), collect(keys(ux)))
         @test all(id -> topic_of[nearest_by_umap(id)] == topic_of[id], collect(keys(ux)))

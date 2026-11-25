@@ -353,9 +353,10 @@ async function draw() {
     graph.scene().fog = new fog(isDark.value ? 0x111116 : 0xfafafa, 0.00035)
     for (const c of clusterCentres(nodes)) {
       if (!c.name) continue
-      const s = new SpriteText(c.name, 10, isDark.value ? 'rgba(235,235,245,0.85)' : 'rgba(30,30,40,0.8)')
+      const s = new SpriteText(c.name, 6, isDark.value ? 'rgba(235,235,245,0.8)' : 'rgba(30,30,40,0.75)')
       s.fontWeight = '600'
-      s.position.set(c.x, c.y + 18, c.z)
+      s.material.depthWrite = false                                            // names over the nodes, never cut by them
+      s.position.set(c.x, c.y, c.z)
       graph.scene().add(s)
     }
     setTimeout(() => graph?.zoomToFit(800, 30), 300)
@@ -432,8 +433,8 @@ const all = (list: string[], kinds: readonly (readonly [string, string])[]) =>
   list.splice(0, list.length, ...(list.length === kinds.length ? [] : kinds.map(([k]) => k)))
 // The space's node discs, by id, with the nodes they draw.
 const sprites = new Map<string, { sprite: any; node: GNode }>()
-// A disc's width: as wide as the sphere 3d-force-graph would draw for the node (radius 4·∛val).
-const spriteSize = (n: GNode) => 8 * Math.cbrt(size(n))
+// A disc's width: a little smaller than the sphere 3d-force-graph would draw for the node (radius 4·∛val).
+const spriteSize = (n: GNode) => 5 * Math.cbrt(size(n))
 // A white disc, lighter at the centre and a little darker towards its antialiased rim, tinted per node.
 function discTexture(THREE: any) {
   const px = 128, c = document.createElement('canvas')

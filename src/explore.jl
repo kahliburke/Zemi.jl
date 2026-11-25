@@ -99,7 +99,7 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 4
+const EXPLORE_VERSION = 5
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -174,10 +174,15 @@ function nearest_columns(X::AbstractMatrix, k::Integer)
     return out
 end
 
-"Positions `Y` (one row each) scaled into -1 to 1 along their widest axis, about their centre."
+"""
+Positions `Y` (one row each) about their centre, scaled so all but the farthest few lie within -1 to 1:
+a layout's outliers do not crowd the rest together. Those beyond are drawn in to 1.3.
+"""
 function centred(Y::AbstractMatrix)
     Y = Y .- sum(Y; dims = 1) ./ size(Y, 1)
-    return Y ./ max(maximum(abs, Y), eps())
+    r = sort!(vec(maximum(abs, Y; dims = 2)))
+    Y = Y ./ max(r[clamp(ceil(Int, 0.98 * length(r)), 1, length(r))], eps())
+    return clamp.(Y, -1.3, 1.3)
 end
 
 """
@@ -251,7 +256,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     cancelled() && return nothing
     # UMAP too, which keeps more of how the groups lie to each other: every document, its cost growing with their number.
     progress("Exploring $n $what: laying out the map and the space by UMAP")
-    uflat, udeep = centred(umap(X; dims = 2)), centred(umap(X; dims = 3))
+    uflat, udeep = centred(umap(X; dims = 2, min_dist = 0.4)), centred(umap(X; dims = 3, min_dist = 0.4))
     pos2, pos3 = zeros(n, 2), zeros(n, 3)
     pos2[laid, :], pos3[laid, :] = flat, deep
     # The rest among their nearest laid out, a little apart.
