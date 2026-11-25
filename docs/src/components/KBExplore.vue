@@ -167,7 +167,7 @@ const size = (n: Node) => ((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links)
                            (hits.value.get(n.id) ?? 0) * 3
 
 type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
-type GLink = { source: string; target: string; kind: string; similarity?: number; unlinked?: boolean }
+type GLink = { source: string; target: string; kind: string; similarity?: number }
 
 // The library's nodes and links: placed nodes fixed where the map puts them, the rest left to settle
 // among those they link to; the nearest by meaning hold the unplaced, and are drawn only when no link
@@ -189,12 +189,13 @@ function graphData() {
   }
   for (const [i, j, s, linked] of g.similar) {
     const a = g.nodes[i].id, b = g.nodes[j].id
-    if (ids.has(a) && ids.has(b)) links.push({ source: a, target: b, kind: 'similar', similarity: s, unlinked: !linked && s >= threshold.value })
+    // Only the pairs drawn: those close enough that no link joins, when they are shown.
+    if (showUnlinked.value && !linked && s >= threshold.value && ids.has(a) && ids.has(b))
+      links.push({ source: a, target: b, kind: 'similar', similarity: s })
   }
   return { nodes, links }
 }
 
-const linkShown = (l: GLink) => l.kind !== 'similar' || (showUnlinked.value && !!l.unlinked)
 function linkColour(l: GLink) {
   if (l.kind === 'similar') return isDark.value ? 'rgba(200,200,255,0.45)' : 'rgba(60,60,140,0.4)'
   const c = LINK_COLOURS[l.kind] ?? '#999'
@@ -230,7 +231,7 @@ async function draw() {
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
       .nodeVal(size).nodeColor(shade).nodeLabel(label)
-      .linkVisibility(linkShown).linkColor(linkColour)
+      .linkColor(linkColour)
       .linkWidth((l: GLink) => (l.kind === 'similar' ? 0.8 : 1.2))
       .linkLineDash((l: GLink) => (l.kind === 'similar' ? [2, 3] : null))
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 3 : 0))
@@ -260,11 +261,9 @@ async function draw() {
     graph = new ForceGraph3D(el, { controlType: fly.value ? 'fly' : 'orbit' })
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
-      .nodeVal(size).nodeColor(shade).nodeLabel(label).nodeOpacity(0.92).nodeResolution(10)
-      .linkVisibility(linkShown).linkColor(linkColour).linkOpacity(0.55)
-      .linkWidth((l: GLink) => (l.kind === 'similar' ? 0 : 0.6))
-      .linkDirectionalParticles((l: GLink) => (l.kind === 'similar' ? 2 : 0))
-      .linkDirectionalParticleWidth(1.2).linkDirectionalParticleSpeed(0.004)
+      .nodeVal(size).nodeColor(shade).nodeLabel(label).nodeOpacity(0.92).nodeResolution(6)
+      .linkColor(linkColour).linkOpacity(0.55)
+      .linkWidth((l: GLink) => (l.kind === 'similar' ? 0 : 0.6))           // 0: a plain line, the cheapest drawn
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 2.5 : 0))
       .linkDirectionalArrowRelPos(1)
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null })
