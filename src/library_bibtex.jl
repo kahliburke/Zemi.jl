@@ -55,8 +55,8 @@ the path taken from the `.bib`'s folder, or from the file directory JabRef keeps
 outside its file directory), the one file under the `.bib`'s folder whose path ends as it does.
 `nothing` where none is.
 """
-function bib_pdf(files, bib::AbstractString, written::AbstractString; meta = Dict{String,String}())
-    by_path = Dict(f.path => f for f in files)
+function bib_pdf(files, bib::AbstractString, written::AbstractString; meta = Dict{String,String}(),
+                 by_path = Dict(f.path => f for f in files))
     parts(p) = filter(s -> !isempty(s) && s != ".", split(replace(p, '\\' => '/'), '/'))
     function under(base, rel)
         out = String[]
@@ -167,6 +167,7 @@ function read_bibliographies!(kb::KB, space::AbstractString, files, state; holde
     bibs = Dict{String,Any}()
     linked = Set{String}()
     sha = Dict(f.path => f.sha256 for f in files)
+    by_path = Dict(f.path => f for f in files)
     for f in sort(bib_files_of(files); by = f -> f.path)
         bytes = read_library_file(kb, space, f.path)
         bytes === nothing && continue
@@ -184,7 +185,7 @@ function read_bibliographies!(kb::KB, space::AbstractString, files, state; holde
                 continue
             end
             written = bib_files(get(e.fields, "file", ""))
-            found = [bib_pdf(files, f.path, p; meta = b.meta) for p in written]
+            found = [bib_pdf(files, f.path, p; meta = b.meta, by_path) for p in written]
             at = findfirst(!isnothing, found)
             pdf = at === nothing ? nothing : found[at]
             pdf === nothing || push!(linked, pdf.path)
