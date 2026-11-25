@@ -3039,8 +3039,10 @@ end
         end
         @test K.explore_stale(kb)
         views = K.explore_map!(kb).data["views"]
-        @test sort(collect(keys(views["read"]["docs"]))) == firsts && issubset(firsts, keys(views["all"]["docs"]))
-        @test all(n[1] in firsts for d in values(views["read"]["docs"]) for n in d["near"])
+        read = Set(String(r.id) for r in K.query(kb, "SELECT doc_id AS id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))
+        placed = Set(keys(views["read"]["docs"]))
+        @test issubset(firsts, placed) && placed == intersect(read, keys(views["all"]["docs"])) && length(placed) < length(views["all"]["docs"])
+        @test all(n[1] in placed for d in values(views["read"]["docs"]) for n in d["near"])
         close(kb); close(con)
     finally
         restore_qdrant!(saved)
