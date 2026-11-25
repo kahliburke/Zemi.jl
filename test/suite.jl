@@ -2790,14 +2790,16 @@ end
     K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (mine,))
     K.execute!(kb, "INSERT INTO document_holders (paper_id, user_id) VALUES (?, ?)", (K.paper_id(kb, mine), ada))
     place(near) = Dict("x" => [0.1, 0.2], "p" => [0.1, 0.2, 0.3], "c" => 1, "near" => near)
-    write(K.explore_path(kb.config), JSON.json(Dict("version" => 1, "input_sha" => "", "built_at" => "then", "layer" => "l",
-        "clusters" => [Dict("id" => 1, "name" => "Reefs", "description" => "")],
-        "docs" => Dict("2401.00001" => place([["2401.00002", 0.9], [rec, 0.6]]), "2401.00002" => place([["2401.00001", 0.9], [mine, 0.7]]),
-                       rec => place([["2401.00005", 0.8]]), mine => place([["2401.00002", 0.7]])))))
+    reefs = [Dict("id" => 1, "name" => "Reefs", "description" => "")]
+    write(K.explore_path(kb.config), JSON.json(Dict("version" => 3, "input_sha" => "", "built_at" => "then", "layer" => "l", "views" => Dict(
+        "all" => Dict("clusters" => reefs, "docs" => Dict("2401.00001" => place([["2401.00002", 0.9], [rec, 0.6]]),
+                      "2401.00002" => place([["2401.00001", 0.9], [mine, 0.7]]), rec => place([["2401.00005", 0.8]]), mine => place([["2401.00002", 0.7]]))),
+        "read" => Dict("clusters" => reefs, "docs" => Dict("2401.00001" => place([]))))))))
     as(uid) = K.Caller(uid, "Someone", "x@x.org", Set(["read", "library", "tasks.view"]), :session, nothing)
     ids(g) = Set(n["id"] for n in g["nodes"])
+    graph(who; kw...) = K.explore_graph(kb, who; abstracts = true, kw...)
     pairs(g, key) = Set(Tuple(sort([g["nodes"][e[1]+1]["id"], g["nodes"][e[2]+1]["id"]])) for e in g[key])
-    g = K.explore_graph(kb, as(ada))
+    g = graph(as(ada))
     @test ids(g) == Set(["2401.00001", "2401.00002", "2401.00005", "2401.00006", rec, mine])
     # Nearest by meaning, once a pair, saying whether a link joins them already.
     near = Dict(Tuple(sort([g["nodes"][e[1]+1]["id"], g["nodes"][e[2]+1]["id"]])) => (e[3], e[4]) for e in g["similar"])
@@ -2808,22 +2810,29 @@ end
     @test !haskey(only(n for n in g["nodes"] if n["id"] == "2401.00006"), "x")         # linked, not placed: no vector
     own = only(n for n in g["nodes"] if n["id"] == mine)
     @test own["mine"] && own["access"] == "private" && !n1["mine"] && n1["access"] == "open"
+    # By default only the documents read in full, on their own map; one known by its abstract alone,
+    # centred on, brings the rest.
+    read = Set(String(r.doc_id) for r in K.query(kb, "SELECT doc_id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))
+    g0 = K.explore_graph(kb, as(ada))
+    @test "2401.00001" in read && !("2401.00002" in read) && ids(g0) == intersect(ids(g), read)
+    @test !g0["abstracts"] && g0["abstract_only"] == length(setdiff(ids(g), read)) && all(n -> n["read"], g0["nodes"])
+    @test K.explore_graph(kb, as(ada); center = "2401.00002")["abstracts"]
     # Another's private note is no node of theirs, nor anyone's neighbour.
-    gb = K.explore_graph(kb, as(bea))
+    gb = graph(as(bea))
     @test !(mine in ids(gb)) && !any(p -> mine in p, pairs(gb, "similar"))
     # Around one document, a step or two; the most linked kept past a limit; only some kinds of link.
-    @test ids(K.explore_graph(kb, as(ada); center = "2401.00005")) == Set(["2401.00005", "2401.00001", rec])
-    @test ids(K.explore_graph(kb, as(ada); center = "2401.00005", depth = 2)) == Set(["2401.00005", "2401.00001", rec, "2401.00002", "2401.00006"])
-    @test "2401.00001" in ids(K.explore_graph(kb, as(ada); limit = 1))
-    @test pairs(K.explore_graph(kb, as(ada); links = ("refers",)), "links") == Set([Tuple(sort([rec, "2401.00005"]))])
+    @test ids(graph(as(ada); center = "2401.00005")) == Set(["2401.00005", "2401.00001", rec])
+    @test ids(graph(as(ada); center = "2401.00005", depth = 2)) == Set(["2401.00005", "2401.00001", rec, "2401.00002", "2401.00006"])
+    @test "2401.00001" in ids(graph(as(ada); limit = 1))
+    @test pairs(graph(as(ada); links = ("refers",)), "links") == Set([Tuple(sort([rec, "2401.00005"]))])
     # A finding is a node of those who see its project, linked to its evidence.
     me = K.person("Ada")
     K.create_project!(kb, "Reefs"; key = "RF", owner = ada, by = me)
     f = K.create_finding!(kb, "RF", "Surveys are fast"; evidence = [(; kind = "paper", target = "2401.00002")], by = me)
-    g = K.explore_graph(kb, as(ada))
+    g = graph(as(ada))
     @test f == "RF-F1" && "RF-F1" in ids(g) && ("2401.00002", "RF-F1") in pairs(g, "links")
-    @test !("RF-F1" in ids(K.explore_graph(kb, as(bea))))
-    @test ids(K.explore_graph(kb, as(ada); project = "RF")) == Set(["RF-F1", "2401.00002"])
+    @test !("RF-F1" in ids(graph(as(bea))))
+    @test ids(graph(as(ada); project = "RF")) == Set(["RF-F1", "2401.00002"])
     # Through the API, which starts reading the links behind; the map is made only where Qdrant
     # answers (here none: nothing more to do once the links are read).
     @test K.links_behind(kb) && !K.can_map(kb)
@@ -2835,7 +2844,7 @@ end
     # With no map yet, and a job to say so.
     rm(K.explore_path(kb.config))
     K.execute!(kb, "DELETE FROM document_links_read")
-    r = K.handle(kb, K.HTTP.Request("GET", "/api/graph"), as(ada))
+    r = K.handle(kb, K.HTTP.Request("GET", "/api/graph?abstracts=1"), as(ada))
     got = JSON.parse(String(r.body))
     @test r.status == 200 && got["job"] !== nothing && got["built_at"] === nothing && !isempty(got["links"])
     wait(K.EXPLORE_JOB[].done)
@@ -2892,7 +2901,8 @@ end
         @test length(d["papers"]) == 18 && length(d["clusters"]) == 3 && asked[] == 1
         # The explore page's map, made in the same sync: every document placed on the map and in the space,
         # its nearest its own topic's, and its cluster the landscape's.
-        m = K.read_explore(c)
+        m = K.read_explore(c)["views"]["all"]
+        @test !haskey(K.read_explore(c)["views"], "read")                      # none read in full
         @test length(m["docs"]) == 18 && sort([cl["name"] for cl in m["clusters"]]) == sort([cl["name"] for cl in d["clusters"]])
         for (id, doc) in m["docs"]
             @test length(doc["near"]) == K.EXPLORE_NEIGHBOURS && all(topic_of[n[1]] == topic_of[id] for n in doc["near"][1:5])
@@ -2903,7 +2913,7 @@ end
         # Without a landscape, clusters of the map's own, labelled by their titles' words.
         mv(K.landscape_path(c), K.landscape_path(c) * ".kept")
         @test K.explore_stale(kb)
-        own = K.explore_map!(kb).data
+        own = K.explore_map!(kb).data["views"]["all"]
         @test length(own["clusters"]) >= 2 && all(cl -> !isempty(cl["name"]) && !startswith(cl["name"], "Group "), own["clusters"])
         @test all(length(unique(own["docs"][id]["c"] for id in keys(topic_of) if topic_of[id] == t)) == 1 for t in topics)
         mv(K.landscape_path(c) * ".kept", K.landscape_path(c))
@@ -3018,6 +3028,16 @@ end
         K.execute!(kb, "DELETE FROM kv WHERE key = 'watch_basis'")
         K.note_watch_basis!(bare); K.note_watch_basis!(wkb)               # the first recorded stands
         @test K.replace_watched!(wkb) == length(watched(wkb)) && all(p -> ismissing(p.relevance), watched(wkb))
+        # The papers read in full have a map of their own: only they are placed on it, and near each other.
+        firsts = sort(collect(keys(topic_of)))[1:4]
+        for id in firsts
+            K.store_parse!(kb, id, K.ParsedPaper(1, [K.Piece(:heading, 1, (0.0, 0.0, 0.0, 0.0), "Methods", 1, 1, "")],
+                                                 [K.Section(1, 1, "", "Methods", "Methods", 1, 1)]))
+        end
+        @test K.explore_stale(kb)
+        views = K.explore_map!(kb).data["views"]
+        @test sort(collect(keys(views["read"]["docs"]))) == firsts && issubset(firsts, keys(views["all"]["docs"]))
+        @test all(n[1] in firsts for d in values(views["read"]["docs"]) for n in d["near"])
         close(kb); close(con)
     finally
         restore_qdrant!(saved)

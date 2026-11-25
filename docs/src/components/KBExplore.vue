@@ -12,11 +12,11 @@ import { useData } from 'vitepress'
 import { getJSON, post, can, onLive } from './kbApi'
 
 type Node = { id: string; kind: string; title: string; year?: string; page: string; links: number; status?: string; project?: string
-              access?: 'open' | 'projects' | 'private'; mine?: boolean
+              access?: 'open' | 'projects' | 'private'; mine?: boolean; read?: boolean
               x?: [number, number]; p?: [number, number, number]; cluster?: number }
 type Cluster = { id: number; name: string; description: string; size: number }
 type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean][]; clusters: Cluster[];
-               built_at: string | null; job: string | null }
+               built_at: string | null; job: string | null; abstracts: boolean; abstract_only: number }
 type Near = { node: Node; similarity: number; linked: boolean }
 type Pair = { a: Node; b: Node; similarity: number; score: number }
 
@@ -50,6 +50,10 @@ const shownLinks = ref<string[]>(stored('links', ['cites', 'refers', 'evidence']
 const shownKinds = ref<string[]>(stored('kinds', ['paper', 'record', 'code', 'resource', 'finding']))
 const threshold = ref<number>(stored('threshold', 0.8))
 const showUnlinked = ref<boolean>(stored('unlinked', true))
+// The papers known only by their abstract (the watch's, and those recorded but not yet read): left out
+// unless asked for, the map then being of every document.
+const abstracts = ref<boolean>(stored('abstracts', false))
+watch(abstracts, v => { keep('abstracts', v); if (data.value && data.value.abstracts !== v) load() })
 watch(view, v => keep('view', v)); watch(colourBy, v => keep('colour', v)); watch(shownLinks, v => keep('links', v), { deep: true })
 watch(shownKinds, v => keep('kinds', v), { deep: true }); watch(threshold, v => keep('threshold', v)); watch(showUnlinked, v => keep('unlinked', v))
 
@@ -112,7 +116,8 @@ const pairs = computed<Pair[]>(() => {
 async function load() {
   loading.value = true
   error.value = ''
-  const q = new URLSearchParams({ links: 'cites,refers,evidence,task', kinds: 'paper,record,code,resource,finding,task' })
+  const q = new URLSearchParams({ links: 'cites,refers,evidence,task', kinds: 'paper,record,code,resource,finding,task',
+                                  ...(abstracts.value ? { abstracts: '1' } : {}) })
   try {
     const g: Graph = await getJSON(`/api/graph?${q}`)
     data.value = g
@@ -123,6 +128,7 @@ async function load() {
   await nextTick()
   draw()
   const center = new URLSearchParams(location.search).get('center')
+  if (center && !byId.value.has(center) && !abstracts.value && data.value?.abstract_only) { abstracts.value = true; return }
   if (center && byId.value.has(center)) setTimeout(() => go(byId.value.get(center)!), 600)
 }
 
@@ -157,7 +163,8 @@ function shade(n: Node) {
   if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return isDark.value ? '#55555f' : '#c8c8ce'
   return c
 }
-const size = (n: Node) => (n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links) * 1.2 + (hits.value.get(n.id) ?? 0) * 3
+const size = (n: Node) => ((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links) * 1.2) * (n.read === false ? 0.6 : 1) +
+                           (hits.value.get(n.id) ?? 0) * 3
 
 type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
 type GLink = { source: string; target: string; kind: string; similarity?: number; unlinked?: boolean }
@@ -434,17 +441,22 @@ const showPairs = ref(false)
         <div class="kbx-row"><span>Documents</span>
           <label v-for="[k, l] in NODE_KINDS" :key="k"><input v-model="shownKinds" type="checkbox" :value="k">
             <i class="kbx-swatch" :style="{ background: KIND_COLOURS[k] }"></i>{{ l }}</label></div>
+        <div class="kbx-row"><label title="Papers recorded or watched whose text has not been read in full: placed by their title and abstract">
+          <input v-model="abstracts" type="checkbox"> Papers known only by their abstract</label></div>
         <div class="kbx-row"><label><input v-model="showUnlinked" type="checkbox"> Close but unlinked pairs, from</label>
           <input v-model.number="threshold" type="range" min="0.5" max="0.98" step="0.01"> {{ Math.round(threshold * 100) }}% alike</div>
         <p v-if="view === '3d'" class="kb-dim">Drag to turn, scroll to come closer; F flies (WASD, mouse to steer).{{ fly ? ' Flying: F to stop.' : '' }}</p>
       </details>
 
       <p v-if="building" class="kbx-building"><span class="kb-spinner"></span> {{ building }}</p>
+      <p v-else-if="data && !data.abstracts && data.abstract_only" class="kbx-building kbx-left-out">
+        The documents read in full. {{ data.abstract_only }} papers known only by their abstract are left out:
+        <a href="#" @click.prevent="abstracts = true">include them</a></p>
       <p v-if="said" class="kbx-said" @click="said = ''">{{ said }}</p>
 
       <aside v-if="selected" class="kbx-card">
         <button class="kbx-close" aria-label="Close" @click="selected = null">×</button>
-        <p class="kbx-kind"><i class="kbx-swatch" :style="{ background: colour(selected) }"></i>{{ kindName(selected.kind) }}<template v-if="selected.year"> · {{ selected.year }}</template>
+        <p class="kbx-kind"><i class="kbx-swatch" :style="{ background: colour(selected) }"></i>{{ kindName(selected.kind) }}<template v-if="selected.read === false"> · known by its abstract</template><template v-if="selected.year"> · {{ selected.year }}</template>
           <template v-if="clusterName(selected.cluster)"> · {{ clusterName(selected.cluster) }}</template></p>
         <h3><a :href="selected.page" target="_blank" rel="noopener">{{ selected.title }}</a></h3>
         <div class="kbx-actions">
