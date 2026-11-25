@@ -4279,6 +4279,9 @@ end
     try
         # One with a copy to read is that paper; a closed one is kept as a resource made from its record.
         @test K.add_papers!(kb, ["doi:10.1/OnArxiv"]) == ["2401.00002"]
+        # Found once, the DOI names that paper without asking again.
+        delete!(copies, "10.1/onarxiv")
+        @test K.add_papers!(kb, ["10.1/onarxiv"]) == ["2401.00002"] && K.paper_with_doi(kb, "10.1/onarxiv") == "2401.00002"
         id = only(K.add_papers!(kb, ["https://doi.org/10.1/closed"]))
         r = K.resource_row(kb, id)
         @test K.is_resource(id) && r.source == "doi" && r.title == "Matching modulo associativity" && r.doi == "10.1/closed"

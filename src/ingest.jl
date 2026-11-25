@@ -237,7 +237,10 @@ function add_doi!(kb::KB, doi::AbstractString; title = nothing, authors::Abstrac
     arxiv === nothing && title !== nothing && (arxiv = arxiv_copy(kb.config, title; doi = d, authors))
     if arxiv !== nothing
         ismissing(paper_id(kb, arxiv)) && keep_out!(kb, anyway; by, id = arxiv)
-        return only(add_papers!(kb, [arxiv]; source, by, holder))
+        id = only(add_papers!(kb, [arxiv]; source, by, holder))
+        # Kept, so the DOI names this paper from now on (see `paper_with_doi`).
+        execute!(kb, "INSERT OR REPLACE INTO doi_arxiv VALUES (?, ?, ?)", (d, id, now_iso()))
+        return id
     end
     for url in c.pdfs
         body = open_pdf(url)
