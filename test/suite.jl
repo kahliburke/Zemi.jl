@@ -1722,6 +1722,33 @@ end
     close(kb)
 end
 
+@zset "a recorded paper has the watch's text until arXiv's record comes" begin
+    kb = open_kb(temp_config(layers = [Layer(; name = "paper-t", model = "m", unit = :paper)]))
+    watched(id) = K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score,
+                                    nearest, found_at) VALUES (?, ?, '["Ada Byron"]', 'On tides.', '2026-10-10', 'physics.ao-ph',
+                                    0.5, 'Corals', 0.5, '[]', ?)""", (id, "Tides $id", K.now_iso()))
+    watched("2610.00041")
+    K.add_papers!(kb, ["2610.00041", "2610.00042"]; source = "watch")
+    p = K.paper_row(kb, "2610.00041")
+    @test (p.title, p.abstract, p.authors, p.published, p.primary_category) ==
+          ("Tides 2610.00041", "On tides.", """["Ada Byron"]""", "2026-10-10", "physics.ao-ph") && ismissing(p.metadata_at)
+    l = only(K.record_layers(kb.config))
+    @test only(K.units(kb, l, "2610.00041")).text == "Tides 2610.00041\n\nOn tides."
+    # With no text at all, a paper has nothing to embed: no vector of its id alone.
+    @test isempty(K.units(kb, l, "2610.00042"))
+    plan = sync_plan(kb)
+    @test [t.id for t in plan if t.action == :embed] == ["2610.00041"]
+    @test sort([t.id for t in plan if t.action == :metadata]) == ["2610.00041", "2610.00042"]
+    # One recorded before its text was kept is filled from the watch, as a sync does first.
+    K.execute!(kb, "INSERT INTO papers (doc_id, added_at) VALUES ('2610.00043', ?)", (K.now_iso(),))
+    watched("2610.00043")
+    @test K.fill_from_watch!(kb) == 1 && K.paper_row(kb, "2610.00043").title == "Tides 2610.00043"
+    # arXiv's record, once fetched, is what stays.
+    K.execute!(kb, "UPDATE papers SET title = 'Tides, revised', abstract = '', metadata_at = ? WHERE doc_id = '2610.00041'", (K.now_iso(),))
+    @test K.fill_from_watch!(kb) == 0 && K.paper_row(kb, "2610.00041").title == "Tides, revised"
+    close(kb)
+end
+
 @zset "a codebase read again redoes only what changed" begin
     dir = mktempdir()
     mkpath(joinpath(dir, "src"))

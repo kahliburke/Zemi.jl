@@ -41,6 +41,7 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
             push!(out, id.id)
         end
     end
+    fill_from_watch!(kb, out)
     return unique!(out)
 end
 
