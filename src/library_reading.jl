@@ -60,9 +60,11 @@ end
 """
     read_space!(kb, space; job = nothing)
 
-Bring the knowledge base in step with library `space`: its vaults read as notes (see
-[`read_vault!`](@ref)), one gone forgotten; its PDFs brought in as documents, a changed one again,
-and one gone no longer held for its person (see [`release!`](@ref)).
+Bring the knowledge base in step with library `space`: its bibliographies' entries brought in as
+documents (see [`read_bibliographies!`](@ref)), first, so that its notes cite by their keys; its vaults
+read as notes (see [`read_vault!`](@ref)), one gone forgotten; and its other PDFs brought in as
+documents, a changed one again. A document none of the space's files brings in any more is no longer
+held for its person (see [`release!`](@ref)).
 """
 function read_space!(kb::KB, space::AbstractString; job::Union{Job,Nothing} = nothing)
     holder = space_holder(space)
@@ -70,7 +72,11 @@ function read_space!(kb::KB, space::AbstractString; job::Union{Job,Nothing} = no
     state = load_library_state(kb, space)
     run = SourceRun(kb, registered_source("obsidian"), job; holder)
     roots = vault_roots(files)
+    pdfs = Dict{String,Any}(get(state, "pdfs", Dict{String,Any}()))
+    held() = union(Set{String}(String(e["id"]) for e in values(pdfs)), bib_documents(state))
+    before = held()
     try
+        linked = read_bibliographies!(kb, space, files, state; holder, run)
         for root in roots
             read_vault!(run, vault_config(kb, space, root))
         end
@@ -78,11 +84,10 @@ function read_space!(kb::KB, space::AbstractString; job::Union{Job,Nothing} = no
             root in roots || forget_vault!(run, VaultConfig(; space = String(space), root = String(root)))
         end
         state["vaults"] = roots
-        pdfs = Dict{String,Any}(get(state, "pdfs", Dict{String,Any}()))
         state["pdfs"] = pdfs
-        here = Dict(f.path => f for f in files if lowercase(splitext(f.path)[2]) == ".pdf" && !any(startswith("."), split(f.path, '/')))
-        # A document is released only when no other file of the space is it.
-        let_go(id) = any(e -> e["id"] == id, values(pdfs)) || release!(kb, id, holder)
+        # The PDFs an entry of a bibliography links are read as that entry.
+        here = Dict(f.path => f for f in files if lowercase(splitext(f.path)[2]) == ".pdf" && !any(startswith("."), split(f.path, '/')) &&
+                                                 !(f.path in linked))
         for (path, f) in sort!(collect(here); by = first)
             cancelled(run) && break
             e = get(pdfs, path, nothing)
@@ -90,16 +95,12 @@ function read_space!(kb::KB, space::AbstractString; job::Union{Job,Nothing} = no
             id = library_pdf!(kb, space, f, holder)
             id === nothing && continue
             pdfs[path] = Dict{String,Any}("sha" => f.sha256, "id" => id)
-            e === nothing || e["id"] == id || let_go(e["id"])
         end
-        for path in collect(keys(pdfs))
-            haskey(here, path) && continue
-            id = pop!(pdfs, path)["id"]
-            let_go(id)
-        end
+        foreach(path -> haskey(here, path) || delete!(pdfs, path), collect(keys(pdfs)))
     finally
         save_library_state!(kb, space, state)
     end
+    foreach(id -> release!(kb, id, holder), setdiff(before, held()))
     return nothing
 end
 
@@ -154,7 +155,7 @@ being_read(space::AbstractString) =
     library_overview(kb, caller) -> Dict
 
 What `caller`'s library holds and what keeps it in step: each folder (its files, bytes, whether it is a
-vault, the documents read from it and when it last changed), how much the space uses of its limit,
+vault, its bibliographies (see [`bib_overview`](@ref)), the documents read from it and when it last changed), how much the space uses of its limit,
 whether it is being read, the `zemi connect` sign-ins that reach it (tokens of scope `library`), and
 whose it is (`person`, their name and email).
 """
@@ -171,7 +172,9 @@ function library_overview(kb::KB, caller::Caller)
         prefix = isempty(name) ? "$space/" : "$space/$name/"
         notes = scalar(kb, "SELECT count(*) FROM records WHERE source = 'obsidian' AND substr(key, 1, ?) = ?", (length(prefix), prefix))
         push!(folders, Dict("name" => name, "files" => length(fs), "bytes" => sum(f.size for f in fs),
-                            "vault" => name in vaults, "documents" => Int(notes) + count(p -> library_folder(p) == name, keys(pdfs)),
+                            "vault" => name in vaults, "bibliographies" => bib_overview(state, name),
+                            "documents" => Int(notes) + count(p -> library_folder(p) == name, keys(pdfs)) +
+                                           sum((b["documents"] for b in bib_overview(state, name)); init = 0),
                             "changed" => get(changes, name, maximum(f.modified for f in fs))))
     end
     connections = caller.user_id === nothing ? Dict{String,Any}[] :

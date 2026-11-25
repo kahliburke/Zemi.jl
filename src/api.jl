@@ -549,7 +549,7 @@ end
 # How a document is cited (see `cite_json`), for a client inserting a citation.
 route!("GET", "/api/cite/*paper") do c
     id = known_paper(c.kb, seen_document(c.kb, c.caller, normalize_id(c[:paper])))
-    merge(cite_json(c.kb, id), Dict("page" => document_link(c.kb.config, id)))
+    merge(cite_json(c.kb, id; space = cite_space(c.caller)), Dict("page" => document_link(c.kb.config, id)))
 end
 
 # The documents citation keys name (`?keys=a,b`, as notes cite them, see `cite_key`), for a client

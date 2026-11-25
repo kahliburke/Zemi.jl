@@ -1,6 +1,7 @@
 <!--
   One's library on the account page (see library_overview in src/library_reading.jl): each folder kept
-  in step with it, what it holds and when it last changed, how much of the space it uses, and the
+  in step with it, what it holds and when it last changed, its bibliographies (the entries linking PDFs
+  that are not synced, and what could not be read), how much of the space it uses, and the
   `zemi connect` sign-ins that reach it, each disconnected here. Sharing what it holds is on the
   Documents page.
 -->
@@ -10,7 +11,9 @@ import { getJSON, post, api } from './kbApi'
 import { kbPage } from './kbLinks'
 import { bytes, when } from './kbFormat'
 
-type Folder = { name: string; files: number; bytes: number; vault: boolean; documents: number; changed: string }
+// A .bib file of the folder: its entries, the documents they came in as, those linking files not synced, and what could not be read.
+type Bibliography = { path: string; entries: number; documents: number; missing: { key: string; files: string[] }[]; problems: string[] }
+type Folder = { name: string; files: number; bytes: number; vault: boolean; bibliographies: Bibliography[]; documents: number; changed: string }
 type Connection = { id: number; name: string; created_at: string; last_used: string }
 type Library = { folders: Folder[]; used: number; limit: number; reading: boolean; connections: Connection[] }
 
@@ -40,6 +43,7 @@ const machine = (c: Connection) => c.name.replace(/^zemi connect on /, '').repla
 // heard from in the last two minutes is syncing now.
 const RUNNING_MS = 2 * 60 * 1000
 const syncing = (c: Connection) => !!c.last_used && Date.now() - new Date(c.last_used).getTime() < RUNNING_MS
+const bibliographies = computed(() => (lib.value?.folders ?? []).flatMap(f => f.bibliographies ?? []))
 const share = computed(() => lib.value && lib.value.limit ? Math.min(100, (100 * lib.value.used) / lib.value.limit) : 0)
 const command = computed(() => `zemi connect ${new URL(api.value || '/', location.href).origin} ~/Documents/Notes`)
 </script>
@@ -61,7 +65,8 @@ const command = computed(() => `zemi connect ${new URL(api.value || '/', locatio
         <thead><tr><th>Folder</th><th>Files</th><th>Documents</th><th>Last changed</th></tr></thead>
         <tbody>
           <tr v-for="f in lib.folders" :key="f.name">
-            <td><code>{{ f.name || '(top level)' }}</code><span v-if="f.vault" class="kbl-tag">Obsidian vault</span></td>
+            <td><code>{{ f.name || '(top level)' }}</code><span v-if="f.vault" class="kbl-tag">Obsidian vault</span><span
+                v-if="f.bibliographies?.length" class="kbl-tag">BibTeX</span></td>
             <td>{{ f.files }} · {{ bytes(f.bytes) }}</td>
             <td>{{ f.documents }}</td>
             <td>{{ when(f.changed, '—') }}</td>
@@ -69,6 +74,21 @@ const command = computed(() => `zemi connect ${new URL(api.value || '/', locatio
         </tbody>
       </table>
       <p v-else class="kb-dim">Empty.</p>
+
+      <template v-for="b in bibliographies" :key="b.path">
+        <h3><code>{{ b.path }}</code></h3>
+        <p class="kb-dim">{{ b.entries }} entries, {{ b.documents }} brought in as documents. Each is cited by its key in your notes
+          and notebooks.</p>
+        <details v-if="b.missing.length" class="kbl-missing">
+          <summary>{{ b.missing.length }} {{ b.missing.length === 1 ? 'entry links a PDF' : 'entries link PDFs' }} not in your library</summary>
+          <p class="kb-dim">Each came in by its DOI or arXiv id, or as a resource. To read the PDF, keep it in the folder you sync.</p>
+          <ul><li v-for="m in b.missing" :key="m.key"><code>{{ m.key }}</code> <span class="kb-dim">{{ m.files.join(', ') }}</span></li></ul>
+        </details>
+        <details v-if="b.problems.length" class="kbl-missing">
+          <summary>{{ b.problems.length }} could not be read</summary>
+          <ul><li v-for="p in b.problems" :key="p">{{ p }}</li></ul>
+        </details>
+      </template>
 
       <h3>Machines</h3>
       <p class="kb-dim">Each syncs while <code>zemi connect</code> runs on it.</p>
@@ -85,7 +105,8 @@ const command = computed(() => `zemi connect ${new URL(api.value || '/', locatio
         </tbody>
       </table>
       <p v-else class="kb-dim">None signed in.</p>
-      <p class="kb-dim kbl-how">To sync a folder, such as an Obsidian vault: <code>{{ command }}</code></p>
+      <p class="kb-dim kbl-how">To sync a folder, such as an Obsidian vault or a folder with a <code>.bib</code> file and its PDFs:
+        <code>{{ command }}</code></p>
     </template>
   </section>
 </template>
@@ -105,5 +126,8 @@ const command = computed(() => `zemi connect ${new URL(api.value || '/', locatio
 .kbl-state.on { color: var(--vp-c-text-1); }
 .kbl-state.on::before { background: var(--vp-c-brand-1); }
 .kbl-how { margin-top: 0.8rem; }
+.kbl-missing { margin: 0.4rem 0; font-size: 0.88rem; }
+.kbl-missing summary { cursor: pointer; }
+.kbl-missing ul { margin: 0.3rem 0 0; }
 .kbl-how code { overflow-wrap: anywhere; }
 </style>

@@ -190,9 +190,9 @@ function VaultIndex(notes, files, records::AbstractDict, papers::AbstractDict; r
     return VaultIndex(names, fnames, read, Dict{String,String}(records), Dict{String,String}(papers), cite)
 end
 
-"The document citation key `key` names in knowledge base `kb`, as a note's citation shows it: `(; id, label)`, or `nothing`."
-function cite_in(kb::KB, key::AbstractString)
-    id = cited_document(kb, key)
+"The document citation key `key` names in knowledge base `kb` (by library `space`'s own keys first), as a note's citation shows it: `(; id, label)`, or `nothing`."
+function cite_in(kb::KB, key::AbstractString; space::Union{AbstractString,Nothing} = nothing)
+    id = cited_document(kb, key; space)
     return id === nothing ? nothing : (; id, label = cite_label(kb, id))
 end
 
@@ -477,7 +477,7 @@ function note_references(kb::KB, v::VaultConfig, paper::AbstractString, props::A
     page = document_link(kb.config, paper)
     string(something(get(props, "zemi", nothing), "")) == paper || push!(out, "zemi" => paper)
     isempty(page) || string(something(get(props, "zemi-page", nothing), "")) == page || push!(out, "zemi-page" => page)
-    cite = "[@" * cite_key(kb, paper) * "]"
+    cite = "[@" * cite_key(kb, paper; space = v.space) * "]"
     string(something(get(props, "zemi-cite", nothing), "")) == cite || push!(out, "zemi-cite" => cite)
     fill(k, x) = haskey(props, k) && empty_property(props[k]) && !empty_property(x) && push!(out, k => x)
     fill("title", coalesce(p.title, ""))
@@ -634,7 +634,7 @@ function read_vault!(run::SourceRun, v::VaultConfig)
             push!(changed, k)
         end
         ix = VaultIndex(vf.notes, vf.files, Dict(k => get(records, vault_key(v, k), record_id("obsidian", vault_key(v, k))) for (k, _) in vf.notes),
-                        papers; read = p -> read_library_file(kb, v.space, in_space(v, p)), cite = key -> cite_in(kb, key))
+                        papers; read = p -> read_library_file(kb, v.space, in_space(v, p)), cite = key -> cite_in(kb, key; space = v.space))
         for (i, k) in enumerate(changed)
             i % 50 == 0 && progress(run, "$i of $(length(changed)) notes read")
             entry = Dict{String,Any}("sha" => bytes2hex(sha256(texts[k])), "modified" => files[k].modified, "ref" => refs[k],

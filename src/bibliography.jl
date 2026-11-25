@@ -5,17 +5,71 @@
 migration!(24, ["ALTER TABLE papers ADD COLUMN cite_key TEXT",
                 "CREATE UNIQUE INDEX papers_cite_key ON papers (cite_key) WHERE cite_key IS NOT NULL"])
 
+# The keys a person cites documents by in a bibliography of their own (a `.bib` file in their library,
+# see library_bibtex.jl), beside each document's own: whose library (its space), the key, the
+# document, and the file the key is from. Each person's are theirs alone.
+migration!(25, ["""CREATE TABLE cite_aliases (
+                       space TEXT NOT NULL,
+                       key TEXT NOT NULL,
+                       paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+                       origin TEXT NOT NULL,
+                       PRIMARY KEY (space, key))""",
+                "CREATE INDEX cite_aliases_paper ON cite_aliases (paper_id)"])
+
+"The library whose citation keys `caller` cites by (see `cite_aliases`): their space, or `nothing` for no one."
+cite_space(caller::Caller) = caller.via in (:local, :owner) ? "people/local" : caller.user_id === nothing ? nothing : "people/$(caller.user_id)"
+
+"""
+    cite_aliases(kb, space) -> Dict{String,Vector{String}}
+
+The keys library `space`'s bibliographies cite documents by, by document id, each document's in key
+order. Empty for `nothing`.
+"""
+function cite_aliases(kb::KB, space::Union{AbstractString,Nothing})
+    out = Dict{String,Vector{String}}()
+    space === nothing && return out
+    for r in query(kb, """SELECT p.doc_id, a.key FROM cite_aliases a JOIN papers p ON p.id = a.paper_id
+                          WHERE a.space = ? ORDER BY a.key""", (space,))
+        push!(get!(out, String(r.doc_id), String[]), String(r.key))
+    end
+    return out
+end
+
+"""
+    set_cite_aliases!(kb, space, aliases)
+
+Make library `space`'s citation keys `aliases` (key => (document id, the file it is from)), in place
+of those it had. A key naming a document no longer here is left out.
+"""
+function set_cite_aliases!(kb::KB, space::AbstractString, aliases)
+    transaction(kb) do
+        execute!(kb, "DELETE FROM cite_aliases WHERE space = ?", (space,))
+        for (key, (id, origin)) in aliases
+            execute!(kb, "INSERT OR IGNORE INTO cite_aliases SELECT ?, ?, id, ? FROM papers WHERE doc_id = ?", (space, key, origin, id))
+        end
+    end
+    return nothing
+end
+
 "A paper on arXiv's key: `arXiv:` and its id, an old-style id's `/` as `_`."
 arxiv_key(id::AbstractString) = "arXiv:" * replace(id, '/' => '_')
 
 """
-    cite_key(kb, id) -> String
+    cite_key(kb, id; space = nothing) -> String
 
-The key document `id` is cited by, in BibTeX, Slate's `[@key]` and Typst: `arXiv:` and its id for a
-paper on arXiv; for any other document a short one a person would write, given the first time it is
-asked for and kept (see [`cite_keys!`](@ref)); the id of a document the knowledge base does not have.
+The key document `id` is cited by, in BibTeX, Slate's `[@key]` and Typst: with `space`, the first of
+the keys that library's bibliographies give it (see [`cite_aliases`](@ref)); else `arXiv:` and its id
+for a paper on arXiv; for any other document a short one a person would write, given the first time
+it is asked for and kept (see [`cite_keys!`](@ref)); the id of a document the knowledge base does not have.
 """
-cite_key(kb::KB, id::AbstractString) = is_arxiv_id(id) ? arxiv_key(id) : cite_keys!(kb, [id])[id]
+function cite_key(kb::KB, id::AbstractString; space::Union{AbstractString,Nothing} = nothing)
+    if space !== nothing
+        own = scalar(kb, """SELECT a.key FROM cite_aliases a JOIN papers p ON p.id = a.paper_id
+                            WHERE a.space = ? AND p.doc_id = ? ORDER BY a.key LIMIT 1""", (space, id))
+        ismissing(own) || return String(own)
+    end
+    return is_arxiv_id(id) ? arxiv_key(id) : cite_keys!(kb, [id])[id]
+end
 
 """
     cite_keys!(kb, ids) -> Dict{String,String}
@@ -56,12 +110,18 @@ function cite_keys!(kb::KB, ids)
 end
 
 """
-    cited_document(kb, key) -> Union{String,Nothing}
+    cited_document(kb, key; space = nothing) -> Union{String,Nothing}
 
-The document a citation key names (see [`cite_key`](@ref)): a paper by `arXiv:<id>`, else the
+The document a citation key names (see [`cite_key`](@ref)): with `space`, the one that library's
+bibliographies give that key (see [`cite_aliases`](@ref)); else a paper by `arXiv:<id>`, else the
 document given that key here; `nothing` for none.
 """
-function cited_document(kb::KB, key::AbstractString)
+function cited_document(kb::KB, key::AbstractString; space::Union{AbstractString,Nothing} = nothing)
+    if space !== nothing
+        own = scalar(kb, "SELECT p.doc_id FROM cite_aliases a JOIN papers p ON p.id = a.paper_id WHERE a.space = ? AND a.key = ?",
+                     (space, String(key)))
+        ismissing(own) || return String(own)
+    end
     m = match(r"^arxiv:(.+)$"i, key)
     m === nothing || return ismissing(paper_id(kb, String(m[1]))) ? nothing : String(m[1])
     r = query(kb, "SELECT doc_id FROM papers WHERE cite_key = ?", (String(key),))
@@ -237,15 +297,18 @@ end
 docpage_field(kb, id, pages) = (s = document_page_source(kb, id); s === nothing ? "" : "  docpage = {$(pages)$(s)},\n")
 
 """
-    bibliography(kb; ids = every document cited, caller = nothing, keys = nothing, docpage = false) -> String
+    bibliography(kb; ids = every document cited, caller = nothing, space = caller's, keys = nothing, docpage = false) -> String
 
 The knowledge base as one BibTeX file: an entry for each of `ids` (see [`bib_entry`](@ref)), in key
 order, by default every document of a kind that is cited (see [`DocumentKind`](@ref)): papers,
 uploads and records, not codebases. With `caller`, only those they may see (see
-[`document_visible`](@ref)); with `keys`, only those cited by those keys. `zemi bib` writes it, and
+[`document_visible`](@ref)). A document library `space`'s bibliographies give keys of their own (see
+[`cite_aliases`](@ref)) has an entry under each of those as well, so that it is cited by either. With
+`keys`, only the entries of those keys (or of the documents with those ids). `zemi bib` writes it, and
 the service answers it at `/api/bib`.
 """
-function bibliography(kb::KB; ids = nothing, caller::Union{Caller,Nothing} = nothing, keys = nothing,
+function bibliography(kb::KB; ids = nothing, caller::Union{Caller,Nothing} = nothing,
+                      space::Union{AbstractString,Nothing} = caller === nothing ? nothing : cite_space(caller), keys = nothing,
                       docpage::Bool = false, pages::AbstractString = "generated/kb/")
     ids === nothing && (ids = [String(r.id) for r in query(kb, "SELECT doc_id AS id FROM papers WHERE $(kind_in(k -> k.cited))")])
     if caller !== nothing
@@ -253,9 +316,11 @@ function bibliography(kb::KB; ids = nothing, caller::Union{Caller,Nothing} = not
         ids = filter(!in(unseen), ids)
     end
     named = cite_keys!(kb, ids)
-    # Asked for by key: a document's key, or its id.
-    keys === nothing || (wanted = Set(keys); ids = filter(id -> named[id] in wanted || id in wanted, ids))
-    entries = [bib_entry(kb, id; pages, docpage, key = named[id]) for id in sort(ids; by = id -> named[id])]
+    own = cite_aliases(kb, space)
+    # Each document under its key and the person's own for it; asked for by key, those keys' (or the ids').
+    pairs = [(id, k) for id in ids for k in unique([named[id]; get(own, id, String[])])]
+    keys === nothing || (wanted = Set(keys); pairs = filter(((id, k),) -> k in wanted || (id in wanted && k == named[id]), pairs))
+    entries = [bib_entry(kb, id; pages, docpage, key = k) for (id, k) in sort(pairs; by = last)]
     return "% The documents of the knowledge base: $(length(entries)) entries.\n\n" * join(entries, "\n")
 end
 
@@ -353,25 +418,26 @@ function citation(kb::KB, id::AbstractString)
 end
 
 """
-    cite_json(kb, id) -> Dict
+    cite_json(kb, id; space = nothing) -> Dict
 
 How document `id` is cited, for its page's Cite panel: its `@` reference, its citation in a notebook
-(`[@key]`, see [`cite_key`](@ref)), its citation in prose ([`citation`](@ref)) and its BibTeX entry
+(`[@key]`, see [`cite_key`](@ref), by library `space`'s key for it where it has one), its citation in prose ([`citation`](@ref)) and its BibTeX entry
 ([`bib_entry`](@ref)).
 """
-cite_json(kb::KB, id::AbstractString) =
-    Dict("reference" => "@" * cited_as(id), "cite" => "[@" * cite_key(kb, id) * "]", "citation" => citation(kb, id),
-         "bibtex" => bib_entry(kb, id; docpage = false))
+cite_json(kb::KB, id::AbstractString; space::Union{AbstractString,Nothing} = nothing) =
+    (key = cite_key(kb, id; space);
+     Dict("reference" => "@" * cited_as(id), "cite" => "[@" * key * "]", "citation" => citation(kb, id),
+          "bibtex" => bib_entry(kb, id; docpage = false, key)))
 
 """
     cited_json(kb, caller, key) -> Union{Dict,Nothing}
 
-The document citation key `key` names, as a note's citation links to it: its id, kind, title, authors,
+The document citation key `key` names (by `caller`'s own keys first, see [`cite_aliases`](@ref)), as a note's citation links to it: its id, kind, title, authors,
 year, label in prose ([`cite_label`](@ref)) and page. `nothing` for a key naming no document `caller`
 may see.
 """
 function cited_json(kb::KB, caller::Caller, key::AbstractString)
-    id = cited_document(kb, key)
+    id = cited_document(kb, key; space = cite_space(caller))
     (id === nothing || !document_visible(kb, caller, id)) && return nothing
     p = first(query(kb, "SELECT title, authors, kind FROM papers WHERE doc_id = ?", (id,)))
     return Dict("id" => id, "kind" => String(p.kind), "title" => coalesce(p.title, id),

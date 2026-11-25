@@ -281,7 +281,7 @@ in `~/.local/share/zemi/connect/connect.log`. `--status` says how the folders st
 them, and `--stop` stops either. `--once` syncs once.
 
 **Your library** on the account page shows each folder in your library (its files, the documents read
-from it, whether it is a vault, when it last changed), how much of your space it uses, and each
+from it, whether it is a vault or holds a bibliography, when it last changed), how much of your space it uses, and each
 machine signed in to keep it in step: whether `zemi connect` is syncing there now, and when it last
 synced. Signing a machine out there revokes its sign-in.
 
@@ -325,6 +325,37 @@ A citation in a note, `[@key]` as a notebook writes them (several as `[@a; @b]`,
 them as `[see @a, p. 3]`), becomes in the note's record references to the documents its keys name,
 labelled as in prose: `(see Hale 2024, p. 3)`. A key the knowledge base has no document for is left
 as written.
+
+**A bibliography** in a library (a `.bib` file, BibTeX or BibLaTeX, as JabRef or another reference
+manager keeps it) is read entry by entry, so a folder holding the file and its PDFs can be synced
+like a vault:
+
+```sh
+zemi connect https://kb.example.org ~/Documents/References
+```
+
+Each entry comes in as the document it is, private to you as the rest of your library is:
+
+- **The PDF it links**, by its `file` field, when that PDF is in the folder you sync. It is read in
+  full, under the entry's title, authors, year and DOI. A path is taken from the `.bib` file's folder,
+  or from the file directory JabRef keeps in it. A path from another machine (`C:\Users\…`, or an
+  absolute path outside the folder) is matched by how it ends: `…/References/papers/hale2024.pdf` finds
+  `papers/hale2024.pdf`.
+- Else **its arXiv paper**, by `eprint` (with `archivePrefix` or `eprinttype` arXiv), an arXiv
+  address, or arXiv's DOI.
+- Else **the paper its DOI has a copy of**: its arXiv copy, or an open PDF OpenAlex knows.
+- Else **a resource**, made of what the entry says: its type (a book, a report, a thesis, a web page),
+  authors (a braced name, `{World Health Organization}`, is an organization), date, journal or book,
+  publisher, address, when it was accessed, its abstract and note.
+
+The entry's key cites its document for you: `[@hale2024]` in your notes and notebooks names the paper,
+as `[@arXiv:2401.00001]` does, and the bibliography a notebook takes from the site (`/api/bib`) has the
+entry under both keys. Your keys are yours: another person's `hale2024` is theirs. Zemi only reads the
+file, which stays your record. An entry edited is read again; one given a PDF since it came in as a
+resource becomes the paper, in the resource's place; one removed lets its document go, unless a PDF
+in your library is that document still. A PDF no entry links is read as any PDF in your library.
+Under **Your library**, each `.bib` file shows its entries and the documents they came in as, the
+entries whose linked PDFs are not in the folder, and what in the file could not be read.
 
 **The Obsidian plugin**, in `obsidian/` (desktop only), keeps the knowledge base beside your notes.
 `zemi obsidian VAULT` builds it and installs it in the vault (its folder, or the name of a vault

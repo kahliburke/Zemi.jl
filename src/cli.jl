@@ -158,7 +158,7 @@ function cli(args::AbstractVector{<:AbstractString})
             done()
             println(format_pull(r))
         elseif cmd == "bib"
-            text = bibliography(kb())
+            text = bibliography(kb(); space = "people/local")
             if isempty(rest)
                 print(text)
             else

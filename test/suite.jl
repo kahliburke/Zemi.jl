@@ -1627,6 +1627,200 @@ end
     end
 end
 
+@zset "BibTeX" begin
+    b = K.parse_bibtex("""
+        % Encoding: UTF-8
+        Text between entries is comment, an @ sign too.
+        @String{cd = {Coastal Dynamics}}
+        @Article{Hale2024,
+          author  = {Hale, Rowan A. and Bea {van der Berg} and {World Health Organization} and Ng, Jr, Bea and others},
+          title   = {Tidal {DNA} in {\\"O}resund --- a \\emph{review} of \\'{e}tudes \\& \\ss{} \$\\alpha\$-decay},
+          journal = cd # { (Oceans)},
+          year    = 2024,
+          month   = mar,
+          doi     = {https://doi.org/10.1000/XYZ.123},
+          file    = {:papers/Hale2024.pdf:PDF;Supplement:papers/hale.zip:ZIP;:C\\:\\\\Users\\\\ada\\\\refs\\\\Hale.pdf:PDF},
+        }
+        @misc(Ng2023, title = "A {"}quoted{"} preprint", eprint = {2401.00001v2}, archivePrefix = {arXiv}, date = {2023-11-05/2024-01})
+        @online{Broken, title = {Open}, url = {https://example.org}
+        @Book{Who2020, title = {Guidelines}, year = {2020}, eprinttype = {arxiv}, eprint = {hep-th/9901001}}
+        @Comment{jabref-meta: fileDirectory:papers;}
+        """)
+    @test [e.key for e in b.entries] == ["Hale2024", "Ng2023", "Who2020"] && [e.type for e in b.entries] == ["article", "misc", "book"]
+    @test b.entries[1].line == 4 && b.meta["fileDirectory"] == "papers"
+    @test only(b.problems) == "Line 14: entry Broken has a field with no name"         # left out, and the next read
+    f = b.entries[1].fields
+    @test K.bib_plain(f["journal"]) == "Coastal Dynamics (Oceans)"
+    @test K.bib_plain(f["title"]) == "Tidal DNA in Öresund — a review of études & ß α-decay"
+    @test K.bib_plain(b.entries[2].fields["title"]) == "A \"quoted\" preprint"
+    @test K.bib_names(f["author"]) == [(name = "Rowan A. Hale", organization = false), (name = "Bea van der Berg", organization = false),
+                                       (name = "World Health Organization", organization = true), (name = "Bea Ng Jr", organization = false),
+                                       (name = "others", organization = false)]
+    @test K.bib_date(f) == "2024-03" && K.bib_date(b.entries[2].fields) == "2023-11-05" && K.bib_date(b.entries[3].fields) == "2020"
+    @test K.bib_date(Dict("year" => "2021", "month" => "October", "day" => "9")) == "2021-10-09" && K.bib_date(Dict{String,String}()) == ""
+    @test K.bib_doi(f) == "10.1000/xyz.123" && K.bib_doi(Dict("url" => "https://doi.org/10.1/A")) == "10.1/a"
+    @test K.bib_files(f["file"]) == ["papers/Hale2024.pdf", "C:\\Users\\ada\\refs\\Hale.pdf"]
+    @test K.bib_files("/home/ada/a.pdf;/home/ada/b.PDF") == ["/home/ada/a.pdf", "/home/ada/b.PDF"]
+    @test K.bib_arxiv(b.entries[2].fields) == "2401.00001" && K.bib_arxiv(b.entries[3].fields) == "hep-th/9901001"
+    @test K.bib_arxiv(Dict("journal" => "arXiv preprint arXiv:2402.01234")) == "2402.01234" && K.bib_arxiv(f) === nothing
+    @test K.bib_arxiv(Dict("eprint" => "123", "archiveprefix" => "HAL")) === nothing
+    @test K.bib_plain("\\v{s}\\c{c}\\'\\i\\o{}rsted \\href{https://x.org}{site} a~b \\textit{x}\\unknown y") == "šçíørsted site a b xy"
+    # What an entry says of its work, as a resource is made of it.
+    w = K.bib_work(K.parse_bibtex("""@InCollection{c, editor = {Ng, Bea}, title = {Floods}, subtitle = {A survey}, booktitle = {Rivers},
+                                     institution = {Survey Office}, urldate = {2025-01-02T10:00}, note = {Draft}, abstract = {On floods.}}""").entries[1])
+    @test w.title == "Floods: A survey" && w.authors == ["Bea Ng"] && w.container == "Rivers" && w.publisher == "Survey Office"
+    @test w.type == "book section" && w.accessed == "2025-01-02" && w.note == "On floods.\n\nDraft"
+    # The PDF a `file` field names: from the .bib's folder, from JabRef's file directory, or a path from another machine by how it ends.
+    files = [(; path = p) for p in ["Refs/references.bib", "Refs/papers/a.pdf", "Refs/pdfs/b.pdf", "Other/papers/c.pdf", "Refs/x/c.pdf"]]
+    @test K.bib_pdf(files, "Refs/references.bib", "papers/a.pdf").path == "Refs/papers/a.pdf"
+    @test K.bib_pdf(files, "Refs/references.bib", "b.pdf"; meta = Dict("fileDirectory" => "pdfs")).path == "Refs/pdfs/b.pdf"
+    @test K.bib_pdf(files, "Refs/references.bib", "C:\\Users\\ada\\Refs\\papers\\a.pdf").path == "Refs/papers/a.pdf"
+    @test K.bib_pdf(files, "Refs/references.bib", "/home/ada/x/c.pdf").path == "Refs/x/c.pdf"        # not Other's, outside the folder
+    @test K.bib_pdf(files, "Refs/references.bib", "/home/ada/gone.pdf") === nothing
+end
+
+@zset "bibliographies in a library" begin
+    dir = mktempdir()
+    pdf(name, title) = (write(joinpath(dir, "$name.txt"), "%%MediaBox 0 0 612 792\n%%Font F1 Helvetica\nBT /F1 24 Tf 72 700 Td ($title) Tj ET\n");
+                        run(`$MUTOOL create -o $(joinpath(dir, "$name.pdf")) $(joinpath(dir, "$name.txt"))`); read(joinpath(dir, "$name.pdf")))
+    kb = open_kb(temp_config(layers = Layer[]))
+    user(email) = Int(K.scalar(kb, "INSERT INTO users (email, name, created_at) VALUES (?, '', ?) RETURNING id", (email, K.now_iso())))
+    ada, bea = user("ada@x.org"), user("bea@x.org")
+    space = "people/$ada"
+    saved = (K.UPLOAD_LOOKUP[], K.DOI_COPIES[], K.ARXIV_TITLE_SEARCH[])
+    K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
+    K.DOI_COPIES[] = (doi; contact = "") -> doi == "10.1/onarxiv" ? (; arxiv = "2401.00002", pdfs = String[]) : (; arxiv = nothing, pdfs = String[])
+    K.ARXIV_TITLE_SEARCH[] = (t, c) -> K.PaperMeta[]
+    K.READ_PUT[] = false
+    bib = """
+        % Encoding: UTF-8
+
+        @Article{Hale2024,
+          author  = {Hale, Rowan and Ng, Bea},
+          title   = {Sediment budgets of {E}stuaries},
+          journal = {Coastal Dynamics},
+          year    = {2024},
+          doi     = {10.1/linked},
+          file    = {:papers/Hale2024.pdf:PDF},
+        }
+
+        @Misc{Ng2023,
+          author        = {Ng, Bea},
+          title         = {Tidal mixing},
+          year          = {2023},
+          eprint        = {2401.00001},
+          archiveprefix = {arXiv},
+        }
+
+        @Article{Lovelace2021,
+          author = {Lovelace, Ada},
+          title  = {Floods in a small catchment},
+          year   = {2021},
+          doi    = {10.1/onarxiv},
+        }
+
+        @Book{Who2020,
+          author    = {{World Health Organization}},
+          title     = {Guidelines for {W}ater {Q}uality},
+          publisher = {WHO Press},
+          date      = {2020-05},
+          doi       = {10.1/closed},
+        }
+
+        @Online{Portal,
+          title   = {Tide gauge portal},
+          url     = {https://example.org/tides},
+          urldate = {2025-01-02},
+          file    = {:/Users/ada/Dropbox/Refs/papers/gone.pdf:PDF},
+        }
+
+        @Article{Remote,
+          title = {Groundwater recharge},
+          file  = {:C\\:\\\\Users\\\\ada\\\\Refs\\\\papers\\\\remote.pdf:PDF},
+        }
+
+        @Misc{Broken, title = {x}, = {y}}
+
+        @Comment{jabref-meta: databaseType:biblatex;}
+        """
+    put(path, bytes) = K.put_library_file!(kb, space, path, bytes isa String ? Vector{UInt8}(bytes) : bytes)
+    put("Refs/references.bib", bib)
+    put("Refs/papers/Hale2024.pdf", pdf("hale", "Sediment budgets"))
+    put("Refs/papers/remote.pdf", pdf("remote", "Groundwater recharge"))
+    put("Refs/papers/loose.pdf", pdf("loose", "A loose paper"))
+    as_ada = K.Caller(ada, "Ada", "ada@x.org", Set(K.PERMISSION_NAMES), :session, nothing)
+    as_bea = K.Caller(bea, "Bea", "bea@x.org", Set(K.PERMISSION_NAMES), :session, nothing)
+    ask(target, who = as_ada) = (r = K.handle(kb, K.HTTP.Request("GET", target), who); (r.status, String(r.body)))
+    private(id) = K.document_holders(kb, id) == [ada] && K.scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,)) == "private"
+    try
+        K.read_space!(kb, space)
+        state = K.load_library_state(kb, space)
+        entries = state["bibs"]["Refs/references.bib"]["entries"]
+        id(key) = entries[key]["id"]
+        # The PDF an entry links, read under the entry's title, authors, year and DOI.
+        hale = id("Hale2024")
+        p = K.paper_row(kb, hale)
+        @test startswith(hale, "doc-") && p.title == "Sediment budgets of Estuaries" && K.json_list(p.authors) == ["Rowan Hale", "Bea Ng"]
+        @test p.published == "2024" && p.doi == "10.1/linked" && only(K.mentions(kb, hale)).source == "bibtex"
+        # Its arXiv paper; the arXiv copy of its DOI; and a path from another machine, found by how it ends.
+        @test id("Ng2023") == "2401.00001" && id("Lovelace2021") == "2401.00002"
+        @test K.paper_row(kb, id("Remote")).title == "Groundwater recharge" && entries["Remote"]["pdf"] == "Refs/papers/remote.pdf"
+        # With no copy to read, a resource made of the entry.
+        who = id("Who2020")
+        r = K.resource_row(kb, who)
+        @test K.is_resource(who) && r.source == "bibtex" && r.type == "book" && r.publisher == "WHO Press" && r.published == "2020-05"
+        @test K.json_list(r.organizations) == ["World Health Organization"] && r.doi == "10.1/closed"
+        @test K.resource_row(kb, id("Portal")).type == "web page" && K.resource_row(kb, id("Portal")).accessed == "2025-01-02"
+        # Each is Ada's alone; the PDFs entries link are theirs, and a PDF no entry links is read as one.
+        @test all(private, [id(k) for k in keys(entries)])
+        @test collect(keys(state["pdfs"])) == ["Refs/papers/loose.pdf"]
+        # Her keys cite them, for her: in notes, the Cite panel, the documents a note cites and her bibliography.
+        @test K.cited_document(kb, "Ng2023"; space) == "2401.00001" && K.cited_document(kb, "Ng2023") === nothing
+        @test K.cite_key(kb, "2401.00001"; space) == "Ng2023" && K.cite_key(kb, "2401.00001") == "arXiv:2401.00001"
+        @test occursin("\"Ng2023\":{", replace(ask("/api/cited?keys=Ng2023")[2], " " => "")) && occursin("2401.00001", ask("/api/cited?keys=Ng2023")[2])
+        @test occursin("[@Ng2023]", ask("/api/cite/2401.00001")[2])
+        @test ask("/api/cited?keys=Ng2023", as_bea)[2] == "{\"Ng2023\":null}"
+        text = ask("/api/bib")[2]
+        @test occursin("@article{Ng2023,", text) && occursin("@article{arXiv:2401.00001,", text) && occursin("@book{Who2020,", text)
+        @test count("@", ask("/api/bib?keys=Ng2023")[2]) == 1 && !occursin("Ng2023", ask("/api/bib", as_bea)[2])
+        # What her library shows: the file's entries and documents, the files an entry links that are not here, what could not be read.
+        folder = only(K.library_overview(kb, as_ada)["folders"])
+        b = only(folder["bibliographies"])
+        @test b["path"] == "Refs/references.bib" && b["entries"] == 6 && b["documents"] == 6 && folder["documents"] == 7
+        @test b["missing"] == [Dict("key" => "Portal", "files" => ["/Users/ada/Dropbox/Refs/papers/gone.pdf"])]
+        @test length(b["problems"]) == 1 && occursin("Broken", only(b["problems"]))
+        # Read again unchanged, nothing is brought in again.
+        n = K.scalar(kb, "SELECT count(*) FROM mentions")
+        K.read_space!(kb, space)
+        @test K.scalar(kb, "SELECT count(*) FROM mentions") == n
+        # Edited in JabRef: an entry edited is the same document; one given a PDF becomes that paper in its resource's place;
+        # one removed lets its document go.
+        put("Refs/papers/who.pdf", pdf("who", "Guidelines for water quality"))
+        edited = replace(bib, "title         = {Tidal mixing}" => "title         = {Tidal mixing in estuaries}",
+                         "  doi       = {10.1/closed},\n" => "  doi       = {10.1/closed},\n  file      = {:papers/who.pdf:PDF},\n",
+                         r"@Article\{Lovelace2021,.*?\n\}\n"s => "")
+        put("Refs/references.bib", edited)
+        K.read_space!(kb, space)
+        entries = K.load_library_state(kb, space)["bibs"]["Refs/references.bib"]["entries"]
+        @test id("Ng2023") == "2401.00001" && !haskey(entries, "Lovelace2021") && ismissing(K.paper_id(kb, "2401.00002"))
+        @test startswith(id("Who2020"), "doc-") && ismissing(K.paper_id(kb, who)) && K.current_document(kb, who) == id("Who2020")
+        @test K.cited_document(kb, "Who2020"; space) == id("Who2020") && K.paper_row(kb, id("Who2020")).doi == "10.1/closed"
+        # Bea's key of the same name is hers: each cites their own by it.
+        K.put_library_file!(kb, "people/$bea", "Bib/mine.bib", Vector{UInt8}("@misc{Ng2023, title = {Another}, eprint = {2401.00005}}"))
+        K.read_space!(kb, "people/$bea")
+        @test K.cited_document(kb, "Ng2023"; space = "people/$bea") == "2401.00005" && K.cited_document(kb, "Ng2023"; space) == "2401.00001"
+        # The file gone: its entries let their documents go, but for a PDF still in the library, read as one.
+        K.delete_library_file!(kb, space, "Refs/references.bib")
+        K.read_space!(kb, space)
+        @test ismissing(K.paper_id(kb, "2401.00001")) && private(hale) && haskey(K.load_library_state(kb, space)["pdfs"], "Refs/papers/Hale2024.pdf")
+        @test K.cited_document(kb, "Hale2024"; space) === nothing
+    finally
+        K.UPLOAD_LOOKUP[], K.DOI_COPIES[], K.ARXIV_TITLE_SEARCH[] = saved
+        K.READ_PUT[] = true
+        close(kb)
+    end
+end
+
 @zset "nightly ingest" begin
     (; DateTime, Time, Hour, Day) = K.Dates
     la = K.TimeZones.TimeZone("America/Los_Angeles")
