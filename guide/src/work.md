@@ -345,9 +345,11 @@ before. It gives:
 - **Add the paper named here**: an arXiv id or DOI in the selection or on the line gets a note of its
   own in the papers folder (`Papers` unless set), linked from here; once the vault is synced, Zemi
   brings the paper in and fills the note's title and authors.
-- **Citations as links**: each `@key` of a citation the knowledge base has a document for links to
-  its page in reading view. In the editor it is underlined: hover over it for the document's title,
-  authors and year, and Cmd-click (Ctrl-click) it to open its page. The note's text stays `[@key]`.
+- **Citations by title**: a citation of documents the knowledge base has reads by their titles,
+  each linked to its page: `[see @arXiv:1706.03762, p. 2]` shows as "(see Attention Is All You Need,
+  p. 2)" in reading view, and in live preview until the cursor is in it. In source mode each key is
+  underlined: hover over it for the document's title, authors and year, and Cmd-click (Ctrl-click) it
+  to open its page. The note's text stays as written.
 - **Zemi blocks**: a `zemi` code block shows what the knowledge base has, drawn each time the note is
   shown and never written into it. Its first line says what (**Insert a Zemi block** starts one):
 

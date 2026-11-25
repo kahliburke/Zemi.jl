@@ -12,8 +12,11 @@
 .zemi-figures figcaption { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .zemi-cite { text-decoration: underline dotted; text-underline-offset: 2px; }
 .cm-editor .zemi-cite { cursor: pointer; color: var(--link-external-color); }
-.zemi-cite-tip { padding: 0.35rem 0.6rem; max-width: 28rem; font-size: var(--font-ui-small); }
-.zemi-cite-title { font-weight: 600; }
+.cm-tooltip:has(> .zemi-cite-tip) { background: var(--background-secondary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); box-shadow: var(--shadow-s); }
+.zemi-cite-tip { padding: 0.4rem 0.65rem; max-width: 28rem; font-size: var(--font-ui-small); }
+.zemi-cite-title { font-weight: 600; color: var(--text-normal); }
+.zemi-citation { white-space: normal; }
 .zemi-block { border: 1px solid var(--background-modifier-border); border-left: 3px solid var(--interactive-accent);
   border-radius: var(--radius-m); padding: 0.4rem 0.75rem 0.6rem; background: var(--background-primary-alt); }
 .zemi-block-head { display: flex; align-items: center; gap: 0.45rem; font-size: var(--font-ui-small); margin-bottom: 0.35rem; }
