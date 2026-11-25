@@ -6,6 +6,8 @@
 
 - The database moves from schema 22 to 24 on first start, keeping a snapshot first
   (`data.backups/kept/before-schema-24`); 0.5 cannot read it afterwards.
+- The shared knowledge base is exported as `default_kb()`; `kb` is no longer exported, so code and
+  notebooks can name their own knowledge base `kb`.
 
 ### Changes
 

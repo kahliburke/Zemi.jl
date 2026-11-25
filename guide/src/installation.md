@@ -104,7 +104,7 @@ From **Add documents** on the Documents page, an agent's `ingest` tool, or Julia
 
 ```julia
 using Zemi
-db = kb()
+db = default_kb()
 ingest!(db, ["1706.03762", "https://arxiv.org/abs/1412.6980"])
 search(db, "how the method's error scales with the problem size")
 ```

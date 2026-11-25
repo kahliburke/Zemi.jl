@@ -111,6 +111,14 @@ function kb()
     end
 end
 
+"""
+    default_kb() -> KB
+
+The knowledge base this process shares, opened on first use with the config file's settings: the
+one Zemi's tools, agents and site use here.
+"""
+default_kb() = kb()
+
 function shutdown()
     lock(_KB_LOCK) do
         _KB[] === nothing || close(_KB[])

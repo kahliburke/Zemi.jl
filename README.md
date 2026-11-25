@@ -59,7 +59,7 @@ your own. The site is at http://localhost:8000; its front page leads to Setup.
 
 ```julia
 using Zemi
-db = kb()
+db = default_kb()
 ingest!(db, ["1706.03762"])
 search(db, "attention without recurrence")
 ```

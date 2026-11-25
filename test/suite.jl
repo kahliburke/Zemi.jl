@@ -5201,6 +5201,8 @@ end
     @test search_args["query"]["required"] == true && search_args["limit"]["required"] == false
     K._KB[] = open_kb(temp_config())
     try
+        # The shared knowledge base is exported by a name people do not give their own.
+        @test K.default_kb() === K.kb() === K._KB[] && :default_kb in names(K) && !(:kb in names(K))
         add_papers!(K._KB[], ["2609.00001"])
         tool(name) = only(t for t in tools if t.name == name).handler
         @test occursin("1 recorded", tool("status")())

@@ -157,7 +157,7 @@ include("cli.jl")
 include("hosted.jl")
 include("main.jl")
 
-export Config, Layer, KB, load_config, open_kb, kb
+export Config, Layer, KB, load_config, open_kb, default_kb
 export parse_arxiv_id, parse_pdf, chunk_paper
 export add_papers!, add_pdf!, refresh_metadata!, fetch_pdf!, parse_paper!, embed_paper!, ingest!, remove_paper!, drop!, restore!
 export drop_layer!, build_layer!, search, rankings, compare_rankings, similar_papers, PaperHit, Passage
