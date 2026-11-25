@@ -97,9 +97,110 @@ function read_links!(kb::KB; progress = msg -> nothing, cancelled = () -> false)
     return length(todo)
 end
 
+# ── Pairs people judged ───────────────────────────────────────────────────────────────────────────
+
+# Pairs of documents a person judged from the explore page's suggestions: related, drawn as a link of
+# their making (`related`), or not, no longer suggested. Each pair once, the lower row first.
+migration!(26, [
+    """CREATE TABLE document_pairs (
+        a_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        b_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        related INTEGER NOT NULL,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        judged_at TEXT NOT NULL,
+        PRIMARY KEY (a_id, b_id))"""])
+
+"""
+    judge_pair!(kb, caller, a, b, related)
+
+Record whether documents `a` and `b`, both seen by `caller`, are related (`true`), not (`false`), or
+undecided again (`nothing`).
+"""
+function judge_pair!(kb::KB, caller::Caller, a::AbstractString, b::AbstractString, related::Union{Bool,Nothing})
+    a == b && error("A document is not a pair with itself")
+    seen_document(kb, caller, a); seen_document(kb, caller, b)
+    x, y = minmax(Int(paper_id(kb, a)), Int(paper_id(kb, b)))
+    if related === nothing
+        execute!(kb, "DELETE FROM document_pairs WHERE a_id = ? AND b_id = ?", (x, y))
+    else
+        execute!(kb, "INSERT OR REPLACE INTO document_pairs (a_id, b_id, related, user_id, judged_at) VALUES (?, ?, ?, ?, ?)",
+                 (x, y, Int(related), something(caller.user_id, missing), now_iso()))
+    end
+    return nothing
+end
+
+# A pair judged: `{a, b, related}`, `related` true, false or null to take the judgement back.
+route!("POST", "/api/graph/pair"; need = "paper.add") do c
+    d = json_body(c)
+    r = get(d, "related", nothing)
+    judge_pair!(c.kb, c.caller, String(get(d, "a", "")), String(get(d, "b", "")), r === nothing ? nothing : Bool(r))
+    return Dict("ok" => true)
+end
+
+# ── What a pair shares ───────────────────────────────────────────────────────────────────────────
+
+"""The words a text is made of, for comparing documents: lowercased, plurals folded, common words left out."""
+function pair_words(t::AbstractString)
+    fold(w) = length(w) > 4 && endswith(w, "s") && !endswith(w, "ss") ? String(chop(w)) : w
+    return Set(fold(w) for w in (lowercase(m.match) for m in eachmatch(r"[\p{L}][\p{L}\p{N}-]+", t))
+               if length(w) > 3 && !(w in LABEL_STOPWORDS))
+end
+
+const PAIR_WORDS = Ref{Any}(nothing)               # (stamp, documents, how many use each word)
+
+"How many documents' titles and abstracts use each word, and of how many: worked out again as documents come."
+function word_counts(kb::KB)
+    stamp = String(scalar(kb, "SELECT count(*) || ':' || coalesce(max(id), 0) FROM papers"))
+    last = PAIR_WORDS[]
+    last !== nothing && last[1] == stamp && return last[2], last[3]
+    df, n = Dict{String,Int}(), 0
+    for r in query(kb, """SELECT coalesce(p.title, w.title, '') || ' ' || coalesce(nullif(p.abstract, ''), w.abstract, '') AS t
+                          FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id""")
+        n += 1
+        foreach(w -> df[w] = get(df, w, 0) + 1, pair_words(String(r.t)))
+    end
+    PAIR_WORDS[] = (stamp, n, df)
+    return n, df
+end
+
+"A document's text to find shared words in: its title and abstract, a record's text too."
+function pair_text(kb::KB, id::AbstractString)
+    r = only(query(kb, """SELECT coalesce(p.title, w.title, '') AS title, coalesce(nullif(p.abstract, ''), w.abstract, '') AS abstract
+                          FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id WHERE p.doc_id = ?""", (id,)))
+    text = "$(r.title) $(r.abstract)"
+    is_record(id) && (text *= " " * first(join((String(x["text"]) for x in record_document(kb, id)["sections"]), " "), 6000))
+    return text
+end
+
+"""
+    shared_words(kb, caller, pairs; most = 5) -> Vector{Vector{String}}
+
+For each pair of documents, the words both use that few others do, the rarest first: what the two
+have in common, as far as their words show it. Empty for a pair `caller` may not see.
+"""
+function shared_words(kb::KB, caller::Caller, pairs; most::Integer = 5)
+    n, df = word_counts(kb)
+    words = Dict{String,Set{String}}()
+    function of(id)
+        get!(words, id) do
+            try seen_document(kb, caller, id); pair_words(pair_text(kb, id)) catch; Set{String}() end
+        end
+    end
+    return map(pairs) do (a, b)
+        common = [w for w in intersect(of(a), of(b)) if get(df, w, 0) <= max(2, n ÷ 5)]
+        first(sort!(common; by = w -> (get(df, w, 0), w)), most)
+    end
+end
+
+# What pairs of documents share (`?pairs=a,b;c,d`): for each, its words.
+route!("GET", "/api/graph/shared") do c
+    pairs = [Tuple(String.(split(p, ','))) for p in split(get(c.params, "pairs", ""), ';') if count(==(','), p) == 1]
+    return Dict("shared" => shared_words(c.kb, c.caller, first(pairs, 60)))
+end
+
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 6
+const EXPLORE_VERSION = 7
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -175,6 +276,20 @@ function nearest_columns(X::AbstractMatrix, k::Integer)
 end
 
 """
+    nearest_library(X, own, k) -> Dict{Int,Vector{Tuple{Int,Float64}}}
+
+For each column of `X` marked `own` (a person's notes and records), the `k` columns not marked nearest
+it, with their similarity: what in the library a note is closest to, though other notes are closer.
+"""
+function nearest_library(X::AbstractMatrix, own::AbstractVector{Bool}, k::Integer)
+    mine, lib = findall(own), findall(!, own)
+    (isempty(mine) || isempty(lib)) && return Dict{Int,Vector{Tuple{Int,Float64}}}()
+    S = X[:, lib]' * X[:, mine]
+    return Dict(i => [(lib[m], Float64(S[m, j])) for m in partialsortperm(view(S, :, j), 1:min(k, length(lib)); rev = true)]
+                for (j, i) in enumerate(mine))
+end
+
+"""
 Positions `Y` (one row each) about their centre, scaled so all but the farthest few lie within -1 to 1:
 a layout's outliers do not crowd the rest together. Those beyond are drawn in to 1.3.
 """
@@ -240,6 +355,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     n = length(rows)
     progress("Exploring $n $what: finding each one's nearest")
     near = nearest_columns(X, EXPLORE_NEIGHBOURS)
+    library = nearest_library(X, [is_record(r.id) for r in rows], 5)
     # Laid out by t-SNE: all of them, or the most often near others where there are too many.
     laid = if n <= EXPLORE_LAYOUT_LIMIT
         collect(1:n)
@@ -304,7 +420,8 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     central = [Float64(dot(view(X, :, i), view(centre[assign[i]], :, 1))) for i in 1:n]
     r4(x) = round(x; digits = 4)
     docs = Dict(r.id => Dict("x" => r4.(pos2[i, :]), "p" => r4.(pos3[i, :]), "ux" => r4.(uflat[i, :]), "up" => r4.(udeep[i, :]), "c" => assign[i],
-                             "k" => r4(central[i]), "near" => [[rows[m].id, r4(s)] for (m, s) in near[i]])
+                             "k" => r4(central[i]), "near" => [[rows[m].id, r4(s)] for (m, s) in near[i]],
+                             "lib" => [[rows[m].id, r4(s)] for (m, s) in get(library, i, ())])
                 for (i, r) in enumerate(rows))
     return Dict("clusters" => clusters, "docs" => docs)
 end
@@ -359,7 +476,7 @@ links_behind(kb::KB) = !ismissing(scalar(kb, """
 # ── The graph a caller sees ───────────────────────────────────────────────────────────────────────
 
 "The kinds of link the graph draws, people's: a paper's citations, a record's references, a finding's evidence, a task's links."
-const GRAPH_LINKS = ("cites", "refers", "evidence", "task")
+const GRAPH_LINKS = ("cites", "refers", "related", "evidence", "task")
 
 """
     explore_graph(kb, caller; center, depth, links, kinds, project, limit) -> Dict
@@ -397,6 +514,13 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
             a, b = get(byrow, Int(r.from_id), nothing), get(byrow, Int(r.to_id), nothing)
             a === nothing || b === nothing || !shown(a) || !shown(b) || push!(E, (a, b, String(r.kind)))
         end
+    end
+    judged = Dict{Tuple{String,String},Bool}()      # pairs people judged, related or not
+    for r in query(kb, "SELECT a_id, b_id, related FROM document_pairs")
+        a, b = get(byrow, Int(r.a_id), nothing), get(byrow, Int(r.b_id), nothing)
+        (a === nothing || b === nothing || !shown(a) || !shown(b)) && continue
+        judged[a < b ? (a, b) : (b, a)] = Bool(r.related)
+        Bool(r.related) && "related" in links && push!(E, (a, b, "related"))
     end
     extra = Dict{String,Dict{String,Any}}()        # findings and tasks
     projects = can(caller, "tasks.view") ? visible_projects(kb, caller) : Set{String}()
@@ -436,7 +560,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     S = Dict{Tuple{String,String},Float64}()            # each pair once, the nearer way round
     for (a, d) in docs
         shown(a) || continue
-        for (b, s) in d["near"]
+        for (b, s) in Iterators.flatten((d["near"], get(d, "lib", ())))
             shown(b) || continue
             key = a < b ? (a, b) : (b, a)
             S[key] = max(get(S, key, 0.0), Float64(s))
@@ -505,7 +629,8 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     everything = m === nothing ? Dict() : get(get(get(m, "views", Dict()), "all", Dict()), "docs", Dict())
     return Dict{String,Any}("nodes" => nodes,
                 "links" => [Any[at[a], at[b], k] for (a, b, k) in E if haskey(at, a) && haskey(at, b)],
-                "similar" => [Any[at[a], at[b], s, (a, b) in linked] for ((a, b), s) in S if haskey(at, a) && haskey(at, b)],
+                "similar" => [Any[at[a], at[b], s, (a, b) in linked || get(judged, (a, b), false), haskey(judged, (a, b)) && !judged[(a, b)]]
+                              for ((a, b), s) in S if haskey(at, a) && haskey(at, b)],
                 "clusters" => clusters, "built_at" => m === nothing ? nothing : m["built_at"], "abstracts" => abstracts,
                 "abstract_only" => count(id -> seen(id) && !Bool(rows[id].read), keys(everything)))
 end

@@ -2821,7 +2821,7 @@ end
     write(K.explore_path(kb.config), JSON.json(Dict("version" => 3, "input_sha" => "", "built_at" => "then", "layer" => "l", "views" => Dict(
         "all" => Dict("clusters" => [reefs; Dict("id" => 2, "name" => "", "description" => "", "closed_name" => "diary")],
                       "docs" => Dict("2401.00001" => place([["2401.00002", 0.9], [rec, 0.6]]), "2401.00002" => place([["2401.00001", 0.9], [mine, 0.7]]),
-                                     rec => place([["2401.00005", 0.8]]), mine => merge(place([["2401.00002", 0.7]]), Dict("c" => 2)))),
+                                     rec => merge(place([["2401.00005", 0.8]]), Dict("lib" => [["2401.00002", 0.55]])), mine => merge(place([["2401.00002", 0.7]]), Dict("c" => 2)))),
         "read" => Dict("clusters" => reefs, "docs" => Dict("2401.00001" => place([])))))))
     K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score, nearest, found_at, relevance)
                       VALUES ('2401.00002', 'Fast surveys of reefs', '[]', 'On reefs.', '2017-03-01', 'q-bio', 0.5, 'Reefs', 0.5, '[]', ?, 2)""", (K.now_iso(),))
@@ -2834,6 +2834,7 @@ end
     # Nearest by meaning, once a pair, saying whether a link joins them already.
     near = Dict(Tuple(sort([g["nodes"][e[1]+1]["id"], g["nodes"][e[2]+1]["id"]])) => (e[3], e[4]) for e in g["similar"])
     @test near[("2401.00001", "2401.00002")] == (0.9, false) && near[Tuple(sort(["2401.00005", rec]))] == (0.8, true)
+    @test near[Tuple(sort(["2401.00002", rec]))] == (0.55, false)                   # a note's nearest in the library
     @test pairs(g, "links") == Set([("2401.00001", "2401.00005"), ("2401.00001", "2401.00006"), Tuple(sort([rec, "2401.00005"]))])
     n1 = only(n for n in g["nodes"] if n["id"] == "2401.00001")
     @test n1["x"] == [0.1, 0.2] && n1["ux"] == [0.3, 0.4] && n1["cluster"] == 1 && n1["year"] == "2017" && n1["links"] == 2 && first(g["clusters"])["name"] == "Reefs"
@@ -2842,6 +2843,27 @@ end
     @test n1["central"] == 0.8 && !haskey(n1, "rating") && only(n for n in g["nodes"] if n["id"] == "2401.00002")["rating"] == 2
     own = only(n for n in g["nodes"] if n["id"] == mine)
     @test own["mine"] && own["access"] == "private" && !n1["mine"] && n1["access"] == "open"
+    # Pairs judged from the suggestions: related ones linked as a person's, others no longer suggested.
+    judged(g) = Dict(Tuple(sort([g["nodes"][e[1]+1]["id"], g["nodes"][e[2]+1]["id"]])) => (e[4], e[5]) for e in g["similar"])
+    K.judge_pair!(kb, as(ada), "2401.00002", "2401.00001", true)
+    K.judge_pair!(kb, as(ada), mine, "2401.00002", false)
+    g = graph(as(ada))
+    @test ("2401.00001", "2401.00002") in pairs(g, "links") && judged(g)[("2401.00001", "2401.00002")] == (true, false)
+    @test judged(g)[Tuple(sort([mine, "2401.00002"]))] == (false, true)
+    @test !(("2401.00001", "2401.00002") in pairs(graph(as(ada); links = ("cites",)), "links"))
+    K.judge_pair!(kb, as(ada), "2401.00001", "2401.00002", nothing)
+    @test judged(graph(as(ada)))[("2401.00001", "2401.00002")] == (false, false)
+    # Only of documents one sees, and not of one with itself.
+    @test_throws K.Refusal K.judge_pair!(kb, as(bea), mine, "2401.00002", true)
+    @test_throws ErrorException K.judge_pair!(kb, as(ada), "2401.00002", "2401.00002", true)
+    # A note's nearest in the library, kept though other notes are nearer, are pairs too.
+    X = K.unit_columns([1.0 0.9 0.0 0.8; 0.0 0.1 1.0 0.6])
+    @test K.nearest_library(X, [true, true, false, false], 1) == Dict(1 => [(4, X[:, 1]' * X[:, 4])], 2 => [(4, X[:, 2]' * X[:, 4])])
+    @test isempty(K.nearest_library(X, falses(4), 1))
+    # What a pair shares: the words both use that few others do; nothing of a document one may not see.
+    @test K.shared_words(kb, as(ada), [(rec, "2401.00005")]) == [["untitled"]]
+    @test K.shared_words(kb, as(bea), [(mine, "2401.00002")]) == [String[]]
+    @test K.pair_words("Füße Reefs, the reef's surveys and Gauß's grass") == Set(["füße", "reef", "survey", "gauß", "grass"])
     # By default only the documents read in full, on their own map; one known by its abstract alone,
     # centred on, brings the rest.
     fully = Set(String(r.doc_id) for r in K.query(kb, "SELECT doc_id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))

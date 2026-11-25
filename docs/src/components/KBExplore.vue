@@ -7,7 +7,7 @@
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
-import { ref, shallowRef, computed, watch, nextTick } from 'vue'
+import { ref, shallowRef, triggerRef, computed, watch, nextTick } from 'vue'
 import { useData } from 'vitepress'
 import { getJSON, post, can, onLive } from './kbApi'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
@@ -17,14 +17,14 @@ type Node = { id: string; kind: string; title: string; year?: string; page: stri
               x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]; cluster?: number
               central?: number; rating?: number }
 type Cluster = { id: number; name: string; description: string; size: number }
-type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean][]; clusters: Cluster[];
+type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean, boolean][]; clusters: Cluster[];
                built_at: string | null; job: string | null; abstracts: boolean; abstract_only: number }
 type Near = { node: Node; similarity: number; linked: boolean }
-type Pair = { a: Node; b: Node; similarity: number; score: number }
+type Pair = { a: Node; b: Node; similarity: number; score: number; at: number }
 
 const { isDark } = useData()
 
-const LINK_KINDS = [['cites', 'Citations'], ['refers', 'References'], ['evidence', 'Evidence'], ['task', 'Tasks']] as const
+const LINK_KINDS = [['cites', 'Citations'], ['refers', 'References'], ['related', 'Related'], ['evidence', 'Evidence'], ['task', 'Tasks']] as const
 const NODE_KINDS = [['paper', 'Papers'], ['record', 'Notes and records'], ['code', 'Codebases'], ['resource', 'Resources'],
                     ['finding', 'Findings'], ['task', 'Tasks']] as const
 const KIND_COLOURS: Record<string, string> = { paper: '#5b8def', record: '#3dd68c', code: '#f0a35e', resource: '#c58af9',
@@ -37,7 +37,7 @@ const WHOSE_COLOURS: Record<string, string> = { mine: '#ff7ab6', projects: '#f0a
 const whose = (n: Node) => (n.mine || n.access === 'private' ? 'mine' : n.access === 'projects' ? 'projects' : 'open')
 // A reader's own: what is held for them, and notes and records (on a knowledge base of one, held for no one).
 const own = (n: Node) => !!n.mine || n.access === 'private' || n.kind === 'record'
-const LINK_COLOURS: Record<string, string> = { cites: '#8ab4f8', refers: '#3dd68c', evidence: '#f6d55c', task: '#ef6f6c' }
+const LINK_COLOURS: Record<string, string> = { cites: '#8ab4f8', refers: '#3dd68c', related: '#c58af9', evidence: '#f6d55c', task: '#ef6f6c' }
 const SCALE_2D = 700, SCALE_3D = 360
 
 // What is drawn, kept between visits.
@@ -51,7 +51,7 @@ const fly = ref(false)
 const layout = ref<'tsne' | 'umap'>(stored('layout', 'tsne'))
 watch(layout, v => keep('layout', v))
 const colourBy = ref<'cluster' | 'kind' | 'whose'>(stored('colour', 'cluster'))
-const shownLinks = ref<string[]>(stored('links', ['cites', 'refers', 'evidence']))
+const shownLinks = ref<string[]>(stored('links', ['cites', 'refers', 'related', 'evidence']))
 const shownKinds = ref<string[]>(stored('kinds', ['paper', 'record', 'code', 'resource', 'finding']))
 const threshold = ref<number>(stored('threshold', 0.8))
 // Pairs close in meaning across the whole map: off at first, the selected document's own being drawn from it.
@@ -122,28 +122,40 @@ const linksOf = computed(() => {
 })
 const clusterName = (id?: number) => data.value?.clusters.find(c => c.id === id)?.name ?? ''
 
-// Pairs near in meaning that no link joins: the strongest first, those across clusters or kinds a little ahead.
-const scope = ref<'all' | 'cluster' | 'own'>('all')
+// Pairs near in meaning that no link joins and no one judged unrelated: the strongest first, those across
+// clusters or kinds a little ahead. By default those where one side is the reader's own work (a note, a
+// record, a finding) and the other is not: what they might cite or rest on.
+const scope = ref<'all' | 'cluster' | 'own'>(stored('scope', 'own'))
+watch(scope, v => keep('scope', v))
+const work = (n: Node) => own(n) || n.kind === 'finding'
+// Notes and papers are written differently and are less alike as text than two papers: the reader's own
+// work is shown beside its nearest down to this, a few each, whatever the threshold.
+const OWN_FLOOR = 0.5, OWN_EACH = 3
 const pairs = computed<Pair[]>(() => {
   const g = data.value
   if (!g) return []
   const here = selected.value?.cluster
   const out: Pair[] = []
-  for (const [i, j, s, linked] of g.similar) {
-    if (linked || s < threshold.value) continue
-    const a = g.nodes[i], b = g.nodes[j]
-    if (scope.value === 'cluster' && here !== undefined && a.cluster !== here && b.cluster !== here) continue
-    if (scope.value === 'own' && own(a) === own(b)) continue
+  const mine = scope.value === 'own'
+  g.similar.forEach(([i, j, s, linked, dismissed], at) => {
+    if (linked || dismissed || s < (mine ? OWN_FLOOR : threshold.value)) return
+    let a = g.nodes[i], b = g.nodes[j]
+    if (scope.value === 'cluster' && here !== undefined && a.cluster !== here && b.cluster !== here) return
+    if (scope.value === 'own' && work(a) === work(b)) return
+    if (work(b) && !work(a)) [a, b] = [b, a]                                  // the reader's own first
     const score = s + (a.cluster !== b.cluster ? 0.04 : 0) + (a.kind !== b.kind ? 0.04 : 0)
-    out.push({ a, b, similarity: s, score })
-  }
-  return out.sort((x, y) => y.score - x.score).slice(0, 40)
+    out.push({ a, b, similarity: s, score, at })
+  })
+  out.sort((x, y) => y.score - x.score)
+  if (!mine) return out.slice(0, 40)
+  const each = new Map<string, number>()
+  return out.filter(p => (each.set(p.a.id, (each.get(p.a.id) ?? 0) + 1).get(p.a.id)! <= OWN_EACH)).slice(0, 40)
 })
 
 async function load() {
   loading.value = true
   error.value = ''
-  const q = new URLSearchParams({ links: 'cites,refers,evidence,task', kinds: 'paper,record,code,resource,finding,task',
+  const q = new URLSearchParams({ links: 'cites,refers,related,evidence,task', kinds: 'paper,record,code,resource,finding,task',
                                   ...(abstracts.value ? { abstracts: '1' } : {}) })
   try {
     const g: Graph = await getJSON(`/api/graph?${q}`)
@@ -269,7 +281,7 @@ function shade(n: Node) {
   if (litRow.value) {
     if (legendKey(n) !== litRow.value) return isDark.value ? '#3a3a44' : '#d8d8de'
     const t = standing.value.get(n.id)
-    return t === undefined ? c : mix(isDark.value ? '#111116' : '#fafafa', c, 0.22 + 0.78 * t)
+    return t === undefined ? c : mix(isDark.value ? '#111116' : '#fafafa', c, 0.38 + 0.62 * t)
   }
   if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return isDark.value ? '#55555f' : '#c8c8ce'
   return c
@@ -663,6 +675,7 @@ function discTexture(THREE: any) {
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
 // How a linked document stands to the one shown: what it does to this one, or this one to it.
 const RELATIONS: Record<string, [string, string]> = { cites: ['cites', 'cited by'], refers: ['refers to', 'referred to by'],
+                                                     related: ['related to', 'related to'],
                                                      evidence: ['rests on', 'evidence for'], task: ['linked to', 'task on'] }
 const relation = (kind: string, out: boolean) => (RELATIONS[kind] ?? [kind, kind])[out ? 0 : 1]
 const kindName = (k: string) => ({ paper: 'paper', record: 'note or record', code: 'codebase', resource: 'resource', finding: 'finding', task: 'task' }[k] ?? k)
@@ -842,10 +855,42 @@ async function addEvidence(finding: Node, doc: Node) {
     await load()
   } catch (e: any) { said.value = `Not added: ${e.message ?? e}` }
 }
+// A pair judged: related, made a link of the reader's; or not, no longer suggested.
+const judgeable = (p: Pair) => can('paper.add') && ![p.a.kind, p.b.kind].some(k => k === 'finding' || k === 'task')
+async function judge(p: Pair, related: boolean) {
+  const g = data.value
+  if (!g) return
+  try {
+    await post('/api/graph/pair', JSON.stringify({ a: p.a.id, b: p.b.id, related }))
+    const e = g.similar[p.at]
+    if (related) { e[3] = true; g.links.push([e[0], e[1], 'related']) } else e[4] = true
+    triggerRef(data)
+    refresh()
+    said.value = related ? `Linked as related: ${p.a.title} and ${p.b.title}` : 'No longer suggested'
+  } catch (e: any) { said.value = `Not saved: ${e.message ?? e}` }
+}
+const showPairs = ref(false)
+// The words each pair shown shares, fetched for the pairs on screen, by pair.
+const shared = ref<Map<string, string[]>>(new Map())
+const pairKey = (p: Pair) => `${p.a.id},${p.b.id}`
+let sharedTimer: ReturnType<typeof setTimeout> | undefined
+watch([pairs, showPairs], () => {
+  clearTimeout(sharedTimer)
+  if (!showPairs.value) return
+  const todo = pairs.value.filter(p => !shared.value.has(pairKey(p)))
+  if (!todo.length) return
+  sharedTimer = setTimeout(async () => {
+    try {
+      const got = await getJSON(`/api/graph/shared?pairs=${encodeURIComponent(todo.map(pairKey).join(';'))}`)
+      const next = new Map(shared.value)
+      todo.forEach((p, i) => next.set(pairKey(p), got.shared?.[i] ?? []))
+      shared.value = next
+    } catch { /* left without */ }
+  }, 200)
+})
 function goPair(p: Pair) { go(p.a); setTimeout(() => { selected.value = p.a }, 50) }
 const nearSelected = computed(() => (nearOf.value.get(selected.value?.id ?? '') ?? []).slice(0, 8))
 const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? '') ?? [])
-const showPairs = ref(false)
 </script>
 
 <template>
@@ -991,13 +1036,14 @@ const showPairs = ref(false)
         <button class="kbx-close" aria-label="Close" @click="showPairs = false">×</button>
         <h4>Suggested links</h4>
         <div class="kbx-seg kbx-seg-small kbx-scope" role="group" aria-label="Where">
-          <button :class="{ on: scope === 'all' }" @click="scope = 'all'">Everywhere</button>
+          <button :class="{ on: scope === 'own' }" title="Your notes, records and findings, beside what they do not link to yet"
+                  @click="scope = 'own'">Yours</button>
           <button :class="{ on: scope === 'cluster' }" :disabled="!selected" :title="selected ? '' : 'Select a document first'"
                   @click="scope = 'cluster'">This cluster</button>
-          <button :class="{ on: scope === 'own' }" title="Your notes and documents, and the shared ones close to them"
-                  @click="scope = 'own'">Yours</button>
+          <button :class="{ on: scope === 'all' }" @click="scope = 'all'">Everywhere</button>
         </div>
-        <p class="kbx-pairs-hint">Alike in meaning, {{ Math.round(threshold * 100) }}% or more, and not linked.</p>
+        <p class="kbx-pairs-hint">{{ scope === 'own' ? `Your notes, records and findings, each beside the library documents nearest it that it does not link to, ${Math.round(OWN_FLOOR * 100)}% alike or more.` :
+          `Documents close in meaning that nothing links, ${Math.round(threshold * 100)}% alike or more.` }}</p>
         <p v-if="!pairs.length" class="kbx-pairs-hint">None.</p>
         <ul class="kbx-list kbx-pair-list">
           <li v-for="p in pairs" :key="p.a.id + p.b.id">
@@ -1006,10 +1052,17 @@ const showPairs = ref(false)
                 <a href="#" :title="p.a.title" @click.prevent="goPair(p)">{{ p.a.title }}</a></div>
               <div class="kbx-pair-doc"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[p.b.kind] ?? '#999' }"></i>
                 <a href="#" :title="p.b.title" @click.prevent="go(p.b)">{{ p.b.title }}</a></div>
-              <div v-if="(p.a.kind === 'finding') !== (p.b.kind === 'finding') && can('tasks.edit')" class="kbx-pair-act">
-                <a href="#" @click.prevent="p.a.kind === 'finding' ? addEvidence(p.a, p.b) : addEvidence(p.b, p.a)">Add as evidence</a></div>
-              <div v-else-if="(p.a.kind === 'record' && p.b.kind === 'paper') || (p.b.kind === 'record' && p.a.kind === 'paper')" class="kbx-pair-act">
-                <a href="#" @click.prevent="copyCitation(p.a.kind === 'paper' ? p.a : p.b)">Copy the paper's citation</a></div>
+              <p v-if="shared.get(pairKey(p))?.length" class="kbx-pair-why">Shared: {{ shared.get(pairKey(p))!.join(' · ') }}</p>
+              <div class="kbx-pair-act">
+                <a v-if="(p.a.kind === 'finding') !== (p.b.kind === 'finding') && can('tasks.edit')" href="#"
+                   @click.prevent="p.a.kind === 'finding' ? addEvidence(p.a, p.b) : addEvidence(p.b, p.a)">Add as evidence</a>
+                <template v-else-if="judgeable(p)">
+                  <a href="#" title="Link the two as related: a line on the map, and in both cards" @click.prevent="judge(p, true)">Link</a>
+                  <a href="#" title="Stop suggesting this pair" @click.prevent="judge(p, false)">Not related</a>
+                </template>
+                <a v-if="(p.a.kind === 'record' && p.b.kind === 'paper') || (p.b.kind === 'record' && p.a.kind === 'paper')" href="#"
+                   @click.prevent="copyCitation(p.a.kind === 'paper' ? p.a : p.b)">Copy the citation</a>
+              </div>
             </div>
             <span class="kbx-aside"><span class="kbx-bar-track"><span class="kbx-bar-fill"
               :style="{ width: `${Math.max(4, Math.round(p.similarity * 100))}%` }"></span></span>{{ Math.round(p.similarity * 100) }}%</span>
@@ -1137,7 +1190,9 @@ const showPairs = ref(false)
 .kbx-pair { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .kbx-pair-doc { display: grid; grid-template-columns: 9px 1fr; align-items: baseline; column-gap: 8px; }
 .kbx-pair-doc a { -webkit-line-clamp: 1; }
-.kbx-pair-act { padding-left: 17px; font-size: 12px; }
+.kbx-pair-act { padding-left: 17px; font-size: 12px; display: flex; gap: 12px; }
+.kbx-pair-act:empty { display: none; }
+.kbx-pair-why { margin: 1px 0 0; padding-left: 17px; font-size: 11.5px; color: var(--vp-c-text-3); }
 .kbx-pair-act a { color: var(--vp-c-brand-1) !important; }
 .kbx-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
 .kbx-close { position: absolute; top: 4px; right: 8px; font-size: 18px; color: var(--vp-c-text-2); }
