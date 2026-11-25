@@ -474,6 +474,8 @@ watch([shownLinks, shownKinds, threshold, showUnlinked], () => {
 }, { deep: true })
 function refresh() {
   if (!graph) return
+  // From an empty map, drawn afresh, which frames what is now shown.
+  if (!graph.graphData().nodes.length) return draw()
   const { nodes, links } = graphData()
   if (view.value === '2d') centres = clusterCentres(nodes)
   graph.graphData({ nodes, links })
@@ -629,6 +631,10 @@ const showPairs = ref(false)
       <p v-if="loading" class="kbx-status">Loading the map…</p>
       <p v-else-if="error" class="kbx-status kb-error">{{ error }}</p>
       <p v-else-if="data && !data.nodes.length" class="kbx-status">Nothing to map yet: documents appear here once they are embedded.</p>
+      <p v-else-if="data && !data.nodes.some(visibleNode)" class="kbx-status">
+        No documents of the kinds chosen in Show.
+        <button class="kbx-btn" @click="shownKinds.splice(0, shownKinds.length, ...NODE_KINDS.map(([k]) => k))">Show all</button>
+      </p>
 
       <div class="kbx-bar">
         <input v-model="query" type="search" class="kb-field kbx-search" placeholder="Search the map… (Enter to go, Tab for the next)" />
