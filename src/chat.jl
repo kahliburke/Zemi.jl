@@ -121,7 +121,7 @@ function chat_context(kb::KB, id::AbstractString)
     return String(take!(io))
 end
 
-"Make a conversation's folder: the paper's PDF and text, and `context.md` (see [`chat_context`](@ref))."
+"Make a conversation's folder: the paper's PDF and text, its figures for a tutor that sees images but not a PDF, and `context.md` (see [`chat_context`](@ref))."
 function chat_folder(kb::KB, chat::AbstractString, id::AbstractString)
     dir = mkpath(agents_dir("chats", chat))
     mkpath(joinpath(dir, "files"))
@@ -130,6 +130,8 @@ function chat_folder(kb::KB, chat::AbstractString, id::AbstractString)
     f = query(kb, "SELECT path FROM files WHERE paper_id = ?", (paper_id(kb, id),))
     pdf = joinpath(dir, "paper.pdf")
     isempty(f) || ispath(pdf) || link_file(first(f).path, pdf)
+    tutor = purpose(kb.config, :tutor).model
+    !agent_reads_pdf(tutor) && agent_views_images(tutor) && is_kind(k -> k.pdf, id) && give_figures!(kb, id, dir)
     return dir
 end
 
@@ -243,7 +245,8 @@ function ask_chat!(kb::KB, id::AbstractString, message::AbstractString; chat = n
             earlier = [m for m in chat_messages(kb, chat).messages[1:end-2] if m.status == "done"]
             "Start from context.md: it summarizes the paper and describes the group. " *
             (agent_reads_pdf(purpose(kb.config, :tutor).model) ? "The paper itself is in paper.pdf, its text in paper.txt. " :
-                                                                  "The paper's text is in paper.txt. ") *
+              "The paper's text is in paper.txt. " * (isfile(joinpath(agents_dir("chats", chat), "figures.md")) ?
+              "Its figures and tables are images in figures/, listed with their captions in figures.md: look at one to discuss it. " : "")) *
             "Your folder is $(agents_dir("chats", chat)).\n\n" * note *
             (isempty(earlier) ? "" : "Our conversation so far:\n\n" *
                 join(("**$(m.role == "user" ? "Student" : "You")**: $(m.text)" for m in earlier), "\n\n") * "\n\n") *

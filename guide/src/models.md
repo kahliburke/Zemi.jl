@@ -40,7 +40,8 @@ Two kinds of model:
   `/v1`).
 - **Agent**: Claude Code, or an agent supporting ACP (Codex, Gemini, OpenCode), run through Kaimon;
   reads the whole paper before summarizing. Claude reads the PDF, figures included, or the extracted
-  text; the others read the text. Needs a Kaimon running on this machine, or Kaimon running the
+  text; Codex reads the text and looks at the figures and tables Zemi cut from the PDF; the others
+  read the text. Needs a Kaimon running on this machine, or Kaimon running the
   knowledge base as its extension.
 
 Built in:
@@ -90,7 +91,7 @@ config file, and can then be chosen under **Who does what**:
 name = "local-agent"
 kind = "agent"
 model = "ollama:qwen3:32b"      # or "sonnet", "acp:codex", "acp:opencode:opencode/glm-5.3-flash", ...
-reads = "text"                  # default "pdf": Claude reads the PDF, other agents the text
+reads = "text"                  # default "pdf": Claude reads the PDF, other agents the text (Codex with the figures)
 
 [[summarizers]]
 name = "local-api"

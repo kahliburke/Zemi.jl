@@ -3585,6 +3585,18 @@ end
         @test length(opened) == n + 2 && K.agent_summaries(kb, s, "2609.00001") == :current
         @test [x.text for x in summaries(kb, "2609.00001"; summarizer = "agent-t")] ==
               ["The document.\nTopics: x", "Part section 1.", "Section 2, read whole."]
+        # An agent that sees images but not a PDF is given the paper's figures, as cut from it, with their captions.
+        codex = Summarizer(; name = "codex-t", kind = :agent, model = "acp:codex", reads = :text)
+        write(joinpath(mkpath(K.figures_dir(kb.config, "2609.00001")), "fig-1.webp"), "image")
+        p1 = K.paper_id(kb, "2609.00001")
+        K.execute!(kb, """INSERT INTO figures (paper_id, kind, number, label, caption, file) VALUES
+                          (?, 'figure', 1, 'Figure 1', 'Figure 1: A flow.', 'fig-1.webp'), (?, 'table', 2, 'Table 2', 'Lost.', 'table-2.webp')""", (p1, p1))
+        @test summarize_paper!(kb, codex, "2609.00001") == 3
+        given = K.agents_dir("codex-t", "2609.00001")
+        @test readdir(joinpath(given, "figures")) == ["fig-1.webp"] && !islink(joinpath(given, "figures", "fig-1.webp"))
+        @test read(joinpath(given, "figures.md"), String) == "- figures/fig-1.webp: Figure 1: A flow.\n"
+        @test occursin("images in figures/", read(joinpath(given, "BRIEF.md"), String))
+        @test !occursin("figures/", read(joinpath(K.agents_dir("agent-t", "2609.00001"), "BRIEF.md"), String))
 
         # An agent that reads the PDF is judged by the PDF and the section list: reading the same PDF
         # better leaves its summaries current, where a text reader's go out of date.

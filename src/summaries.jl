@@ -24,6 +24,12 @@ through its CLI or over ACP. Other ACP agents read a file as bytes, and local mo
 """
 agent_reads_pdf(model::AbstractString) = !occursin(':', model) || startswith(model, "acp:claude")
 
+"""
+Whether the agent `model` names views an image file with its own tools, though not a PDF: Codex. It is
+given a paper's figures and tables as cut from the PDF (see [`give_figures!`](@ref)), beside its text.
+"""
+agent_views_images(model::AbstractString) = startswith(model, "acp:codex")
+
 "Whether `s` is an agent that reads a paper's PDF rather than the text extracted from it: one asked to and able to (see [`agent_reads_pdf`](@ref))."
 reads_pdf(s::Summarizer) = s.kind == :agent && s.reads == :pdf && agent_reads_pdf(s.model)
 

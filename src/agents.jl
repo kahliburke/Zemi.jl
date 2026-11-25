@@ -231,7 +231,11 @@ function agent_brief(reads::Symbol)
         """
         1. Read the whole paper first: paper.txt holds its text, extracted from the PDF. Equations and symbols may be \
         garbled there (fractions flattened, overbars, signs and square roots lost); use the rest of the paper to work \
-        out what they really say, and describe them correctly rather than copying the garbled form."""
+        out what they really say, and describe them correctly rather than copying the garbled form.""" *
+        (reads == :figures ?
+         " The paper's figures and tables are cut from the PDF as images in figures/, each listed with its caption " *
+         "in figures.md. Look at the image of each one a section discusses, with your tool for viewing images (which you " *
+         "may use besides Read and Write), and describe what it shows from the image itself, not from its caption alone." : "")
     """
     task.md names the paper and lists the sections to summarize, each with a number (its "ord") and its heading path.
 
@@ -254,6 +258,26 @@ function agent_brief(reads::Symbol)
     "<paper summary>\\nTopics: ..."} with exactly one entry per listed section (an empty "sections" object if none \
     are listed). Write the JSON carefully: you have no tool to check it. Then reply with one line saying it is written.
     """
+end
+
+"""
+    give_figures!(kb, id, dir) -> Bool
+
+Copy paper `id`'s figures and tables, as cut from its PDF, into `dir/figures`, and list each file with its
+caption in `dir/figures.md`, for an agent that views images but not a PDF (see
+[`agent_views_images`](@ref)). Returns whether there were any.
+"""
+function give_figures!(kb::KB, id::AbstractString, dir::AbstractString)
+    from = figures_dir(kb.config, id)
+    figs = [f for f in paper_figures(kb, id) if isfile(joinpath(from, f.file))]
+    isempty(figs) && return false
+    to = mkpath(joinpath(dir, "figures"))
+    lines = map(figs) do f
+        cp(joinpath(from, f.file), joinpath(to, f.file); force = true)       # copied: small, and readable under confinement
+        "- figures/$(f.file): " * (startswith(f.caption, f.label) ? f.caption : "$(f.label). $(f.caption)")
+    end
+    write(joinpath(dir, "figures.md"), join(lines, "\n") * "\n")
+    return true
 end
 
 """
@@ -291,7 +315,9 @@ function agent_summarize_paper!(kb::KB, s::Summarizer, doc_id::AbstractString; p
     rm(dir; force = true, recursive = true)
     mkpath(dir)
     prompts = summary_prompts(doc_id)
-    reads = reads_pdf(s) && is_kind(k -> k.pdf, doc_id) ? :pdf : :text    # a document not read from a PDF, from its text
+    # A document not read from a PDF, from its text; with its figures, for an agent that sees images.
+    reads = !is_kind(k -> k.pdf, doc_id) ? :text : reads_pdf(s) ? :pdf :
+            s.kind == :agent && agent_views_images(s.model) && give_figures!(kb, doc_id, dir) ? :figures : :text
     write(joinpath(dir, "BRIEF.md"), prompts.agent_brief(reads))
     write(joinpath(dir, "task.md"), "Paper: $(coalesce(p.title, doc_id))\n\nSections to summarize (ord: heading path):\n" *
         join(("- $(t.ord): $(t.path)\n" for t in sections)))
