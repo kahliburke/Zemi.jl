@@ -1008,7 +1008,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
       <div ref="box" class="kbx-canvas"></div>
       <p v-if="loading" class="kbx-status">Loading the map…</p>
       <p v-else-if="error" class="kbx-status kb-error">{{ error }}</p>
-      <p v-else-if="data && !data.nodes.length" class="kbx-status">Nothing to map yet: documents appear here once they are embedded.</p>
+      <p v-else-if="data && !data.nodes.length && !building" class="kbx-status">Nothing to map yet: documents appear here once they are embedded.</p>
       <p v-else-if="data && !data.nodes.some(visibleNode)" class="kbx-status">
         No documents of the kinds chosen in Show.
         <button class="kbx-btn" @click="shownKinds.splice(0, shownKinds.length, ...NODE_KINDS.map(([k]) => k))">Show all</button>
@@ -1073,7 +1073,12 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <p v-if="view === '3d'" class="kbx-hint">Drag to turn, scroll to come closer. F flies: WASD to move, the mouse to steer.{{ fly ? ' Flying: F to stop.' : '' }}</p>
       </details>
 
-      <p v-if="building" class="kbx-building"><span class="kb-spinner"></span> {{ building }}</p>
+      <div v-if="building" class="kbx-building" role="status">
+        <div class="kbx-building-card">
+          <p><span class="kb-spinner"></span> {{ building }}</p>
+          <p class="kbx-building-then">The map redraws when this is done.</p>
+        </div>
+      </div>
       <p v-if="said" class="kbx-said" @click="said = ''">{{ said }}</p>
 
       <aside v-if="selected" class="kbx-card" :class="{ short: driftTrail.length > 1 }">
@@ -1262,8 +1267,12 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-row > span { color: var(--vp-c-text-2); min-width: 5.5rem; }
 .kbx-row label { display: inline-flex; align-items: center; gap: 4px; }
 .kbx-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 2px; }
-.kbx-building { position: absolute; bottom: 10px; left: 10px; font-size: 13px; color: var(--vp-c-text-2); background: var(--vp-c-bg);
-                padding: 3px 10px; border-radius: 8px; border: 1px solid var(--vp-c-divider); display: flex; gap: 6px; align-items: center; }
+.kbx-building { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
+                background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(2px); }
+.kbx-building-card { background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); border-radius: 12px; padding: 18px 26px;
+                     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25); text-align: center; max-width: min(32rem, 90%); }
+.kbx-building-card p { margin: 0; font-size: 15px; display: flex; gap: 10px; align-items: center; justify-content: center; }
+.kbx-building-card .kbx-building-then { margin-top: 6px; font-size: 13px; color: var(--vp-c-text-2); }
 .kbx-said { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 13px; background: var(--vp-c-bg);
             padding: 3px 12px; border-radius: 8px; border: 1px solid var(--vp-c-divider); cursor: pointer; }
 .kbx-card, .kbx-pairs { position: absolute; top: 52px; left: 10px; width: min(24rem, 45%); max-height: calc(100% - 64px); overflow: auto;
