@@ -19,8 +19,13 @@ html.kbx-takeover .VPFooter { display: none; }
 .kbx-crumb { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .kbx-top { display: inline-flex; align-items: center; gap: 4px; color: var(--vp-c-text-2); white-space: nowrap; }
 .kbx-top input { width: 4rem; padding: 0 4px; border: 1px solid var(--vp-c-divider); border-radius: 4px; background: var(--vp-c-bg); }
-.kbx-map-row { padding: 0 6px; font-size: 12px; color: var(--vp-c-text-3); border-radius: 4px; }
-.kbx-map-row:hover { color: var(--vp-c-brand-1); background: var(--vp-c-default-soft); }
+.kbx-map-row { display: inline-flex; align-items: center; padding: 1px 4px; color: var(--vp-c-text-3); border-radius: 4px; }
+.kbx-map-row:hover, .kbx-map-row:focus-visible { color: var(--vp-c-brand-1); background: var(--vp-c-default-soft); }
+/* Its tip, above the row and inside the panel, which scrolls and would cut off anything outside it. */
+.kbx-map-row:hover::after, .kbx-map-row:focus-visible::after {
+  content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 3px); z-index: 2; max-width: 100%; width: max-content;
+  padding: 4px 8px; border: 1px solid var(--vp-c-divider); border-radius: 6px; background: var(--vp-c-bg-elv); box-shadow: var(--vp-shadow-2);
+  color: var(--vp-c-text-1); font-size: 12px; line-height: 1.35; text-align: left; white-space: normal; pointer-events: none; }
 .kbx-pick { font-size: 12px; padding: 2px 6px; }
 .kbx-search { flex: 1 1 18rem; max-width: 30rem; background: var(--vp-c-bg); }
 .kbx-seg { display: inline-flex; border: 1px solid var(--vp-c-divider); border-radius: 8px; overflow: hidden; background: var(--vp-c-bg); }
@@ -43,7 +48,7 @@ html.kbx-takeover .VPFooter { display: none; }
 .kbx-shade { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0 4px; color: var(--vp-c-text-2); }
 .kbx-shade .kbx-seg button { padding: 2px 7px; }
 .kbx-key ul { list-style: none; margin: 4px 0 2px; padding: 0; }
-.kbx-key li { display: flex; align-items: center; }
+.kbx-key li { position: relative; display: flex; align-items: center; }
 .kbx-key li button:not(.kbx-map-row) { flex: 1; min-width: 0; width: 100%; display: grid; grid-template-columns: 9px 1fr auto; align-items: center; column-gap: 7px;
                      padding: 1px 4px; margin: 0 -4px; border-radius: 4px; text-align: left; }
 .kbx-key li button:not(.kbx-map-row):hover { background: var(--vp-c-default-soft); }

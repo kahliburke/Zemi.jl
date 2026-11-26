@@ -123,7 +123,7 @@ The panel at the top right has two tabs:
 clusters are found again at a finer grain, so one cluster of the full map comes apart into its
 subtopics:
 
-- a cluster, from ⤢ on its legend row, and a cluster of that map in turn, a level further in;
+- a cluster, from the lens on its legend row, and a cluster of that map in turn, a level further in;
 - a project's library, chosen under **Settings**;
 - the documents a search finds (**Map these**: the first 100, and **top** beside its name sets how
   many, up to 500);

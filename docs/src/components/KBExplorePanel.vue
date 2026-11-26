@@ -3,6 +3,7 @@
 // and the settings (layout, a project's library to map, the links and documents drawn, unlinked pairs).
 // The settings are the page's (see `useExploreSettings`), taken up here.
 import { can } from './kbApi'
+import KBIcon from './KBIcon.vue'
 import { COLOUR_BY, KIND_COLOURS, LINK_COLOURS, LINK_KINDS, NODE_KINDS, SHADE_BY, all, toggle, useSettings,
          type LegendRow } from './kbExplore'
 
@@ -37,8 +38,9 @@ const { panel, colourBy, shadeBy, layout, shownLinks, shownKinds, showUnlinked, 
         <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="$emit('goToRow', r.key)">
           <i class="kbx-swatch" :style="{ background: r.colour }"></i>
           <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button>
-          <button v-if="r.key[0] === 'c'" class="kbx-map-row" :title="`Map ${r.label} by itself`" :aria-label="`Map ${r.label} by itself`"
-                  @click="$emit('map', 'cluster:' + r.key.slice(1) + (subset ? '@' + subset : ''))">⤢</button></li>
+          <button v-if="r.key[0] === 'c'" class="kbx-map-row" :data-tip="`Map ${r.label} by itself, into its subtopics`"
+                  :aria-label="`Map ${r.label} by itself`"
+                  @click="$emit('map', 'cluster:' + r.key.slice(1) + (subset ? '@' + subset : ''))"><KBIcon name="zoom_in" :size="15" /></button></li>
       </ul>
     </div>
     <div v-if="panel === 'show'" role="tabpanel">
