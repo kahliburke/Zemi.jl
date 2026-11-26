@@ -275,6 +275,13 @@ function uncovered() {
 // Where a node is fixed (every node is, see `graphData`): known as soon as it is drawn, before the graph's
 // first tick gives it `x` and `y`, so a move just after a redraw finds it.
 const placed = (n: GNode) => n.fx !== undefined
+// The whole map, as the view first shows it: the documents with a place by meaning (not those set on the
+// ring around it), all but the farthest few, so outliers do not hold the view far out.
+const frameAll = (ms?: number) => {
+  const ns: GNode[] = (graph?.graphData().nodes ?? []).filter(placed)
+  const mapped = ns.filter(n => n.cluster !== undefined)
+  frameNodes(mapped.length >= 3 ? mapped : ns, 0.95, ms)
+}
 const spot = (n: GNode): [number, number, number] => [n.fx!, n.fy!, n.fz ?? 0]
 function frameNodes(ns: GNode[], most: number, ms = 1100) {
   if (!ns.length || !graph) return
@@ -304,7 +311,7 @@ watch(selected, n => { if (n) litRow.value = null })
 function resetView() {
   stopDrift()
   litRow.value = null
-  frameNodes((graph?.graphData().nodes ?? []).filter(placed), 1)
+  frameAll()
 }
 // A legend row's documents shaded from faint to full by how much each stands out in it: its links among
 // the documents here (the cluster's middle deciding among the unlinked), how central it is in meaning,
@@ -843,7 +850,7 @@ function back() { const n = trail.pop(); if (n) go(n, false) }
 function settle(was: View | null) {
   drawnView = view.value
   if (was) applyView(was)
-  setTimeout(() => keepSelected() || frameNodes((graph?.graphData().nodes ?? []).filter(placed), 1, 900),
+  setTimeout(() => keepSelected() || frameAll(900),
              was ? 0 : 300)
 }
 // After the map is drawn again (another view, layout or theme), the selected document stays selected and
