@@ -3132,6 +3132,22 @@ end
     close(kb)
 end
 
+@zset "groups a layout leaves far apart are brought in" begin
+    rng = K.Random.MersenneTwister(4)
+    a = randn(rng, 40, 2) .* 0.05
+    b = [50.0 0.0; 50.01 0.01]                                      # two documents far off on one side, together
+    Y = K.packed([a; b])
+    middle = vec(sum([a; b]; dims = 1) ./ 42)
+    radius = sort([sqrt(sum(abs2, r .- middle)) for r in eachrow([a; b])])[38]
+    gap = minimum(sqrt(sum(abs2, Y[i, :] .- Y[j, :])) for i in 1:40, j in 41:42)
+    @test isapprox(gap, 0.2 * radius; rtol = 0.01)                  # brought in, still apart
+    @test Y[1:40, :] == a && Y[41:42, :] .- Y[41, :]' ≈ b .- b[1, :]'   # each group as it was, the far one moved whole
+    @test Y[41, 1] > maximum(a[:, 1])                               # on the side it was
+    @test K.packed(a) == a                                          # one group: nothing moves
+    many = randn(rng, 12, 2) .* 0.05 .+ [50.0 0.0]                  # a whole topic far off keeps its place
+    @test K.packed([a; many]) == [a; many]
+end
+
 @zset "landscape" begin
     HTTP, JSON = K.HTTP, K.JSON
     qdrant, colls, qport = standin_qdrant()

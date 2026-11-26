@@ -220,7 +220,7 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 8
+const EXPLORE_VERSION = 9
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -309,6 +309,55 @@ function nearest_library(X::AbstractMatrix, own::AbstractVector{Bool}, k::Intege
 end
 
 """
+    packed(Y; near = nothing, link = 6, most = 0.2, few = 0.05) -> Matrix
+
+Positions `Y` (one row each) with a few documents left far apart brought in: points within `link` times
+the layout's typical spacing (the median distance from a point to its nearest) are one group, and a group
+of no more than `few` of the documents, further than `most` of the layout's radius (from its middle to all
+but the farthest tenth) from those placed before it, the biggest groups placed first, is moved straight
+toward one of them until that is the gap: the one nearest it in meaning (`near`, each row's nearest as `(row, similarity)`), else the
+nearest on the layout. A group keeps its shape; larger groups, and those nearer, stay where the layout put
+them: only the wide empty space goes that a layout can leave around a few documents unlike any others.
+"""
+function packed(Y::AbstractMatrix; near = nothing, link::Real = 6, most::Real = 0.2, few::Real = 0.05)
+    n = size(Y, 1)
+    n < 3 && return Y
+    Y = copy(Y)
+    D = [sqrt(sum(abs2, view(Y, i, :) .- view(Y, j, :))) for i in 1:n, j in 1:n]
+    spacing = sort!([minimum(D[i, j] for j in 1:n if j != i) for i in 1:n])[cld(n, 2)]
+    spacing > 0 || return Y
+    middle = sum(Y; dims = 1) ./ n
+    radius = sort!([sqrt(sum(abs2, view(Y, i, :) .- vec(middle))) for i in 1:n])[clamp(ceil(Int, 0.9n), 1, n)]
+    widest = most * radius
+    # Groups: joined wherever two points are within `link` spacings.
+    root = collect(1:n)
+    find(i) = (while root[i] != i; root[i] = root[root[i]]; i = root[i]; end; i)
+    for i in 1:n, j in i+1:n
+        D[i, j] <= link * spacing && (root[find(i)] = find(j))
+    end
+    groups = collect(values(foldl((g, i) -> (push!(get!(g, find(i), Int[]), i); g), 1:n; init = Dict{Int,Vector{Int}}())))
+    length(groups) == 1 && return Y
+    sort!(groups; by = length, rev = true)
+    placed = copy(first(groups))
+    for g in groups[2:end]
+        # Toward the placed document it is most like, from its member most like it; else the nearest on the layout.
+        here = Set(placed)
+        alike = near === nothing ? () : ((s, i, j) for i in g for (j, s) in near[i] if j in here)
+        a, b = isempty(alike) ? minimum((D[i, j], i, j) for i in g for j in placed)[2:3] : maximum(alike)[2:3]
+        d = D[a, b]
+        if d > widest && length(g) <= max(3, few * n)
+            step = (Y[b, :] .- Y[a, :]) .* ((d - widest) / d)
+            Y[g, :] .+= step'
+            for i in g, j in 1:n                                       # its distances to the rest, as moved
+                D[i, j] = D[j, i] = sqrt(sum(abs2, view(Y, i, :) .- view(Y, j, :)))
+            end
+        end
+        append!(placed, g)
+    end
+    return Y
+end
+
+"""
 Positions `Y` (one row each) about their centre, scaled so all but the farthest few lie within -1 to 1:
 a layout's outliers do not crowd the rest together. Those beyond are drawn in to 1.3.
 """
@@ -387,18 +436,21 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
         sort!(partialsortperm(often, 1:EXPLORE_LAYOUT_LIMIT; rev = true))
     end
     progress("Exploring $n $what: laying out the map")
-    flat = centred(tsne(X[:, laid]; dims = 2))
+    # The nearest by meaning of the laid out, as rows of their layout, for bringing in groups left apart.
+    row = Dict(r => k for (k, r) in enumerate(laid))
+    near_laid = [[(row[m], s) for (m, s) in near[i] if haskey(row, m)] for i in laid]
+    flat = centred(packed(tsne(X[:, laid]; dims = 2); near = near_laid))
     cancelled() && return nothing
     progress("Exploring $n $what: laying out the space")
-    deep = centred(tsne(X[:, laid]; dims = 3))
+    deep = centred(packed(tsne(X[:, laid]; dims = 3); near = near_laid))
     cancelled() && return nothing
     # UMAP too, which keeps more of how the groups lie to each other: every document, its cost growing with their number.
     progress("Exploring $n $what: laying out the map and the space by UMAP")
-    uflat, udeep = centred(umap(X; dims = 2, min_dist = 0.4)), centred(umap(X; dims = 3, min_dist = 0.4))
+    uflat, udeep = centred(packed(umap(X; dims = 2, min_dist = 0.4); near)), centred(packed(umap(X; dims = 3, min_dist = 0.4); near))
     cancelled() && return nothing
     # And PaCMAP, which keeps the arrangement between groups better still.
     progress("Exploring $n $what: laying out the map and the space by PaCMAP")
-    pflat, pdeep = centred(pacmap(X; dims = 2)), centred(pacmap(X; dims = 3))
+    pflat, pdeep = centred(packed(pacmap(X; dims = 2); near)), centred(packed(pacmap(X; dims = 3); near))
     pos2, pos3 = zeros(n, 2), zeros(n, 3)
     pos2[laid, :], pos3[laid, :] = flat, deep
     # The rest among their nearest laid out, a little apart.
