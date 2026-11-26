@@ -6238,6 +6238,11 @@ end
     @test K.schema_version() == n + 2 && K.MIGRATIONS[n + 2] == ["SELECT 2"]
     pop!(K.MIGRATIONS); pop!(K.MIGRATIONS)
     @test K.schema_version() == n
+    # Each migration is defined in one place: a second definition of a number would replace the first.
+    src = joinpath(pkgdir(K), "src")
+    defined = [parse(Int, m[1]) for f in readdir(src; join = true) if endswith(f, ".jl")
+               for m in eachmatch(r"^migration!\((\d+),"m, read(f, String))]
+    @test allunique(defined) && sort(defined) == 1:n
     # Pages follow changes: a wait answers at once when it is behind, wakes on the next change, and
     # gives up after its timeout.
     v = K.TASKS_VERSION[]

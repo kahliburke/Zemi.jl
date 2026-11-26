@@ -8,13 +8,13 @@ migration!(24, ["ALTER TABLE papers ADD COLUMN cite_key TEXT",
 # The keys a person cites documents by in a bibliography of their own (a `.bib` file in their library,
 # see library_bibtex.jl), beside each document's own: whose library (its space), the key, the
 # document, and the file the key is from. Each person's are theirs alone.
-migration!(25, ["""CREATE TABLE cite_aliases (
+migration!(27, ["""CREATE TABLE IF NOT EXISTS cite_aliases (
                        space TEXT NOT NULL,
                        key TEXT NOT NULL,
                        paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
                        origin TEXT NOT NULL,
                        PRIMARY KEY (space, key))""",
-                "CREATE INDEX cite_aliases_paper ON cite_aliases (paper_id)"])
+                "CREATE INDEX IF NOT EXISTS cite_aliases_paper ON cite_aliases (paper_id)"])
 
 "The library whose citation keys `caller` cites by (see `cite_aliases`): their space, or `nothing` for no one."
 cite_space(caller::Caller) = caller.via in (:local, :owner) ? "people/local" : caller.user_id === nothing ? nothing : "people/$(caller.user_id)"
