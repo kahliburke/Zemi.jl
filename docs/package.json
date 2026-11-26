@@ -5,7 +5,8 @@
     "@types/three": "^0.187.0",
     "playwright-core": "^1.63.0",
     "typescript": "^6.0.3",
-    "vue-tsc": "^3.3.14"
+    "vue-tsc": "^3.3.14",
+    "workbox-build": "^7.4.1"
   },
   "scripts": {
     "docs:dev": "vitepress dev build/.documenter",

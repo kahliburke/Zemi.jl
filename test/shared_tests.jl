@@ -1110,7 +1110,7 @@ end
     icon() = K.web_manifest(c)["icons"][1]["src"]
     before = icon()
     own = K.content_path(c, "assets", "logo.png")
-    @test !isfile(own) && startswith(before, "/android-chrome-512x512.png?v=")
+    @test !isfile(own) && startswith(before, "zemi-icon-192.png?v=")
     mkpath(dirname(own)); write(own, "another logo")
     @test icon() != before
     rm(own)
@@ -1166,6 +1166,18 @@ end
     end
     @test length(read(K.site_icon(kb.config))) < 16_000                                             # the small one is small
     @test occursin("""<link rel="icon" type="image/png" href="/favicon.png">""", page)
+    # A shared site uses its network-only worker even if the files came from a public demo build.
+    served = K.current_site(c)
+    K.write_install_files(c, served)
+    write(joinpath(served, "zemi-sw.js"), "// public demo worker")
+    @test req("GET", "/zemi-sw.js").body == read(K.SERVICE_WORKER)
+    manifest = JSON.parse(String(req("GET", "/manifest.webmanifest").body))
+    @test manifest["start_url"] == manifest["scope"] == "./"
+    for icon in manifest["icons"]
+        r = req("GET", "/" * icon["src"])
+        @test r.status == 200 && HTTP.header(r, "Content-Type") == "image/png"
+        @test join(size(K.PNGFiles.load(IOBuffer(r.body))), "x") == icon["sizes"]
+    end
     @test req("GET", "/api/status").status == 401
     @test !HTTP.hasheader(req("GET", "/api/status"), "Access-Control-Allow-Origin")       # no other site reads its answers
 

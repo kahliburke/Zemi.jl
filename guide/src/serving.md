@@ -73,6 +73,15 @@ Zemi serves the knowledge base at `/kb/`, findings at `/findings` and projects a
 `/projects`. A link can include a search or a specific finding, for example
 `/kb/?q=reef` or `/findings#KB-F3`.
 
+## Install Zemi
+
+Open the site over HTTPS (or on localhost) and choose **Install Zemi** on the home page.
+On iPhone or iPad, use Safari’s Share menu and **Add to Home Screen**. Notifications are optional.
+
+After the public demo has downloaded its reading files on the first visit, it can reopen offline,
+search papers by keyword, and display their summaries and sections. The personal and shared
+services need a connection to read the knowledge base or make changes.
+
 ## Static copy
 
 Set `ZEMI_SITE_CLEAN_URLS=0` when building for a static host that requires literal

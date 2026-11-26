@@ -23,6 +23,7 @@ const NOTEBOOKS = joinpath(DOCS, "notebooks")      # the content's, linked into 
 const GENERATED = joinpath(SRC, "generated")
 const KB_PAGES = joinpath(SRC, "kb")
 const KB_PUBLIC = joinpath(DOCS, "kb_public")   # build output: copied to the site's root
+const PUBLIC_DEMO = get(ENV, "ZEMI_PUBLIC_DEMO", "") == "1"
 # `zemi dev` writes the pages without bundling them, for VitePress's development server to serve,
 # forwarding the API to the knowledge base at ZEMI_DEV_API (see `run_dev`).
 const DEV = get(ENV, "ZEMI_SITE_DEV", "") == "1"
@@ -76,6 +77,7 @@ if isempty(ONLY)
     site = haskey(ENV, "ZEMI_SITE_WRITTEN") ? KBase.site_from_json(read(ENV["ZEMI_SITE_WRITTEN"], String)) :
                                                   KBase.write_site(KBase.kb(), KB_PAGES, KB_PUBLIC)
     haskey(ENV, "ZEMI_SITE_WRITTEN") || step_time("wrote the knowledge base's pages", t)
+    KBase.write_install_files(KBase.load_config(), KB_PUBLIC)
     # Every page loads the version list from the site root. deploydocs writes the real one, so a local
     # preview gets an empty stand-in.
     write_page(joinpath(KB_PUBLIC, "versions.js"), "// The version list is written by deploydocs.\n")
@@ -108,13 +110,16 @@ DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
                                                       "KBProjects", "KBFindings", "KBMarkdownAttachment", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
                                                       "KBStatusTables", "KBCodeFilePage", "KBCodebasePage", "KBCodebases", "KBDayPage",
                                                       "KBRecordPage", "KBRecords", "KBResourcePage", "KBResources", "KBExplore",
-                                                      "KBSetup", "KBOpenSource")]
+                                                      "KBSetup", "KBInstall", "KBOpenSource")]
 DocumenterVitepress.vitepress_assets(::KnowledgeBaseSite) = isdir(KB_PUBLIC) ? [KB_PUBLIC] : String[]
 function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, config::String)
     # ZEMI_SITE_BASE serves the site under a path (the demo's, `/Zemi.jl/demo/`); otherwise it is at the
     # root, as a service serves it. Set either way: on a CI service DocumenterVitepress takes the base
     # from the repository's name, for GitHub Pages. The config names the base twice.
-    config = replace(config, r"base: '[^']*'" => "base: '$(get(ENV, "ZEMI_SITE_BASE", "/"))'")
+    base = rstrip(get(ENV, "ZEMI_SITE_BASE", "/"), '/') * "/"
+    config = replace(config, r"base: '[^']*'" => "base: '$base'")
+    manifest = KBase.JSON.json(base * "manifest.webmanifest")
+    config = replace(config, "head: [" => "head: [\n    ['link', { rel: 'manifest', href: $manifest, crossorigin: 'use-credentials' }],"; count = 1)
     # ZEMI_SITE_NOTICE, HTML, is shown in a bar above every page: what a static copy cannot do, say.
     # It sits outside the app, so it stays as pages change, in the room VitePress keeps above its nav.
     # vp-raw keeps the router from opening its links as the site's own pages: they lead elsewhere.
@@ -160,7 +165,7 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     config = replace(config, r"^\s*lastUpdated: true,?\n"m => "")
     vite = "vite: {"
     occursin(vite, config) || @warn "No `$vite` in the VitePress config; Vite keeps its chunk size warning at 500 kB"
-    config = replace(config, vite => vite * "\n    build: { chunkSizeWarningLimit: 2000 },"; count = 1)
+    config = replace(config, vite => vite * "\n    build: { chunkSizeWarningLimit: 2000, manifest: $PUBLIC_DEMO },"; count = 1)
     if DEV
         target = repr(get(ENV, "ZEMI_DEV_API", "http://127.0.0.1:8000"))
         # Folders, with their slash, so a page's own files (authors.json) stay the development server's.
@@ -199,6 +204,7 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     occursin(define, config) || error("No `$define` in the VitePress config to give the components the knowledge base API's address")
     templates = [Dict("name" => k, "folder" => t.folder, "template" => t.template) for (k, t) in KBase.TEMPLATED]
     config = replace(config, define => define * "\n      __KB_API__: JSON.stringify($(repr(kb_api)))," *
+                                                 "\n      __KB_PUBLIC_DEMO__: $PUBLIC_DEMO," *
                                                  "\n      __KB_CLEAN_URLS__: $CLEAN_URLS," *
                                                  "\n      __KB_TEMPLATES__: JSON.stringify($(KBase.JSON.json(templates)))," *
                                                  "\n      __KB_TEMPLATE_COPY__: JSON.stringify($(repr(KBase.TEMPLATE_COPY))),"; count = 1)
@@ -254,7 +260,6 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     # No previous and next page links: the sidebar's order is not a reading order. A page that has one
     # sets `prev` and `next` in its front matter.
     # The footer names what the site is built with, and leads to the open source it runs on.
-    base = something(match(r"base: '([^']*)'", config), (; captures = ["/"])).captures[1]
     footer = r"footer: \{\s*message: '[^']*',"
     occursin(footer, config) || @warn "No footer message in the VitePress config to replace"
     api_root = KBase.html_escape(rstrip(kb_api, '/'))
@@ -280,7 +285,7 @@ pages = !isempty(ONLY) ? ONLY :
 # The site's packages, beside the build folder (the development server's are written as it starts).
 const BUILD = get(ENV, "ZEMI_SITE_BUILD", "build")
 const BUILD_DIR = isabspath(BUILD) ? BUILD : joinpath(DOCS, BUILD)
-DEV || KBase.site_packages!(dirname(BUILD_DIR))
+DEV || KBase.site_packages!(dirname(BUILD_DIR); public_demo = PUBLIC_DEMO)
 
 # Notebook bundles are build output (git-ignored, under docs/slate/): each build renders a notebook
 # whose bundle is missing or older than the notebook, through the Slate hub on this machine.
@@ -315,4 +320,10 @@ if !DEV
     t = time()
     n = KBase.stamp_templates!(site_dir)
     step_time("copied the templates to $n pages", t)
+    if PUBLIC_DEMO
+        script = joinpath(pkgdir(KBase), "demo", "offline.mjs")
+        DocumenterVitepress.node() do exe
+            run(`$exe $script $site_dir $(dirname(BUILD_DIR))`)
+        end
+    end
 end

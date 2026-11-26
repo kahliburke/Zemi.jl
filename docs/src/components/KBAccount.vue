@@ -6,10 +6,10 @@
   person there are no accounts, and it has the pages alone.
 -->
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { mode, connect, me, can, shared, post, signOut } from './kbApi'
 import { pageLink } from './kbLinks'
-import { offerInstall, followNotificationClicks } from './kbPush'
+import { registerWorker, followNotificationClicks } from './kbPush'
 import KBNotifyOffer from './KBNotifyOffer.vue'
 
 const open = ref(false)
@@ -26,9 +26,12 @@ const pages = computed(() => [
 ].filter(Boolean) as { label: string; href: string }[])
 
 function away(e: MouseEvent) { if (root.value && !root.value.contains(e.target as Node)) open.value = false }
-onMounted(() => { connect(); document.addEventListener('click', away); followNotificationClicks() })
-// Signed in to the service, the site can be installed: an iPhone shows notifications only so.
-watch([mode, shared], () => { if (mode.value === 'live' && shared.value) offerInstall() }, { immediate: true })
+onMounted(() => {
+  connect()
+  document.addEventListener('click', away)
+  followNotificationClicks()
+  if ('serviceWorker' in navigator) registerWorker().catch(error => console.warn('Zemi service worker', error))
+})
 onBeforeUnmount(() => document.removeEventListener('click', away))
 
 async function stopViewing() {

@@ -1,0 +1,30 @@
+{
+  "languages": [
+    "julia",
+    "python",
+    "bash",
+    "shellscript",
+    "json",
+    "toml",
+    "yaml",
+    "c",
+    "cpp",
+    "fortran-free-form",
+    "matlab",
+    "latex",
+    "r",
+    "rust",
+    "javascript",
+    "typescript",
+    "vue",
+    "html",
+    "css",
+    "sql",
+    "diff",
+    "markdown"
+  ],
+  "themes": [
+    "github-light",
+    "github-dark"
+  ]
+}

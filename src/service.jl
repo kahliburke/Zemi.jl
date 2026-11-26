@@ -93,7 +93,7 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             # Run for one person, a client connects as it would to the shared service: what it asks
             # here, before the owner has approved it, needs no key. Approving it does (below).
             oauth_response(kb, sh, req, parts, params; owner = true)
-        elseif !shared && token === nothing && !haskey(ICON_PATHS, uri.path) && (locked = local_key_response(kb, req, uri, params)) !== nothing
+        elseif !shared && token === nothing && !haskey(ICON_PATHS, uri.path) && !(uri.path in PWA_ICON_PATHS) && (locked = local_key_response(kb, req, uri, params)) !== nothing
             locked
         elseif !shared && oauth
             oauth_response(kb, sh, req, parts, params; owner = true)
@@ -115,11 +115,13 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
         elseif req.method != "GET"
             HTTP.Response(405)
         elseif uri.path == "/zemi-sw.js"
-            # The service worker that shows pushed notifications (see notify.jl), at the root so it
-            # covers the whole site, and looked at again on every visit.
+            # The service always uses the network-only worker, even if serving an imported static build.
             r = file_response(SERVICE_WORKER; req)
             HTTP.setheader(r, "Cache-Control" => "no-cache")
             r
+        elseif uri.path in PWA_ICON_PATHS && isempty(DEV_URL[])
+            f = site_file(kb.config, uri.path)
+            f !== nothing && endswith(f, ".png") ? file_response(f; req) : HTTP.Response(404)
         elseif uri.path == "/manifest.webmanifest"
             # What a phone installs the site as, which on an iPhone notifications need. To anyone,
             # like the icons it names: browsers ask for it without signing in.

@@ -19,6 +19,8 @@ export type Status = { papers: number; processed: number; passages: number;
 
 // The knowledge base API that serves this site, set by docs/make.jl.
 declare const __KB_API__: string
+declare const __KB_PUBLIC_DEMO__: boolean
+export const publicDemo = __KB_PUBLIC_DEMO__
 export const api = ref(__KB_API__)
 export const mode = ref<'checking' | 'live' | 'static'>('checking')
 export const status = ref<Status | null>(null)
@@ -47,6 +49,10 @@ export const RECONNECT = { every: 3000, within: 120_000 }
 // One status request however many components ask; `retry` asks again.
 let pending: Promise<void> | null = null
 export function connect(retry = false): Promise<void> {
+  if (publicDemo) {
+    mode.value = 'static'
+    return Promise.resolve()
+  }
   if (pending && !retry) return pending
   mode.value = 'checking'
   pending = (async () => {

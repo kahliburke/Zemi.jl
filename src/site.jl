@@ -110,6 +110,7 @@ function front_page(c::Config)
     $(panels_yaml(g.panels))
     ---
 
+    <KBInstall />
     <KBSetup prompt />
     ```
     """
