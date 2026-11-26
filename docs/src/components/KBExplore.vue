@@ -10,6 +10,7 @@ import KBNeedsService from './KBNeedsService.vue'
 import { ref, shallowRef, triggerRef, computed, watch, nextTick } from 'vue'
 import { useData } from 'vitepress'
 import { getJSON, post, can, onLive } from './kbApi'
+import { exploreHref } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 
 type Node = { id: string; kind: string; title: string; year?: string; page: string; links: number; status?: string; project?: string
@@ -169,7 +170,13 @@ async function load() {
   draw()
   const center = new URLSearchParams(location.search).get('center')
   if (center && !byId.value.has(center) && !abstracts.value && data.value?.abstract_only) { abstracts.value = true; return }
-  if (center && byId.value.has(center)) setTimeout(() => go(byId.value.get(center)!), 600)
+  if (center) {
+    const node = byId.value.get(center)
+    if (node) {
+      if (!shownKinds.value.includes(node.kind)) shownKinds.value.push(node.kind)
+      setTimeout(() => go(node), 600)
+    } else if (data.value) said.value = 'This document is unavailable in your map.'
+  }
 }
 
 let jobTimer: ReturnType<typeof setTimeout> | undefined
@@ -950,6 +957,12 @@ function key(e: KeyboardEvent) {
 // ── Acting on a pair ───────────────────────────────────────────────────────────────────────────────
 
 const said = ref('')
+async function copyView(n: Node) {
+  try {
+    await navigator.clipboard.writeText(new URL(exploreHref(n.id), window.location.href).href)
+    said.value = 'Copied the link to this view'
+  } catch (e: any) { said.value = `Not copied: ${e.message ?? e}` }
+}
 async function copyCitation(n: Node) {
   try {
     const c = await getJSON(`/api/cite/${encodeURIComponent(n.id)}`)
@@ -1094,6 +1107,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <div class="kbx-actions">
           <button class="kbx-btn kbx-small" @click="open(selected)">Open</button>
           <button v-if="selected.kind !== 'finding' && selected.kind !== 'task'" class="kbx-btn kbx-small" @click="copyCitation(selected)">Copy citation</button>
+          <a class="kbx-btn kbx-small" :href="exploreHref(selected.id)" @click.prevent="copyView(selected)">Copy link to this view</a>
           <button v-if="trail.length" class="kbx-btn kbx-small" @click="back">Back</button>
         </div>
         <template v-if="linkedSelected.length">

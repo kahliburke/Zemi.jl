@@ -26,6 +26,9 @@ test('the kind of a document, from its id', async () => {
 })
 
 test('pages, each kind built one way', () => {
+  const centered = new URL(links.exploreHref('hep-th/9901001'), 'https://example.org')
+  assert.equal(centered.pathname, links.kbPage('explore'))
+  assert.equal(centered.searchParams.get('center'), 'hep-th/9901001')
   assert.equal(links.pageLink('/projects'), '/projects.html')
   assert.equal(links.pageLink('/generated/kb/daily/2026-10-02/'), '/generated/kb/daily/2026-10-02/')
   assert.equal(links.paperHref('2401.00001'), '/generated/kb/papers/2401-00001.html')
