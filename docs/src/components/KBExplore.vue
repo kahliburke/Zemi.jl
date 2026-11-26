@@ -1292,11 +1292,21 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
           <button v-if="cardText.length > 420" class="kbx-more" @click="more = !more">{{ more ? 'Less' : 'More' }}</button>
           <div v-if="detail.topics.length" class="kbx-topics"><span v-for="t in detail.topics" :key="t">{{ t }}</span></div>
         </template>
-        <div class="kbx-actions">
-          <button class="kbx-btn kbx-small" @click="open(selected)">Open</button>
-          <button v-if="selected.kind !== 'finding' && selected.kind !== 'task'" class="kbx-btn kbx-small" @click="copyCitation(selected)">Copy citation</button>
-          <a class="kbx-btn kbx-small" :href="exploreHref(selected.id)" @click.prevent="copyView(selected)">Copy link to this view</a>
-          <button v-if="trail.length" class="kbx-btn kbx-small" @click="back">Back</button>
+        <div class="kbx-actions kbx-tools">
+          <button v-if="trail.length" class="kbx-btn kbx-tool" title="Back to the document before (Backspace)" aria-label="Back" @click="back">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          </button>
+          <button class="kbx-btn kbx-tool" title="Open its page" aria-label="Open its page" @click="open(selected)">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+          </button>
+          <button v-if="selected.kind !== 'finding' && selected.kind !== 'task'" class="kbx-btn kbx-tool" title="Copy its citation"
+                  aria-label="Copy its citation" @click="copyCitation(selected)">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h4v5H6V9a2 2 0 0 1 1-2zM6 12c0 3 1 5 4 6M15 7h4v5h-5V9a2 2 0 0 1 1-2zM14 12c0 3 1 5 4 6"/></svg>
+          </button>
+          <a class="kbx-btn kbx-tool" :href="exploreHref(selected.id)" title="Copy a link to this view" aria-label="Copy a link to this view"
+             @click.prevent="copyView(selected)">
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1"/></svg>
+          </a>
         </div>
         <template v-if="linkedSelected.length">
           <h4>Linked</h4>
@@ -1483,6 +1493,8 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-meta { margin: 0; font-size: 12px; color: var(--vp-c-text-2); display: flex; align-items: center; gap: 6px; padding-right: 1.2rem; }
 .kbx-cluster { margin: 2px 0 0; font-size: 12px; color: var(--vp-c-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kbx-small { padding: 2px 9px; font-size: 12px; border-radius: 6px; }
+.kbx-tool { display: inline-flex; align-items: center; justify-content: center; padding: 5px 7px; border-radius: 6px; color: var(--vp-c-text-2); }
+.kbx-tool:hover { color: var(--vp-c-text-1); background: var(--vp-c-default-soft); }
 .kbx-list { list-style: none; padding: 0 !important; margin: 0; }
 .kbx-list li { display: grid; grid-template-columns: 9px 1fr auto; align-items: baseline; column-gap: 8px; margin: 0 !important;
                padding: 4px 0; font-size: 13px; line-height: 1.35; border-bottom: 1px solid var(--vp-c-divider); }
