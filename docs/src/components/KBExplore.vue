@@ -703,16 +703,16 @@ const relevantClusters = computed<Set<number> | null>(() => {
 })
 // The space's cluster names, with their clusters.
 const clusterLabels: { sprite: any; id: number }[] = []
-// The selected document marked where it is: a ring in the brand colour around its node, and a wider faint one.
+// The selected document marked where it is: a thin ring in the brand colour around its node, and a faint wider one.
 function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
   const n: GNode | undefined = selected.value ? graph?.graphData().nodes.find((x: GNode) => x.id === selected.value!.id) : undefined
   if (!n || n.x === undefined) return
   const r = Math.sqrt(flatSize(n)) * 4
   ctx.save()
-  ctx.strokeStyle = BRAND; ctx.lineWidth = 2.5 / scale
-  ctx.beginPath(); ctx.arc(n.x, n.y, r + 4 / scale, 0, 2 * Math.PI); ctx.stroke()
-  ctx.strokeStyle = BRAND + '50'; ctx.lineWidth = 5 / scale
-  ctx.beginPath(); ctx.arc(n.x, n.y, r + 11 / scale, 0, 2 * Math.PI); ctx.stroke()
+  ctx.strokeStyle = BRAND + 'c0'; ctx.lineWidth = 1.5 / scale
+  ctx.beginPath(); ctx.arc(n.x, n.y, r + 3 / scale, 0, 2 * Math.PI); ctx.stroke()
+  ctx.strokeStyle = BRAND + '26'; ctx.lineWidth = 3 / scale
+  ctx.beginPath(); ctx.arc(n.x, n.y, r + 8 / scale, 0, 2 * Math.PI); ctx.stroke()
   // Its title above the ring, on a backing, a constant size on screen.
   const text = shortTitle(n.title)
   ctx.font = `600 ${13 / scale}px system-ui, sans-serif`
@@ -765,16 +765,16 @@ function showRing3d() {
     c.width = c.height = px
     const ctx = c.getContext('2d')!
     ctx.strokeStyle = '#ffffff'
-    ctx.lineWidth = 9; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 22, 0, 2 * Math.PI); ctx.stroke()
-    ctx.globalAlpha = 0.35; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 6, 0, 2 * Math.PI); ctx.stroke()
+    ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 22, 0, 2 * Math.PI); ctx.stroke()
+    ctx.globalAlpha = 0.15; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 8, 0, 2 * Math.PI); ctx.stroke()
     const map = new three.CanvasTexture(c)
     map.colorSpace = three.SRGBColorSpace
-    ring3d = new three.Sprite(new three.SpriteMaterial({ map, color: BRAND, transparent: true, depthTest: false, depthWrite: false }))
+    ring3d = new three.Sprite(new three.SpriteMaterial({ map, color: BRAND, transparent: true, opacity: 0.75, depthTest: false, depthWrite: false }))
     ring3d.renderOrder = 998
     ring3d.onBeforeRender = () => {
       const f = selected.value && sprites.get(selected.value.id)
       if (!f) return
-      const k = f.sprite.scale.x * 2 * (1 + 0.08 * Math.sin(performance.now() / 400))
+      const k = f.sprite.scale.x * 1.8
       ring3d.position.copy(f.sprite.position)
       ring3d.scale.set(k, k, 1)
       ring3d.updateMatrixWorld()
