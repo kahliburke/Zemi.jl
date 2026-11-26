@@ -323,7 +323,7 @@ function mix(a: string, b: string, t: number) {
   const ch = (h: string, i: number) => parseInt(h.slice(1 + 2 * i, 3 + 2 * i), 16)
   return '#' + [0, 1, 2].map(i => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t).toString(16).padStart(2, '0')).join('')
 }
-// The panel on the right: the colours' legend, or what the map shows; open or folded away.
+// The panel on the right: the legend, or what the map shows; open or folded away.
 const panelOpen = ref<boolean>(stored('legend', true))
 watch(panelOpen, v => keep('legend', v))
 const panel = ref<'colours' | 'show'>(stored('panel', 'colours'))
@@ -1144,14 +1144,14 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
                 @click="fullScreen">{{ full ? '⤡' : '⤢' }}</button>
       </div>
 
-      <section class="kbx-panel" :class="{ open: panelOpen, wide: panelOpen && panel === 'show' }" aria-label="Colours and what the map shows">
+      <section class="kbx-panel" :class="{ open: panelOpen, wide: panelOpen && panel === 'show' }" aria-label="The map's legend and settings">
         <div class="kbx-panel-head">
           <div v-if="panelOpen" class="kbx-seg kbx-seg-small" role="tablist" aria-label="Panel">
-            <button role="tab" :aria-selected="panel === 'colours'" :class="{ on: panel === 'colours' }" @click="panel = 'colours'">Colours</button>
+            <button role="tab" :aria-selected="panel === 'colours'" :class="{ on: panel === 'colours' }" @click="panel = 'colours'">Legend</button>
             <button role="tab" :aria-selected="panel === 'show'" :class="{ on: panel === 'show' }" @click="panel = 'show'">Show</button>
           </div>
           <button class="kbx-panel-toggle" :aria-expanded="panelOpen" :aria-label="panelOpen ? 'Close the map\'s settings' : 'The map\'s settings'"
-                  :title="panelOpen ? 'Close' : 'Colours, layout and what the map shows'" @click="panelOpen = !panelOpen">
+                  :title="panelOpen ? 'Close' : 'Legend, layout and what the map shows'" @click="panelOpen = !panelOpen">
             <svg v-if="!panelOpen" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"
                  stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
             <span v-else aria-hidden="true">×</span>
