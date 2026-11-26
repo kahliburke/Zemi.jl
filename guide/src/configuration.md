@@ -98,6 +98,16 @@ out and clustered afresh.
   with F (WASD to move, the mouse to steer). The clusters are the landscape's, named where they lie.
 - **Show** chooses the layout: **t-SNE** keeps each document's close neighbourhood; **UMAP** keeps
   more of how the groups lie to each other. Either way, close together means alike.
+- In **Forces**, **Semantic map** is the default for each visit. In Map or Space, drag a document to enter
+  **Free physics** directly, or switch modes in the panel. The links to its immediate neighbours
+  stand out as you move it, and those links pull on the unpinned neighbours while you hold it. Distances then reflect the visible links and the forces
+  you choose. Adjust repulsion, link strength, link distance, centering and the weight of similarity
+  links relative to explicit links. To include similarity links, enable **Unlinked pairs** in Settings.
+  Under **On drop**, **Return to starting positions** is the default.
+  On release, all documents glide back to where they were when you grabbed the node, preserving the
+  previous layout mode and pins. With reduced motion enabled, the return is immediate. Choose **Pin here**
+  to keep the dragged document where you drop it. **Unpin node** on its card releases it. The browser
+  remembers your drop preference and sliders. **Return to semantic map** resets the whole projection and clears all pins.
 - Clicking a document moves there and shows its card: its authors, its summary or abstract, its
   links, and the documents nearest it in meaning, with lines drawn to them, fainter the less alike.
   Double-click opens its page; Backspace goes back.

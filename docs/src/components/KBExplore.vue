@@ -10,6 +10,7 @@ import KBNeedsService from './KBNeedsService.vue'
 import { ref, shallowRef, triggerRef, computed, watch, nextTick } from 'vue'
 import { useData } from 'vitepress'
 import { getJSON, post, can, onLive } from './kbApi'
+import { forceSettings, forceSliders, linkStrength } from './kbExplorePhysics'
 import { exploreHref } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 
@@ -51,6 +52,15 @@ const stored = <T,>(key: string, fallback: T): T => {
 const keep = (key: string, v: unknown) => { try { localStorage.setItem(`kb-explore-${key}`, JSON.stringify(v)) } catch { /* private mode */ } }
 const view = ref<'2d' | '3d'>(stored('view', '2d'))
 const fly = ref(false)
+const free = ref(false)
+const onDrop = ref<'pin' | 'return'>(stored<string>('drop', 'return') === 'pin' ? 'pin' : 'return')
+watch(onDrop, value => keep('drop', value))
+const forces = ref(forceSettings(stored('forces', null)))
+const pinned = ref(new Set<string>())
+watch(forces, settings => {
+  keep('forces', settings)
+  if (free.value && graph) { applyForces(); graph.d3ReheatSimulation() }
+}, { deep: true })
 // Where documents are placed: by t-SNE (close neighbourhoods kept) or UMAP (more of how groups lie to each other).
 const layout = ref<'tsne' | 'umap' | 'pacmap'>(stored('layout', 'tsne'))
 watch(layout, v => keep('layout', v))
@@ -238,8 +248,22 @@ function watchJob(id: string) {
 
 const visibleNode = (n: Node) => shownKinds.value.includes(n.kind)
 const hits = ref<Map<string, number>>(new Map())          // a search's hits, by id, with their strength
-const near = computed(() => new Set([...(nearOf.value.get(selected.value?.id ?? '') ?? []).map(x => x.node.id),
-                                     ...(linksOf.value.get(selected.value?.id ?? '') ?? []).map(x => x.node.id)]))
+// Use the filtered graph: a hidden link must not light up its other endpoint.
+const visibleLinks = shallowRef<GLink[]>([])
+const neighbours = computed(() => {
+  const id = selected.value?.id
+  const result = new Set<string>()
+  if (!id) return result
+  for (const l of visibleLinks.value) {
+    const a = endId(l.source), b = endId(l.target)
+    if (a === id) result.add(b)
+    if (b === id) result.add(a)
+  }
+  if (!free.value) {
+    for (const { node } of nearSelected.value) result.add(node.id)
+  }
+  return result
+})
 
 function colour(n: Node) {
   if (colourBy.value === 'whose' && n.kind !== 'finding' && n.kind !== 'task') return WHOSE_COLOURS[whose(n)]
@@ -335,20 +359,24 @@ function mix(a: string, b: string, t: number) {
 // The panel on the right: the legend, or what the map shows; open or folded away.
 const panelOpen = ref<boolean>(stored('legend', typeof window === 'undefined' || window.innerWidth > 640))
 watch(panelOpen, v => keep('legend', v))
-const panel = ref<'colours' | 'show'>(stored('panel', 'colours'))
+const panel = ref<'colours' | 'show' | 'forces'>(stored('panel', 'colours'))
 watch(panel, v => keep('panel', v))
 const settingsOpen = computed(() => panelOpen.value && panel.value === 'show')
 watch(settingsOpen, open => { if (open) loadProjects() }, { immediate: true })
 function shade(n: Node) {
   const c = colour(n)
-  if (hits.value.size) return hits.value.has(n.id) ? c : isDark.value ? '#3a3a44' : '#d8d8de'
+  if (hits.value.size && !held.value) return hits.value.has(n.id) ? c : isDark.value ? '#3a3a44' : '#d8d8de'
+  if (free.value && selected.value) {
+    if (selected.value.id === n.id || neighbours.value.has(n.id)) return c
+    return mix(isDark.value ? '#111116' : '#fafafa', c, 0.32)
+  }
   if (litRow.value) {
     if (legendKey(n) !== litRow.value) return isDark.value ? '#3a3a44' : '#d8d8de'
     const t = standing.value.get(n.id)
     return t === undefined ? c : mix(isDark.value ? '#111116' : '#fafafa', c, 0.38 + 0.62 * t)
   }
   // A document selected: the rest keep their colours, a little faded; its ring and lines mark it out.
-  if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return mix(isDark.value ? '#111116' : '#fafafa', c, 0.6)
+  if (selected.value && selected.value.id !== n.id && !neighbours.value.has(n.id)) return mix(isDark.value ? '#111116' : '#fafafa', c, 0.6)
   return c
 }
 const size = (n: Node) => (((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links) * 1.2) * (n.read === false ? 0.6 : 1) +
@@ -387,13 +415,30 @@ const packing = computed(() => {
 })
 const flatSize = (n: Node) => size(n) * packing.value ** 2
 
-type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
+type GNode = Node & { home: Position; vx?: number; vy?: number; vz?: number; fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
 type GLink = { source: string; target: string; kind: string; similarity?: number }
 
 // The library's nodes and links: placed nodes fixed where the map puts them, the rest left to settle
 // among those they link to; the nearest by meaning hold the unplaced, and are drawn only when no link
 // joins a pair above the threshold.
+// Retain visible positions and pins across filter, theme and flight-control changes.
+// A different map or projection starts in its own coordinate system.
+type Position = { x: number; y: number; z?: number }
+const positions = new Map<string, Position>()
+let coordinateSystem = ''
+let visibleById = new Map<string, GNode>()
 function graphData() {
+  held.value = null
+  finishPreview()
+  pressPositions = null
+  const system = JSON.stringify([view.value, layout.value, subset.value, abstracts.value])
+  if (free.value && coordinateSystem === system && graph) {
+    for (const n of graph.graphData().nodes) positions.set(n.id, { x: n.x, y: n.y, z: n.z })
+  } else {
+    positions.clear()
+    pinned.value.clear()
+  }
+  coordinateSystem = system
   const g = data.value!
   const deep = view.value === '3d'
   const nodes: GNode[] = g.nodes.filter(visibleNode).map(n => {
@@ -416,7 +461,20 @@ function graphData() {
     if (showUnlinked.value && !linked && s >= threshold.value && ids.has(a) && ids.has(b))
       links.push({ source: a, target: b, kind: 'similar', similarity: s })
   }
+  visibleLinks.value = links
   placeTheRest(nodes, links, deep)
+  for (const n of nodes) {
+    n.home = { x: n.fx!, y: n.fy!, z: n.fz }
+    const pos = free.value && positions.get(n.id)
+    n.x = pos ? pos.x : n.fx
+    n.y = pos ? pos.y : n.fy
+    if (deep) n.z = pos ? pos.z : n.fz
+    if (free.value) {
+      if (pinned.value.has(n.id)) pinAtPosition(n)
+      else release(n)
+    }
+  }
+  visibleById = new Map(nodes.map(n => [n.id, n]))
   return { nodes, links }
 }
 
@@ -455,9 +513,9 @@ function placeTheRest(nodes: GNode[], links: GLink[], deep: boolean) {
 const hashTurn = (id: string) => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) / 0xffffffff * 2 * Math.PI
 
 function linkColour(l: GLink) {
-  if (l.kind === 'similar') return isDark.value ? 'rgba(200,200,255,0.45)' : 'rgba(60,60,140,0.4)'
-  const c = LINK_COLOURS[l.kind] ?? '#999'
-  return selected.value && !touches(l, selected.value.id) ? c + '40' : c + 'b0'
+  const c = l.kind === 'similar' ? (isDark.value ? '#c8c8ff' : '#3c3c8c') : LINK_COLOURS[l.kind] ?? '#999999'
+  if (selected.value) return c + (touches(l, selected.value.id) ? 'ff' : '28')
+  return c + (l.kind === 'similar' ? '70' : 'b0')
 }
 const endId = (e: any) => (typeof e === 'object' ? e.id : e) as string
 const touches = (l: any, id: string) => endId(l.source) === id || endId(l.target) === id
@@ -466,9 +524,9 @@ const touches = (l: any, id: string) => endId(l.source) === id || endId(l.target
 function clusterCentres(nodes: GNode[]) {
   const sums = new Map<number, { x: number; y: number; z: number; n: number }>()
   for (const n of nodes) {
-    if (n.cluster === undefined || n.fx === undefined) continue
+    if (n.cluster === undefined) continue
     const s = sums.get(n.cluster) ?? { x: 0, y: 0, z: 0, n: 0 }
-    s.x += n.fx; s.y += n.fy!; s.z += n.fz ?? 0; s.n++
+    s.x += n.x; s.y += n.y; s.z += n.z ?? 0; s.n++
     sums.set(n.cluster, s)
   }
   return [...sums].filter(([, s]) => s.n >= 3).map(([id, s]) => ({ id, name: clusterName(id), x: s.x / s.n, y: s.y / s.n, z: s.z / s.n, size: s.n }))
@@ -476,29 +534,177 @@ function clusterCentres(nodes: GNode[]) {
 
 // The 2D map's cluster names, where they are drawn.
 let centres: ReturnType<typeof clusterCentres> = []
+function pinAtPosition(n: GNode) {
+  n.fx = n.x; n.fy = n.y
+  if (view.value === '3d') n.fz = n.z
+}
+function release(n: GNode) {
+  delete n.fx; delete n.fy; delete n.fz
+}
+const held = shallowRef<GNode | null>(null)
+// Capture the free layout before the renderer applies the first pointer movement. The
+// semantic layout already has exact home positions. Only a confirmed drag starts a preview.
+const positionOf = (n: GNode): Position => ({ x: n.x, y: n.y, z: n.z })
+let pressPositions: Position[] | null = null
+let preview: { wasFree: boolean; nodes: GNode[]; before: Position[]; after?: Position[]; started: number } | null = null
+function pointerDown(event: PointerEvent) {
+  if (!event.isPrimary || event.button !== 0) return
+  finishPreview()
+  pressPositions = onDrop.value === 'return' && free.value && graph ? graph.graphData().nodes.map(positionOf) : null
+}
+function finishPreview() {
+  if (!preview) return
+  const { nodes, before, wasFree } = preview
+  preview = null
+  free.value = wasFree
+  for (const [i, node] of nodes.entries()) {
+    Object.assign(node, before[i])
+    node.vx = node.vy = node.vz = 0
+    if (wasFree && !pinned.value.has(node.id)) release(node)
+    else pinAtPosition(node)
+  }
+  configurePhysics()
+  // Show the restored layout at rest, including previously unpinned documents. The
+  // next drag or change to the forces can wake it again.
+  graph.cooldownTicks(0)
+  updateLabels(nodes)
+}
+function animateReturn(now: number) {
+  if (!preview?.after) return
+  const t = Math.min(1, (now - preview.started) / 450)
+  if (t >= 1) { finishPreview(); return }
+  const remaining = (1 - t) ** 3
+  const { nodes, before, after } = preview
+  for (const [i, n] of nodes.entries()) {
+    const to = before[i], from = after[i]
+    n.fx = n.x = to.x + (from.x - to.x) * remaining
+    n.fy = n.y = to.y + (from.y - to.y) * remaining
+    if (to.z !== undefined && from.z !== undefined) n.fz = n.z = to.z + (from.z - to.z) * remaining
+  }
+}
+function dragged(n: GNode) {
+  if (held.value === n) return
+  held.value = n
+  if (onDrop.value === 'return') {
+    const nodes: GNode[] = graph.graphData().nodes
+    const before = free.value ? pressPositions : nodes.map(node => node.home)
+    if (before) preview = { wasFree: free.value, nodes, before, started: 0 }
+  }
+  pressPositions = null
+  stopDrift()
+  selected.value = byId.value.get(n.id) ?? null
+  // Keep the grabbed node under the pointer while the link forces pull on its neighbours.
+  if (free.value) graph.cooldownTicks(Infinity).d3ReheatSimulation()
+  else setFree(true, n)
+}
+function dropped(n: GNode) {
+  if (held.value !== n) return
+  held.value = null
+  if (preview) {
+    preview.after = preview.nodes.map(positionOf)
+    preview.started = performance.now()
+    graph.d3ReheatSimulation()
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) finishPreview()
+    return
+  }
+  if (!free.value) return
+  pinAtPosition(n)
+  pinned.value.add(n.id)
+  selected.value = byId.value.get(n.id) ?? null
+}
+function unpin(id: string) {
+  const n = visibleById.get(id)
+  pinned.value.delete(id)
+  if (n) { release(n); graph.d3ReheatSimulation() }
+}
+function applyForces() {
+  const settings = forces.value
+  graph.d3Force('charge').strength(free.value ? -settings.repulsion : view.value === '2d' ? -12 : -10)
+  graph.d3Force('center').strength(free.value ? settings.centering : 1)
+  graph.d3Force('link').distance(free.value ? settings.distance : 30).strength(free.value
+    ? (link: GLink) => linkStrength(settings, link)
+    : (link: GLink) => link.kind === 'similar' ? (link.similarity ?? 0) * 0.3 : 0.1)
+}
+function configurePhysics() {
+  graph.cooldownTicks(free.value ? Infinity : 1)
+    .cooldownTime(Infinity).d3AlphaMin(0.002) // stop when cool, including on slower renderers
+  applyForces()
+}
+function setFree(value: boolean, grabbed?: GNode) {
+  if (!grabbed) { finishPreview(); held.value = null }
+  if (value === free.value) return
+  free.value = value
+  if (!graph) { draw(); return }
+  configurePhysics()
+  const { nodes } = graph.graphData()
+  positions.clear()
+  pinned.value.clear()
+  for (const n of nodes) {
+    if (n === grabbed) continue
+    if (value) release(n)
+    else {
+      Object.assign(n, n.home)
+      pinAtPosition(n)
+      n.vx = n.vy = n.vz = 0
+    }
+  }
+  updateLabels(nodes)
+  graph.d3ReheatSimulation()
+}
+let lastLabels = 0
+let updateCardOnTick = false
+function updateLabels(nodes: GNode[]) {
+  centres = clusterCentres(nodes)
+  if (view.value !== '3d') return
+  const current = new Map(centres.map(c => [c.id, c]))
+  for (const { id, sprite } of clusterLabels) {
+    const c = current.get(id)
+    sprite.visible = !!c
+    if (c) sprite.position.set(c.x, c.y, c.z)
+  }
+}
+function tick(stopped = false) {
+  if (stopped) {
+    if (preview?.after) finishPreview()
+    graph.cooldownTicks(free.value ? Infinity : 1)
+  } else if (preview?.after) animateReturn(performance.now())
+  if (updateCardOnTick && view.value === '3d') {
+    updateCardOnTick = false
+    showRing3d() // the renderer has now created the visible nodes' sprites
+  }
+  if (!free.value) return
+  if (stopped || performance.now() - lastLabels >= 100) {
+    updateLabels(graph.graphData().nodes)
+    lastLabels = performance.now()
+  }
+  if (view.value === '3d') { nearest3d?.userData.follow?.(); trail3d?.userData.follow?.() }
+}
+let drawGeneration = 0
 async function draw() {
   if (!box.value || !data.value) return
+  const drawId = ++drawGeneration
+  const { nodes, links } = graphData()
   graph?._destructor?.()
+  graph = null
   box.value.innerHTML = ''
   const el = box.value
-  const { nodes, links } = graphData()
   const bg = isDark.value ? '#111116' : '#fafafa'
   const label = (n: Node) => `<div class="kbx-tip"><b>${esc(n.title)}</b><br>${esc([kindName(n.kind), n.year, clusterName(n.cluster)].filter(Boolean).join(' · '))}</div>`
   if (view.value === '2d') {
     const ForceGraph = (await import('force-graph')).default as any
+    if (drawId !== drawGeneration) return
     centres = clusterCentres(nodes)
     graph = new ForceGraph(el)
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
       .nodeVal(flatSize).nodeColor(shade).nodeLabel(label)
       .linkColor(linkColour)
-      .linkWidth((l: GLink) => (l.kind === 'similar' ? 0.8 : 1.2))
+      .linkWidth((l: GLink) => selected.value && touches(l, selected.value.id) ? 3 : l.kind === 'similar' ? 0.8 : 1.2)
       .linkLineDash((l: GLink) => (l.kind === 'similar' ? [2, 3] : null))
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 3 : 0))
       .linkDirectionalArrowRelPos(1)
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
-      .enableNodeDrag(false)                                                     // placed by meaning, not by hand
-      .cooldownTicks(1)
+      .onNodeDrag(dragged).onNodeDragEnd(dropped).onEngineTick(() => tick()).onEngineStop(() => tick(true))
       .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => { drawTrail2d(ctx, scale); drawNearest2d(ctx, scale) })
       .onRenderFramePost((ctx: CanvasRenderingContext2D, scale: number) => {
         drawNearestLabels2d(ctx, scale)
@@ -531,16 +737,17 @@ async function draw() {
         }
         ctx.restore()
       })
-    graph.d3Force('charge')?.strength(-12)
-    graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
-    setTimeout(() => graph?.zoomToFit(600, 40), 300)
+    configurePhysics()
+    setTimeout(() => drawId === drawGeneration && graph?.zoomToFit(600, 40), 300)
   } else {
     const ForceGraph3D = (await import('3d-force-graph')).default as any
     const SpriteText = (await import('three-spritetext')).default as any
     SpriteTextOf = SpriteText
     const THREE = await import('three')
+    if (drawId !== drawGeneration) return
     const disc = discTexture(THREE)
     sprites.clear()
+    updateCardOnTick = true
     graph = new ForceGraph3D(el, { controlType: fly.value ? 'fly' : 'orbit' })
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
@@ -563,15 +770,14 @@ async function draw() {
       // close. Which way a link goes is in the card.
       .linkWidth(0)
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
-      .enableNodeDrag(false)
-      .cooldownTicks(1)
-    graph.d3Force('charge')?.strength(-10)
-    graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
-    const fog = (await import('three')).FogExp2
+      .onNodeDrag(dragged).onNodeDragEnd(dropped).onEngineTick(() => tick()).onEngineStop(() => tick(true))
+    configurePhysics()
+    const fog = THREE.FogExp2
     // A little depth: a tenth faded across the space as first framed, a quarter beyond it.
     graph.scene().fog = new fog(isDark.value ? 0x111116 : 0xfafafa, 0.00035)
     clusterLabels.length = 0
-    for (const c of clusterCentres(nodes)) {
+    // Filters may reveal a cluster that had no visible documents when Space was opened.
+    for (const c of data.value.clusters) {
       if (!c.name) continue
       const s = new SpriteText(c.name, 6, isDark.value ? 'rgba(240,240,248,0.95)' : 'rgba(25,25,35,0.95)')
       s.fontWeight = '600'
@@ -582,12 +788,13 @@ async function draw() {
       s.material.depthTest = false
       s.material.depthWrite = false
       s.renderOrder = 1000
-      s.position.set(c.x, c.y, c.z)
+      s.visible = false
       capHeight(s, 12, 20)
       clusterLabels.push({ sprite: s, id: c.id })
       graph.scene().add(s)
     }
-    setTimeout(() => graph?.zoomToFit(800, 30), 300)
+    updateLabels(nodes)
+    setTimeout(() => drawId === drawGeneration && graph?.zoomToFit(800, 30), 300)
     three = THREE
     nearest3d = null
     ring3d = null
@@ -602,8 +809,8 @@ async function draw() {
 const BRAND = '#8b7cf6'
 function nearestShown() {
   const s = selected.value
-  if (!s || !graph) return []
-  const at = new Map<string, GNode>(graph.graphData().nodes.map((n: GNode) => [n.id, n]))
+  if (!s || !graph || free.value) return []
+  const at = visibleById
   const from = at.get(s.id)
   if (!from) return []
   const xs = nearSelected.value.filter(x => at.has(x.node.id))
@@ -705,7 +912,7 @@ const relevantClusters = computed<Set<number> | null>(() => {
 const clusterLabels: { sprite: any; id: number }[] = []
 // The selected document marked where it is: a ring in the brand colour around its node, and a wider faint one.
 function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
-  const n: GNode | undefined = selected.value ? graph?.graphData().nodes.find((x: GNode) => x.id === selected.value!.id) : undefined
+  const n: GNode | undefined = selected.value ? visibleById.get(selected.value.id) : undefined
   if (!n || n.x === undefined) return
   const r = Math.sqrt(flatSize(n)) * 4
   ctx.save()
@@ -732,7 +939,7 @@ let SpriteTextOf: any = null
 let title3d: any = null
 function showTitle3d() {
   const f = selected.value && sprites.get(selected.value.id)
-  if (title3d && title3d.userData.id !== f?.node.id) {
+  if (title3d && title3d.userData.node !== f?.node) {
     graph?.scene().remove(title3d); title3d.material.map?.dispose(); title3d.material.dispose(); title3d = null
   }
   if (!f || title3d || !SpriteTextOf || !graph) return
@@ -742,7 +949,7 @@ function showTitle3d() {
   t.borderColor = BRAND; t.borderWidth = 0.4; t.borderRadius = 3; t.padding = [3, 1.5]
   t.material.depthTest = false; t.material.depthWrite = false
   t.renderOrder = 1002
-  t.userData.id = f.node.id
+  t.userData.node = f.node
   capHeight(t, 18, 22)
   const sized = t.onBeforeRender
   const up = new three.Vector3()
@@ -786,21 +993,21 @@ function showRing3d() {
 }
 let three: any = null
 let nearest3d: any = null
-async function showNearest3d() {
+function showNearest3d() {
   if (!graph || view.value !== '3d' || !three) return
   if (nearest3d) { graph.scene().remove(nearest3d); nearest3d.traverse((o: any) => { o.geometry?.dispose?.(); o.material?.map?.dispose?.(); o.material?.dispose?.() }) }
   nearest3d = null
   const lines = nearestShown()
   if (!lines.length) return
-  const SpriteText = (await import('three-spritetext')).default as any
+  const SpriteText = SpriteTextOf
   const group = new three.Group()
   const pos: number[] = [], col: number[] = []
   const brand = new three.Color(BRAND), bg = new three.Color(isDark.value ? 0x111116 : 0xfafafa)
-  for (const { from, to, t } of lines) {
+  for (const { from, to, t, similarity } of lines) {
     const c = bg.clone().lerp(brand, 0.15 + 0.85 * t)
     pos.push(from.x, from.y, from.z, to.x, to.y, to.z)
     col.push(c.r, c.g, c.b, c.r, c.g, c.b)
-    const label = new SpriteText(`${Math.round(lines.find(l => l.to === to)!.similarity * 100)}%`, 4,
+    const label = new SpriteText(`${Math.round(similarity * 100)}%`, 4,
                                  isDark.value ? 'rgba(230,230,245,0.9)' : 'rgba(40,40,60,0.9)')
     label.material.depthTest = false
     label.renderOrder = 1001
@@ -812,6 +1019,16 @@ async function showNearest3d() {
   geometry.setAttribute('position', new three.Float32BufferAttribute(pos, 3))
   geometry.setAttribute('color', new three.Float32BufferAttribute(col, 3))
   group.add(new three.LineSegments(geometry, new three.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95 })))
+  group.userData.follow = () => {
+    const attr = geometry.getAttribute('position')
+    lines.forEach(({ from, to }, i) => {
+      attr.setXYZ(2 * i, from.x, from.y, from.z)
+      attr.setXYZ(2 * i + 1, to.x, to.y, to.z)
+      group.children[i].position.set(to.x, to.y + 6, to.z)
+    })
+    attr.needsUpdate = true
+    geometry.computeBoundingSphere()
+  }
   nearest3d = group
   graph.scene().add(group)
 }
@@ -861,16 +1078,18 @@ function refresh() {
   // From an empty map, drawn afresh, which frames what is now shown.
   if (!graph.graphData().nodes.length) return draw()
   const { nodes, links } = graphData()
-  if (view.value === '2d') centres = clusterCentres(nodes)
+  updateLabels(nodes)
+  if (view.value === '3d') { sprites.clear(); updateCardOnTick = true }
   graph.graphData({ nodes, links })
   restyle()
 }
-watch([selected, hits, colourBy, litRow, standing], restyle)
+watch([selected, free, held, hits, colourBy, litRow, standing], restyle)
 watch(colourBy, () => { litRow.value = null })
 // Recoloured and resized in place: the space's discs directly, the map's through its accessors.
 function restyle() {
   if (!graph) return
   graph.linkColor(linkColour)
+  if (view.value === '3d') graph.linkOpacity(selected.value ? 0.95 : 0.55)
   showNearest3d()
   showRing3d()
   showTrail3d()
@@ -918,7 +1137,7 @@ onLive(() => {
     removeEventListener('resize', resize); removeEventListener('keydown', key); removeEventListener('popstate', fromAddress)
     document.documentElement.classList.remove('kbx-takeover')
     document.removeEventListener('fullscreenchange', onFullScreen)
-    clearTimeout(jobTimer); stopDrift(); graph?._destructor?.()
+    ++drawGeneration; clearTimeout(jobTimer); clearTimeout(refreshTimer); stopDrift(); graph?._destructor?.(); graph = null
   }
 })
 
@@ -928,6 +1147,8 @@ const trail: Node[] = []
 let lastClick = { id: '', at: 0 }
 
 function clicked(n: GNode) {
+  // The canvas drag handler can move a pinned node a few pixels below its click threshold.
+  if (!free.value) { Object.assign(n, n.home); pinAtPosition(n) }
   const now = Date.now()
   if (lastClick.id === n.id && now - lastClick.at < 350) { open(n); return }
   lastClick = { id: n.id, at: now }
@@ -938,8 +1159,8 @@ function clicked(n: GNode) {
 function go(n: Node, remember = true) {
   if (remember && selected.value && selected.value.id !== n.id) trail.push(selected.value)
   selected.value = n
-  const g = graph?.graphData().nodes.find((x: GNode) => x.id === n.id)
-  if (!g || g.x === undefined) return
+  const g = visibleById.get(n.id)
+  if (!graph || !g || g.x === undefined) return
   if (view.value === '2d') {
     graph.centerAt(g.x, g.y, moveMs(900))
     graph.zoom(Math.max(graph.zoom(), 3), moveMs(900))
@@ -987,7 +1208,7 @@ watch(() => driftTrail.value.length, () => showTrail3d())
 const TRAIL = '#ffb454'
 function trailNodes(): GNode[] {
   if (driftTrail.value.length < 2 || !graph) return []
-  const at = new Map<string, GNode>(graph.graphData().nodes.map((n: GNode) => [n.id, n]))
+  const at = visibleById
   return driftTrail.value.map(t => at.get(t.node.id)).filter((n): n is GNode => !!n && n.x !== undefined)
 }
 function drawTrail2d(ctx: CanvasRenderingContext2D, scale: number) {
@@ -1007,11 +1228,11 @@ let trail3d: any = null
 function showTrail3d() {
   if (!graph || view.value !== '3d' || !three) return
   if (trail3d) { graph.scene().remove(trail3d); trail3d.traverse((o: any) => { o.geometry?.dispose(); o.material?.dispose() }); trail3d = null }
-  const ps = driftTrail.value.map(t => sprites.get(t.node.id)?.sprite.position).filter(Boolean)
-  if (ps.length < 2) return
+  const steps = trailNodes()
+  if (steps.length < 2) return
   const bg = new three.Color(isDark.value ? 0x111116 : 0xfafafa), c = new three.Color(TRAIL)
-  const cols = ps.flatMap((_, i) => { const k = bg.clone().lerp(c, 0.3 + 0.7 * i / (ps.length - 1)); return [k.r, k.g, k.b] })
-  const geometry = new three.BufferGeometry().setFromPoints(ps)
+  const cols = steps.flatMap((_, i) => { const k = bg.clone().lerp(c, 0.3 + 0.7 * i / (steps.length - 1)); return [k.r, k.g, k.b] })
+  const geometry = new three.BufferGeometry().setFromPoints(steps)
   geometry.setAttribute('color', new three.Float32BufferAttribute(cols, 3))
   // A line a pixel wide is lost among the others: a dot at each step, a constant size on screen, marks it.
   trail3d = new three.Group()
@@ -1019,6 +1240,14 @@ function showTrail3d() {
   const dots = new three.Points(geometry.clone(), new three.PointsMaterial({ vertexColors: true, size: 7, sizeAttenuation: false, depthTest: false }))
   line.renderOrder = dots.renderOrder = 997
   trail3d.add(line, dots)
+  trail3d.userData.follow = () => {
+    for (const obj of [line, dots]) {
+      const attr = obj.geometry.getAttribute('position')
+      steps.forEach((n, i) => attr.setXYZ(i, n.x, n.y, n.z))
+      attr.needsUpdate = true
+      obj.geometry.computeBoundingSphere()
+    }
+  }
   graph.scene().add(trail3d)
 }
 function drift() {
@@ -1060,7 +1289,9 @@ async function copyTrail() {
 }
 
 function key(e: KeyboardEvent) {
-  const typing = (e.target as HTMLElement)?.closest?.('input, textarea')
+  const target = e.target as HTMLElement
+  if (target?.closest?.('input[type="range"]')) return // native arrow keys and Tab for the force sliders
+  const typing = target?.closest?.('input, textarea')
   if (e.key === 'Enter' && typing && order.value.length) { e.preventDefault(); at = -1; next() }
   else if (e.key === 'Tab' && order.value.length && (typing || !e.target || e.target === document.body)) { e.preventDefault(); next(e.shiftKey ? -1 : 1) }
   if (typing) return
@@ -1133,7 +1364,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 <template>
   <KBNeedsService>
     <div ref="frame" class="kbx" :class="{ dark: isDark, full }" :style="{ '--kbx-top': barBottom + 'px' }">
-      <div ref="box" class="kbx-canvas"></div>
+      <div ref="box" class="kbx-canvas" @pointerdown.capture="pointerDown"></div>
       <p v-if="loading" class="kbx-status">Loading the map…</p>
       <p v-else-if="error" class="kbx-status kb-error">{{ error }}</p>
       <p v-else-if="data?.set?.few" class="kbx-status">
@@ -1165,6 +1396,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
           <button :class="{ on: view === '2d' }" @click="view = '2d'">Map</button>
           <button :class="{ on: view === '3d' }" @click="view = '3d'">Space</button>
         </div>
+        <button v-if="free && !(panelOpen && panel === 'forces')" class="kbx-btn" @click="setFree(false)">Return to semantic map</button>
         <button class="kbx-btn" :class="{ on: drifting }" title="Move from document to document along the nearest in meaning, one every few seconds" @click="drift">{{ drifting ? 'Stop' : 'Drift' }}</button>
         <label v-if="drifting" class="kbx-speed" title="Seconds at each document">
           <input v-model.number="driftEvery" type="range" min="0.1" max="10" step="0.1" aria-label="Seconds at each document">
@@ -1186,11 +1418,12 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
                 @click="fullScreen">{{ full ? '⤡' : '⤢' }}</button>
       </div>
 
-      <section v-if="panelOpen" id="kbx-panel" class="kbx-panel" :class="{ wide: panel === 'show' }" aria-label="The map's legend and settings">
+      <section v-if="panelOpen" id="kbx-panel" class="kbx-panel" :class="{ wide: panel !== 'colours' }" aria-label="The map's legend and settings">
         <div class="kbx-panel-head">
           <div class="kbx-seg kbx-seg-small" role="tablist" aria-label="Panel">
             <button role="tab" :aria-selected="panel === 'colours'" :class="{ on: panel === 'colours' }" @click="panel = 'colours'">Legend</button>
             <button role="tab" :aria-selected="panel === 'show'" :class="{ on: panel === 'show' }" @click="panel = 'show'">Settings</button>
+            <button role="tab" :aria-selected="panel === 'forces'" :class="{ on: panel === 'forces' }" @click="panel = 'forces'">Forces</button>
           </div>
         </div>
         <div v-if="panel === 'colours'" class="kbx-key" role="tabpanel">
@@ -1213,6 +1446,32 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
               <button v-if="r.key[0] === 'c'" class="kbx-map-row" :title="`Map ${r.label} by itself`"
                       :aria-label="`Map ${r.label} by itself`" @click="mapSet('cluster:' + r.key.slice(1) + (subset ? '@' + subset : ''))">⤢</button></li>
           </ul>
+        </div>
+        <div v-if="panel === 'forces'" role="tabpanel" aria-label="Forces">
+          <div class="kbx-shade">
+            <span>Position by</span>
+            <div class="kbx-seg kbx-seg-small" role="group" aria-label="Position by">
+              <button :class="{ on: !free }" :aria-pressed="!free" @click="setFree(false)">Semantic map</button>
+              <button :class="{ on: free }" :aria-pressed="free" @click="setFree(true)">Free physics</button>
+            </div>
+          </div>
+          <label class="kbx-shade">On drop
+            <select v-model="onDrop" class="kb-field kbx-pick">
+              <option value="return">Return to starting positions</option>
+              <option value="pin">Pin here</option>
+            </select>
+          </label>
+          <p v-if="!free" class="kbx-hint">Positions reflect similarity in content. Drag a document to switch to free physics.</p>
+          <template v-else>
+            <p class="kbx-hint">Drag a document to pull its linked neighbours.</p>
+            <label v-for="slider in forceSliders" :key="slider.key" class="kbx-force">
+              <span>{{ slider.label }}</span>
+              <input v-model.number="forces[slider.key]" type="range" :min="slider.min" :max="slider.max" :step="slider.step">
+              <span aria-hidden="true">{{ forces[slider.key] }}</span>
+            </label>
+            <p class="kbx-hint">At weight 1, similarity links use their similarity score. Explicit links use the full link strength.</p>
+            <button class="kbx-btn" @click="setFree(false)">Return to semantic map</button>
+          </template>
         </div>
         <div v-if="panel === 'show'" role="tabpanel">
           <div class="kbx-grid">
@@ -1271,6 +1530,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
           v-if="selected.year"> · {{ selected.year }}</template><template v-if="selected.read === false"> · abstract only</template></p>
         <p v-if="clusterName(selected.cluster)" class="kbx-cluster" :title="clusterName(selected.cluster)">{{ clusterName(selected.cluster) }}</p>
         <h3><a :href="selected.page" target="_blank" rel="noopener">{{ selected.title }}</a></h3>
+        <button v-if="free && pinned.has(selected.id)" class="kbx-btn" @click="unpin(selected.id)">Unpin node</button>
         <template v-if="detail && detail.id === selected.id">
           <p v-if="byline(detail)" class="kbx-byline">{{ byline(detail) }}</p>
           <div v-if="detail.summary || detail.abstract" class="kbx-summary" :class="{ open: more }">
@@ -1395,6 +1655,9 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-seg { display: inline-flex; border: 1px solid var(--vp-c-divider); border-radius: 8px; overflow: hidden; background: var(--vp-c-bg); }
 .kbx-seg button { padding: 4px 12px; font-size: 13px; color: var(--vp-c-text-2); }
 .kbx-seg button.on { background: var(--vp-c-brand-soft); color: var(--vp-c-text-1); font-weight: 600; }
+.kbx-force { display: grid; grid-template-columns: minmax(8rem, auto) 1fr 3ch; gap: 8px; align-items: center; margin: 6px 0; }
+.kbx-force input { width: 100%; min-width: 0; accent-color: var(--vp-c-brand-1); }
+.kbx-force span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .kbx-speed { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--vp-c-text-2); font-variant-numeric: tabular-nums; }
 .kbx-speed input { width: 6rem; accent-color: var(--vp-c-brand-1); }
 .kbx-speed span { min-width: 2.6rem; }
