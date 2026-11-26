@@ -3328,6 +3328,48 @@ end
         placed = Set(keys(views["read"]["docs"]))
         @test issubset(firsts, placed) && placed == intersect(fully, keys(views["all"]["docs"])) && length(placed) < length(views["all"]["docs"])
         @test all(n[1] in placed for d in values(views["read"]["docs"]) for n in d["near"])
+        # A subset mapped by itself: one of the full map's clusters, laid out and clustered alone.
+        least = K.SUBSET_LEAST[]
+        try
+            K.SUBSET_LEAST[] = 4
+            me = K.local_caller()
+            whole = views["all"]
+            cl = first(whole["clusters"])
+            members = sort([id for (id, d) in whole["docs"] if d["c"] == cl["id"]])
+            s = K.explore_set(kb, me, "cluster:$(cl["id"])"; abstracts = true)
+            @test s.ids == members && s.name == cl["name"]
+            g = K.explore_set_graph(kb, me, s.spec; abstracts = true)
+            @test isempty(g["nodes"]) && g["job"] !== nothing && g["set"]["count"] == length(members) && !g["set"]["few"]
+            job = K.JOBS[g["job"]]
+            wait(job.done)
+            @test job.status == :done
+            g = K.explore_set_graph(kb, me, s.spec; abstracts = true)
+            @test g["job"] === nothing && Set(n["id"] for n in g["nodes"]) == Set(members) && g["set"]["name"] == cl["name"]
+            @test all(n -> length(n["x"]) == 2 && length(n["px"]) == 2 && length(n["pp"]) == 3, g["nodes"]) && length(g["clusters"]) >= 2
+            # Made again once the documents' vectors or titles change.
+            @test K.cached_subset(kb, members) !== nothing
+            K.execute!(kb, "UPDATE papers SET title = 'A coral study, retitled' WHERE doc_id = ?", (members[1],))
+            K.explore_map!(kb)
+            @test K.cached_subset(kb, members) === nothing
+            # A drift's documents with the nearest of each; a search's first; what one may not see left out.
+            d = K.explore_set(kb, me, "docs:$(members[1])")
+            @test members[1] in d.ids && length(d.ids) == 1 + K.SUBSET_DRIFT_NEAR
+            q = K.explore_set(kb, me, "q:kelp"; n = 4)
+            @test length(q.ids) == 4 && all(id -> topic_of[id] == "kelp", q.ids) && q.name == "“kelp”"
+            K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (members[2],))
+            uid = Int(K.scalar(kb, "INSERT INTO users (email, name, created_at) VALUES ('ada@x.org', 'Ada', ?) RETURNING id", (K.now_iso(),)))
+            ada = K.Caller(uid, "Ada", "ada@x.org", Set(["read", "library", "tasks.view"]), :session, nothing)
+            @test !(members[2] in K.explore_set(kb, ada, "cluster:$(cl["id"])"; abstracts = true).ids)
+            # Too few to lay out, or no such subset.
+            K.SUBSET_LEAST[] = 50
+            few = K.explore_set_graph(kb, me, s.spec; abstracts = true)
+            @test few["set"]["few"] && isempty(few["nodes"]) && few["job"] === nothing
+            @test_throws ErrorException K.explore_set(kb, me, "cluster:999")
+            @test_throws ErrorException K.explore_set(kb, me, "shelf:1")
+            @test_throws ErrorException K.explore_set(kb, ada, "project:NONE")
+        finally
+            K.SUBSET_LEAST[] = least
+        end
         close(kb); close(con)
     finally
         restore_qdrant!(saved)

@@ -370,8 +370,11 @@ function explore_map!(kb::KB; force::Bool = false, progress = msg -> nothing, ca
     return (; data, changed = true)
 end
 
-"One map (see [`explore_map!`](@ref)): of the documents `rows`, whose unit vectors are `X`'s columns."
-function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancelled, what)
+"""
+One map (see [`explore_map!`](@ref)): of the documents `rows`, whose unit vectors are `X`'s columns.
+Without the landscape's clusters (`land`), it makes `clusters` of its own, or as many as suit its size.
+"""
+function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancelled, what, clusters::Integer = c.landscape_clusters)
     n = length(rows)
     progress("Exploring $n $what: finding each one's nearest")
     near = nearest_columns(X, EXPLORE_NEIGHBOURS)
@@ -410,7 +413,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     end
 
     # The landscape's clusters, each centred on its members here; every document joins the nearest.
-    clusters, assign = Dict{String,Any}[], ones(Int, n)
+    wanted, clusters, assign = clusters, Dict{String,Any}[], ones(Int, n)
     col = Dict(r.id => i for (i, r) in enumerate(rows))
     if land !== nothing && !isempty(land["clusters"])
         members = Dict{Int,Vector{Int}}()
@@ -427,7 +430,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     end
     # With no landscape, clusters of its own, labelled by the words of the titles every reader sees.
     if isempty(clusters)
-        k = c.landscape_clusters > 0 ? c.landscape_clusters : clamp(round(Int, sqrt(n / 4)), 2, 16)
+        k = wanted > 0 ? wanted : clamp(round(Int, sqrt(n / 4)), 2, 16)
         assign, _ = spherical_kmeans(X, k)
         open_titles = [coalesce(r.title, "") for r in rows if coalesce(r.access, "open") == "open"]
         all_titles = [coalesce(r.title, "") for r in rows]
@@ -514,17 +517,19 @@ with the similarity, and whether a link joins the two already). The documents kn
 abstract are left out, and the map of those read in full drawn, unless `abstracts` or `center` is one
 of them (`abstract_only` counts those left out). `center` keeps the nodes within `depth` steps of that
 one, `project` those of a project and the nodes next to them; past `limit` nodes, the most linked are kept.
+`view`, a map of some documents only (see [`subset_view!`](@ref)), is drawn instead, of its documents (`only`).
 """
 function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", depth::Integer = 1, links = GRAPH_LINKS,
-                       kinds = ("paper", "record", "code", "resource", "finding"), project::AbstractString = "", limit::Integer = 3000, abstracts::Bool = false)
+                       kinds = ("paper", "record", "code", "resource", "finding"), project::AbstractString = "", limit::Integer = 3000, abstracts::Bool = false,
+                       view = nothing, only = nothing)
     hidden = unfound_documents(kb, caller)
     rows = Dict(String(r.doc_id) => r for r in query(kb, """
         SELECT p.id, p.doc_id, p.kind, coalesce(p.title, w.title) AS title, coalesce(p.published, w.published) AS published, p.access,
                EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read, w.relevance AS rating, p.metadata_at
         FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id"""))
-    abstracts = abstracts || !isempty(center) && haskey(rows, center) && !Bool(rows[center].read)
+    abstracts = abstracts || view !== nothing || !isempty(center) && haskey(rows, center) && !Bool(rows[center].read)
     m = read_explore(kb.config)
-    v = m === nothing ? nothing : get(get(m, "views", Dict()), abstracts ? "all" : "read", nothing)
+    v = view !== nothing ? view : m === nothing ? nothing : get(get(m, "views", Dict()), abstracts ? "all" : "read", nothing)
     docs = v === nothing ? Dict{String,Any}() : v["docs"]
     held = caller.user_id === nothing ? Set{String}() : held_documents(kb, caller.user_id)
     byrow = Dict(Int(r.id) => d for (d, r) in rows)
@@ -619,6 +624,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
         ids = around(seeds, 1)
     end
     isempty(center) || (ids = around([String(center)], clamp(depth, 1, 3)))
+    only === nothing || intersect!(ids, only)
     degree = Dict{String,Int}()
     for (a, b, _) in E
         degree[a] = get(degree, a, 0) + 1; degree[b] = get(degree, b, 0) + 1
@@ -658,20 +664,24 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
                 "similar" => [Any[at[a], at[b], s, (a, b) in linked || get(judged, (a, b), false), haskey(judged, (a, b)) && !judged[(a, b)]]
                               for ((a, b), s) in S if haskey(at, a) && haskey(at, b)],
                 "clusters" => clusters, "built_at" => m === nothing ? nothing : m["built_at"], "abstracts" => abstracts,
-                "abstract_only" => count(id -> seen(id) && !Bool(rows[id].read), keys(everything)))
+                "abstract_only" => view !== nothing ? 0 : count(id -> seen(id) && !Bool(rows[id].read), keys(everything)))
 end
 
 # The graph of what the caller may see, for the explore page (see `explore_graph`): `?center=<id>` and
 # `?depth=1|2|3`, `?links=cites,refers,evidence,task`, `?kinds=paper,record,…`, `?project=KEY`,
-# `?limit=`, `?abstracts=1` with the documents known only by their abstract. Asking starts bringing the
-# map up to date where it is behind (`job`, while it runs).
+# `?limit=`, `?abstracts=1` with the documents known only by their abstract, `?set=` a subset mapped by
+# itself (see `explore_set`, with `?n=` a search's documents). Asking starts bringing the map up to date
+# where it is behind (`job`, while it runs), or making the subset's.
 route!("GET", "/api/graph") do c
     p = c.params
     list(k, default) = isempty(get(p, k, "")) ? default : Tuple(String.(strip.(split(p[k], ','))))
-    g = explore_graph(c.kb, c.caller; center = get(p, "center", ""), depth = int_param(p, "depth", 1, 1:3),
-                      links = list("links", GRAPH_LINKS), kinds = list("kinds", ("paper", "record", "code", "resource", "finding")),
-                      project = get(p, "project", ""), limit = int_param(p, "limit", 3000, 1:20000),
-                      abstracts = get(p, "abstracts", "") in ("1", "true"))
+    links, kinds = list("links", GRAPH_LINKS), list("kinds", ("paper", "record", "code", "resource", "finding"))
+    abstracts = get(p, "abstracts", "") in ("1", "true")
+    isempty(get(p, "set", "")) ||
+        return explore_set_graph(c.kb, c.caller, p["set"]; abstracts, links, kinds,
+                                 n = int_param(p, "n", SUBSET_SEARCH.default, 1:SUBSET_SEARCH.most))
+    g = explore_graph(c.kb, c.caller; center = get(p, "center", ""), depth = int_param(p, "depth", 1, 1:3), links, kinds,
+                      project = get(p, "project", ""), limit = int_param(p, "limit", 3000, 1:20000), abstracts)
     job = try explore_soon!(c.kb) catch e
         @warn "The map could not be brought up to date" exception = e maxlog = 1
         nothing
