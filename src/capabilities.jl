@@ -196,6 +196,7 @@ function action_needs(c::Config, action::AbstractString; kind::DocumentKind = PA
     action == "resummarize" && return [summary; embed]
     action == "classify" && return [:summarizer]
     action in ("embed", "landscape") && return [:embedder, :qdrant]
+    action == "explore" && return [:qdrant]
     return Symbol[]
 end
 

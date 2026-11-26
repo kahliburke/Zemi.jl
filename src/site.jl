@@ -710,7 +710,8 @@ the site shows the knowledge base's changes without a build:
   `TEMPLATED`), its data in `public/kb-data/<kind>/`, the day's picked figures in
   `public/kb-data/figures/`;
 - `index.md`, `timeline.md` and `topics.md`, drawn from `papers.json`; `status.md`, from
-  `status.json`; `authors.md`, `landscape.md`, `missing.md`, `watch.md` and `daily.md`, from
+  `status.json`; `explore.md`, drawn from the API (see [`explore_graph`](@ref)); `authors.md`,
+  `landscape.md`, `missing.md`, `watch.md` and `daily.md`, from
   their JSON (see [`landscape!`](@ref), [`cited_works`](@ref), [`watch!`](@ref),
   [`feature_daily!`](@ref)); and `manage.md`, the Documents page;
 - the pages the build still compiles: the lists of codebases (see [`write_code_site`](@ref)) and of
@@ -718,7 +719,7 @@ the site shows the knowledge base's changes without a build:
 
 Files are only rewritten when their contents change. Returns the pages for the site's navigation,
 paths relative to `dir`: `(; code, code_index, index, timeline, overview, status, manage, landscape,
-missing, watch, daily, authors, topics, papers, records)`, where `code` pairs each open codebase's name with its
+explore, missing, watch, daily, authors, topics, papers, records)`, where `code` pairs each open codebase's name with its
 page, with `topics` as `title => path` pairs, `papers` the number of papers, and `records` the page
 listing the records, `nothing` while there are none.
 """
@@ -828,6 +829,22 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
         <KBLandscape />
         ```
         """)
+    write(joinpath(dir, "explore.md"), """
+        ```@raw html
+        ---
+        layout: page
+        sidebar: false
+        aside: false
+        ---
+        ```
+
+        ```@raw html
+        <div class="kb-wide kbx-page">
+        <h1 class="visually-hidden">Explore</h1>
+        <KBExplore />
+        </div>
+        ```
+        """)
     CITED_WORKS[] = cited_works(sp.doc_id => sp.references for sp in papers)    # (the API serves them too)
     write(joinpath(public, "missing.json"), JSON.json(works_json(kb, on_arxiv(kb, CITED_WORKS[]))))
     write(joinpath(dir, "missing.md"), """
@@ -877,7 +894,7 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
     end
     save(joinpath(public, BUILT_PAGES_FILE), built_pages_digest(dir))
     return (; code = [c.title => joinpath("code", c.page) for c in code], code_index = "code/index.md", index = "index.md", timeline = "timeline.md", overview = "topics.md", status = "status.md",
-              manage = "manage.md", landscape = "landscape.md", missing = "missing.md", watch = "watch.md", daily = "daily.md", authors = "authors.md", topics,
+              manage = "manage.md", landscape = "landscape.md", explore = "explore.md", missing = "missing.md", watch = "watch.md", daily = "daily.md", authors = "authors.md", topics,
               papers = length(papers), records = records ? "records.md" : nothing,
               resources = isempty(resources) ? nothing : "resources.md")
 end
@@ -891,6 +908,7 @@ function site_from_json(text::AbstractString)
     pairs_of(k) = [String(x[1]) => String(x[2]) for x in d[k]]
     return (; code = pairs_of("code"), code_index = d["code_index"], index = d["index"], timeline = d["timeline"],
               overview = d["overview"], status = d["status"], manage = d["manage"], landscape = d["landscape"],
+              explore = get(d, "explore", "explore.md"),
               missing = d["missing"], watch = d["watch"], daily = d["daily"], authors = d["authors"],
               topics = pairs_of("topics"), papers = Int(d["papers"]), records = get(d, "records", nothing),
               resources = get(d, "resources", nothing))

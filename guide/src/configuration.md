@@ -86,6 +86,33 @@ by how near it is to each of them:
 </figure>
 ```
 
+**Explore**, beside the landscape, places every document you may see by what it is about, your own
+notes included, with the links people made drawn between them: citations between papers, references
+in notes and records, a finding's evidence, a task's links. It needs a running server.
+
+It maps the documents read in full. **Include abstract only** adds the papers known only by their
+title and abstract (recorded but not yet read, or found by the watch), on a map of every document laid
+out and clustered afresh.
+
+- **Map** lays them out flat; **Space** in three dimensions, to turn with the mouse, or fly through
+  with F (WASD to move, the mouse to steer). The clusters are the landscape's, named where they lie.
+- **Show** chooses the layout: **t-SNE** keeps each document's close neighbourhood; **UMAP** keeps
+  more of how the groups lie to each other. Either way, close together means alike.
+- Clicking a document moves there and shows its card: its authors, its summary or abstract, its
+  links, and the documents nearest it in meaning, with lines drawn to them, fainter the less alike.
+  Double-click opens its page; Backspace goes back.
+- The search box lights up what Zemi's search finds; Enter goes to the best, Tab to the next.
+  **Drift** moves on by itself every few seconds to the nearest document not yet visited.
+- **Suggested links** lists the pairs most alike that no link joins yet, across the whole
+  knowledge base, the cluster you are in, or between your own notes and documents and the shared ones:
+  from there, copy a paper's citation for a note, or add a document to a finding as evidence. The
+  slider in **Show** sets how alike they must be.
+- **Show** colours documents by cluster, by kind, or by whose they are: yours, your projects', or
+  everyone's.
+
+A paper's or record's page shows its neighbourhood in a small map, with **Explore from here**. The
+map is made with the landscape in a sync, and when the page is opened after documents changed.
+
 ## The config file
 
 `~/.config/zemi/config.toml`, or the path in `ZEMI_CONFIG`. Defaults are in `src/config.jl`. What the

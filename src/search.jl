@@ -478,12 +478,15 @@ end
 """
     similar_papers(kb, doc_id; layer = first paper layer, limit = 10, except = ()) -> Vector{@NamedTuple}
 
-Papers nearest to this one in a paper-level layer, but those in `except`.
+Papers nearest to this one in a paper-level layer, but those in `except`; none for a paper with no
+title or abstract yet.
 """
 function similar_papers(kb::KB, doc_id::AbstractString; layer = nothing, limit::Integer = 10, except = ())
     l = layer === nothing ? kb.config.layers[findfirst(l -> l.unit == :paper, kb.config.layers)] :
         Zemi.layer(kb.config, layer)
-    u = only(units(kb, l, doc_id))
+    us = units(kb, l, doc_id)
+    isempty(us) && return []                     # known by its id alone: nothing to be near
+    u = only(us)
     v = query_vector(kb.config, Layer(; name = l.name, model = l.model, unit = l.unit), u.text)
     hits = vector_search(collection_name(kb.config, l), v; limit = limit + 1 + length(except))
     out = []

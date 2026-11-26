@@ -130,6 +130,9 @@ function units(kb::KB, l::Layer, doc_id::AbstractString)
     base = paper_payload(p)
     isempty(l.source) || return summary_units(kb, l, p, prep, base)
     if l.unit == :paper
+        # A paper known by its id alone has nothing to place it by: a vector of the id would sit beside
+        # every other such paper.
+        ismissing(p.title) && coalesce(p.abstract, "") == "" && return Unit[]
         text = "$title\n\n$(coalesce(p.abstract, ""))"
         return [Unit("p:$doc_id", prep(text), merge(base, Dict("kind" => "paper")))]
     end

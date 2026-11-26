@@ -51,7 +51,7 @@ function sync_plan(kb::KB; unread::Bool = false)
         if arxiv && d.fetched != 1 && ismissing(d.file_sha)
             if unread
                 task(:ingest, UNREAD)
-            elseif !ismissing(d.metadata_at) && any(l -> !isempty(embedding_diff(kb, l, d.id).todo), record_layers(kb.config))
+            elseif any(l -> !isempty(embedding_diff(kb, l, d.id).todo), record_layers(kb.config))
                 task(:embed, "title and abstract not embedded")
             end
             continue
@@ -139,6 +139,8 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
             push!(failed, "dataset" => failure_message(e))
         end
     end
+    # Papers known by their id alone, where the watch has their text.
+    fill_from_watch!(kb)
     plan === nothing && (plan = sync_plan(kb; unread))
     ids(action) = unique([t.id for t in plan if t.action == action])
     metadata = 0
@@ -256,6 +258,15 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
                 e isa InterruptException && rethrow()
                 push!(failed, "landscape" => failure_message(e))
             end
+        end
+    end
+    # As does the explore page's map, with the links read from what changed.
+    if !cancelled()
+        try
+            explore!(kb; progress, cancelled)
+        catch e
+            e isa InterruptException && rethrow()
+            push!(failed, "explore" => failure_message(e))
         end
     end
     published = nothing

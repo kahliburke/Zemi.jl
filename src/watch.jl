@@ -168,6 +168,32 @@ function replace_watched!(kb::KB; progress = msg -> nothing)
 end
 
 """
+    fill_from_watch!(kb, ids = nothing) -> Int
+
+Give papers without their arXiv record yet (of `ids`, or all) the title, authors, abstract, date and
+category the watch found them with, where they lack them, so a paper is never known by its id alone
+while arXiv is asked. The record, once fetched, replaces them. Returns the number of papers filled.
+"""
+function fill_from_watch!(kb::KB, ids::Union{AbstractVector{<:AbstractString},Nothing} = nothing)
+    ids !== nothing && isempty(ids) && return 0
+    w(col) = "(SELECT nullif(w.$col, '') FROM watch w WHERE w.doc_id = papers.doc_id)"
+    only_these = ids === nothing ? "" : "AND doc_id IN ($(join(fill("?", length(ids)), ", ")))"
+    sql = """
+        UPDATE papers SET title = coalesce(title, $(w("title"))), abstract = coalesce(nullif(abstract, ''), $(w("abstract"))),
+                          authors = coalesce(authors, $(w("authors"))), published = coalesce(published, $(w("published"))),
+                          primary_category = coalesce(primary_category, $(w("category")))
+        WHERE metadata_at IS NULL AND (title IS NULL OR coalesce(abstract, '') = '')
+          AND doc_id IN (SELECT doc_id FROM watch) $only_these"""
+    return lock(kb.lock) do
+        DBInterface.close!(DBInterface.execute(kb.db, sql, ids === nothing ? () : Tuple(ids)))
+        c = DBInterface.execute(kb.db, "SELECT changes() AS n")
+        n = Int(first(c).n)
+        DBInterface.close!(c)
+        n
+    end
+end
+
+"""
     take_watched!(kb; progress, cancelled, read_in_full, record) -> (; read, recorded)
 
 Take the judged watched papers into the knowledge base by their rating: those rated at least

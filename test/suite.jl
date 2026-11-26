@@ -745,7 +745,7 @@ end
         @test [(f.bytes, f.type) for f in K.daily_figures(kb)] == [(UInt8[0x89, 0x50, 0x4e, 0x47], "image/png")]
         @test isempty(K.daily_figures(kb, "2026-10-01"))
         @test startswith(K.format_daily(kb, "2026-09-30"), "No paper of the day on 2026-09-30. Days with one: 2026-10-02, 2026-10-01")
-        @test K.daily_json(dailies(kb)) == [Dict("day" => "2026-10-02", "id" => "2610.00001", "title" => "2610.00001"),
+        @test K.daily_json(dailies(kb)) == [Dict("day" => "2026-10-02", "id" => "2610.00001", "title" => "Paper 2610.00001"),
                                             Dict("day" => "2026-10-01", "id" => "2401.00001", "title" => "A library paper")]
         # Its citations link to the papers' pages (or arXiv); its mathematics stays as written, for the page to render.
         text = main["analysis"][2]["text"]
@@ -1916,6 +1916,33 @@ end
     close(kb)
 end
 
+@zset "a recorded paper has the watch's text until arXiv's record comes" begin
+    kb = open_kb(temp_config(layers = [Layer(; name = "paper-t", model = "m", unit = :paper)]))
+    watched(id) = K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score,
+                                    nearest, found_at) VALUES (?, ?, '["Ada Byron"]', 'On tides.', '2026-10-10', 'physics.ao-ph',
+                                    0.5, 'Corals', 0.5, '[]', ?)""", (id, "Tides $id", K.now_iso()))
+    watched("2610.00041")
+    K.add_papers!(kb, ["2610.00041", "2610.00042"]; source = "watch")
+    p = K.paper_row(kb, "2610.00041")
+    @test (p.title, p.abstract, p.authors, p.published, p.primary_category) ==
+          ("Tides 2610.00041", "On tides.", """["Ada Byron"]""", "2026-10-10", "physics.ao-ph") && ismissing(p.metadata_at)
+    l = only(K.record_layers(kb.config))
+    @test only(K.units(kb, l, "2610.00041")).text == "Tides 2610.00041\n\nOn tides."
+    # With no text at all, a paper has nothing to embed: no vector of its id alone.
+    @test isempty(K.units(kb, l, "2610.00042"))
+    plan = sync_plan(kb)
+    @test [t.id for t in plan if t.action == :embed] == ["2610.00041"]
+    @test sort([t.id for t in plan if t.action == :metadata]) == ["2610.00041", "2610.00042"]
+    # One recorded before its text was kept is filled from the watch, as a sync does first.
+    K.execute!(kb, "INSERT INTO papers (doc_id, added_at) VALUES ('2610.00043', ?)", (K.now_iso(),))
+    watched("2610.00043")
+    @test K.fill_from_watch!(kb) == 1 && K.paper_row(kb, "2610.00043").title == "Tides 2610.00043"
+    # arXiv's record, once fetched, is what stays.
+    K.execute!(kb, "UPDATE papers SET title = 'Tides, revised', abstract = '', metadata_at = ? WHERE doc_id = '2610.00041'", (K.now_iso(),))
+    @test K.fill_from_watch!(kb) == 0 && K.paper_row(kb, "2610.00041").title == "Tides, revised"
+    close(kb)
+end
+
 @zset "a codebase read again redoes only what changed" begin
     dir = mktempdir()
     mkpath(joinpath(dir, "src"))
@@ -2950,6 +2977,145 @@ end
     @test due("2020-01-01", missing) && due(missing, "2026-01-01T00:00:00Z")
 end
 
+@zset "exploring the knowledge base" begin
+    JSON = K.JSON
+    kb = open_kb(temp_config(; layers = Layer[], qdrant_url = "http://127.0.0.1:1"))
+    for (id, title, journal) in (("2401.00001", "Citing paper", missing), ("2401.00002", "Fast surveys of reefs", missing),
+                                 ("2401.00005", "Untitled in the citation", "Mar. Biol. 57 (2017) 066001"))
+        K.execute!(kb, """INSERT INTO papers (doc_id, title, journal_ref, authors, added_at, metadata_at, kind, published)
+                          VALUES (?, ?, ?, '["Tomi Ames"]', ?, ?, 'paper', '2017-03-01')""", (id, title, journal, K.now_iso(), K.now_iso()))
+    end
+    K.store_parse!(kb, "2401.00001", K.ParsedPaper(1, [
+        K.Piece(:heading, 1, (0.0, 0.0, 0.0, 0.0), "References", 1, 1, ""),
+        K.Piece(:reference, 1, (0.0, 0.0, 0.0, 0.0), "[1] T. Ames et al., Mar. Biol. 57, 066001 (2017). [2] B. Bard, Later work, arXiv:2401.00006 (2024).", 1, 0, "")],
+        [K.Section(1, 1, "", "References", "References", 1, 1)]))
+    note(text) = first(K.put_record!(kb, "upload", (; key = "reef notes", title = "Reef notes", date = "2026-10-01",
+                                                    sections = ["Notes" => text]); read = false))
+    rec = note("As @[Fast surveys](paper:2401.00002) found.")
+    K.execute!(kb, "UPDATE papers SET access = 'open' WHERE doc_id = ?", (rec,))
+    links() = Set((String(r.a), String(r.b), String(r.kind)) for r in K.query(kb, """
+        SELECT f.doc_id AS a, t.doc_id AS b, l.kind FROM document_links l JOIN papers f ON f.id = l.from_id JOIN papers t ON t.id = l.to_id"""))
+    # The links people made: a paper's references to papers here, a record's references; read once each.
+    @test K.links_behind(kb) && K.read_links!(kb) == 4 && !K.links_behind(kb)
+    @test links() == Set([("2401.00001", "2401.00005", "cites"), (rec, "2401.00002", "refers")])
+    @test K.read_links!(kb) == 0
+    # A paper new here is found in the references of those read before it; an edited record is read again.
+    K.execute!(kb, "INSERT INTO papers (doc_id, title, added_at, kind) VALUES ('2401.00006', 'Later work', ?, 'paper')", (K.now_iso(),))
+    @test note("Unlike @[Untitled](paper:2401.00005).") == rec && K.read_links!(kb) == 2
+    @test links() == Set([("2401.00001", "2401.00005", "cites"), ("2401.00001", "2401.00006", "cites"), (rec, "2401.00005", "refers")])
+
+    # The map, as `explore_map!` writes it, and a note of Ada's alone.
+    ada = Int(K.scalar(kb, "INSERT INTO users (email, name, created_at) VALUES ('ada@x.org', 'Ada', ?) RETURNING id", (K.now_iso(),)))
+    bea = Int(K.scalar(kb, "INSERT INTO users (email, name, created_at) VALUES ('bea@x.org', 'Bea', ?) RETURNING id", (K.now_iso(),)))
+    mine = first(K.put_record!(kb, "upload", (; key = "diary", title = "Diary", date = "2026-10-02", sections = ["Notes" => "Mine."]); read = false))
+    K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (mine,))
+    K.execute!(kb, "INSERT INTO document_holders (paper_id, user_id) VALUES (?, ?)", (K.paper_id(kb, mine), ada))
+    place(near) = Dict("x" => [0.1, 0.2], "p" => [0.1, 0.2, 0.3], "ux" => [0.3, 0.4], "up" => [0.3, 0.4, 0.5], "c" => 1, "k" => 0.8, "near" => near)
+    reefs = [Dict("id" => 1, "name" => "Reefs", "description" => "")]
+    write(K.explore_path(kb.config), JSON.json(Dict("version" => 3, "input_sha" => "", "built_at" => "then", "layer" => "l", "views" => Dict(
+        "all" => Dict("clusters" => [reefs; Dict("id" => 2, "name" => "", "description" => "", "closed_name" => "diary")],
+                      "docs" => Dict("2401.00001" => place([["2401.00002", 0.9], [rec, 0.6]]), "2401.00002" => place([["2401.00001", 0.9], [mine, 0.7]]),
+                                     rec => merge(place([["2401.00005", 0.8]]), Dict("lib" => [["2401.00002", 0.55]])), mine => merge(place([["2401.00002", 0.7]]), Dict("c" => 2)))),
+        "read" => Dict("clusters" => reefs, "docs" => Dict("2401.00001" => place([])))))))
+    K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score, nearest, found_at, relevance)
+                      VALUES ('2401.00002', 'Fast surveys of reefs', '[]', 'On reefs.', '2017-03-01', 'q-bio', 0.5, 'Reefs', 0.5, '[]', ?, 2)""", (K.now_iso(),))
+    as(uid) = K.Caller(uid, "Someone", "x@x.org", Set(["read", "library", "tasks.view"]), :session, nothing)
+    ids(g) = Set(n["id"] for n in g["nodes"])
+    graph(who; kw...) = K.explore_graph(kb, who; abstracts = true, kw...)
+    pairs(g, key) = Set(Tuple(sort([g["nodes"][e[1]+1]["id"], g["nodes"][e[2]+1]["id"]])) for e in g[key])
+    g = graph(as(ada))
+    @test ids(g) == Set(["2401.00001", "2401.00002", "2401.00005", "2401.00006", rec, mine])
+    # Nearest by meaning, once a pair, saying whether a link joins them already.
+    near = Dict(Tuple(sort([g["nodes"][e[1]+1]["id"], g["nodes"][e[2]+1]["id"]])) => (e[3], e[4]) for e in g["similar"])
+    @test near[("2401.00001", "2401.00002")] == (0.9, false) && near[Tuple(sort(["2401.00005", rec]))] == (0.8, true)
+    @test near[Tuple(sort(["2401.00002", rec]))] == (0.55, false)                   # a note's nearest in the library
+    @test pairs(g, "links") == Set([("2401.00001", "2401.00005"), ("2401.00001", "2401.00006"), Tuple(sort([rec, "2401.00005"]))])
+    n1 = only(n for n in g["nodes"] if n["id"] == "2401.00001")
+    @test n1["x"] == [0.1, 0.2] && n1["ux"] == [0.3, 0.4] && n1["cluster"] == 1 && n1["year"] == "2017" && n1["links"] == 2 && first(g["clusters"])["name"] == "Reefs"
+    @test !haskey(only(n for n in g["nodes"] if n["id"] == "2401.00006"), "x")         # linked, not placed: no vector
+    # A paper whose arXiv record has not come has no page on the site yet: its page is arXiv's.
+    @test only(n for n in g["nodes"] if n["id"] == "2401.00006")["page"] == "https://arxiv.org/abs/2401.00006" &&
+          !startswith(n1["page"], "https://arxiv.org")
+    @test K.explore_node(kb, as(ada), "2401.00006")["page"] == "https://arxiv.org/abs/2401.00006"
+    # How central each is to its cluster, and the watch's rating where the watch judged it.
+    @test n1["central"] == 0.8 && !haskey(n1, "rating") && only(n for n in g["nodes"] if n["id"] == "2401.00002")["rating"] == 2
+    own = only(n for n in g["nodes"] if n["id"] == mine)
+    @test own["mine"] && own["access"] == "private" && !n1["mine"] && n1["access"] == "open"
+    # Pairs judged from the suggestions: related ones linked as a person's, others no longer suggested.
+    judged(g) = Dict(Tuple(sort([g["nodes"][e[1]+1]["id"], g["nodes"][e[2]+1]["id"]])) => (e[4], e[5]) for e in g["similar"])
+    K.judge_pair!(kb, as(ada), "2401.00002", "2401.00001", true)
+    K.judge_pair!(kb, as(ada), mine, "2401.00002", false)
+    g = graph(as(ada))
+    @test ("2401.00001", "2401.00002") in pairs(g, "links") && judged(g)[("2401.00001", "2401.00002")] == (true, false)
+    @test judged(g)[Tuple(sort([mine, "2401.00002"]))] == (false, true)
+    @test !(("2401.00001", "2401.00002") in pairs(graph(as(ada); links = ("cites",)), "links"))
+    K.judge_pair!(kb, as(ada), "2401.00001", "2401.00002", nothing)
+    @test judged(graph(as(ada)))[("2401.00001", "2401.00002")] == (false, false)
+    # Only of documents one sees, and not of one with itself.
+    @test_throws K.Refusal K.judge_pair!(kb, as(bea), mine, "2401.00002", true)
+    @test_throws ErrorException K.judge_pair!(kb, as(ada), "2401.00002", "2401.00002", true)
+    # A note's nearest in the library, kept though other notes are nearer, are pairs too.
+    X = K.unit_columns([1.0 0.9 0.0 0.8; 0.0 0.1 1.0 0.6])
+    @test K.nearest_library(X, [true, true, false, false], 1) == Dict(1 => [(4, X[:, 1]' * X[:, 4])], 2 => [(4, X[:, 2]' * X[:, 4])])
+    @test isempty(K.nearest_library(X, falses(4), 1))
+    # What a pair shares: the words both use that few others do; nothing of a document one may not see.
+    @test K.shared_words(kb, as(ada), [(rec, "2401.00005")]) == [["untitled"]]
+    @test K.shared_words(kb, as(bea), [(mine, "2401.00002")]) == [String[]]
+    @test K.pair_words("Füße Reefs, the reef's surveys and Gauß's grass") == Set(["füße", "reef", "survey", "gauß", "grass"])
+    # By default only the documents read in full, on their own map; one known by its abstract alone,
+    # centred on, brings the rest.
+    fully = Set(String(r.doc_id) for r in K.query(kb, "SELECT doc_id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))
+    g0 = K.explore_graph(kb, as(ada))
+    @test "2401.00001" in fully && !("2401.00002" in fully) && ids(g0) == intersect(ids(g), fully)
+    @test !g0["abstracts"] && g0["abstract_only"] == length(setdiff(Set(["2401.00001", "2401.00002", rec, mine]), fully)) && all(n -> n["read"], g0["nodes"])
+    @test K.explore_graph(kb, as(ada); center = "2401.00002")["abstracts"]
+    # Another's private note is no node of theirs, nor anyone's neighbour.
+    gb = graph(as(bea))
+    @test !(mine in ids(gb)) && !any(p -> mine in p, pairs(gb, "similar"))
+    # A cluster no open document names is labelled by its titles only for one who sees them all.
+    @test [cl["name"] for cl in g["clusters"]] == ["Reefs", "diary"] && [cl["name"] for cl in gb["clusters"]] == ["Reefs", ""]
+    # Around one document, a step or two; the most linked kept past a limit; only some kinds of link.
+    @test ids(graph(as(ada); center = "2401.00005")) == Set(["2401.00005", "2401.00001", rec])
+    @test ids(graph(as(ada); center = "2401.00005", depth = 2)) == Set(["2401.00005", "2401.00001", rec, "2401.00002", "2401.00006"])
+    @test "2401.00001" in ids(graph(as(ada); limit = 1))
+    @test pairs(graph(as(ada); links = ("refers",)), "links") == Set([Tuple(sort([rec, "2401.00005"]))])
+    # A finding is a node of those who see its project, linked to its evidence.
+    me = K.person("Ada")
+    K.create_project!(kb, "Reefs"; key = "RF", owner = ada, by = me)
+    f = K.create_finding!(kb, "RF", "Surveys are fast"; evidence = [(; kind = "paper", target = "2401.00002")], by = me)
+    g = graph(as(ada))
+    @test f == "RF-F1" && "RF-F1" in ids(g) && ("2401.00002", "RF-F1") in pairs(g, "links")
+    @test !("RF-F1" in ids(graph(as(bea))))
+    @test ids(graph(as(ada); project = "RF")) == Set(["RF-F1", "2401.00002"])
+    # A document's card: a paper's own details, a watched paper's from the watch; another's note is none.
+    K.execute!(kb, "UPDATE papers SET abstract = 'Surveys, fast.' WHERE doc_id = '2401.00002'")
+    K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score, nearest, found_at)
+                      VALUES ('2401.00006', 'Later work, watched', '["Bo Bard"]', 'Later.', '2024-01-02', 'q-bio', 0.5, '', 0, '[]', ?)""", (K.now_iso(),))
+    card(id, who = ada) = K.handle(kb, K.HTTP.Request("GET", "/api/graph/node?id=$id"), as(who))
+    c2 = JSON.parse(String(card("2401.00002").body))
+    @test c2["title"] == "Fast surveys of reefs" && c2["abstract"] == "Surveys, fast." && c2["authors"] == ["Tomi Ames"] && !c2["read"]
+    c6 = JSON.parse(String(card("2401.00006").body))
+    @test c6["title"] == "Later work" && c6["abstract"] == "Later." && c6["authors"] == ["Bo Bard"] && c6["published"] == "2024-01-02"
+    @test card(mine).status == 200 && card(mine, bea).status == 404 && card("2401.09999").status == 404
+    # Through the API, which starts reading the links behind; the map is made only where Qdrant
+    # answers (here none: nothing more to do once the links are read).
+    @test K.links_behind(kb) && !K.can_map(kb)
+    r = K.handle(kb, K.HTTP.Request("GET", "/api/graph?center=2401.00005&links=cites,refers"), as(ada))
+    got = JSON.parse(String(r.body))
+    @test r.status == 200 && length(got["nodes"]) == 3 && got["job"] !== nothing
+    wait(K.EXPLORE_JOB[].done)
+    @test !K.links_behind(kb) && K.explore_soon!(kb) === nothing
+    # With no map yet, and a job to say so.
+    rm(K.explore_path(kb.config))
+    K.execute!(kb, "DELETE FROM document_links_read")
+    r = K.handle(kb, K.HTTP.Request("GET", "/api/graph?abstracts=1"), as(ada))
+    got = JSON.parse(String(r.body))
+    @test r.status == 200 && got["job"] !== nothing && got["built_at"] === nothing && !isempty(got["links"])
+    wait(K.EXPLORE_JOB[].done)
+    @test K.handle(kb, K.HTTP.Request("GET", "/api/graph?project=NONE"), as(bea)).status == 200
+    close(kb)
+end
+
 @zset "landscape" begin
     HTTP, JSON = K.HTTP, K.JSON
     qdrant, colls, qport = standin_qdrant()
@@ -2997,6 +3163,31 @@ end
         @test r.embedded == 18 && isempty(r.failed) && r.landscape.changed && !any(t -> t.action == :embed, sync_plan(kb))
         d = r.landscape.data
         @test length(d["papers"]) == 18 && length(d["clusters"]) == 3 && asked[] == 1
+        # The explore page's map, made in the same sync: every document placed on the map and in the space,
+        # its nearest its own topic's, and its cluster the landscape's.
+        m = K.read_explore(c)["views"]["all"]
+        @test !haskey(K.read_explore(c)["views"], "read")                      # none read in full
+        @test length(m["docs"]) == 18 && sort([cl["name"] for cl in m["clusters"]]) == sort([cl["name"] for cl in d["clusters"]])
+        for (id, doc) in m["docs"]
+            @test length(doc["near"]) == K.EXPLORE_NEIGHBOURS && all(topic_of[n[1]] == topic_of[id] for n in doc["near"][1:5])
+            @test length(doc["x"]) == 2 && length(doc["p"]) == 3 && all(v -> -1.3 <= v <= 1.3, [doc["x"]; doc["p"]])
+            @test 0 < doc["k"] <= 1.0001
+        end
+        @test all(length(unique(m["docs"][id]["c"] for id in keys(topic_of) if topic_of[id] == t)) == 1 for t in topics)
+        # Laid out by UMAP as well, each paper nearest one of its own topic there too.
+        @test all(d -> length(d["ux"]) == 2 && length(d["up"]) == 3 && all(v -> -1.3 <= v <= 1.3, [d["ux"]; d["up"]]), values(m["docs"]))
+        ux = Dict(id => d["ux"] for (id, d) in m["docs"])
+        nearest_by_umap(id) = argmin(o -> o == id ? Inf : sum(abs2, ux[o] .- ux[id]), collect(keys(ux)))
+        @test all(id -> topic_of[nearest_by_umap(id)] == topic_of[id], collect(keys(ux)))
+        @test !K.explore_map!(kb).changed && !K.explore_stale(kb)
+        # Without a landscape, clusters of the map's own, labelled by their titles' words.
+        mv(K.landscape_path(c), K.landscape_path(c) * ".kept")
+        @test K.explore_stale(kb)
+        own = K.explore_map!(kb).data["views"]["all"]
+        @test length(own["clusters"]) >= 2 && all(cl -> !isempty(cl["name"]) && !startswith(cl["name"], "Group "), own["clusters"])
+        @test all(length(unique(own["docs"][id]["c"] for id in keys(topic_of) if topic_of[id] == t)) == 1 for t in topics)
+        mv(K.landscape_path(c) * ".kept", K.landscape_path(c))
+        @test K.explore_map!(kb).changed && !K.explore_stale(kb)
         # Each cluster is one topic, named by the namer, and each paper is nearest its own topic's area.
         for cl in d["clusters"]
             @test length(unique(topic_of[p["id"]] for p in d["papers"] if p["cluster"] == cl["id"])) == 1
@@ -3038,6 +3229,7 @@ end
         site, public = mktempdir(), mktempdir()
         nav = write_site(kb, site, public; related = false)
         @test nav.landscape == "landscape.md" && occursin("<KBLandscape", read(joinpath(site, "landscape.md"), String))
+        @test nav.explore == "explore.md" && occursin("<KBExplore", read(joinpath(site, "explore.md"), String))
         @test JSON.parsefile(joinpath(public, "landscape.json"))["input_sha"] == d["input_sha"]
         store = DirStore(mktempdir())
         publish!(kb; store)
@@ -3106,6 +3298,18 @@ end
         K.execute!(kb, "DELETE FROM kv WHERE key = 'watch_basis'")
         K.note_watch_basis!(bare); K.note_watch_basis!(wkb)               # the first recorded stands
         @test K.replace_watched!(wkb) == length(watched(wkb)) && all(p -> ismissing(p.relevance), watched(wkb))
+        # The papers read in full have a map of their own: only they are placed on it, and near each other.
+        firsts = sort(collect(keys(topic_of)))[1:4]
+        for id in firsts
+            K.store_parse!(kb, id, K.ParsedPaper(1, [K.Piece(:heading, 1, (0.0, 0.0, 0.0, 0.0), "Methods", 1, 1, "")],
+                                                 [K.Section(1, 1, "", "Methods", "Methods", 1, 1)]))
+        end
+        @test K.explore_stale(kb)
+        views = K.explore_map!(kb).data["views"]
+        fully = Set(String(r.id) for r in K.query(kb, "SELECT doc_id AS id FROM papers p WHERE EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id)"))
+        placed = Set(keys(views["read"]["docs"]))
+        @test issubset(firsts, placed) && placed == intersect(fully, keys(views["all"]["docs"])) && length(placed) < length(views["all"]["docs"])
+        @test all(n[1] in placed for d in values(views["read"]["docs"]) for n in d["near"])
         close(kb); close(con)
     finally
         restore_qdrant!(saved)
