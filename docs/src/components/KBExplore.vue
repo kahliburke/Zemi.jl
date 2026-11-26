@@ -1140,24 +1140,23 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <button class="kbx-btn" :class="{ on: showPairs }" title="Pairs of documents close in meaning that nothing links yet" @click="showPairs = !showPairs">Suggested links</button>
         <button v-if="data?.abstract_only" class="kbx-btn" :class="{ on: abstracts }" :title="`${data.abstract_only} papers not read in full, placed by their title and abstract`"
                 @click="abstracts = !abstracts">Include abstract only</button>
+        <button class="kbx-btn kbx-icon" :class="{ on: panelOpen }" aria-controls="kbx-panel" :aria-expanded="panelOpen"
+                aria-label="The map's legend and settings" title="Legend, layout and what the map shows" @click="panelOpen = !panelOpen">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+        </button>
         <button class="kbx-btn kbx-full" :title="full ? 'Leave full screen (Esc)' : 'Full screen'" :aria-label="full ? 'Leave full screen' : 'Full screen'"
                 @click="fullScreen">{{ full ? '⤡' : '⤢' }}</button>
       </div>
 
-      <section class="kbx-panel" :class="{ open: panelOpen, wide: panelOpen && panel === 'show' }" aria-label="The map's legend and settings">
+      <section v-if="panelOpen" id="kbx-panel" class="kbx-panel" :class="{ wide: panel === 'show' }" aria-label="The map's legend and settings">
         <div class="kbx-panel-head">
-          <div v-if="panelOpen" class="kbx-seg kbx-seg-small" role="tablist" aria-label="Panel">
+          <div class="kbx-seg kbx-seg-small" role="tablist" aria-label="Panel">
             <button role="tab" :aria-selected="panel === 'colours'" :class="{ on: panel === 'colours' }" @click="panel = 'colours'">Legend</button>
             <button role="tab" :aria-selected="panel === 'show'" :class="{ on: panel === 'show' }" @click="panel = 'show'">Show</button>
           </div>
-          <button class="kbx-panel-toggle" :aria-expanded="panelOpen" :aria-label="panelOpen ? 'Close the map\'s settings' : 'The map\'s settings'"
-                  :title="panelOpen ? 'Close' : 'Legend, layout and what the map shows'" @click="panelOpen = !panelOpen">
-            <svg v-if="!panelOpen" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"
-                 stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-            <span v-else aria-hidden="true">×</span>
-          </button>
         </div>
-        <div v-if="panelOpen && panel === 'colours'" class="kbx-key" role="tabpanel">
+        <div v-if="panel === 'colours'" class="kbx-key" role="tabpanel">
           <div class="kbx-shade">
             <span>Colour by</span>
             <div class="kbx-seg kbx-seg-small" role="group" aria-label="Colour by">
@@ -1178,7 +1177,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
                       :aria-label="`Map ${r.label} by itself`" @click="mapSet('cluster:' + r.key.slice(1))">⤢</button></li>
           </ul>
         </div>
-        <div v-if="panelOpen && panel === 'show'" role="tabpanel">
+        <div v-if="panel === 'show'" role="tabpanel">
           <div class="kbx-grid">
             <template v-if="data?.nodes.some(n => n.ux)">
               <span class="kbx-label">Layout</span>
@@ -1363,14 +1362,12 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-panel { position: absolute; top: 52px; right: 10px; max-height: calc(100% - 64px); overflow: auto; border: 1px solid var(--vp-c-divider);
               background: color-mix(in srgb, var(--vp-c-bg) 72%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
               border-radius: 8px; padding: 4px 10px; font-size: 12px; }
-.kbx-panel.open { width: 18rem; padding: 6px 12px 10px; }
+.kbx-panel { width: 18rem; padding: 6px 12px 10px; }
 .kbx-panel.wide { width: min(31rem, calc(100% - 20px)); }
 .kbx-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kbx-panel-head .kbx-seg button { padding: 2px 10px; }
-.kbx-panel-toggle { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; font-size: 16px;
-                     color: var(--vp-c-text-2); margin-left: auto; border-radius: 6px; }
-.kbx-panel:not(.open) { padding: 4px; }
-.kbx-panel-toggle:hover { color: var(--vp-c-text-1); }
+.kbx-icon { display: inline-flex; align-items: center; justify-content: center; padding: 5px 8px; margin-left: auto; }
+.kbx-icon + .kbx-full { margin-left: 0; }
 .kbx-shade { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0 4px; color: var(--vp-c-text-2); }
 .kbx-shade .kbx-seg button { padding: 2px 7px; }
 .kbx-key ul { list-style: none; margin: 4px 0 2px; padding: 0; }
