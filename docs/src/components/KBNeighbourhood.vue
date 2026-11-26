@@ -7,7 +7,7 @@
 import { ref, watch, nextTick } from 'vue'
 import { useData } from 'vitepress'
 import { getJSON, onLive } from './kbApi'
-import { kbPage } from './kbLinks'
+import { exploreHref } from './kbLinks'
 
 const props = defineProps<{ id: string }>()
 const { isDark } = useData()
@@ -48,12 +48,11 @@ async function draw() {
 
 onLive(() => { draw(); return () => graph?._destructor?.() })
 watch(() => props.id, () => draw())
-const explore = () => `${kbPage('explore')}?center=${encodeURIComponent(props.id)}`
 </script>
 
 <template>
   <section v-show="found" class="kbn">
-    <div class="kbn-head"><h2>Nearby</h2><a :href="explore()">Explore from here →</a></div>
+    <div class="kbn-head"><h2>Nearby</h2><a :href="exploreHref(props.id)">Explore from here →</a></div>
     <div ref="box" class="kbn-map"></div>
   </section>
 </template>

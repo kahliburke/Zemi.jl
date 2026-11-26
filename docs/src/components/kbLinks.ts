@@ -15,6 +15,9 @@ const KB = '/generated/kb/'
 /** A page of the knowledge base's, as the API and the site's data name them: `papers/2401-00001`, `code/code-kb/`. */
 export const kbPage = (path: string) => pageLink(KB + path)
 
+/** Open Explore with this document selected in the reader's graph. */
+export const exploreHref = (id: string) => `${kbPage('explore')}?center=${encodeURIComponent(id)}`
+
 /** A paper's or topic's page name: its id with dots and slashes as dashes (`page_slug` in src/site.jl). */
 export const pageSlug = (id: string) => id.replace(/[./]/g, '-')
 /** A codebase file's page name: its path with each run of other characters as `_` (`file_slug` in src/code.jl). */
