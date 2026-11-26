@@ -541,6 +541,32 @@ end
     @test K.project_access(kb, K.token_caller(kb, K.create_token!(kb, other; name = "all mine").token), "OT") == K.NO_ACCESS
     @test_throws "No project ZZ" K.create_token!(kb, boss; name = "bad", projects = ["ZZ"])
 
+    # Search suggestions count visible tasks and findings before taking the first five.
+    tr = K.create_task!(kb, "MN", "Reef survey"; by = K.person("boss"))
+    fr = K.create_finding!(kb, "MN", "Reef finding"; by = K.person("boss"))
+    for i in 1:6
+        K.create_task!(kb, "OT", "Reef survey $i"; by = K.person("boss"))
+        K.create_finding!(kb, "OT", "Reef finding $i"; by = K.person("boss"))
+    end
+    K.execute!(kb, "UPDATE tasks SET updated_at = '2099' WHERE project_id = ?", (K.project_id(kb, "OT"),))
+    K.execute!(kb, "UPDATE findings SET updated_at = '2099' WHERE project_id = ?", (K.project_id(kb, "OT"),))
+    matches = call(reader, "GET", "/api/tasks/references?q=reef")[2]
+    @test [r["target"] for r in matches if r["kind"] == "task"] == [tr]
+    @test [r["target"] for r in matches if r["kind"] == "finding"] == [fr]
+
+    # Shareable workspace searches include the activity item containing the words.
+    K.note_task!(kb, tr, "MathInterchange weekly meeting"; by = K.person("boss"))
+    K.note_task!(kb, "OT-1", "MathInterchange workshop"; by = K.person("boss"))
+    for view in ("suggestions", "results")
+        target = "/api/search?view=$view&q=MathInterchange&kinds=task&layers=none"
+        data = call(reader, "GET", target)[2]
+        item = only(data["tasks"])
+        @test item["ref"] == tr && only(item["matches"])["event"] > 0
+        @test call(boss, "GET", target * "&project=MN")[2]["tasks"] == [item]
+        @test call(reader, "GET", target * "&project=OT")[1] == 404
+        @test isempty(data["hits"])
+    end
+
     # The board learns what one may do in a project; an invitation can name projects to join.
     @test call(maker, "GET", "/api/projects/MN")[2]["access"] == "maintainer" && call(other, "GET", "/api/projects/MN")[2]["access"] == "contributor"
     K.invite!(kb, "new@x.org"; roles = ["Curator"], projects = Dict("mn" => "contributor"))

@@ -188,7 +188,8 @@ as `(; kind, target, label, detail)`, and with a `project` that has a codebase `
 of the label beginning it.
 """
 function at_reference_matches(kb::KB, q::AbstractString; limit::Integer = 5, project::AbstractString = "",
-                              caller::Caller = local_caller())
+                              caller::Caller = local_caller(), projects = visible_projects(kb, caller),
+                              only = nothing, except = hidden_documents(kb, caller))
     codebase = isempty(project) ? "" :
         String(coalesce(scalar(kb, "SELECT d.doc_id FROM projects p JOIN papers d ON d.id = p.codebase_id WHERE p.key = ?",
                                (uppercase(strip(project)),)), ""))
@@ -199,17 +200,21 @@ function at_reference_matches(kb::KB, q::AbstractString; limit::Integer = 5, pro
     starts, word = esc * "%", "% " * esc * "%"
     # Text matched at the start of a word: a space put before it lets the first word match too.
     found = NamedTuple[]
+    # Apply the per-kind limit to the caller's projects. Matches in another project
+    # would otherwise use the available slots before the picker can show them.
+    keys_json = JSON.json(collect(projects))
     for r in query(kb, """SELECT p.key || '-' || t.number AS ref, t.title FROM tasks t JOIN projects p ON p.id = t.project_id
-                          WHERE t.archived_at IS NULL AND (lower(p.key || '-' || t.number) LIKE ? ESCAPE '\\' OR ' ' || lower(t.title) LIKE ? ESCAPE '\\')
-                          ORDER BY lower(p.key || '-' || t.number) = ? DESC, t.updated_at DESC LIMIT ?""", (starts, word, q, limit))
+                          WHERE p.key IN (SELECT value FROM json_each(?)) AND t.archived_at IS NULL
+                          AND (lower(p.key || '-' || t.number) LIKE ? ESCAPE '\\' OR ' ' || lower(t.title) LIKE ? ESCAPE '\\')
+                          ORDER BY lower(p.key || '-' || t.number) = ? DESC, t.updated_at DESC LIMIT ?""", (keys_json, starts, word, q, limit))
         push!(found, (; kind = "task", target = String(r.ref), label = String(r.ref), detail = String(r.title)))
     end
-    hidden = hidden_documents(kb, caller)
+    visible(id) = !(id in except) && (only === nothing || id in only)
     n = 0
     for r in query(kb, """SELECT doc_id, title FROM papers WHERE $(literature_sql(closed = true)) AND metadata_at IS NOT NULL
                           AND (lower(doc_id) LIKE ? ESCAPE '\\' OR ' ' || lower(title) LIKE ? ESCAPE '\\')
                           ORDER BY published DESC""", (starts, word))
-        r.doc_id in hidden && continue
+        visible(r.doc_id) || continue
         push!(found, (; kind = "paper", target = String(r.doc_id), label = String(r.doc_id), detail = coalesce(r.title, "")))
         (n += 1) >= limit && break
     end
@@ -217,30 +222,34 @@ function at_reference_matches(kb::KB, q::AbstractString; limit::Integer = 5, pro
     for r in query(kb, """SELECT p.doc_id, p.title, x.happened FROM papers p JOIN records x ON x.paper_id = p.id
                           WHERE lower(p.doc_id) LIKE ? ESCAPE '\\' OR ' ' || lower(p.title) LIKE ? ESCAPE '\\'
                           ORDER BY x.happened DESC""", (starts, word))
-        r.doc_id in hidden && continue
+        visible(r.doc_id) || continue
         push!(found, (; kind = "record", target = String(r.doc_id), label = String(r.doc_id), detail = "$(r.title), $(record_day(r.happened))"))
         (n += 1) >= limit && break
     end
     if !isempty(q)
         n = 0
-        for a in authors(kb; coauthors = 0)
+        for a in authors(kb; coauthors = 0, only, except)
             any(v -> author_matches(v, q), a.variants) || continue
             push!(found, (; kind = "author", target = a.key, label = a.name, detail = "$(length(a.papers)) paper$(length(a.papers) == 1 ? "" : "s")"))
             (n += 1) >= limit && break
         end
     end
     for r in query(kb, """SELECT p.key || '-F' || f.number AS ref, f.claim FROM findings f JOIN projects p ON p.id = f.project_id
-                          WHERE lower(p.key || '-F' || f.number) LIKE ? ESCAPE '\\' OR ' ' || lower(f.claim) LIKE ? ESCAPE '\\'
-                          ORDER BY f.updated_at DESC LIMIT ?""", (starts, word, limit))
+                          WHERE p.key IN (SELECT value FROM json_each(?))
+                          AND (lower(p.key || '-F' || f.number) LIKE ? ESCAPE '\\' OR ' ' || lower(f.claim) LIKE ? ESCAPE '\\')
+                          ORDER BY lower(p.key || '-F' || f.number) = ? DESC, f.updated_at DESC LIMIT ?""", (keys_json, starts, word, q, limit))
         push!(found, (; kind = "finding", target = String(r.ref), label = String(r.ref), detail = String(r.claim)))
     end
     for p in people(kb)
         (startswith(lowercase(p.id), q) || occursin(" " * q, " " * lowercase(p.label))) || continue
         push!(found, (; kind = "person", target = p.id, label = p.label, detail = p.agent ? "agent" : p.id == p.label ? "" : p.id))
     end
+    n = 0
     for r in query(kb, """SELECT path, title, doc_id FROM notebooks WHERE status = 'done' AND ' ' || lower(coalesce(title, path)) LIKE ? ESCAPE '\\'
-                          ORDER BY started_at DESC LIMIT ?""", (word, limit))
+                          ORDER BY started_at DESC""", (word,))
+        visible(r.doc_id) || continue
         push!(found, (; kind = "notebook", target = String(r.path), label = coalesce(r.title, basename(r.path)), detail = String(r.doc_id)))
+        (n += 1) >= limit && break
     end
     rank(m) = (l = lowercase(m.label); l == q ? 0 : startswith(l, q) ? 1 : occursin(" " * q, " " * l) ? 2 : 3)
     return [sort(found; by = rank); code]  # stable: each kind's order within a rank

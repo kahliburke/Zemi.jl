@@ -28,11 +28,14 @@ tokens), Administration and Sign out, each for the roles that allow it. Open sou
 </figure>
 ```
 
-**Cmd-K** (Ctrl-K) anywhere on the site opens a palette while the service answers. Typing finds what
-the knowledge base has, each for whoever may see it: tasks, findings, papers and resources, records,
-notebooks and code. It also opens a project or a page, adds the paper an arXiv id, DOI or address
-names, switches the theme, syncs, or searches for the words on the Search page. With nothing typed it
-lists what was opened from it lately. A static copy keeps VitePress's own search on Cmd-K.
+Choose **Search Zemi** in the header, or press **Ctrl-K** (**Cmd-K** on macOS). Type a reference,
+title or words from a task note. The live palette shows matching items, including excerpts that open
+the matching note on its task. On a project board, **In project** narrows the search. Press Enter to
+open the full results, or select a suggestion with the arrow keys and press Enter to open it directly.
+The results page can be filtered by project and type. Its address keeps the query and filters.
+
+Enter **>** in the palette or press **F1** or **Ctrl-Shift-P** (**Cmd-Shift-P** on macOS) for commands and
+page navigation. A static copy uses the site's local page index for the header search.
 
 ```@raw html
 <figure class="shot">

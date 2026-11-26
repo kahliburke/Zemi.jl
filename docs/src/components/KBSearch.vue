@@ -8,14 +8,15 @@
 -->
 <script setup lang="ts">
 import KBTitle from './KBTitle.vue'
-import { ref, shallowRef, computed, onMounted, watch } from 'vue'
-import { mode, publicDemo, connect, getJSON, latest, isStale } from './kbApi'
+import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { mode, publicDemo, connect, can, getJSON, latest, isStale } from './kbApi'
 import { loadPapers, type Paper } from './kbData'
 import { byline } from './kbFormat'
 import { current, vectorless, searchKind } from './kbSearchPrefs'
+import { taskResults, type TaskSearchHit } from './kbTaskResults'
 import { kbPage, findingHref } from './kbLinks'
 import { markedSnippet } from './kbUtils'
-import { refsTextHtml, clipRefs } from './kbRefs'
+import { refsTextHtml, clipRefs, href as refHref, type RefMatch } from './kbRefs'
 
 
 type Evidence = { ranking: string; ranking_label: string; rank: number; matched: string; contribution: number }
@@ -26,14 +27,24 @@ type Hit = { id: string; slug: string; kind?: string; page?: string; title: stri
              summary?: string; topics?: string[] }
 
 const query = ref('')
+const project = ref('')
+const projects = ref<{ key: string; name: string }[]>([])
+const tasks = ref<TaskSearchHit[]>([])
+const taskLinks = computed(() => taskResults(tasks.value, query.value))
+let ready = false
+let mounted = false
 // The kinds of document found: every kind, or one (see src/kinds.jl).
-const KINDS = [{ id: '', label: 'everything' }, { id: 'paper', label: 'papers' }, { id: 'code', label: 'codebases' },
-               { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }, { id: 'finding', label: 'findings' }]
+const KINDS = [{ id: '', label: 'All types' }, { id: 'paper', label: 'papers' }, { id: 'code', label: 'codebases' },
+               { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }, { id: 'finding', label: 'findings' }, { id: 'task', label: 'tasks and notes' }]
 const kind = searchKind
-const choose = (k: string) => { searchKind.value = k }
 const hits = ref<Hit[]>([])
 type Found = { ref: string; claim: string; status: string; snippet: string }
 const found = ref<Found[]>([])
+const references = ref<RefMatch[]>([])
+const extraLinks = computed(() => {
+  const listed = new Set([...hits.value.map(h => h.id), ...found.value.map(f => f.ref), ...tasks.value.map(t => t.ref)])
+  return references.value.filter(r => !listed.has(r.target) && refHref(r.kind, r.target))
+})
 const busy = ref(false)
 const error = ref('')
 const seconds = ref<number | null>(null)
@@ -45,6 +56,9 @@ const papers = shallowRef<readonly Paper[]>([])
 // the site.
 async function start(retry = false) {
   await connect(retry)
+  if (mode.value === 'live' && can('tasks.view')) {
+    getJSON('/api/projects').then(data => { projects.value = data.projects }).catch(() => {})
+  }
   if (mode.value === 'static' && !papers.value.length) {
     try {
       papers.value = await loadPapers()
@@ -55,16 +69,24 @@ async function start(retry = false) {
 // A search asked for by its address (`?q=…`, as the palette and links from elsewhere do), run once the
 // knowledge base has answered, so it is the live search with the reader's settings, on a reload too.
 onMounted(async () => {
-  const asked = new URLSearchParams(location.search).get('q')
-  if (asked) query.value = asked
+  mounted = true
+  const params = new URLSearchParams(location.search)
+  query.value = params.get('q') ?? ''
+  project.value = params.get('project') ?? ''
+  const requestedKind = params.get('kind')
+  kind.value = KINDS.find(k => k.id === requestedKind)?.id ?? ''
   await start()
-  if (asked) runSearch(query.value, 0)
+  if (!mounted) return
+  ready = true
+  if (query.value) runSearch(query.value, 0)
 })
 
 // The address keeps the query, so a reload or a copied link searches the same.
 function keepQuery(q: string) {
   const u = new URL(location.href)
   q.trim() ? u.searchParams.set('q', q) : u.searchParams.delete('q')
+  project.value ? u.searchParams.set('project', project.value) : u.searchParams.delete('project')
+  kind.value ? u.searchParams.set('kind', kind.value) : u.searchParams.delete('kind')
   if (u.href !== location.href) history.replaceState(history.state, '', u.href)
 }
 
@@ -97,29 +119,51 @@ let timer: ReturnType<typeof setTimeout> | undefined
 // replaces them.
 const searching = latest()
 const keywords = latest()
+type SearchResult = { hits: Hit[]; findings?: Found[]; tasks?: TaskSearchHit[]; references?: RefMatch[]; seconds?: number }
+
+function showResults(data: SearchResult, interim = false) {
+  hits.value = data.hits
+  found.value = data.findings ?? []
+  tasks.value = data.tasks ?? []
+  references.value = data.references ?? []
+  partial.value = interim
+  seconds.value = interim ? null : data.seconds ?? null
+}
+
 function runSearch(q: string, delay = 350) {
   clearTimeout(timer)
+  searching.cancel()
+  keywords.cancel()
   error.value = ''
-  if (!q.trim()) { searching.cancel(); keywords.cancel(); busy.value = false; partial.value = false; hits.value = []; found.value = []; seconds.value = null; return }
-  if (mode.value === 'static') { hits.value = searchStatic(q); return }
+  if (!q.trim()) {
+    showResults({ hits: [] })
+    busy.value = false
+    return
+  }
+  if (mode.value === 'static') {
+    const unavailable = project.value || (kind.value && kind.value !== 'paper')
+    hits.value = unavailable ? [] : searchStatic(q)
+    if (unavailable) error.value = 'Searching this scope requires a live instance.'
+    return
+  }
   // Busy from the keystroke, not from when the pause in typing ends.
   busy.value = true
   partial.value = false
   timer = setTimeout(async () => {
     const c = current.value
     const kinds = kind.value ? `&kinds=${kind.value}` : ''
-    const url = (layers: string, keyword: boolean) =>
-      `/api/search?q=${encodeURIComponent(q)}&limit=8&layers=${encodeURIComponent(layers)}&keyword=${keyword ? 1 : 0}${kinds}`
+    const url = (layers: string, keyword: boolean, view: string) =>
+      `/api/search?q=${encodeURIComponent(q)}&view=${view}&project=${encodeURIComponent(project.value)}&limit=8&layers=${encodeURIComponent(layers)}&keyword=${keyword ? 1 : 0}${kinds}`
     let answered = false
     if (c.layers.length && c.keyword)
-      keywords(signal => getJSON(url('none', true), { signal })).then(data => {
+      keywords(signal => getJSON(url('none', true, 'suggestions'), { signal })).then(data => {
         if (answered) return
-        hits.value = data.hits; found.value = data.findings ?? []; seconds.value = null; partial.value = true
+        showResults(data, true)
       }).catch(() => {})
     try {
-      const data = await searching(signal => getJSON(url(c.layers.length ? c.layers.join(',') : 'none', c.keyword), { signal }))
+      const data = await searching(signal => getJSON(url(c.layers.length ? c.layers.join(',') : 'none', c.keyword, 'results'), { signal }))
       answered = true
-      hits.value = data.hits; found.value = data.findings ?? []; seconds.value = data.seconds; partial.value = false
+      showResults(data)
     } catch (e: any) {
       if (isStale(e)) return
       error.value = `Search failed: ${e.message ?? e}`
@@ -127,10 +171,11 @@ function runSearch(q: string, delay = 350) {
     busy.value = false
   }, delay)
 }
-watch(query, q => { keepQuery(q); runSearch(q) })
-watch(kind, () => runSearch(query.value, 0))
-// A change in the settings button's choice searches again.
-watch(current, () => runSearch(query.value, 0), { deep: true })
+watch([query, project, kind], ([q]) => {
+  if (ready) { keepQuery(q); runSearch(q) }
+})
+watch(current, () => { if (ready) runSearch(query.value, 0) }, { deep: true })
+onBeforeUnmount(() => { mounted = false; ready = false; clearTimeout(timer); searching.cancel(); keywords.cancel() })
 
 const rankings = computed(() => current.value.layers.length + (current.value.keyword ? 1 : 0))
 const note = computed(() => mode.value === 'live'
@@ -151,19 +196,34 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
 <template>
   <div class="kb-search">
     <div class="kb-box">
-      <input v-model="query" type="search" class="kb-field kb-input" placeholder="Search…" autofocus :aria-busy="busy" />
+      <input v-model="query" type="search" class="kb-field kb-input" placeholder="Search Zemi" aria-label="Search Zemi" autofocus :aria-busy="busy" />
       <span v-if="busy" class="kb-spinner" role="status" aria-label="Searching"></span>
+    </div>
+    <div v-if="mode === 'live'" class="kb-filters">
+      <select v-if="can('tasks.view')" v-model="project" aria-label="Project">
+        <option value="">All projects</option>
+        <option v-for="p in projects" :key="p.key" :value="p.key">{{ p.key }} · {{ p.name }}</option>
+      </select>
+      <select v-model="kind" aria-label="Result type">
+        <option v-for="k in KINDS.filter(k => can('tasks.view') || (k.id !== 'task' && k.id !== 'finding'))"
+                :key="k.id" :value="k.id">{{ k.label }}</option>
+      </select>
     </div>
     <div class="kb-note">
       <span :class="['kb-mode', mode]">{{ mode === 'live' ? 'live' : mode === 'static' ? 'offline' : '…' }}</span>
       {{ note }}<button type="button" v-if="mode === 'static' && !publicDemo" class="kb-link kb-retry" @click="start(true)">retry</button>
       <span v-if="busy && partial"> · keyword matches; searching by meaning…</span><span v-else-if="busy"> · searching…</span><span v-else-if="seconds !== null"> · {{ seconds.toFixed(2) }} s</span>
-      <span v-if="mode === 'live'" class="kb-kinds">
-        <button v-for="k in KINDS" :key="k.id" type="button" :class="['kb-link', { on: kind === k.id }]" @click="choose(k.id)">{{ k.label }}</button>
-      </span>
     </div>
-    <p v-if="error" class="kb-error">{{ error }}</p>
+    <p v-if="error" class="kb-error" role="status">{{ error }} <button v-if="mode === 'live'" type="button" class="kb-link" @click="runSearch(query, 0)">Retry</button></p>
     <div class="kb-results" :class="{ stale: busy && !partial }">
+    <div v-if="taskLinks.length" class="kb-findings">
+      <div class="kb-findings-head">Tasks and notes</div>
+      <a v-for="t in taskLinks" :key="t.href + t.snippet" class="kb-finding" :href="t.href">
+        <span class="kb-finding-claim">{{ t.label }}</span>
+        <span class="kb-meta">{{ t.detail }}</span>
+        <span v-if="t.snippet" class="kb-excerpt" v-html="markedSnippet(t.snippet)"></span>
+      </a>
+    </div>
     <ol class="kb-hits">
       <li v-for="h in hits" :key="h.id" class="kb-hit">
         <a class="kb-title" :href="kbPage(h.page ?? `papers/${h.slug}`)"><KBTitle :text="h.title" /></a>
@@ -201,6 +261,13 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
         </div>
       </li>
     </ol>
+    <div v-if="extraLinks.length" class="kb-findings">
+      <div class="kb-findings-head">Matching names and references</div>
+      <a v-for="r in extraLinks" :key="r.kind + r.target" class="kb-finding" :href="refHref(r.kind, r.target)">
+        <span class="kb-finding-claim">{{ r.label === r.target && r.detail ? r.detail : r.label }}</span>
+        <span class="kb-meta">{{ r.kind }} · {{ r.target }}</span>
+      </a>
+    </div>
     <div v-if="found.length" class="kb-findings">
       <div class="kb-findings-head">Findings</div>
       <a v-for="f in found" :key="f.ref" class="kb-finding" :href="findingHref(f.ref)">
@@ -210,12 +277,15 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
       </a>
     </div>
     </div>
-    <p v-if="query.trim() && !busy && !hits.length && !found.length && !error" class="kb-note">Nothing found.</p>
+    <p v-if="query.trim() && !busy && !hits.length && !found.length && !tasks.length && !extraLinks.length && !error" class="kb-note">Nothing found.</p>
   </div>
 </template>
 
 <style scoped>
 .kb-search { margin: 1rem 0 2rem; }
+.kb-filters { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .65rem; }
+.kb-filters select { padding: .3rem .65rem; border: 1px solid var(--vp-c-divider); border-radius: 6px; font: inherit; font-size: .85rem; color: var(--vp-c-text-1); background: var(--vp-c-bg); }
+.kb-excerpt { display: block; color: var(--vp-c-text-1); font-size: .9rem; }
 .kb-box { position: relative; }
 .kb-input { width: 100%; box-sizing: border-box; padding: 0.7rem 2.6rem 0.7rem 1rem; font-size: 1.05rem; border-radius: 8px; }
 .kb-input:focus { outline: none; border-color: var(--vp-c-brand-1); }
@@ -246,9 +316,6 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
 .kb-chip { display: inline-block; margin-left: 0.35rem; padding: 0 0.4rem; border-radius: 4px; font-size: 0.72rem;
   background: var(--vp-c-default-soft); color: var(--vp-c-text-2); }
 .kb-chip-record { background: var(--vp-c-yellow-soft); color: var(--vp-c-text-1); }
-.kb-kinds { margin-left: 0.6rem; }
-.kb-kinds .kb-link { margin-right: 0.45rem; font-size: 0.8rem; }
-.kb-kinds .kb-link.on { font-weight: 600; text-decoration: underline; }
 .kb-score { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.35rem; font-size: 0.8rem; color: var(--vp-c-text-2); }
 .kb-rank { font-weight: 600; color: var(--vp-c-text-1); }
 .kb-bar { display: inline-block; width: 120px; height: 6px; border-radius: 3px; background: var(--vp-c-default-soft); overflow: hidden; vertical-align: middle; }

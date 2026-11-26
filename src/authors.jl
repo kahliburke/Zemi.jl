@@ -43,12 +43,13 @@ papers, coauthors)`. `name` is the fullest of the names the person appears under
 used first), `papers` their documents' ids, newest first, and `coauthors` the `(; key, name, count)`
 of those they share most papers with.
 """
-function authors(kb::KB; coauthors::Integer = 8)
+function authors(kb::KB; coauthors::Integer = 8, only = nothing, except = ())
     rows = query(kb, "SELECT doc_id AS id, authors, published FROM papers WHERE $(literature_sql()) ORDER BY coalesce(published, '') DESC")
     names = Dict{String,Dict{String,Int}}()
     papers = Dict{String,Vector{String}}()
     together = Dict{String,Dict{String,Int}}()
     for r in rows
+        (r.id in except || (only !== nothing && !(r.id in only))) && continue
         keys_here = String[]
         for a in json_list(r.authors)
             # The same name in another Unicode form or spacing is the same way of writing it.

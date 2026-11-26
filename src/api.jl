@@ -243,14 +243,42 @@ route!("GET", "/api/search") do c
         isempty(l) ? kb.config.search_layers : l == "all" ? nothing : l == "none" ? String[] : split_list(l)
     end
     keyword = get(params, "keyword", kb.config.search_keyword ? "1" : "0") in ("1", "true")
-    want = search_kinds(get(params, "kinds", ""))
-    t = @elapsed hits = want.documents ? search(kb, q; limit, layers, keyword, want.kinds, except = unfound_documents(kb, c.caller)) : []
-    found = want.findings && can(c.caller, "tasks.view") ?
-        search_findings(kb, q; projects = visible_projects(kb, c.caller), limit = want.documents ? 5 : 3limit) : NamedTuple[]
+    kinds = get(params, "kinds", "")
+    want = search_kinds(kinds)
+    view = get(params, "view", "")
+    quick = view == "suggestions"
+    project = uppercase(named_project(c))
+    scope = isempty(project) ? nothing : union(library_papers(kb, project),
+        Set(id for (id, keys) in documents_projects(kb) if project in keys))
+    excluded = unfound_documents(kb, c.caller)
+    t = @elapsed hits = want.documents && kinds != "task" ? search(kb, q; limit, layers, keyword, want.kinds,
+        only = scope, except = excluded) : []
+    projects = !can(c.caller, "tasks.view") ? Set{String}() :
+               isempty(project) ? visible_projects(kb, c.caller) : Set([project])
+    no_meaning(kb, text) = Tuple{Int,String}[]
+    found = want.findings && !isempty(projects) ? search_findings(kb, q; projects, limit = want.documents ? 5 : 3limit,
+        meaning = quick ? no_meaning : finding_meaning_ranking) : NamedTuple[]
     page = site_link(kb.config, "kb/index")
-    Dict("query" => q, "seconds" => t, "k" => kb.config.rrf_k, "hits" => [hit_json(kb, h) for h in hits],
-         "link" => isempty(page) ? "" : page * "?q=" * HTTP.escapeuri(q),
-         "findings" => Any[Dict(pairs(f)) for f in found])
+    link = isempty(page) ? "" : page * "?q=" * HTTP.escapeuri(q)
+    isempty(link) || isempty(project) || (link *= "&project=" * HTTP.escapeuri(project))
+    isempty(link) || isempty(kinds) || (link *= "&kind=" * HTTP.escapeuri(kinds))
+    result = Dict{String,Any}("query" => q, "seconds" => t, "k" => kb.config.rrf_k, "hits" => [hit_json(kb, h) for h in hits],
+                              "link" => link, "findings" => Any[Dict(pairs(f)) for f in found])
+    if view in ("suggestions", "results") && !isempty(projects) && (isempty(kinds) || "task" in split_list(kinds))
+        tasks = search_tasks(kb, q; project, projects, limit, me = my_name(c), meaning = quick ? no_meaning : task_meaning_ranking)
+        result["tasks"] = [(; t.ref, t.title, t.matches) for t in tasks]
+    end
+    if view in ("suggestions", "results") && can(c.caller, "tasks.view")
+        refs = at_reference_matches(kb, q; limit, project, c.caller, projects, only = scope, except = excluded)
+        selected = split_list(kinds)
+        function include_ref(r)
+            r.kind in ("person", "code") && return false
+            kind = r.kind == "paper" ? something(document_kind(r.target), PAPER).name : r.kind
+            return isempty(selected) || kind in selected
+        end
+        result["references"] = filter(include_ref, refs)
+    end
+    return result
 end
 
 # One paper, as on its page.

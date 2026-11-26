@@ -754,7 +754,7 @@ function onHash() {
 }
 const setHash = (h: string) => { if (location.hash.slice(1).toUpperCase() !== h) history.replaceState(history.state, '', '#' + h) }
 watch(key, k => { if (k) { setHash(k); localStorage.setItem(LAST_PROJECT, k) }; open.value = null; milestone.value = ''; reviewing.value = false; declined.value = null; library.value = false; loadBoard() })
-watch(open, t => { if (key.value) setHash(t ? t.ref : key.value) })
+watch(() => open.value?.ref, ref => { if (key.value) setHash(ref ?? key.value) })
 watch(() => open.value?.ref, () => { diffText.value = null })
 watch(() => board.value?.codebase?.id ?? '', id => setCodebase(id), { immediate: true })
 
@@ -1211,7 +1211,11 @@ async function openAt(r: string, event: number) {
   await openRef(r)
   if (!event) return
   await nextTick()
-  document.querySelector(`[data-event="${event}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  if (open.value?.ref !== r) return
+  const row = document.querySelector(`[data-event="${event}"]`)
+  if (!row) return
+  setHash(`${r}/${event}`)
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' })
   flashEvent.value = event
   setTimeout(() => { if (flashEvent.value === event) flashEvent.value = 0 }, 6200)
 }
