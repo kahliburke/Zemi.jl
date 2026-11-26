@@ -19,12 +19,15 @@ const SUBSET_DRIFT_NEAR = 5
 
 The documents of subset `spec` that `caller` may see and the full map places:
 
-- `cluster:<id>`: a cluster of the full map (of the documents read in full, or with `abstracts` of all);
+- `cluster:<id>`: a cluster of the full map (of the documents read in full, or with `abstracts` of all),
+  and `cluster:<id>@<subset>` one of subset `<subset>`'s own map, a level further in;
 - `project:<KEY>`: the papers project `KEY`'s library keeps and the documents the project holds;
 - `q:<query>`: the `n` documents a search for the query ranks first;
 - `docs:<id>,<id>,…`: those documents (a drift's) and the nearest few of each.
 
-`name` says what the subset is, for the page's breadcrumb.
+`name` says what the subset is, and `trail` the subsets it was opened from, for the page's
+breadcrumb. `needs`, when not `nothing`, is the subset whose map must be made before this one can be
+found in it.
 """
 function explore_set(kb::KB, caller::Caller, spec::AbstractString; abstracts::Bool = false, n::Integer = SUBSET_SEARCH.default)
     kind, arg = occursin(':', spec) ? split(spec, ':'; limit = 2) : (spec, "")
@@ -35,10 +38,21 @@ function explore_set(kb::KB, caller::Caller, spec::AbstractString; abstracts::Bo
     views = get(m, "views", Dict())
     placed = get(get(views, "all", Dict()), "docs", Dict())
     hidden = unfound_documents(kb, caller)
+    trail = Dict{String,Any}[]
     ids, name = if kind == "cluster"
-        v = get(views, abstracts ? "all" : "read", nothing)
+        which, within = occursin('@', arg) ? String.(split(arg, '@'; limit = 2)) : (arg, "")
+        v = if isempty(within)
+            get(views, abstracts ? "all" : "read", nothing)
+        else
+            up = explore_set(kb, caller, within; abstracts, n)
+            up.needs === nothing || return up
+            trail = [up.trail; Dict{String,Any}("spec" => up.spec, "name" => up.name)]
+            made = cached_subset(kb, up.ids)
+            made === nothing && return (; spec = String(spec), kind, name = "", ids = String[], trail, needs = up.ids)
+            made
+        end
         v === nothing && error("The map has no such view.")
-        j = tryparse(Int, arg)
+        j = tryparse(Int, which)
         cl = j === nothing ? nothing : findfirst(c -> c["id"] == j, v["clusters"])
         cl === nothing && error("No cluster $arg on the map.")
         label = v["clusters"][cl]["name"]
@@ -63,7 +77,7 @@ function explore_set(kb::KB, caller::Caller, spec::AbstractString; abstracts::Bo
     end
     ids = sort!([String(id) for id in ids if haskey(placed, id) && !(id in hidden)])
     length(ids) > SUBSET_MOST && (ids = ids[1:SUBSET_MOST])
-    return (; spec = String(spec), kind, name, ids)
+    return (; spec = String(spec), kind, name, ids, trail, needs = nothing)
 end
 
 # The subsets' maps, by the documents and the full map they were made with: the most recently used kept.
@@ -149,11 +163,13 @@ function explore_set_graph(kb::KB, caller::Caller, spec::AbstractString; abstrac
                            n::Integer = SUBSET_SEARCH.default, kw...)
     s = explore_set(kb, caller, spec; abstracts, n)
     about = Dict{String,Any}("spec" => s.spec, "kind" => s.kind, "name" => s.name, "count" => length(s.ids),
-                             "least" => SUBSET_LEAST[], "few" => length(s.ids) < SUBSET_LEAST[])
+                             "least" => SUBSET_LEAST[], "trail" => s.trail,
+                             "few" => s.needs === nothing && length(s.ids) < SUBSET_LEAST[])
     empty(; job = nothing) = Dict{String,Any}("nodes" => [], "links" => [], "similar" => [], "clusters" => [],
                                               "built_at" => nothing, "abstracts" => true, "abstract_only" => 0,
                                               "set" => about, "job" => job)
     about["few"] && return empty()
+    s.needs === nothing || return empty(; job = subset_soon!(kb, s.needs).id)
     v = cached_subset(kb, s.ids)
     v === nothing && return empty(; job = subset_soon!(kb, s.ids).id)
     g = explore_graph(kb, caller; kw..., view = v, only = Set(s.ids))

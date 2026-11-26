@@ -20,7 +20,7 @@ type Node = { id: string; kind: string; title: string; year?: string; page: stri
               central?: number; rating?: number }
 type Cluster = { id: number; name: string; description: string; size: number }
 // A subset mapped by itself (`?set=`): what it is, how many documents it has, and whether too few to map.
-type SetInfo = { spec: string; kind: string; name: string; count: number; least: number; few: boolean }
+type SetInfo = { spec: string; kind: string; name: string; count: number; least: number; few: boolean; trail: { spec: string; name: string }[] }
 type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean, boolean][]; clusters: Cluster[];
                built_at: string | null; job: string | null; abstracts: boolean; abstract_only: number; set?: SetInfo }
 type Near = { node: Node; similarity: number; linked: boolean }
@@ -1149,6 +1149,9 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
       <div ref="bar" class="kbx-bar">
         <nav v-if="subset" class="kbx-crumbs" aria-label="Where on the map">
           <a href="#" @click.prevent="leaveSet">All documents</a><span aria-hidden="true">›</span>
+          <template v-for="t in data?.set?.trail ?? []" :key="t.spec">
+            <a href="#" class="kbx-crumb-up" :title="t.name" @click.prevent="mapSet(t.spec)">{{ t.name }}</a><span aria-hidden="true">›</span>
+          </template>
           <span class="kbx-crumb" :title="data?.set?.name">{{ data?.set?.name ?? '…' }}</span>
           <span v-if="data?.set" class="kbx-key-count">{{ data.set.count }}</span>
           <label v-if="data?.set?.kind === 'q'" class="kbx-top" title="How many of the search's documents are mapped">
@@ -1207,8 +1210,8 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
             <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="goToRow(r.key)">
               <i class="kbx-swatch" :style="{ background: r.colour }"></i>
               <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button>
-              <button v-if="r.key[0] === 'c' && !subset" class="kbx-map-row" :title="`Map ${r.label} by itself`"
-                      :aria-label="`Map ${r.label} by itself`" @click="mapSet('cluster:' + r.key.slice(1))">⤢</button></li>
+              <button v-if="r.key[0] === 'c'" class="kbx-map-row" :title="`Map ${r.label} by itself`"
+                      :aria-label="`Map ${r.label} by itself`" @click="mapSet('cluster:' + r.key.slice(1) + (subset ? '@' + subset : ''))">⤢</button></li>
           </ul>
         </div>
         <div v-if="panel === 'show'" role="tabpanel">
@@ -1378,9 +1381,10 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-status { position: absolute; top: 45%; width: 100%; text-align: center; color: var(--vp-c-text-2); }
 .kbx-bar { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .kbx-bar > * { pointer-events: auto; }
-.kbx-crumbs { display: inline-flex; align-items: center; gap: 6px; max-width: 24rem; padding: 4px 10px; font-size: 13px; border-radius: 8px;
+.kbx-crumbs { display: inline-flex; align-items: center; gap: 6px; max-width: 36rem; padding: 4px 10px; font-size: 13px; border-radius: 8px;
               border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg); }
 .kbx-crumbs a { color: var(--vp-c-brand-1); white-space: nowrap; }
+.kbx-crumb-up { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kbx-crumb { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .kbx-top { display: inline-flex; align-items: center; gap: 4px; color: var(--vp-c-text-2); white-space: nowrap; }
 .kbx-top input { width: 4rem; padding: 0 4px; border: 1px solid var(--vp-c-divider); border-radius: 4px; background: var(--vp-c-bg); }

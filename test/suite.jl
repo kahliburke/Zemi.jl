@@ -3350,11 +3350,18 @@ end
             g = K.explore_set_graph(kb, me, s.spec; abstracts = true)
             @test g["job"] === nothing && Set(n["id"] for n in g["nodes"]) == Set(members) && g["set"]["name"] == cl["name"]
             @test all(n -> length(n["x"]) == 2 && length(n["px"]) == 2 && length(n["pp"]) == 3, g["nodes"]) && length(g["clusters"]) >= 2
+            # A level further in: a cluster of the subset's own map, found in that map once it is made.
+            inner = first(g["clusters"])
+            deeper = K.explore_set(kb, me, "cluster:$(inner["id"])@$(s.spec)"; abstracts = true)
+            @test deeper.needs === nothing && !isempty(deeper.ids) && issubset(deeper.ids, members) && length(deeper.ids) < length(members)
+            @test deeper.trail == [Dict("spec" => s.spec, "name" => cl["name"])] && deeper.name == inner["name"]
             # Made again once the documents' vectors or titles change.
             @test K.cached_subset(kb, members) !== nothing
             K.execute!(kb, "UPDATE papers SET title = 'A coral study, retitled' WHERE doc_id = ?", (members[1],))
             K.explore_map!(kb)
             @test K.cached_subset(kb, members) === nothing
+            # Until the subset's map is made again, a cluster of it waits on it.
+            @test K.explore_set(kb, me, "cluster:$(inner["id"])@$(s.spec)"; abstracts = true).needs == K.explore_set(kb, me, s.spec; abstracts = true).ids
             # A drift's documents with the nearest of each; a search's first; what one may not see left out.
             d = K.explore_set(kb, me, "docs:$(members[1])")
             @test members[1] in d.ids && length(d.ids) == 1 + K.SUBSET_DRIFT_NEAR
