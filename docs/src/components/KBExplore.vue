@@ -14,7 +14,8 @@ import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 
 type Node = { id: string; kind: string; title: string; year?: string; page: string; links: number; status?: string; project?: string
               access?: 'open' | 'projects' | 'private'; mine?: boolean; read?: boolean
-              x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]; cluster?: number
+              x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]; px?: [number, number]; pp?: [number, number, number]
+              cluster?: number
               central?: number; rating?: number }
 type Cluster = { id: number; name: string; description: string; size: number }
 type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean, boolean][]; clusters: Cluster[];
@@ -48,7 +49,7 @@ const keep = (key: string, v: unknown) => { try { localStorage.setItem(`kb-explo
 const view = ref<'2d' | '3d'>(stored('view', '2d'))
 const fly = ref(false)
 // Where documents are placed: by t-SNE (close neighbourhoods kept) or UMAP (more of how groups lie to each other).
-const layout = ref<'tsne' | 'umap'>(stored('layout', 'tsne'))
+const layout = ref<'tsne' | 'umap' | 'pacmap'>(stored('layout', 'tsne'))
 watch(layout, v => keep('layout', v))
 const colourBy = ref<'cluster' | 'kind' | 'whose'>(stored('colour', 'cluster'))
 const shownLinks = ref<string[]>(stored('links', ['cites', 'refers', 'related', 'evidence']))
@@ -303,7 +304,8 @@ function graphData() {
   const deep = view.value === '3d'
   const nodes: GNode[] = g.nodes.filter(visibleNode).map(n => {
     const o: GNode = { ...n } as GNode
-    const flat = layout.value === 'umap' && n.ux ? n.ux : n.x, space = layout.value === 'umap' && n.up ? n.up : n.p
+    const flat = layout.value === 'umap' && n.ux ? n.ux : layout.value === 'pacmap' && n.px ? n.px : n.x
+    const space = layout.value === 'umap' && n.up ? n.up : layout.value === 'pacmap' && n.pp ? n.pp : n.p
     if (flat && !deep) { o.fx = flat[0] * SCALE_2D; o.fy = -flat[1] * SCALE_2D }
     if (space && deep) { o.fx = space[0] * SCALE_3D; o.fy = space[1] * SCALE_3D; o.fz = space[2] * SCALE_3D }
     return o
@@ -1038,6 +1040,8 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
             <div class="kbx-seg kbx-seg-small kbx-wide" role="group" aria-label="Layout">
               <button :class="{ on: layout === 'tsne' }" title="Keeps each document's close neighbourhood" @click="layout = 'tsne'">t-SNE</button>
               <button :class="{ on: layout === 'umap' }" title="Keeps more of how the groups lie to each other" @click="layout = 'umap'">UMAP</button>
+              <button v-if="data?.nodes.some(n => n.px)" :class="{ on: layout === 'pacmap' }"
+                      title="Keeps the neighbourhoods and how the groups lie to each other, the most evenly" @click="layout = 'pacmap'">PaCMAP</button>
             </div>
           </template>
           <span class="kbx-label">Colour by</span>

@@ -200,7 +200,7 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 7
+const EXPLORE_VERSION = 8
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -373,6 +373,10 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     # UMAP too, which keeps more of how the groups lie to each other: every document, its cost growing with their number.
     progress("Exploring $n $what: laying out the map and the space by UMAP")
     uflat, udeep = centred(umap(X; dims = 2, min_dist = 0.4)), centred(umap(X; dims = 3, min_dist = 0.4))
+    cancelled() && return nothing
+    # And PaCMAP, which keeps the arrangement between groups better still.
+    progress("Exploring $n $what: laying out the map and the space by PaCMAP")
+    pflat, pdeep = centred(pacmap(X; dims = 2)), centred(pacmap(X; dims = 3))
     pos2, pos3 = zeros(n, 2), zeros(n, 3)
     pos2[laid, :], pos3[laid, :] = flat, deep
     # The rest among their nearest laid out, a little apart.
@@ -419,7 +423,8 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     centre = Dict(j => unit_columns(reshape(vec(sum(X[:, assign .== j]; dims = 2)), :, 1)) for j in unique(assign))
     central = [Float64(dot(view(X, :, i), view(centre[assign[i]], :, 1))) for i in 1:n]
     r4(x) = round(x; digits = 4)
-    docs = Dict(r.id => Dict("x" => r4.(pos2[i, :]), "p" => r4.(pos3[i, :]), "ux" => r4.(uflat[i, :]), "up" => r4.(udeep[i, :]), "c" => assign[i],
+    docs = Dict(r.id => Dict("x" => r4.(pos2[i, :]), "p" => r4.(pos3[i, :]), "ux" => r4.(uflat[i, :]), "up" => r4.(udeep[i, :]),
+                             "px" => r4.(pflat[i, :]), "pp" => r4.(pdeep[i, :]), "c" => assign[i],
                              "k" => r4(central[i]), "near" => [[rows[m].id, r4(s)] for (m, s) in near[i]],
                              "lib" => [[rows[m].id, r4(s)] for (m, s) in get(library, i, ())])
                 for (i, r) in enumerate(rows))
@@ -616,6 +621,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
         if d !== nothing
             n["x"], n["p"], n["cluster"] = d["x"], d["p"], d["c"]
             haskey(d, "ux") && (n["ux"] = d["ux"]; n["up"] = d["up"])
+            haskey(d, "px") && (n["px"] = d["px"]; n["pp"] = d["pp"])
             haskey(d, "k") && (n["central"] = d["k"])
         end
         ismissing(r.rating) || (n["rating"] = Int(r.rating))     # the watch's judge's, 0 to 3
