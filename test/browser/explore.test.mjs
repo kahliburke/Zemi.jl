@@ -107,3 +107,19 @@ test("a search's best matches are listed until one is picked", async () => {
   assert.deepEqual(errors, [])
   await close()
 })
+
+test('a new search sets down the selected document and shows its matches', async () => {
+  const searching = page => Promise.all([serving(page), page.route(u => new URL(u).pathname.endsWith('/api/search'),
+    r => r.fulfill({ json: { hits: [14, 15].map((i, k) => ({ id: nodes[i].id, score: 1 - k / 10 })) } }))])
+  const { page, errors, close } = await open('/kb/explore?center=2609.00003', '.kbx-bar', { prepare: searching })
+  await card(page).locator('h3').waitFor()
+  await page.getByPlaceholder(/Search the map/).fill('tides')
+  await page.getByRole('complementary', { name: 'Search results' }).waitFor()
+  assert.equal(await page.locator('.kbx-card h3').count(), 0)
+  // Moves given one after another carry on from each other.
+  await page.getByRole('link', { name: 'Paper 14 on tides' }).click()
+  await page.getByRole('button', { name: 'Show the whole map' }).click()
+  await page.waitForTimeout(1500)
+  assert.deepEqual(errors, [])
+  await close()
+})

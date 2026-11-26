@@ -22,6 +22,7 @@ import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { BRAND, CLUSTER_COLOURS, DIMMED, KIND_COLOURS, LINK_COLOURS, NODE_KINDS, TRAIL, WHOSE, WHOSE_COLOURS, esc, kindName, mix, own,
          provideSettings, shortTitle, useExploreSettings, whose,
          type Detail, type Graph, type LegendRow, type Linked, type Near, type Node, type Pair, type Step } from './kbExplore'
+import { cameraMover, type View } from './exploreCamera'
 import { SCALE_2D, SCALE_3D, capHeight, clusterCentres, discTexture, pixelSize, placeTheRest, spacing,
          type GLink, type GNode } from './exploreLayout'
 
@@ -58,6 +59,22 @@ const building = ref('')
 const loading = ref(true)
 const box = ref<HTMLDivElement | null>(null)
 let graph: any = null
+// The view as the camera mover takes it (see exploreCamera.ts): the map's centre and log zoom, or the
+// space's camera and the point it looks at.
+function readView(): View | null {
+  if (!graph) return null
+  if (drawnView === '2d') { const c = graph.centerAt(); return [c.x, c.y, Math.log(graph.zoom())] }
+  const c = graph.cameraPosition()
+  return [c.x, c.y, c.z, c.lookAt.x, c.lookAt.y, c.lookAt.z]
+}
+function applyView(v: View) {
+  if (!graph) return
+  if (drawnView === '2d') { graph.zoom(Math.exp(v[2]), 0); graph.centerAt(v[0], v[1], 0) }
+  else graph.cameraPosition({ x: v[0], y: v[1], z: v[2] }, { x: v[3], y: v[4], z: v[5] }, 0)
+}
+const camera = cameraMover(readView, applyView)
+// The view the graph was drawn as, which a redraw in the same view starts from.
+let drawnView: '2d' | '3d' | null = null
 
 // ── The graph's data ───────────────────────────────────────────────────────────────────────────────
 
@@ -239,19 +256,42 @@ function goToRow(key: string) {
   frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => legendKey(n) === key && n.x !== undefined), 0.7)
 }
 // The view framing nodes `ns`: the share `most` of them nearest their middle, so outliers do not hold it far out.
-function frameNodes(ns: GNode[], most: number) {
+// The part of the map nothing is drawn over, in pixels from its corner: right of the card (or a search's
+// matches, or the suggested links) on the left, left of the panel on the right, below the top row.
+function uncovered() {
+  const el = frame.value!, at = el.getBoundingClientRect()
+  const edge = (sel: string, side: 'left' | 'right') => {
+    const r = el.querySelector(sel)?.getBoundingClientRect()
+    return r ? (side === 'left' ? r.right - at.left + 12 : r.left - at.left - 12) : null
+  }
+  const lefts = ['.kbx-card', '.kbx-pairs'].map(sel => edge(sel, 'left')).filter((x): x is number => x !== null)
+  const left = Math.max(0, ...lefts), right = edge('.kbx-panel', 'right') ?? at.width
+  // Too little left beside them: the whole of the map, as on a narrow screen.
+  const narrow = right - left < at.width / 3
+  return { left: narrow ? 0 : left, right: narrow ? at.width : right, top: barBottom.value, bottom: at.height, width: at.width, height: at.height }
+}
+function frameNodes(ns: GNode[], most: number, ms = 1100) {
   if (!ns.length || !graph) return
   const mid = ['x', 'y', 'z'].map(a => ns.reduce((t, n) => t + ((n as any)[a] ?? 0), 0) / ns.length)
   const apart = (n: GNode) => Math.hypot(n.x - mid[0], n.y - mid[1], (n.z ?? 0) - mid[2])
-  const core = new Set(ns.slice().sort((a, b) => apart(a) - apart(b)).slice(0, Math.max(3, Math.ceil(ns.length * most))).map(n => n.id))
-  if (view.value === '2d') { graph.zoomToFit(900, 20, (n: GNode) => core.has(n.id)); return }
-  // The space's own fitting aims at the origin; this looks at the middle, from where the camera is.
-  const r = Math.max(20, ...ns.filter(n => core.has(n.id)).map(apart))
+  const core = ns.slice().sort((a, b) => apart(a) - apart(b)).slice(0, Math.max(3, Math.ceil(ns.length * most)))
+  const open = uncovered()
+  if (view.value === '2d') {
+    // Into the part of the map no card or panel covers.
+    const xs = core.map(n => n.x), ys = core.map(n => n.y), pad = 30
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+    const k = Math.min((open.right - open.left) / (x1 - x0 + 2 * pad), (open.bottom - open.top) / (y1 - y0 + 2 * pad), 8)
+    camera.to([(x0 + x1) / 2 - ((open.left + open.right) / 2 - open.width / 2) / k,
+               (y0 + y1) / 2 - ((open.top + open.bottom) / 2 - open.height / 2) / k, Math.log(k)], ms)
+    return
+  }
+  // From the side the camera is on, back as far as the group needs to fit in what is uncovered.
+  const r = Math.max(20, ...core.map(apart))
   const cam = graph.camera(), from = cam.position
   const away = Math.hypot(from.x - mid[0], from.y - mid[1], from.z - mid[2]) || 1
-  const d = (r / Math.sin((cam.fov * Math.PI) / 360)) * 1.05
-  graph.cameraPosition({ x: mid[0] + (from.x - mid[0]) * d / away, y: mid[1] + (from.y - mid[1]) * d / away,
-                         z: mid[2] + (from.z - mid[2]) * d / away }, { x: mid[0], y: mid[1], z: mid[2] }, 1200)
+  const d = (r / Math.sin((cam.fov * Math.PI) / 360)) * 1.05 * Math.max(open.width / (open.right - open.left), open.height / (open.bottom - open.top))
+  camera.to([mid[0] + (from.x - mid[0]) * d / away, mid[1] + (from.y - mid[1]) * d / away, mid[2] + (from.z - mid[2]) * d / away,
+             mid[0], mid[1], mid[2]], ms)
 }
 watch(selected, n => { if (n) litRow.value = null })
 // Back to the whole map in view, nothing lit; the selected document stays selected.
@@ -357,6 +397,9 @@ const touches = (l: any, id: string) => endId(l.source) === id || endId(l.target
 let centres: ReturnType<typeof clusterCentres> = []
 async function draw() {
   if (!box.value || !data.value) return
+  // Another layout, map or theme in the same view carries on from where the view is.
+  const was = drawnView === view.value ? readView() : null
+  if (!was) camera.stop()
   graph?._destructor?.()
   box.value.innerHTML = ''
   const el = box.value
@@ -412,7 +455,7 @@ async function draw() {
       })
     graph.d3Force('charge')?.strength(-12)
     graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
-    setTimeout(() => keepSelected() || graph?.zoomToFit(600, 40), 300)
+    settle(was)
   } else {
     const ForceGraph3D = (await import('3d-force-graph')).default as any
     const SpriteText = (await import('three-spritetext')).default as any
@@ -466,7 +509,7 @@ async function draw() {
       clusterLabels.push({ sprite: s, id: c.id })
       graph.scene().add(s)
     }
-    setTimeout(() => keepSelected() || graph?.zoomToFit(800, 30), 300)
+    settle(was)
     three = THREE
     nearest3d = null
     ring3d = null
@@ -742,6 +785,12 @@ onLive(() => {
   return () => watcher.disconnect()
 })
 onLive(() => {
+  const hold = () => camera.stop()
+  box.value?.addEventListener('pointerdown', hold)
+  box.value?.addEventListener('wheel', hold, { passive: true })
+  return () => { box.value?.removeEventListener('pointerdown', hold); box.value?.removeEventListener('wheel', hold); camera.stop() }
+})
+onLive(() => {
   document.documentElement.classList.add('kbx-takeover')
   subset.value = new URLSearchParams(location.search).get('set') ?? ''
   load()
@@ -775,15 +824,21 @@ function go(n: Node, remember = true) {
   selected.value = n
   const g = graph?.graphData().nodes.find((x: GNode) => x.id === n.id)
   if (!g || g.x === undefined) return
-  if (view.value === '2d') {
-    graph.centerAt(g.x, g.y, moveMs(900))
-    graph.zoom(Math.max(graph.zoom(), 3), moveMs(900))
-  } else {
+  if (view.value === '2d') camera.to([g.x, g.y, Math.log(Math.max(graph.zoom(), 3))], moveMs(900))
+  else {
     const d = 90, r = Math.hypot(g.x, g.y, g.z) || 1
-    graph.cameraPosition({ x: g.x * (1 + d / r), y: g.y * (1 + d / r), z: g.z * (1 + d / r) }, g, moveMs(1400))
+    camera.to([g.x * (1 + d / r), g.y * (1 + d / r), g.z * (1 + d / r), g.x, g.y, g.z], moveMs(1400))
   }
 }
 function back() { const n = trail.pop(); if (n) go(n, false) }
+// A graph just drawn: shown first as the one before it was (`was`), then moved to the selected document,
+// or to the whole map.
+function settle(was: View | null) {
+  drawnView = view.value
+  if (was) applyView(was)
+  setTimeout(() => keepSelected() || frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => n.x !== undefined), 1, 900),
+             was ? 0 : 300)
+}
 // After the map is drawn again (another view, layout or theme), the selected document stays selected and
 // in view; false when there is none on this map to keep.
 function keepSelected() {
@@ -812,6 +867,11 @@ watch(query, q => {
       hits.value = new Map(found.map((h: any) => [h.id, Math.max(0.25, h.score / top)]))
       order.value = found.map((h: any) => h.id)
       at = -1
+      // A new search shows its matches: the selected document set down, the view moving to take them in.
+      if (selected.value) selected.value = null
+      await nextTick()                                     // the matches' list drawn, so the view frames beside it
+      const shown = new Set(order.value.slice(0, 12))
+      frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => shown.has(n.id) && n.x !== undefined), 0.9)
     } catch { /* left as it was */ }
   }, 350)
 })
