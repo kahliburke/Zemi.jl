@@ -132,7 +132,7 @@ const brief = (d: Record<string, any>) => Object.entries(d).filter(([k]) => k !=
 
       <section v-if="tab === 'people'">
         <table class="kbad-table">
-          <thead><tr><th>Person</th><th>Roles</th><th>Signs in with</th><th>Last seen</th><th></th></tr></thead>
+          <thead><tr><th>Person</th><th>Roles</th><th>Signs in with</th><th title="Most recent activity through a web session or an API token, including MCP">Last seen</th><th></th></tr></thead>
           <tbody>
             <tr v-for="u in users" :key="u.id" :class="{ off: u.disabled }">
               <td>{{ u.name || u.email }}<div class="kbad-s">{{ u.email }}</div></td>
