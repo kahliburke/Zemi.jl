@@ -7,7 +7,7 @@
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
 import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { api, getJSON, post, can, me, shared, latest, isStale, onLive } from './kbApi'
+import { api, getJSON, post, can, me, shared, latest, isStale, onLive, uploadMedia } from './kbApi'
 import KBDock from './KBDock.vue'
 import KBDialog from './KBDialog.vue'
 import KBIcon from './KBIcon.vue'
@@ -54,7 +54,7 @@ const list = ref<Project[]>([])
 const statuses = ref<Status[]>([])
 const key = ref('')
 const board = ref<{ project: Project; milestones: Milestone[]; tasks: Task[]; codebase: Codebase | null; access: string;
-                    manages_members: boolean; findings: number; records: { id: string; title: string; day: string }[];
+                    files?: { name: string; address: string }[]; manages_members: boolean; findings: number; records: { id: string; title: string; day: string }[];
                     agents: { tasks: { ref: string; agent: string; at: string; via: string }[]; waiting: { agent: string; since: string }[] };
                     people_did: Action[]; changed_by_others?: Record<string, { at: string; who: string }> } | null>(null)
 const open = ref<Full | null>(null)
@@ -76,6 +76,29 @@ const manages = computed(() => can('tasks.edit') && board.value?.access === 'mai
 // Records are added on the board by those who contribute to the project and may add documents.
 const addsRecords = computed(() => editable.value && can('paper.add'))
 const addingRecords = ref(false)
+const uploadingFile = ref(false)
+const fileRef = ref('')
+watch(key, () => { fileRef.value = '' })
+async function keepProjectFile() {
+  const project = key.value
+  try {
+    await post(`/api/projects/${project}/files`, JSON.stringify({ address: fileRef.value.trim() }))
+    if (key.value === project) { fileRef.value = ''; await loadBoard() }
+  } catch (e: any) { if (key.value === project) error.value = e.message }
+}
+async function addProjectFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0], project = key.value
+  if (!file) return
+  input.value = ''
+  uploadingFile.value = true
+  try {
+    await uploadMedia(file, undefined, project, true)
+    if (key.value === project) await loadBoard()
+  } catch (e: any) { if (key.value === project) error.value = e.message }
+  finally { uploadingFile.value = false }
+}
+
 // Who tasks can be assigned to: the service's people and the agents.
 const people = ref<Person[]>([])
 const personLabel = (id: string) => people.value.find(p => p.id === id)?.label ?? id
@@ -1421,6 +1444,21 @@ function keepRecordsOpen(open: boolean) {
         <KBRecordUpload v-if="addingRecords && addsRecords" :project="key" @uploaded="loadBoard" />
         <KBMembers v-if="shared" :project="key" :manages="!!board.manages_members" />
       </div>
+
+      <details v-if="board && (board.files?.length || editable)" class="kbp-records">
+        <summary class="kbp-records-head"><span class="kbp-waiting-label">Project files</span>
+          <span class="kb-dim">{{ board.files?.length ?? 0 }}</span></summary>
+        <ul v-if="board.files?.length" class="kbp-records-list">
+          <li v-for="file in board.files" :key="file.address">
+            <a :href="sourceHref('result', file.address)" target="_blank" rel="noopener">{{ file.name }}</a>
+          </li>
+        </ul>
+        <label v-if="editable">Add file <input type="file" :disabled="uploadingFile" @change="addProjectFile" /></label>
+        <form v-if="editable" @submit.prevent="keepProjectFile">
+          <label>Existing attachment <input v-model="fileRef" class="kb-field" placeholder="media/…/filename" /></label>
+          <button class="kbp-small" :disabled="!fileRef.trim()">Keep on project</button>
+        </form>
+      </details>
 
       <div v-if="!focus && WAITING.some(w => shownWaiting[w.id].length)" class="kbp-waiting" :class="{ pulse }">
         <span class="kbp-waiting-label">Waiting on you</span>

@@ -553,7 +553,7 @@ through you: a figure, a PDF, a movie, a data file. `ref` is the task (`KB-12`),
 (`curl -sS -T fig.png "<link>"`), within 30 minutes, once; it answers with the file's reference,
 `media/<hash>/fig.png`, to use wherever Markdown goes: `![caption](media/…)` in a finding's body,
 a note or a plan, or `result: media/…` as a source in `finding_evidence`. With `post`, a file for a
-task is also shown in its activity with its caption. Files up to the service's limit (200 MB
+task is also shown in its activity with its caption. A file uploaded to a project key is kept on its Files list. Files up to the service's limit (200 MB
 unless configured otherwise): images (png, jpg, gif, webp, svg), pdf, movies (mp4, webm, mov),
 csv, json, zip and text. The same file sent twice is kept once.
 """

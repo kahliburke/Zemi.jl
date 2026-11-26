@@ -7732,3 +7732,46 @@ end
         close(kb)
     end
 end
+
+@zset "files kept on a project" begin
+    kb = open_kb(temp_config(layers = Layer[]))
+    try
+        by = K.person("Rowan")
+        K.create_project!(kb, "Corals"; key = "CO", by)
+        K.create_project!(kb, "Tides"; key = "TI", by)
+        task = K.create_task!(kb, "CO", "Survey"; by)
+        upload(ref, project, name, bytes; post = true) = K.receive_upload!(kb,
+            K.upload_link!(ref, project; name, by, post), Vector{UInt8}(bytes))
+        m = upload("CO", "CO", "survey.md", "# Survey")
+        @test m.note == 0
+        upload("CO", "CO", "survey.md", "# Survey"; post = false)
+        t = upload(task, "CO", "task.txt", "Task attachment")
+        @test t.note > 0
+        # An editor's upload is staged until referenced. Neither it nor the task attachment
+        # is an explicit file on the project board.
+        staged = K.add_media!(kb, UInt8[1], "draft.txt"; by = by.name, project = "CO")
+        board = K.handle(kb, K.HTTP.Request("GET", "/api/projects/CO"))
+        @test board.status == 200 && only(K.JSON.parse(String(board.body))["files"])["address"] == m.address
+        @test isempty(K.project_files(kb, "TI"))
+        outsider = K.Caller(nothing, "Other", "", Set(["tasks.view"]), :token, nothing, Set(["TI"]))
+        @test K.handle(kb, K.HTTP.Request("GET", "/api/projects/CO"), outsider).status in (403, 404)
+        pin(key, address) = K.handle(kb, K.HTTP.Request("POST", "/api/projects/$key/files", [], K.JSON.json((; address))))
+        @test pin("TI", t.address).status == 404
+        @test pin("CO", t.address).status == 200 && length(K.project_files(kb, "CO")) == 2
+        @test pin("CO", t.address).status == 200 && length(K.project_files(kb, "CO")) == 2
+        # The web upload uses the same retention rule. Identical bytes in two projects can have different names.
+        kept = K.handle(kb, K.HTTP.Request("POST", "/api/media?project=TI&name=tides.md&keep=1", [], "# Survey"))
+        @test kept.status == 200 && only(K.project_files(kb, "TI")).name == "tides.md"
+        later = K.Dates.now(K.Dates.UTC) + K.Dates.Day(8)
+        @test K.sweep_media!(kb; now = later) == 1 && K.media_file(kb, staged.hash) === nothing
+        @test isfile(K.media_path(kb.config, m.hash)) && isfile(K.media_path(kb.config, t.hash))
+        K.delete_project!(kb, "CO")
+        K.sweep_media!(kb; now = later)
+        @test K.media_file(kb, m.hash) !== nothing
+        K.delete_project!(kb, "TI")
+        K.sweep_media!(kb; now = later)
+        @test K.media_file(kb, m.hash) === nothing
+    finally
+        close(kb)
+    end
+end

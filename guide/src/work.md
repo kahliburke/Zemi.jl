@@ -474,3 +474,12 @@ a record that changes marks them for a second look.
   <img class="dark-only" src="./assets/screenshots/finding-dark.png" alt="A finding">
 </figure>
 ```
+
+
+## Project files
+
+Open **Project files** on a project's board to download its files. Contributors can upload a file
+there or paste an existing `media/<hash>/<name>` reference from that project and choose **Keep on
+project**. This also works for attachments uploaded before the list was available. An agent can
+upload directly to the list by giving `media_upload` the project key. The file stays on the
+project even when no note links to it.
