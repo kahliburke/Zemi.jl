@@ -31,12 +31,30 @@ route!("POST", "/api/publications/:id/publish"; need = "tasks.edit") do c
     publish_publication!(c.kb, c.caller, person_of(c), c[:id], get(d, "revision", ""); audience = get(d, "audience", "project"))
 end
 
+route!("POST", "/api/publications/:id/history"; need = "tasks.edit") do c
+    d = json_body(c)
+    version = get(d, "version", 0)
+    version isa Integer || error("Choose an internal edition")
+    record_publication_event!(c.kb, c.caller, person_of(c), c[:id], version; stage = get(d, "stage", ""),
+        venue = get(d, "venue", ""), date = get(d, "date", ""), reference = get(d, "reference", ""))
+end
+
 route!("GET", "/api/publications/:id/:version/pdf") do c
     version = something(tryparse(Int, c[:version]), 0)
     version > 0 || not_found("No such edition")
     e = publication_edition(c.kb, c.caller, c[:id]; version)
     ismissing(e.pdf_hash) && not_found("No PDF for this edition")
     media_response(c.kb, e.pdf_hash, "publication-$(e.id)-v$(e.version).pdf")
+end
+
+route!("GET", "/api/publications/:id/:version/markdown") do c
+    version = something(tryparse(Int, c[:version]), 0)
+    version > 0 || not_found("No such edition")
+    e = publication_edition(c.kb, c.caller, c[:id]; version)
+    isempty(e.body) && not_found("No Markdown manuscript for this edition")
+    HTTP.Response(200, ["Content-Type" => "text/markdown; charset=utf-8",
+                        "Content-Disposition" => "attachment; filename=\"publication-$(e.id)-v$(e.version).md\"",
+                        "Cache-Control" => "private, no-store"], e.body)
 end
 
 # The authenticated principal is known over MCP. The client need not be a specific model or vendor.
@@ -68,6 +86,19 @@ function publication_publish_tool(id::Int, revision::String; audience::String = 
     end
 end
 tool!("publication_publish", publication_publish_tool; need = "tasks.edit")
+
+"""Record an external milestone against a released internal edition as its project maintainer.
+Choose preprint, submitted, accepted, published, declined or withdrawn. Give the venue, the date
+(YYYY-MM-DD), and a link, preprint identifier or DOI for a preprint or published article.
+This records an event that has already happened. Read the work with publication to see its history."""
+function publication_event_tool(id::Int, version::Int, stage::String, venue::String, date::String;
+                                reference::String = "")::String
+    refusing() do
+        caller = tool_caller()
+        JSON.json(record_publication_event!(kb(), caller, publication_agent(caller), id, version; stage, venue, date, reference))
+    end
+end
+tool!("publication_event", publication_event_tool; need = "tasks.edit")
 
 """Read an internal publication, optionally at a specific numbered version. Contributors can read its pending draft
 with draft=true. The revision returned is needed to edit the manuscript or publish that draft."""

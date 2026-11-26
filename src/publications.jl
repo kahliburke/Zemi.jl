@@ -18,6 +18,58 @@ migration!(31, [
     "CREATE INDEX publication_pdf ON publication_editions(pdf_hash) WHERE pdf_hash IS NOT NULL"
 ])
 
+# Editorial events belong to the work and point to the precise internal manuscript used.
+migration!(32, ["""CREATE TABLE publication_events (
+    id INTEGER PRIMARY KEY, work INTEGER NOT NULL, version INTEGER NOT NULL,
+    stage TEXT NOT NULL, venue TEXT NOT NULL, happened TEXT NOT NULL, url TEXT NOT NULL,
+    recorded_by TEXT NOT NULL,
+    FOREIGN KEY(work, version) REFERENCES publication_editions(work, version) ON DELETE CASCADE,
+    UNIQUE(work, version, stage, venue, happened, url))"""])
+
+const PUBLICATION_STAGES = ("preprint", "submitted", "accepted", "published", "declined", "withdrawn")
+
+function publication_reference(reference)
+    value = strip(reference)
+    isempty(value) && return ""
+    doi = parse_doi(value)
+    doi === nothing || return "https://doi.org/$doi"
+    # Preserve the requested repository version when a depositor gives a versioned identifier.
+    if occursin(ARXIV_BARE_ID, value)
+        preprint = parse_arxiv_id(value)
+        return "https://arxiv.org/abs/" * preprint.id * preprint.version
+    end
+    uri = try
+        HTTP.URI(value)
+    catch
+        nothing
+    end
+    (uri !== nothing && uri.scheme in ("http", "https") && !isempty(uri.host) &&
+        !occursin(r"[\s\\]", value)) || error("Enter an HTTP(S) link, a DOI or a preprint identifier")
+    return String(value)
+end
+
+function record_publication_event!(kb, caller, by, id, version; stage, venue, date, reference = "")
+    return transaction(kb) do
+        w = publication_work(kb, caller, id; editing = true)
+        need_project!(kb, caller, w.project, MAINTAIN)
+        1 <= version <= w.latest || error("Choose a released internal edition")
+        stage in PUBLICATION_STAGES || error("Unknown publication stage")
+        venue = strip(venue)
+        isempty(venue) && error("Name the repository, journal or conference")
+        day = tryparse(Date, date)
+        (day !== nothing && string(day) == date) || error("Use a date in YYYY-MM-DD format")
+        url = publication_reference(reference)
+        stage in ("preprint", "published") && isempty(url) && error("Give the link or identifier for the external work")
+        execute!(kb, """INSERT INTO publication_events (work, version, stage, venue, happened, url, recorded_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(work, version, stage, venue, happened, url) DO NOTHING""",
+                 (id, version, stage, venue, date, url, by.name))
+        return publication_events(kb, id)
+    end
+end
+
+publication_events(kb, id) = query(kb, """SELECT version, stage, venue, happened, url, recorded_by FROM publication_events
+                                          WHERE work = ? ORDER BY happened, id""", (id,))
+
 publication_url(id, version = 0) = "/publications/$id/" * (version == 0 ? "" : "v$version/")
 publication_conflict() = throw(Refusal(409, "The draft has changed. Reopen it before saving or publishing."))
 
@@ -49,7 +101,7 @@ function publication_edition(kb, caller, id; version = 0, editing = false)
     isempty(rows) && not_found("No such edition")
     e = only(rows)
     !editing && isempty(e.published_at) && not_found("No such edition")
-    return (; id = w.id, w.project, w.audience, w.latest, e..., url = publication_url(id, e.version))
+    return (; id = w.id, w.project, w.audience, w.latest, e..., url = publication_url(id, e.version), history = publication_events(kb, w.id))
 end
 
 # Search and discovery both select only the latest published edition, before ranking or limiting.

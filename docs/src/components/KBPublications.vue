@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, shallowRef, computed, watch } from 'vue'
 import { useRoute } from 'vitepress'
+import KBPublicationHistory from './KBPublicationHistory.vue'
 import KBNeedsService from './KBNeedsService.vue'
 import KBPublicationEditor from './KBPublicationEditor.vue'
 import { api, getJSON, onLive } from './kbApi'
@@ -9,7 +10,8 @@ import { onTaskRef } from './kbRefs'
 import { escapeText, loadMarkdown } from './kbMarkdown'
 
 type Work = { id: number; version: number; title: string; authors: string; project: string }
-type Edition = Work & { latest: number; abstract: string; body: string; revision: string; changes: string; audience: string;
+type History = InstanceType<typeof KBPublicationHistory>['$props']['entries']
+type Edition = Work & { history: History; latest: number; abstract: string; body: string; revision: string; changes: string; audience: string;
   prepared_by: string; published_by: string; published_at: string; has_draft: boolean; pdf_hash: string | null; date: string; access: string; url: string }
 const openTask = onTaskRef(ref => location.assign(taskHref(ref)))
 const route = useRoute()
@@ -77,8 +79,11 @@ async function cite() {
       <p v-if="reader.prepared_by !== reader.published_by">Draft prepared by {{ reader.prepared_by }}</p>
       <button @click="cite">Cite this version</button>
       <p v-if="citationOpen" role="status"><span v-if="copied">Copied. </span>{{ citation }}</p>
+      <KBPublicationHistory :key="reader.url" :work="reader.id" :version="reader.version" :latest="reader.latest"
+        :entries="reader.history" :maintainer="access === 'maintainer'" @saved="entries => { if (reader) reader = { ...reader, history: entries } }" />
       <h2>Abstract</h2><p>{{ reader.abstract }}</p>
       <p v-if="reader.pdf_hash"><a :href="`${api}/api/publications/${reader.id}/${reader.version}/pdf`" target="_blank" rel="noopener">Read manuscript PDF</a></p>
+      <p v-if="reader.body"><a :href="`${api}/api/publications/${reader.id}/${reader.version}/markdown`" download>Download manuscript Markdown</a></p>
       <div class="kb-md" @click="openTask" @keydown.enter="openTask" v-html="render(reader.body, { refs: true })"></div>
       <h2>Versions</h2>
       <nav class="versions" aria-label="Versions"><a v-for="v in reader.latest" :key="v" :href="href(reader.id, v)" :aria-current="v === reader.version ? 'page' : undefined">v{{ v }}</a></nav>

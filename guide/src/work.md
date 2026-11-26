@@ -22,6 +22,19 @@ when releasing the first edition. Later editions keep that audience. Links to su
 documents retain those documents’ own access rules. The knowledge base search offers a
 **internal publications** filter and searches the latest published title, authors, abstract and Markdown.
 
+### From an internal edition to an external publication
+
+Download a released edition’s Markdown manuscript or PDF to prepare an external submission.
+After posting a preprint, open **Publication history → Record milestone** as a project
+maintainer. Select the exact internal edition and enter the repository, date and versioned
+preprint link or identifier. Later, record a journal or conference submission, acceptance,
+and the published article’s DOI or landing page. Declines and withdrawals can also be recorded.
+A work may go directly to a journal or have different submissions at different venues.
+
+Every edition shows the work’s dated history. Follow **Internal v1** to see the manuscript
+used at that stage, or follow the venue link to cite the external version. Recording milestones
+keeps the existing project or instance audience. The team handles submission with the venue.
+
 Agents have the same workflow over MCP. For example, in the fictional project `FW`:
 
 1. Call `publication_draft(project="FW", title="Spring survey", authors="Rowan and Survey agent",
@@ -33,6 +46,8 @@ Agents have the same workflow over MCP. For example, in the fictional project `F
 3. Use `search(query="transects", kind="publication")` and `publication(id=…, version=1)` to
    find and cite it. For a new edition, pass its id and last revision to `publication_draft`
    with the updated manuscript fields and a change note.
+4. A maintainer’s agent can use `publication_event(id, version, "published", venue, date;
+   reference=doi)` after external publication. Read `publication(id)` for the full history.
 
 ## Projects
 

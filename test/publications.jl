@@ -52,6 +52,29 @@
     @test v2["version"] == 2 && payload(request(viewer, "GET", "$api/$id"))["body"] == edit["body"]
     @test payload(request(viewer, "GET", "$api/$id?version=1"))["body"] == draft.body
     @test isempty(searchfor(viewer, "Crest")) && only(searchfor(viewer, "Summer"))["version"] == 2
+    # The external history belongs to the work. Each milestone names the internal edition used.
+    event = Dict("version" => 1, "stage" => "preprint", "venue" => "Example repository",
+                 "date" => "2026-04-15", "reference" => "2401.12345v2")
+    record(c, data) = request(c, "POST", "$api/$id/history", data)
+    @test record(contributor, event).status == 403
+    @test record(elsewhere, event).status == 404
+    @test record(keeper, merge(event, Dict("version" => 3))).status == 400
+    @test record(keeper, merge(event, Dict("reference" => ""))).status == 400
+    @test record(keeper, merge(event, Dict("reference" => "no-link"))).status == 400
+    @test record(keeper, merge(event, Dict("date" => "2026-02-31"))).status == 400
+    @test only(payload(record(keeper, event)))["url"] == "https://arxiv.org/abs/2401.12345v2"
+    @test length(payload(record(keeper, event))) == 1
+    final = merge(event, Dict("version" => 2, "stage" => "published", "date" => "2026-05-28",
+                              "venue" => "Example Journal", "reference" => "doi:10.1234/example"))
+    @test last(payload(record(keeper, final)))["url"] == "https://doi.org/10.1234/example"
+    submission = merge(final, Dict("stage" => "submitted", "date" => "2026-05-06", "reference" => ""))
+    history = payload(record(keeper, submission))
+    @test [h["stage"] for h in history] == ["preprint", "submitted", "published"]
+    @test [h["version"] for h in history] == [1, 2, 2]
+    old_edition = payload(request(viewer, "GET", "$api/$id?version=1"))
+    @test old_edition["history"] == history && old_edition["body"] == draft.body
+    @test String(request(viewer, "GET", "$api/$id/1/markdown").body) == draft.body
+    @test request(elsewhere, "GET", "$api/$id/1/markdown").status == 404
     pdf = K.add_media!(kb, codeunits("%PDF-1.5\nfixture"), "work.pdf"; by = me.name, project = "FW")
     separate = K.draft_publication!(kb, localuser, me, "FW"; title = "Survey", authors = "Ada", abstract = "Survey results", source = pdf.address)
     @test request(elsewhere, "GET", "$api/$(separate.id)/1/pdf").status == 404
@@ -76,6 +99,11 @@
         @test m["prepared_by"] == "Agent for Bea"
         as_agent(() -> tools["publication_publish"](mid, m["revision"]))
         @test K.JSON.parse(as_agent(() -> tools["publication"](mid; version = 1)))["published_by"] == "Agent for Bea"
+        K.MCP_CALLERS[session] = (keeper, K.Dates.now())
+        direct = K.JSON.parse(as_agent(() -> tools["publication_event"](mid, 1, "published", "Sample proceedings",
+            "2026-05-01"; reference = "https://example.org/proceedings/paper")))
+        @test only(direct)["stage"] == "published"
+        @test only(K.JSON.parse(as_agent(() -> tools["publication"](mid)))["history"])["version"] == 1
         @test occursin("/publications/$mid/v1/", as_agent(() -> tools["search"]("Estuary"; kind = "publication", project = "FW")))
         @test any(w -> w["id"] == mid, payload(request(viewer, "GET", "/api/recent?kind=publication")))
     finally

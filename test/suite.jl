@@ -5759,7 +5759,7 @@ end
                "projects", "tasks", "task", "next_task", "plan", "task_update", "task_note", "task_note_edit", "task_diff", "task_link", "project_create", "project_codebase", "library", "library_add", "milestones",
                "milestone_create", "milestone_update", "milestone_activate", "milestone_done", "task_wait", "task_search", "task_match", "task_status", "task_attach", "media_upload", "media", "task_note_remove",
                "findings", "finding", "finding_draft", "finding_update", "finding_comment", "finding_evidence", "ingest_history",
-               "publication", "publication_draft", "publication_publish"])
+               "publication", "publication_draft", "publication_publish", "publication_event"])
     # Each says what it needs over /mcp; those that read the service's own disk are offered no one there.
     @test all(t -> t.need === nothing || t.need in K.PERMISSION_NAMES, K.TOOLS[])
     # Each permission is in one group of those the forms choose them by, with what it allows.
