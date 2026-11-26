@@ -19,8 +19,10 @@ type Node = { id: string; kind: string; title: string; year?: string; page: stri
               cluster?: number
               central?: number; rating?: number }
 type Cluster = { id: number; name: string; description: string; size: number }
+// A subset mapped by itself (`?set=`): what it is, how many documents it has, and whether too few to map.
+type SetInfo = { spec: string; kind: string; name: string; count: number; least: number; few: boolean }
 type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean, boolean][]; clusters: Cluster[];
-               built_at: string | null; job: string | null; abstracts: boolean; abstract_only: number }
+               built_at: string | null; job: string | null; abstracts: boolean; abstract_only: number; set?: SetInfo }
 type Near = { node: Node; similarity: number; linked: boolean }
 type Pair = { a: Node; b: Node; similarity: number; score: number; at: number }
 
@@ -154,20 +156,32 @@ const pairs = computed<Pair[]>(() => {
   return out.filter(p => (each.set(p.a.id, (each.get(p.a.id) ?? 0) + 1).get(p.a.id)! <= OWN_EACH)).slice(0, 40)
 })
 
+// The subset mapped (see `explore_set` in src/explore_sets.jl), as the address names it, and how many a
+// search's subset takes.
+const subset = ref('')
+const setSize = ref(100)
+
 async function load() {
   loading.value = true
   error.value = ''
   const q = new URLSearchParams({ links: 'cites,refers,related,evidence,task', kinds: 'paper,record,code,resource,finding,task',
-                                  ...(abstracts.value ? { abstracts: '1' } : {}) })
+                                  ...(abstracts.value ? { abstracts: '1' } : {}),
+                                  ...(subset.value ? { set: subset.value, n: String(setSize.value) } : {}) })
   try {
     const g: Graph = await getJSON(`/api/graph?${q}`)
     data.value = g
-    building.value = g.job ? 'Placing what is new here…' : ''
+    building.value = g.job ? (g.set ? `Laying out ${g.set.count} documents by themselves…` : 'Placing what is new here…') : ''
     if (g.job) watchJob(g.job)
   } catch (e: any) { error.value = `The map could not be loaded: ${e.message ?? e}` }
   loading.value = false
   await nextTick()
   draw()
+  // A drift's map opened from its address draws the drift's path through the documents it names.
+  const s = data.value?.set
+  if (s?.kind === 'docs' && !driftTrail.value.length && data.value?.nodes.length) {
+    driftTrail.value = s.spec.slice(5).split(',').map(id => byId.value.get(id)).filter((n): n is Node => !!n).map(node => ({ node }))
+    restyle()
+  }
   const center = new URLSearchParams(location.search).get('center')
   if (center && !byId.value.has(center) && !abstracts.value && data.value?.abstract_only) { abstracts.value = true; return }
   if (center) {
@@ -177,6 +191,34 @@ async function load() {
       setTimeout(() => go(node), 600)
     } else if (data.value) said.value = 'This document is unavailable in your map.'
   }
+}
+
+// Map subset `spec` by itself, or with none the full map again, keeping in the address where one is.
+// A drift's own map keeps the drift's path; another starts afresh.
+function mapSet(spec: string, center = '') {
+  stopDrift()
+  if (!spec.startsWith('docs:')) driftTrail.value = []
+  selected.value = null
+  litRow.value = null
+  subset.value = spec
+  const u = new URL(location.href)
+  spec ? u.searchParams.set('set', spec) : u.searchParams.delete('set')
+  center ? u.searchParams.set('center', center) : u.searchParams.delete('center')
+  history.pushState({}, '', u)
+  load()
+}
+// Back to the full map, the document selected here selected there.
+const leaveSet = () => mapSet('', selected.value?.id ?? '')
+const mapDrift = () => mapSet('docs:' + driftTrail.value.map(t => t.node.id).join(','))
+function fromAddress() {
+  subset.value = new URLSearchParams(location.search).get('set') ?? ''
+  load()
+}
+// The projects whose libraries can be mapped, asked for once Show opens.
+const projectList = ref<{ key: string; name: string }[] | null>(null)
+async function loadProjects() {
+  if (projectList.value || !can('tasks.view')) return
+  try { projectList.value = (await getJSON('/api/projects')).projects } catch { projectList.value = [] }
 }
 
 let jobTimer: ReturnType<typeof setTimeout> | undefined
@@ -284,6 +326,7 @@ function mix(a: string, b: string, t: number) {
 const legendOpen = ref<boolean>(stored('legend', true))
 watch(legendOpen, v => keep('legend', v))
 const settingsOpen = ref(false)
+watch(settingsOpen, open => { if (open) loadProjects() })
 function shade(n: Node) {
   const c = colour(n)
   if (hits.value.size) return hits.value.has(n.id) ? c : isDark.value ? '#3a3a44' : '#d8d8de'
@@ -458,7 +501,11 @@ async function draw() {
         for (const c of centres) {
           if (!c.name) continue
           const a = rel ? (rel.has(c.id) ? 1 : DIMMED) : fade
-          ctx.fillStyle = isDark.value ? `rgba(235,235,245,${0.85 * a})` : `rgba(30,30,40,${0.8 * a})`
+          // On a translucent backing, so the name reads over the discs and links beneath it.
+          const w = ctx.measureText(c.name).width + 12 / scale, h = 20 / scale
+          ctx.fillStyle = isDark.value ? `rgba(17,17,22,${0.62 * a})` : `rgba(250,250,250,${0.72 * a})`
+          ctx.beginPath(); ctx.roundRect(c.x - w / 2, c.y - h / 2, w, h, 4 / scale); ctx.fill()
+          ctx.fillStyle = isDark.value ? `rgba(235,235,245,${0.9 * a})` : `rgba(30,30,40,${0.85 * a})`
           ctx.fillText(c.name, c.x, c.y)
         }
         ctx.restore()
@@ -507,7 +554,7 @@ async function draw() {
       if (!c.name) continue
       const s = new SpriteText(c.name, 6, isDark.value ? 'rgba(240,240,248,0.95)' : 'rgba(25,25,35,0.95)')
       s.fontWeight = '600'
-      s.backgroundColor = isDark.value ? 'rgba(17,17,22,0.6)' : 'rgba(250,250,250,0.7)'
+      s.backgroundColor = isDark.value ? 'rgba(17,17,22,0.72)' : 'rgba(250,250,250,0.8)'
       s.padding = [3, 1.5]
       s.borderRadius = 3
       // Over every node, whatever is nearer: drawn last, and not hidden by depth.
@@ -829,12 +876,14 @@ function fullScreen() {
 }
 const onFullScreen = () => { full.value = document.fullscreenElement === frame.value; nextTick(resize) }
 onLive(() => {
+  subset.value = new URLSearchParams(location.search).get('set') ?? ''
   load()
+  addEventListener('popstate', fromAddress)
   addEventListener('resize', resize)
   document.addEventListener('fullscreenchange', onFullScreen)
   addEventListener('keydown', key)
   return () => {
-    removeEventListener('resize', resize); removeEventListener('keydown', key)
+    removeEventListener('resize', resize); removeEventListener('keydown', key); removeEventListener('popstate', fromAddress)
     document.removeEventListener('fullscreenchange', onFullScreen)
     clearTimeout(jobTimer); stopDrift(); graph?._destructor?.()
   }
@@ -1054,6 +1103,10 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
       <div ref="box" class="kbx-canvas"></div>
       <p v-if="loading" class="kbx-status">Loading the map…</p>
       <p v-else-if="error" class="kbx-status kb-error">{{ error }}</p>
+      <p v-else-if="data?.set?.few" class="kbx-status">
+        Only {{ data.set.count }} documents in {{ data.set.name }}: a map of its own needs at least {{ data.set.least }}.
+        <button class="kbx-btn" @click="leaveSet">Back to all documents</button>
+      </p>
       <p v-else-if="data && !data.nodes.length && !building" class="kbx-status">Nothing to map yet: documents appear here once they are embedded.</p>
       <p v-else-if="data && !data.nodes.some(visibleNode)" class="kbx-status">
         No documents of the kinds chosen in Show.
@@ -1061,7 +1114,17 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
       </p>
 
       <div class="kbx-bar">
+        <nav v-if="subset" class="kbx-crumbs" aria-label="Where on the map">
+          <a href="#" @click.prevent="leaveSet">All documents</a><span aria-hidden="true">›</span>
+          <span class="kbx-crumb" :title="data?.set?.name">{{ data?.set?.name ?? '…' }}</span>
+          <span v-if="data?.set" class="kbx-key-count">{{ data.set.count }}</span>
+          <label v-if="data?.set?.kind === 'q'" class="kbx-top" title="How many of the search's documents are mapped">
+            top <input v-model.number="setSize" type="number" min="20" max="500" step="10" @change="load()">
+          </label>
+        </nav>
         <input v-model="query" type="search" class="kb-field kbx-search" placeholder="Search the map… (Enter to go, Tab for the next)" />
+        <button v-if="query.trim() && order.length" class="kbx-btn" title="Lay out the documents this search finds as a map of their own"
+                @click="mapSet('q:' + query.trim())">Map these</button>
         <div class="kbx-seg" role="group" aria-label="View">
           <button :class="{ on: view === '2d' }" @click="view = '2d'">Map</button>
           <button :class="{ on: view === '3d' }" @click="view = '3d'">Space</button>
@@ -1089,6 +1152,14 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
               <button v-if="data?.nodes.some(n => n.px)" :class="{ on: layout === 'pacmap' }"
                       title="Keeps the neighbourhoods and how the groups lie to each other, the most evenly" @click="layout = 'pacmap'">PaCMAP</button>
             </div>
+          </template>
+          <template v-if="can('tasks.view') && projectList?.length">
+            <span class="kbx-label">Map</span>
+            <select class="kb-field kbx-wide kbx-pick" aria-label="Map a project's library by itself"
+                    @change="e => { const k = (e.target as HTMLSelectElement).value; if (k) mapSet('project:' + k) }">
+              <option value="">A project's library…</option>
+              <option v-for="p in projectList" :key="p.key" :value="p.key">{{ p.name }} ({{ p.key }})</option>
+            </select>
           </template>
           <span class="kbx-label">Colour by</span>
           <div class="kbx-wide">
@@ -1183,7 +1254,9 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <ul>
           <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="goToRow(r.key)">
             <i class="kbx-swatch" :style="{ background: r.colour }"></i>
-            <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button></li>
+            <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button>
+            <button v-if="r.key[0] === 'c' && !subset" class="kbx-map-row" :title="`Map ${r.label} by itself`"
+                    :aria-label="`Map ${r.label} by itself`" @click="mapSet('cluster:' + r.key.slice(1))">⤢</button></li>
         </ul>
       </details>
 
@@ -1196,7 +1269,11 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
             <span v-if="i" class="kbx-key-count">{{ Math.round((t.similarity ?? 0) * 100) }}%</span>
           </li>
         </ol>
-        <button class="kbx-btn kbx-small" @click="copyTrail">Copy as text</button>
+        <div class="kbx-actions">
+          <button class="kbx-btn kbx-small" @click="copyTrail">Copy as text</button>
+          <button v-if="!subset.startsWith('docs:')" class="kbx-btn kbx-small" title="Lay out the drift's documents and their nearest as a map of their own"
+                  @click="mapDrift">Map this drift</button>
+        </div>
       </aside>
 
       <aside v-if="showPairs" class="kbx-pairs">
@@ -1251,6 +1328,15 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-status { position: absolute; top: 45%; width: 100%; text-align: center; color: var(--vp-c-text-2); }
 .kbx-bar { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
 .kbx-bar > * { pointer-events: auto; }
+.kbx-crumbs { display: inline-flex; align-items: center; gap: 6px; max-width: 24rem; padding: 4px 10px; font-size: 13px; border-radius: 8px;
+              border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg); }
+.kbx-crumbs a { color: var(--vp-c-brand-1); white-space: nowrap; }
+.kbx-crumb { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.kbx-top { display: inline-flex; align-items: center; gap: 4px; color: var(--vp-c-text-2); white-space: nowrap; }
+.kbx-top input { width: 4rem; padding: 0 4px; border: 1px solid var(--vp-c-divider); border-radius: 4px; background: var(--vp-c-bg); }
+.kbx-map-row { padding: 0 6px; font-size: 12px; color: var(--vp-c-text-3); border-radius: 4px; }
+.kbx-map-row:hover { color: var(--vp-c-brand-1); background: var(--vp-c-default-soft); }
+.kbx-pick { font-size: 12px; padding: 2px 6px; }
 .kbx-search { flex: 1 1 18rem; max-width: 30rem; background: var(--vp-c-bg); }
 .kbx-seg { display: inline-flex; border: 1px solid var(--vp-c-divider); border-radius: 8px; overflow: hidden; background: var(--vp-c-bg); }
 .kbx-seg button { padding: 4px 12px; font-size: 13px; color: var(--vp-c-text-2); }
@@ -1274,10 +1360,11 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-shade .kbx-seg button { padding: 2px 7px; }
 .kbx-key summary { cursor: pointer; color: var(--vp-c-text-2); text-align: right; }
 .kbx-key ul { list-style: none; margin: 4px 0 2px; padding: 0; }
-.kbx-key li button { width: 100%; display: grid; grid-template-columns: 9px 1fr auto; align-items: center; column-gap: 7px;
+.kbx-key li { display: flex; align-items: center; }
+.kbx-key li button:not(.kbx-map-row) { flex: 1; min-width: 0; width: 100%; display: grid; grid-template-columns: 9px 1fr auto; align-items: center; column-gap: 7px;
                      padding: 1px 4px; margin: 0 -4px; border-radius: 4px; text-align: left; }
-.kbx-key li button:hover { background: var(--vp-c-default-soft); }
-.kbx-key li button.on { background: var(--vp-c-brand-soft); }
+.kbx-key li button:not(.kbx-map-row):hover { background: var(--vp-c-default-soft); }
+.kbx-key li button:not(.kbx-map-row).on { background: var(--vp-c-brand-soft); }
 .kbx-key-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--vp-c-text-1); }
 .kbx-key-count { color: var(--vp-c-text-3); font-variant-numeric: tabular-nums; }
 .kbx-trail { position: absolute; left: 10px; bottom: 46px; width: min(20rem, 40%); max-height: 38%; overflow: auto; font-size: 12px;
