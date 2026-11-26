@@ -16,6 +16,13 @@ export const shortDay = (s: string) =>
 export const when = (s: string | null | undefined, none = '') =>
   s ? new Date(s).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : none
 
+/** The time of an edit, including its date when it falls on another local day than creation. */
+export function editTime(created: string, edited: string) {
+  const d = new Date(edited)
+  return d.toDateString() === new Date(created).toDateString()
+    ? d.toLocaleTimeString(undefined, { timeStyle: 'short' }) : when(edited)
+}
+
 /** A moment as a list of recent things shows it: its time today, else its day and time. */
 export const clock = (s: string | null | undefined, none = '') => {
   if (!s) return none

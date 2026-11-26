@@ -22,7 +22,7 @@ import { sourceHref, onTaskRef, setCodebase, setPeople, plainRefs } from './kbRe
 import { findingHref, recordHref, kbPage, taskHref } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { plainLine } from './kbUtils'
-import { when } from './kbFormat'
+import { when, editTime } from './kbFormat'
 import { PRIORITIES } from './kbLabels'
 
 type Project = { key: string; name: string; description: string; codebase: string; root: string; tasks: number; open: number;
@@ -48,7 +48,7 @@ type Codebase = { id: string; title: string; rev: string; remote: string; page: 
 // Who else has a board open, at the level each chose (src/people_activity.jl); what people did lately.
 type Viewer = { id: number; name: string; project: string; planning: boolean; open: string; draft_ref: string; draft: string;
                 following: number; view: string; at: string }
-type Action = { event: number; who: string; kind: string; ref: string; title: string; text: string; detail: Record<string, any>; at: string }
+type Action = { event: number; who: string; kind: string; ref: string; title: string; text: string; detail: Record<string, any>; at: string; edited_at: string }
 
 const list = ref<Project[]>([])
 const statuses = ref<Status[]>([])
@@ -1326,7 +1326,10 @@ function keepRecordsOpen(open: boolean) {
             <div v-if="followers.length" class="kbp-menu-item kbp-menu-wait">Following you: {{ followers.map(p => p.name).join(', ') }}</div>
             <div class="kbp-menu-label">Lately</div>
             <button v-for="(e, i) in peopleDid" :key="i" class="kbp-menu-item" role="menuitem" @click="menu = ''; openAt(e.ref, e.event)">
-              <span class="kbp-menu-title"><b>{{ e.who }}</b> {{ actionText(e) }}</span><span class="kbp-menu-dim">{{ since(e.at) }}</span></button>
+              <span class="kbp-menu-title"><b>{{ e.who }}</b> {{ actionText(e) }}</span>
+              <span class="kbp-menu-dim">{{ since(e.at) }}
+                <template v-if="e.edited_at"><br>edited <time :datetime="e.edited_at">{{ editTime(e.at, e.edited_at) }}</time></template>
+              </span></button>
             <div v-if="!peopleDid.length" class="kbp-menu-item kbp-menu-wait">Nothing from others in the last week</div>
           </div>
         </div>
@@ -1805,9 +1808,10 @@ function keepRecordsOpen(open: boolean) {
             <div class="kbp-event-head"><span class="kbp-who">{{ e.who }}</span><span v-if="e.by_agent" class="kbp-tag">agent</span>
               <span v-if="e.reply_to && e.kind === 'comment'" class="kbp-tag kbp-answer-tag">answer</span>
               <span v-else-if="e.kind === 'question'" class="kb-dim kbp-dim">{{ e.reply_to ? 'asked back' : 'asked' }} {{ e.to_label }}</span>
-              <span class="kb-dim kbp-dim kbp-when">{{ when(e.at) }}</span>
+              <time class="kb-dim kbp-dim kbp-when" :datetime="e.at">{{ when(e.at) }}</time>
               <button v-if="e.edited_at" class="kb-link kbp-link kbp-edited" :title="'Edited ' + when(e.edited_at) + '; show the earlier text'"
-                      @click="showNoteHistory(e.id)">edited</button>
+                      :aria-expanded="noteHistory?.id === e.id" @click="showNoteHistory(e.id)">
+                edited <time :datetime="e.edited_at">{{ editTime(e.at, e.edited_at) }}</time></button>
               <span class="kbp-spacer"></span>
               <button v-if="canEditNote(e) && editingNote?.id !== e.id" class="kbp-icon kbp-note-edit" title="Edit" aria-label="Edit this note"
                       @click="editingNote = { id: e.id, text: e.text }"><KBIcon name="edit" :size="14" /></button>

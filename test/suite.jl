@@ -6184,6 +6184,7 @@ end
     @test Set((l.kind, l.target, l.label) for l in K.task(kb, made).links) == Set([("task", "NE-1", ""), ("person", "Rowan", "")])
     # Editing a note: its author, or a person for an agent's; the earlier text kept, links and search following.
     note = K.note_task!(kb, "NE-2", "Checked the stochastic runs"; kind = "progress", by = bot)
+    K.execute!(kb, "UPDATE task_events SET at = ? WHERE id = ?", ("2026-01-07T23:55:04Z", note))
     @test K.edit_note!(kb, "NE-2", note, "Checked the deterministic runs against @arXiv:2501.00001"; by = bot) == note
     edited = only(e for e in K.task(kb, "NE-2").activity if e.id == note)
     @test edited.text == "Checked the deterministic runs against @arXiv:2501.00001" && !isempty(edited.edited_at) && edited.kind == "progress"
@@ -6200,7 +6201,8 @@ end
     @test_throws "agents working for them" K.edit_note!(kb, "NE-2", rowans, "Changed"; by = K.person("Bea"))
     @test_throws "agents working for them" K.edit_note!(kb, "NE-2", note, "Changed"; by = me)
     @test K.edit_note!(kb, "NE-2", rowans, "Ran the deterministic case, twice"; by = K.person("Bea"), maintainer = true) == rowans
-    @test occursin("[note $note, edited]: reported: Checked the deterministic runs", K.format_task(K.task(kb, "NE-2")))
+    latest_edit = last(K.note_history(kb, note)).at
+    @test occursin("$(edited.at) $(edited.who) (agent) [note $note, edited $latest_edit]: reported: Checked the deterministic runs", K.format_task(K.task(kb, "NE-2")))
     mine = K.note_task!(kb, "NE-2", "My own words"; by = me)
     @test_throws "An agent edits only its own" K.edit_note!(kb, "NE-2", mine, "Changed"; by = bot)
     @test_throws "their own notes" K.edit_note!(kb, "NE-2", mine, "Changed"; by = K.person("Bea"))
@@ -6617,7 +6619,8 @@ end
         @test occursin("Noted on DM-6 (note ", noted)
         n = parse(Int, match(r"note (\d+)", noted)[1])
         @test as_ada(() -> tools["task_note_edit"]("DM-6", n, "Looked at the arXiv listings")) == "Edited note $n on DM-6."
-        @test occursin("[note $n, edited]: reported: Looked at the arXiv listings", tools["task"]("DM-6"))
+        stamp = only(K.note_history(kb, n)).at
+        @test occursin("[note $n, edited $stamp]: reported: Looked at the arXiv listings", tools["task"]("DM-6"))
         @test occursin("DM: Demo · ", tools["projects"](; path = root)) && occursin("No project for", tools["projects"](; path = tempdir()))
         @test occursin("First · due 2026-11-01 · 0/1 done", tools["milestones"]("DM"))
         @test startswith(tools["task"]("DM-404"), "⛔ No task DM-404")
@@ -6732,10 +6735,17 @@ end
         csv = K.add_media!(kb, Vector{UInt8}("depth,temp\n1,12.5\n"), "readings.csv"; by = "Ada", project = "DM")
         svg = K.add_media!(kb, Vector{UInt8}("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'><rect width='40' height='20' fill='red'/></svg>"),
                            "box.svg"; by = "Ada", project = "DM")
+        # Reusing these bytes keeps the first upload time on the file and in both tool outputs.
+        first_upload = "2026-01-07T23:55:04Z"
+        K.execute!(kb, "UPDATE media SET added_at = ? WHERE hash = ?", (first_upload, csv.hash))
+        reused = K.add_media!(kb, Vector{UInt8}("depth,temp\n1,12.5\n"), "copy.csv"; by = "Rowan", project = "PL")
+        @test reused.hash == csv.hash
         tools["task_note"]("DM-11", "The readings: [scan]($(pdf.address)) and [table]($(csv.address))")
         listed = text_of(tools["task"]("DM-11"))
         @test occursin("## Files attached, not shown here", listed) && occursin("`$(pdf.address)`: a PDF", listed) &&
               occursin("media(\"$(pdf.address)\")", listed) && occursin("`$(csv.address)`: text", listed)
+        @test occursin("first uploaded $first_upload", only(filter(line -> startswith(line, "- `$(csv.address)`"), split(listed, '\n'))))
+        @test occursin("first uploaded $first_upload by Ada", tools["media"](reused.address))
         opened = tools["media"](pdf.address)
         @test occursin("Tide gauge readings.", text_of(opened)) && occursin("2 pages", text_of(opened)) && occursin("\"mimeType\":\"image/png\"", opened)
         second = tools["media"](pdf.address; page = 2)

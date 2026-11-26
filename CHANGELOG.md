@@ -41,6 +41,8 @@
   and are a kind of their own to search alone. A query of three words or more that a few documents
   hold word for word puts them first. A summary layer counts with the layer of its text as one
   ranking, so notes and codebases, which are not summarized, rank alongside papers.
+- Edited task notes show when they were last changed on the board and in the `task` tool.
+  The `task` and `media` tools also show when an attachment was first uploaded.
 - **The board** keeps a dragged subtask under its task unless it is dropped onto another;
   "make it a task of its own" on its page takes it out.
 - **The installers** have Kaimon set itself up (`kaimon --setup-defaults`) where it can.
