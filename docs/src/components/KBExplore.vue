@@ -471,7 +471,7 @@ function clusterCentres(nodes: GNode[]) {
     s.x += n.fx; s.y += n.fy!; s.z += n.fz ?? 0; s.n++
     sums.set(n.cluster, s)
   }
-  return [...sums].filter(([, s]) => s.n >= 3).map(([id, s]) => ({ id, name: clusterName(id), x: s.x / s.n, y: s.y / s.n, z: s.z / s.n }))
+  return [...sums].filter(([, s]) => s.n >= 3).map(([id, s]) => ({ id, name: clusterName(id), x: s.x / s.n, y: s.y / s.n, z: s.z / s.n, size: s.n }))
 }
 
 // The 2D map's cluster names, where they are drawn.
@@ -510,15 +510,24 @@ async function draw() {
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.font = `600 ${14 / scale}px system-ui, sans-serif`
         const rel = relevantClusters.value
-        for (const c of centres) {
-          if (!c.name) continue
+        // Placed in turn, those that matter here and the largest first: a name that would cover one placed
+        // already moves a step up or down, and is left out while no step clears it.
+        const placed: { x0: number; x1: number; y0: number; y1: number }[] = []
+        const order = centres.filter(c => c.name)
+          .sort((p, q) => Number(!!rel && rel.has(q.id)) - Number(!!rel && rel.has(p.id)) || q.size - p.size)
+        const h = 20 / scale
+        for (const c of order) {
           const a = rel ? (rel.has(c.id) ? 1 : DIMMED) : fade
+          const w = ctx.measureText(c.name).width + 12 / scale
+          const clear = (y: number) => placed.every(b => c.x + w / 2 < b.x0 || c.x - w / 2 > b.x1 || y + h / 2 < b.y0 || y - h / 2 > b.y1)
+          const y = [0, -1.1, 1.1, -2.2, 2.2].map(k => c.y + k * h).find(clear)
+          if (y === undefined) continue
+          placed.push({ x0: c.x - w / 2 - 2 / scale, x1: c.x + w / 2 + 2 / scale, y0: y - h / 2, y1: y + h / 2 })
           // On a translucent backing, so the name reads over the discs and links beneath it.
-          const w = ctx.measureText(c.name).width + 12 / scale, h = 20 / scale
           ctx.fillStyle = isDark.value ? `rgba(17,17,22,${0.62 * a})` : `rgba(250,250,250,${0.72 * a})`
-          ctx.beginPath(); ctx.roundRect(c.x - w / 2, c.y - h / 2, w, h, 4 / scale); ctx.fill()
+          ctx.beginPath(); ctx.roundRect(c.x - w / 2, y - h / 2, w, h, 4 / scale); ctx.fill()
           ctx.fillStyle = isDark.value ? `rgba(235,235,245,${0.9 * a})` : `rgba(30,30,40,${0.85 * a})`
-          ctx.fillText(c.name, c.x, c.y)
+          ctx.fillText(c.name, c.x, y)
         }
         ctx.restore()
       })
