@@ -443,10 +443,14 @@ route!("POST", "/api/documents"; need = "paper.add") do c
     b = json_body(c)
     # A document dropped here is added only `anyway`, which restores it.
     anyway = get(b, "anyway", false) === true
-    if !isempty(strip(String(get(b, "codebase", ""))))
-        id = add_codebase_from!(kb, String(b["codebase"]); by = adder(get(b, "by", nothing), caller), anyway, caller)
-        job = start_codebase_reading(kb, id)
-        return Dict("ids" => [id], "already" => already_read(kb, [id]), "job" => job === nothing ? nothing : job.id)
+    # Codebases, one or several apart by commas or lines: read together. An organization's are chosen
+    # from with /api/code-orgs.
+    named = named_codebases(String(get(b, "codebase", "")))
+    if !isempty(named)
+        any(n -> named_org(n) !== nothing, named) && error("An organization is listed, to choose its repositories from, with /api/code-orgs")
+        ids = [add_codebase_from!(kb, n; by = adder(get(b, "by", nothing), caller), anyway, caller) for n in named]
+        job = start_codebases_reading(kb, ids)
+        return Dict("ids" => ids, "already" => already_read(kb, ids), "job" => job === nothing ? nothing : job.id)
     end
     read = get(b, "read", true) !== false
     ids, job = start_adding(kb, split_list(String(get(b, "arxiv", ""))); source = String(get(b, "source", "added")),

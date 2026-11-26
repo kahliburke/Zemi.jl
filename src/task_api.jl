@@ -97,7 +97,7 @@ route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
     i === nothing && not_found("No project $key")
     p = projects(kb)[i]
     Dict("project" => Dict(pairs(p)), "statuses" => STATUS_JSON, "codebases" => Any[codebase_json(kb, x) for x in project_codebases(kb, key)],
-         "orgs" => Any[merge(Dict(pairs(o)), Dict(:repositories => Any[Dict(pairs(r)) for r in o.repositories])) for o in project_orgs(kb, key)],
+         "orgs" => orgs_json(project_orgs(kb, key)),
          "access" => access_name(project_access(kb, c.caller, key)), "manages_members" => manages_members(kb, c.caller, key),
          "agents" => Dict(pairs(agents_at_work(kb, key))),
          "files" => project_files(kb, key),
@@ -132,6 +132,40 @@ route!("POST", "/api/projects/:key"; need = "tasks.edit", project = MAINTAIN) do
     update_project!(c.kb, c[:key]; name = opt(d, "name"), description = opt(d, "description"), by = person_of(c))
     Dict("project" => Dict(pairs(only(p for p in projects(c.kb) if p.key == uppercase(c[:key])))))
 end
+
+orgs_json(orgs) = Any[merge(Dict(pairs(o)), Dict(:repositories => Any[Dict(pairs(r)) for r in o.repositories])) for o in orgs]
+
+"""
+What a request about organization `d["org"]` in `pid`'s scope (see project_codebases.jl) does: with
+`remove`, stops listing it; with any of `take`, `untake`, `decline` or `undecline` (repositories'
+addresses, or for `untake` codebases), chooses among its candidates; else lists it, with `forks` and
+`auto` (kept as they were when not given). Answers with the organizations in that scope.
+"""
+function org_request!(c::APICall, pid::Scope)
+    d = json_body(c)
+    org = named_org(String(get(d, "org", "")))
+    org === nothing && error("Name an organization: github.com/<owner>")
+    list(k) = String.(get(d, k, String[]))
+    add, by = can(c.caller, "paper.add"), caller_name(c.caller)
+    ids = if get(d, "remove", false) == true
+        remove_org!(c.kb, pid, org...)
+    elseif any(k -> haskey(d, k), ("take", "untake", "decline", "undecline"))
+        choose_org!(c.kb, pid, org...; take = list("take"), untake = list("untake"), decline = list("decline"),
+                    undecline = list("undecline"), add, by, c.caller)
+    else
+        was = something(findfirst(o -> (o.host, lowercase(o.owner)) == (org[1], lowercase(org[2])), code_orgs(c.kb, pid)), 0)
+        before = was == 0 ? nothing : code_orgs(c.kb, pid)[was]
+        flag(k, kept) = haskey(d, k) ? d[k] == true : kept
+        add_org!(c.kb, pid, org...; forks = flag("forks", before !== nothing && before.forks), auto = flag("auto", before !== nothing && before.auto),
+                 add, by)
+    end
+    return Dict("taken" => ids, "orgs" => orgs_json(code_orgs(c.kb, pid)))
+end
+
+route!(c -> org_request!(c, project_id(c.kb, c[:key])), "POST", "/api/projects/:key/orgs"; need = "tasks.edit", project = MAINTAIN)
+# The knowledge base's own organizations, on the Codebases page: those who add sources list and choose from them.
+route!(c -> Dict("orgs" => orgs_json(code_orgs(c.kb, nothing))), "GET", "/api/code-orgs"; need = "paper.add")
+route!(c -> org_request!(c, nothing), "POST", "/api/code-orgs"; need = "paper.add")
 
 # Link codebases or an organization to a project (`codebase`, or several as `codebases`), unlink them
 # (`remove`), or make one main (see project_codebase!).

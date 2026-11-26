@@ -174,7 +174,8 @@ they appear** they are linked and read, without forks unless asked and never arc
 repository unticked or unlinked is declined, and not linked again by itself. One archived since it
 was linked stays, marked, and is not fetched again; one the organization no longer lists is marked,
 not unlinked. With the GitHub App installed for the organization, its private repositories the App
-may read are listed too.
+may read are listed too. Where codebases are added to the knowledge base itself (the Codebases page),
+an organization is listed and chosen from the same way, those chosen added in no project.
 
 When a project has codebases, a commit in any of them naming a task is recorded on it: on a trailer line
 (`Tasks: RB-12`, or `Task:`, `Refs:`) or after `Part of`, as its work; anywhere else, as a mention.

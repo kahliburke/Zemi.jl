@@ -3926,7 +3926,7 @@ end
     @test [(c.id, c.main) for c in K.project_codebases(kb, "MC")] == [(ida, true)] && isempty(K.projects(kb; path = b))
 
     # A knowledge base from before keeps each project's one codebase, as its main one.
-    foreach(t -> K.execute!(kb, "DROP TABLE $t"), ("project_codebases", "org_repositories", "project_orgs"))
+    foreach(t -> K.execute!(kb, "DROP TABLE $t"), ("project_codebases", "org_repositories", "code_orgs"))
     K.execute!(kb, "ALTER TABLE papers DROP COLUMN repository_archived_at")
     K.execute!(kb, "ALTER TABLE projects ADD COLUMN codebase_id INTEGER REFERENCES papers(id) ON DELETE SET NULL")
     K.execute!(kb, "UPDATE projects SET codebase_id = ? WHERE key = 'MC'", (K.paper_id(kb, idb),))
@@ -3979,8 +3979,8 @@ end
         # Listed again a day later: a new repository is a candidate, marked new; one archived since is marked.
         K.project_codebase!(kb, "LB", reef_url; read = false, by = me)                # chosen again: no longer declined
         push!(listing, entry("lagoon")); listing[1]["archived"] = true
-        @test K.list_project_orgs!(kb) == 0                                          # not due yet
-        @test K.list_project_orgs!(kb; now = K.Dates.now(K.UTC) + K.Dates.Day(1)) == 0
+        @test K.list_code_orgs!(kb) == 0                                             # not due yet
+        @test K.list_code_orgs!(kb; now = K.Dates.now(K.UTC) + K.Dates.Day(1)) == 0
         rs = Dict(r.name => r for r in only(K.project_orgs(kb, "LB")).repositories)
         @test rs["lagoon"].new && isempty(rs["lagoon"].codebase) && !rs["reef"].declined && rs["reef"].archived
         @test only(c.archived for c in K.project_codebases(kb, "LB") if c.id == reef)
@@ -3992,23 +3992,54 @@ end
         @test only(K.project_orgs(kb, "LB")).auto
         # One the organization no longer lists is marked gone, not unlinked.
         filter!(r -> r["name"] != "reef", listing)
-        K.list_org!(kb, Int(K.scalar(kb, "SELECT id FROM project_orgs")); read = false)
+        K.list_org!(kb, Int(K.scalar(kb, "SELECT id FROM code_orgs")); read = false)
         @test [(c.id, c.gone) for c in K.project_codebases(kb, "LB")] == [(solo_id, false), (reef, true), (lagoon, false)]
         # No longer listed, the organization's chosen codebases stay.
         @test isempty(K.project_codebase!(kb, "LB", "org:ada-lab"; remove = true, by = me))
         @test isempty(K.project_orgs(kb, "LB")) && [c.id for c in K.project_codebases(kb, "LB")] == [solo_id, reef, lagoon]
         @test all(c -> c.org == "", K.project_codebases(kb, "LB"))
         K.project_codebase!(kb, "LB", "github.com/ada-lab"; by = me)
+        # Declined without being linked, and offered again.
+        kelp_remote = K.clone_url(kelp_url)
+        @test isempty(K.project_codebase!(kb, "LB", kelp_url; remove = true, by = me))
+        @test only(r.declined for r in only(K.project_orgs(kb, "LB")).repositories if r.name == "kelp")
+        K.choose_org!(kb, K.project_id(kb, "LB"), "github.com", "ada-lab"; undecline = [kelp_url], by = "Rowan")
+        @test !only(r.declined for r in only(K.project_orgs(kb, "LB")).repositories if r.name == "kelp")
+        # Chosen through the organization: linked, and unlinked (declined).
+        @test K.choose_org!(kb, K.project_id(kb, "LB"), "github.com", "ada-lab"; take = [kelp_url], read = false, by = "Rowan") ==
+              [K.link_repository!(kb, kelp_url)]
+        kelp = K.project_codebases(kb, "LB")[end].id
+        K.choose_org!(kb, K.project_id(kb, "LB"), "github.com", "ada-lab"; untake = [kelp], by = "Rowan")
+        @test !any(c -> c.id == kelp, K.project_codebases(kb, "LB")) &&
+              only(r.declined for r in only(K.project_orgs(kb, "LB")).repositories if r.remote == kelp_remote)
+        @test_throws "not one of ada-lab's repositories" K.choose_org!(kb, K.project_id(kb, "LB"), "github.com", "ada-lab";
+                                                                         take = ["file:///elsewhere"], by = "Rowan")
+        # The knowledge base lists one for itself the same way: those chosen are added to it, in no project.
+        @test isempty(K.add_org!(kb, nothing, "github.com", "ada-lab"; by = "Rowan"))
+        mine = only(K.code_orgs(kb, nothing))
+        @test mine.owner == "ada-lab" && Set(r.codebase for r in mine.repositories) == Set([kelp, "", lagoon])   # in it already, or not
+        dirs["tides-db"] = repo("tides-db")
+        push!(listing, entry("tides-db"))
+        K.list_org!(kb, Int(K.scalar(kb, "SELECT id FROM code_orgs WHERE project_id IS NULL")); read = false)
+        db_url = "file://$(dirs["tides-db"])"
+        @test only(r for r in only(K.code_orgs(kb, nothing)).repositories if r.name == "tides-db").codebase == ""
+        db = only(K.choose_org!(kb, nothing, "github.com", "ada-lab"; take = [db_url], read = false, by = "Rowan"))
+        @test K.codebase_id(kb, db_url; add = false) == K.paper_id(kb, db) && !any(c -> c.id == db, K.project_codebases(kb, "LB"))
+        @test only(r for r in only(K.code_orgs(kb, nothing)).repositories if r.name == "tides-db").codebase == db
+        @test_throws "Documents page" K.choose_org!(kb, nothing, "github.com", "ada-lab"; untake = [db], by = "Rowan")
+        @test only(K.project_orgs(kb, "LB")).owner == "ada-lab"                       # each scope its own
+        K.remove_org!(kb, nothing, "github.com", "ada-lab")
+        @test isempty(K.code_orgs(kb, nothing)) && !isempty(K.project_orgs(kb, "LB"))
         # A listing that fails is kept with the organization.
-        K.execute!(kb, "UPDATE project_orgs SET owner = 'nobody'")
-        @test_throws "No GitHub organization" K.list_org!(kb, Int(K.scalar(kb, "SELECT id FROM project_orgs")))
+        K.execute!(kb, "UPDATE code_orgs SET owner = 'nobody'")
+        @test_throws "No GitHub organization" K.list_org!(kb, Int(K.scalar(kb, "SELECT id FROM code_orgs")))
         @test occursin("nobody", only(K.project_orgs(kb, "LB")).problem)
         # As the GitHub App, where it is installed for the organization: the repositories of its installation that are the organization's.
         dir = mktempdir()
         key = joinpath(dir, "app.pem")
         run(pipeline(`openssl genrsa -out $key 2048`; stderr = devnull))
         c = temp_config(; shared = K.SharedConfig(; github_app = K.GitHubApp(; client_id = "Iv-test", private_key = key)))
-        @test [r.name for r in K.org_repositories(c, "ada-lab")] == ["kelp", "old", "lagoon"]
+        @test [r.name for r in K.org_repositories(c, "ada-lab")] == ["kelp", "old", "lagoon", "tides-db"]
     finally
         K.GITHUB_API[] = saved
         empty!(K.APP_TOKENS)

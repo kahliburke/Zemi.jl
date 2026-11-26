@@ -53,6 +53,14 @@ async function send(body: Record<string, unknown>, done?: () => void) {
   catch (e: any) { error.value = e.message; return false }
   finally { busy.value = false }
 }
+// A change to an organization's listing or choice (see org_request! in src/task_api.jl).
+async function act(o: ProjectOrg, body: Record<string, unknown>, done?: () => void) {
+  if (busy.value) return
+  busy.value = true; error.value = ''
+  try { await post(`/api/projects/${props.project}/orgs`, JSON.stringify({ org: `${o.host}/${o.owner}`, ...body })); emit('changed'); done?.() }
+  catch (e: any) { error.value = e.message }
+  finally { busy.value = false }
+}
 async function save() {
   const named = draft.value === NEW ? address.value.split(/[\n,]/).map(x => x.trim()).filter(Boolean) : [draft.value ?? '']
   if (!named.length || !named[0]) return
@@ -86,7 +94,7 @@ const marks = (c: ProjectCodebase) => [c.archived && 'archived', c.gone && `no l
     <button v-if="manages && draft === null" class="kbpc-icon" title="Link a codebase or an organization" aria-label="Link a codebase or an organization"
             @click="start"><KBIcon name="plus" :size="15" /></button>
     <KBOrgRepositories v-for="o in orgs" :key="o.owner" :org="o" :manages="manages" :busy="busy" :open="o.owner.toLowerCase() === listed"
-                       @send="send" />
+                       @act="(body, done) => act(o, body, done)" />
     <div v-if="draft !== null" class="kbpc-add">
       <select v-model="draft" class="kbpc-select" aria-label="Codebase">
         <option v-for="c in linkable" :key="c.id" :value="c.id">{{ c.title }}</option>

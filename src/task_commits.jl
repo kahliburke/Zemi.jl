@@ -165,8 +165,8 @@ read_all_commits!(kb::KB) =
 For a running service: read the linked codebases' commits now and every `every` seconds, for as long
 as the process runs, in shared mode fetching each codebase's repository first, and then mark the
 findings whose evidence changed (see [`check_findings!`](@ref)). It lists the projects'
-organizations again once a day, linking and reading their new repositories (see
-[`list_project_orgs!`](@ref)). In shared mode it then starts the nightly ingest when it is due (see
+organizations and the knowledge base's again once a day, for their new repositories (see
+[`list_code_orgs!`](@ref)). In shared mode it then starts the nightly ingest when it is due (see
 [`nightly_ingest!`](@ref)), from the repositories just fetched. A failure is logged once and tried
 again next time.
 """
@@ -175,7 +175,7 @@ function follow_commits(kb::KB; every::Real = 30)
         fetch_codebases!(kb)               # the clones of the repositories codebases are read from, first
         read_all_commits!(kb)
         check_findings!(kb)                # with the code read, what changed under findings
-        list_project_orgs!(kb)
+        list_code_orgs!(kb)
         SHARED_MODE[] && nightly_ingest!(kb)
     end
     return nothing

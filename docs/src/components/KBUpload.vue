@@ -1,7 +1,8 @@
 <!--
-  Adding documents from the site: PDFs dropped or chosen here, arXiv ids and links, or a codebase by
-  its repository's address or a folder on the service's machine (in a shared service, a folder by
-  someone who may change its configuration). Each goes through the whole pipeline (parse, summarize,
+  Adding documents from the site: PDFs dropped or chosen here, arXiv ids and links, or codebases by
+  their repositories' addresses or folders on the service's machine (in a shared service, a folder by
+  someone who may change its configuration), several apart by commas. A GitHub organization named
+  there is listed instead, its repositories to choose from below (KBCodeOrgs). Each goes through the whole pipeline (parse, summarize,
   embed) as a job of the knowledge base API. With `codebases`, only a codebase, as on the Codebases
   page; with `manage` too, a link to managing those there are.
 -->
@@ -11,6 +12,7 @@ import { ref, computed, onMounted } from 'vue'
 import { connect, post, followJobs, blockers, shared, can, RequestError } from './kbApi'
 import { kbPage } from './kbLinks'
 import KBJobs from './KBJobs.vue'
+import KBCodeOrgs from './KBCodeOrgs.vue'
 
 const props = defineProps<{ codebases?: boolean; manage?: boolean }>()
 
@@ -27,6 +29,10 @@ const over = ref(false)
 // A document dropped here, refused: who dropped it and why, to add it anyway (which restores it).
 type Drop = { id: string; title: string; by: string; at: string; why: string }
 const dropped = ref<Drop | null>(null)
+// The organizations listed, and the one just listed.
+const orgs = ref<InstanceType<typeof KBCodeOrgs> | null>(null)
+const listed = ref('')
+const ORG = /^(?:org:|(?:https?:\/\/)?(?:www\.)?github\.com\/)([A-Za-z0-9][A-Za-z0-9-]*)\/?$/i
 
 onMounted(() => { connect(); followJobs() })
 
@@ -58,11 +64,22 @@ async function add(anyway = false) {
       added.push(...r.ids); already.push(...(r.already ?? [])); followJobs(r.job)
       arxiv.value = ''
     }
-    if (codebase.value.trim()) {
-      const r = await post('/api/documents', JSON.stringify({ codebase: codebase.value, anyway }))
-      added.push(...r.ids); already.push(...(r.already ?? [])); followJobs(r.job)
-      codebase.value = ''
+    const named = codebase.value.split(/[\n,]/).map(x => x.trim()).filter(Boolean)
+    const orgsNamed = named.filter(n => ORG.test(n))
+    for (const org of orgsNamed) {
+      const r = await post('/api/code-orgs', JSON.stringify({ org }))
+      const owner = org.match(ORG)![1]
+      const o = r.orgs.find((x: { owner: string }) => x.owner.toLowerCase() === owner.toLowerCase())
+      message.value = `Listed ${o?.repositories.length ?? 0} repositories of ${owner}: choose those to add below.`
+      listed.value = owner; await orgs.value?.reload()
     }
+    const codebases = named.filter(n => !ORG.test(n))
+    if (codebases.length) {
+      const r = await post('/api/documents', JSON.stringify({ codebase: codebases.join(','), anyway }))
+      added.push(...r.ids); already.push(...(r.already ?? [])); followJobs(r.job)
+    }
+    codebase.value = ''
+    if (orgsNamed.length && !added.length) return                 // the listing's message stands
     const adding = added.filter(id => !already.includes(id))
     message.value = [adding.length ? `Adding ${adding.join(', ')}.` : '',
                      already.length ? `Already in the knowledge base: ${already.join(', ')}.` : ''].filter(Boolean).join(' ') || 'Nothing to add.'
@@ -89,7 +106,9 @@ async function add(anyway = false) {
           <textarea v-model="arxiv" class="kb-field kbu-input" rows="2" placeholder="arXiv ids, DOIs or links"></textarea>
         </template>
         <input v-model="codebase" class="kb-field kbu-input" @keydown.enter="add()"
-               :placeholder="shared && !can('config.edit') ? 'A codebase: its repository, https://github.com/owner/repo' : 'A codebase: its repository (https://github.com/owner/repo) or a folder here'" />
+               :placeholder="(shared && !can('config.edit') ? 'Codebases: their repositories (https://github.com/owner/repo)' :
+                              'Codebases: their repositories (https://github.com/owner/repo) or folders here') +
+                             ', apart by commas, or an organization to choose from (github.com/owner)'" />
         <div class="kbu-actions">
           <button type="button" class="kb-primary kbu-button" :disabled="busy || (!files.length && !arxiv.trim() && !codebase.trim())" @click="add()">
             {{ busy ? 'Adding…' : 'Add' }}</button>
@@ -101,6 +120,7 @@ async function add(anyway = false) {
         <p v-if="dropped" class="kb-error kbu-error">{{ dropped.title }} ({{ dropped.id }}) was dropped by {{ dropped.by }}
           on {{ dropped.at.slice(0, 10) }}<template v-if="dropped.why">: {{ dropped.why }}</template>.
           <button type="button" class="kb-link" :disabled="busy" @click="add(true)">Add it anyway</button>, which restores it.</p>
+        <KBCodeOrgs ref="orgs" :listed="listed" />
         <KBJobs />
       </template>
     </KBNeedsService>

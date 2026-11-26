@@ -2,17 +2,19 @@
 # which `@code:path` references are in, until another is made main. All of them lead agents working in
 # their directories to the project, have their commits recorded against its tasks, and are seen by its
 # members. Codebases are linked one by one, by their ids, repositories' addresses or folders, or chosen
-# from the repositories of a GitHub organization (or account) the project lists (`project_orgs`): its
-# repositories are its candidates (`org_repositories`), listed again each day (see
-# `list_project_orgs!`), and only those chosen are linked and read, unless the organization links new
-# ones as they appear (`auto`, forks only with `forks`, archived ones never). A candidate unlinked is
-# declined, and not linked again by itself. A codebase whose repository is archived stays linked,
-# marked, and is not fetched again; one its organization no longer lists is marked gone.
+# from the repositories of a GitHub organization (or account) listed for the project (`code_orgs`).
+# The knowledge base lists organizations of its own the same way, from the Codebases page, its
+# codebases chosen from them added to it without a project. An organization's repositories are its
+# candidates (`org_repositories`), listed again each day (see `list_code_orgs!`), and only those chosen
+# are linked (or added) and read, unless the organization takes new ones as they appear (`auto`, forks
+# only with `forks`, archived ones never). A candidate unlinked or declined is not taken again by
+# itself. A codebase whose repository is archived stays, marked, and is not fetched again; one its
+# organization no longer lists is marked gone.
 
 migration!(32, [
-    """CREATE TABLE project_orgs (
+    """CREATE TABLE code_orgs (
            id INTEGER PRIMARY KEY,
-           project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+           project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
            host TEXT NOT NULL,
            owner TEXT NOT NULL,
            forks INTEGER NOT NULL DEFAULT 0,
@@ -20,10 +22,10 @@ migration!(32, [
            added_by TEXT NOT NULL DEFAULT '',
            added_at TEXT NOT NULL,
            listed_at TEXT,
-           problem TEXT,
-           UNIQUE (project_id, host, owner))""",
+           problem TEXT)""",
+    "CREATE UNIQUE INDEX code_orgs_named ON code_orgs (coalesce(project_id, 0), host, owner COLLATE NOCASE)",
     """CREATE TABLE org_repositories (
-           org_id INTEGER NOT NULL REFERENCES project_orgs(id) ON DELETE CASCADE,
+           org_id INTEGER NOT NULL REFERENCES code_orgs(id) ON DELETE CASCADE,
            remote TEXT NOT NULL,
            name TEXT NOT NULL,
            fork INTEGER NOT NULL DEFAULT 0,
@@ -36,7 +38,7 @@ migration!(32, [
            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
            codebase_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
            position INTEGER NOT NULL,
-           org_id INTEGER REFERENCES project_orgs(id) ON DELETE SET NULL,
+           org_id INTEGER REFERENCES code_orgs(id) ON DELETE SET NULL,
            added_by TEXT NOT NULL DEFAULT '',
            added_at TEXT NOT NULL,
            PRIMARY KEY (project_id, codebase_id))""",
@@ -58,7 +60,7 @@ function project_codebases(kb::KB, key::AbstractString)
     rows = query(kb, """
         SELECT d.doc_id, d.title, d.repository_archived_at AS archived, r.gone_at, o.owner
         FROM project_codebases pc JOIN projects p ON p.id = pc.project_id JOIN papers d ON d.id = pc.codebase_id
-        LEFT JOIN project_orgs o ON o.id = pc.org_id LEFT JOIN org_repositories r ON r.org_id = pc.org_id AND r.remote = d.remote
+        LEFT JOIN code_orgs o ON o.id = pc.org_id LEFT JOIN org_repositories r ON r.org_id = pc.org_id AND r.remote = d.remote
         WHERE p.key = ? ORDER BY pc.position, pc.added_at, d.doc_id""", (uppercase(strip(key)),))
     return [(; id = String(r.doc_id), title = String(coalesce(r.title, r.doc_id)), main = i == 1, org = String(coalesce(r.owner, "")),
                gone = !ismissing(r.gone_at), archived = !ismissing(r.archived)) for (i, r) in enumerate(rows)]
@@ -70,52 +72,72 @@ project_codebase(kb::KB, key::AbstractString) =
                                   JOIN papers d ON d.id = pc.codebase_id WHERE p.key = ?
                                   ORDER BY pc.position, pc.added_at, d.doc_id LIMIT 1""", (uppercase(strip(key)),)), ""))
 
-"""
-    project_orgs(kb, key) -> Vector{NamedTuple}
+# Where an organization is listed: for project `pid`, or for the knowledge base itself (`nothing`).
+const Scope = Union{Integer,Nothing}
+in_scope(pid::Scope) = pid === nothing ? ("project_id IS NULL", ()) : ("project_id = ?", (pid,))
 
-The organizations project `key` lists, `(; host, owner, forks, auto, listed_at, problem, repositories)`,
-each repository `(; name, remote, fork, archived, gone, declined, new, codebase)`: `new` one first seen
-after the organization's first listing and neither linked nor declined, `codebase` the project's
-codebase from it (`""` when it is not linked).
+"The codebases taken in `pid`'s scope, by their repositories: a project's codebases, or every codebase of the knowledge base."
+taken(kb::KB, pid::Scope) = Dict(String(r.remote) => String(r.doc_id) for r in (pid === nothing ?
+    query(kb, "SELECT remote, doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND remote IS NOT NULL") :
+    query(kb, """SELECT d.remote, d.doc_id FROM project_codebases pc JOIN papers d ON d.id = pc.codebase_id
+                 WHERE pc.project_id = ? AND d.remote IS NOT NULL""", (pid,))))
+
 """
-function project_orgs(kb::KB, key::AbstractString)
-    pid = project_id(kb, key)
-    linked = Dict(String(r.remote) => String(r.doc_id) for r in query(kb, """
-        SELECT d.remote, d.doc_id FROM project_codebases pc JOIN papers d ON d.id = pc.codebase_id
-        WHERE pc.project_id = ? AND d.remote IS NOT NULL""", (pid,)))
+    code_orgs(kb, pid) -> Vector{NamedTuple}
+
+The organizations listed for project `pid` (its row id), or for the knowledge base itself
+(`nothing`): `(; host, owner, forks, auto, listed_at, problem, repositories)`, each repository
+`(; name, remote, fork, archived, gone, declined, new, codebase)`, `new` one first seen after the
+organization's first listing and neither taken nor declined, `codebase` the codebase taken from it in
+that scope (`""` for none). [`project_orgs`](@ref) gives a project's by its key.
+"""
+function code_orgs(kb::KB, pid::Scope)
+    have = taken(kb, pid)
+    where, args = in_scope(pid)
     return [begin
         repos = [(; name = String(r.name), remote = String(r.remote), fork = r.fork == 1, archived = r.archived == 1,
                     gone = !ismissing(r.gone_at), declined = !ismissing(r.declined_at),
-                    new = r.first_seen_at > o.added_at && !haskey(linked, r.remote) && ismissing(r.declined_at),
-                    codebase = get(linked, String(r.remote), ""))
+                    new = r.first_seen_at > o.added_at && !haskey(have, r.remote) && ismissing(r.declined_at),
+                    codebase = get(have, String(r.remote), ""))
                  for r in query(kb, "SELECT * FROM org_repositories WHERE org_id = ? ORDER BY lower(name)", (o.id,))]
         (; host = String(o.host), owner = String(o.owner), forks = o.forks == 1, auto = o.auto == 1,
            listed_at = String(coalesce(o.listed_at, "")), problem = String(coalesce(o.problem, "")), repositories = repos)
-    end for o in query(kb, "SELECT * FROM project_orgs WHERE project_id = ? ORDER BY host, owner", (pid,))]
+    end for o in query(kb, "SELECT * FROM code_orgs WHERE $where ORDER BY host, owner", args)]
+end
+project_orgs(kb::KB, key::AbstractString) = code_orgs(kb, project_id(kb, key))
+
+"The organization `host`/`owner` listed in `pid`'s scope (its row id), or `nothing`."
+function find_org(kb::KB, pid::Scope, host::AbstractString, owner::AbstractString)
+    where, args = in_scope(pid)
+    id = scalar(kb, "SELECT id FROM code_orgs WHERE $where AND host = ? AND owner = ? COLLATE NOCASE", (args..., host, owner))
+    return ismissing(id) ? nothing : Int(id)
 end
 
 """
 Link codebase `cid` (its row id) to project `pid`, after its others; whether it is new to the
-project. One that is a candidate of an organization the project lists is that organization's, and
-no longer declined.
+project. One that is a candidate of an organization listed for the project is that organization's,
+and no longer declined.
 """
 function link_codebase!(kb::KB, pid::Integer, cid::Integer; by::AbstractString)
     remote = scalar(kb, "SELECT remote FROM papers WHERE id = ?", (cid,))
     org = ismissing(remote) ? missing :
-        scalar(kb, """SELECT r.org_id FROM org_repositories r JOIN project_orgs o ON o.id = r.org_id
+        scalar(kb, """SELECT r.org_id FROM org_repositories r JOIN code_orgs o ON o.id = r.org_id
                       WHERE o.project_id = ? AND r.remote = ? ORDER BY r.org_id LIMIT 1""", (pid, remote))
     linked = 0 < changed!(kb, """INSERT OR IGNORE INTO project_codebases (project_id, codebase_id, position, org_id, added_by, added_at)
                                  SELECT ?, ?, coalesce(max(position) + 1, 0), ?, ?, ? FROM project_codebases WHERE project_id = ?""",
                           (pid, cid, org, by, now_iso(), pid))
-    ismissing(org) || execute!(kb, """UPDATE org_repositories SET declined_at = NULL WHERE remote = ?
-                                      AND org_id IN (SELECT id FROM project_orgs WHERE project_id = ?)""", (remote, pid))
+    ismissing(remote) || decline!(kb, pid, [remote]; on = false)
     return linked
 end
 
-"Decline repository `remote` among the candidates of project `pid`'s organizations: it is not linked again by itself."
-decline_candidate!(kb::KB, pid::Integer, remote::AbstractString) =
-    0 < changed!(kb, """UPDATE org_repositories SET declined_at = ? WHERE remote = ? AND declined_at IS NULL
-                        AND org_id IN (SELECT id FROM project_orgs WHERE project_id = ?)""", (now_iso(), remote, pid))
+"Decline (or, without `on`, no longer decline) `remotes` among the candidates of the organizations in `pid`'s scope."
+function decline!(kb::KB, pid::Scope, remotes; on::Bool = true)
+    where, args = in_scope(pid)
+    for remote in remotes
+        execute!(kb, """UPDATE org_repositories SET declined_at = ? WHERE remote = ? AND (declined_at IS NULL) = ?
+                        AND org_id IN (SELECT id FROM code_orgs WHERE $where)""", (on ? now_iso() : missing, remote, on ? 1 : 0, args...))
+    end
+end
 
 "Make codebase `cid` project `pid`'s main one: first of its codebases."
 make_main_codebase!(kb::KB, pid::Integer, cid::Integer) =
@@ -138,10 +160,10 @@ named_codebases(s::AbstractString) = String.(filter(!isempty, strip.(split(s, r"
 Link project `key` to each of `codebases` (one, or several as [`named_codebases`](@ref) reads them):
 a codebase (`code-…`), a repository's address or a folder (see [`codebase_id`](@ref), for `add` and
 `caller`), or a GitHub organization or account (see [`named_org`](@ref)), whose repositories are
-listed as the project's candidates to choose from (see [`list_org!`](@ref)), and linked as they appear
-only with `auto` (forks only with `forks`). Those linked new to the knowledge base are read together,
-at once, unless `read` is false. The first codebase is the project's main one; `main` makes this one
-main. With `remove`, unlinks a codebase, declining it if it is a candidate (one not linked is
+listed as the project's candidates to choose from (see [`add_org!`](@ref)), and linked as they
+appear only with `auto` (forks only with `forks`). Those linked new to the knowledge base are read
+together, at once, unless `read` is false. The first codebase is the project's main one; `main` makes
+this one main. With `remove`, unlinks a codebase, declining it if it is a candidate (one not linked is
 declined too), or stops listing an organization; the codebases chosen from it stay. Returns the
 codebases linked or unlinked.
 """
@@ -155,19 +177,10 @@ function project_codebase!(kb::KB, key::AbstractString, codebases; remove::Bool 
     for name in names
         org = named_org(name)
         if org !== nothing
-            remove ? remove_project_org!(kb, pid, org...) :
-                (add || not_permitted("Not permitted: an organization's repositories are added by someone with paper.add");
-                 append!(out, add_project_org!(kb, pid, org...; forks, auto, by = by.name)))
+            remove ? remove_org!(kb, pid, org...) : append!(out, add_org!(kb, pid, org...; forks, auto, add, by = by.name))
         elseif remove
-            cid = linked_codebase(kb, pid, name)
-            if cid === nothing
-                is_repository(name) && decline_candidate!(kb, pid, clone_url(name)) && continue
-                not_found("$name is not one of the project's codebases")
-            end
-            execute!(kb, "DELETE FROM project_codebases WHERE project_id = ? AND codebase_id = ?", (pid, cid))
-            remote = scalar(kb, "SELECT remote FROM papers WHERE id = ?", (cid,))
-            ismissing(remote) || decline_candidate!(kb, pid, remote)
-            push!(out, String(scalar(kb, "SELECT doc_id FROM papers WHERE id = ?", (cid,))))
+            id = unlink_codebase!(kb, pid, name)
+            id === nothing || push!(out, id)
         else
             cid = codebase_id(kb, name; add, read = false, caller)
             ismissing(cid) && error("Name a codebase: its id (code-…), a repository's address, a folder, or github.com/<organization>")
@@ -179,6 +192,26 @@ function project_codebase!(kb::KB, key::AbstractString, codebases; remove::Bool 
     remove || !read || read_unread!(kb, out)
     tasks_changed!()
     return out
+end
+
+"""
+Unlink the codebase of project `pid` that `name` names, declining it if it is a candidate; returns its
+id. A candidate named without being linked is declined, and `nothing` returned.
+"""
+function unlink_codebase!(kb::KB, pid::Integer, name::AbstractString)
+    cid = linked_codebase(kb, pid, name)
+    if cid === nothing
+        remote = is_repository(name) ? clone_url(name) : ""
+        candidate = !isempty(remote) && !ismissing(scalar(kb, """SELECT 1 FROM org_repositories r JOIN code_orgs o ON o.id = r.org_id
+                                                                 WHERE o.project_id = ? AND r.remote = ?""", (pid, remote)))
+        candidate || not_found("$name is not one of the project's codebases")
+        decline!(kb, pid, [remote])
+        return nothing
+    end
+    execute!(kb, "DELETE FROM project_codebases WHERE project_id = ? AND codebase_id = ?", (pid, cid))
+    remote = scalar(kb, "SELECT remote FROM papers WHERE id = ?", (cid,))
+    ismissing(remote) || decline!(kb, pid, [remote])
+    return String(scalar(kb, "SELECT doc_id FROM papers WHERE id = ?", (cid,)))
 end
 
 "Read those of codebases `ids` not read yet nor being read, together (see [`start_codebases_reading`](@ref))."
@@ -200,39 +233,86 @@ function linked_codebase(kb::KB, pid::Integer, codebase::AbstractString)
     return nothing
 end
 
-"List organization `owner`'s repositories for project `pid` (see [`list_org!`](@ref)), with its settings; the codebases it linked."
-function add_project_org!(kb::KB, pid::Integer, host::AbstractString, owner::AbstractString; forks::Bool, auto::Bool,
-                          by::AbstractString)
-    execute!(kb, """INSERT INTO project_orgs (project_id, host, owner, forks, auto, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (project_id, host, owner) DO UPDATE SET forks = excluded.forks, auto = excluded.auto""",
-             (pid, host, owner, forks ? 1 : 0, auto ? 1 : 0, by, now_iso()))
-    oid = Int(scalar(kb, "SELECT id FROM project_orgs WHERE project_id = ? AND host = ? AND owner = ?", (pid, host, owner)))
+"""
+    add_org!(kb, pid, host, owner; forks = false, auto = false, add = true, by) -> Vector{String}
+
+List organization `owner`'s repositories in `pid`'s scope (a project's row id, or `nothing` for the
+knowledge base itself), recording it with its settings, or changing them (see [`list_org!`](@ref)):
+the codebases it took. Takes `add`, as it may add repositories the knowledge base does not have.
+"""
+function add_org!(kb::KB, pid::Scope, host::AbstractString, owner::AbstractString; forks::Bool = false, auto::Bool = false,
+                  add::Bool = true, by::AbstractString)
+    add || not_permitted("Not permitted: an organization's repositories are listed by someone with paper.add")
+    oid = find_org(kb, pid, host, owner)
+    if oid === nothing
+        execute!(kb, "INSERT INTO code_orgs (project_id, host, owner, forks, auto, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                 (something(pid, missing), host, owner, forks ? 1 : 0, auto ? 1 : 0, by, now_iso()))
+        oid = find_org(kb, pid, host, owner)
+    else
+        execute!(kb, "UPDATE code_orgs SET forks = ?, auto = ? WHERE id = ?", (forks ? 1 : 0, auto ? 1 : 0, oid))
+    end
     return list_org!(kb, oid; read = false)
 end
 
-"Stop listing organization `owner`'s repositories for project `pid`; the codebases chosen from it stay linked."
-function remove_project_org!(kb::KB, pid::Integer, host::AbstractString, owner::AbstractString)
-    0 < changed!(kb, "DELETE FROM project_orgs WHERE project_id = ? AND host = ? AND owner = ? COLLATE NOCASE", (pid, host, owner)) ||
-        not_found("The project does not list $host/$owner")
-    return nothing
+"Stop listing organization `owner` in `pid`'s scope; the codebases taken from it stay."
+function remove_org!(kb::KB, pid::Scope, host::AbstractString, owner::AbstractString)
+    oid = find_org(kb, pid, host, owner)
+    oid === nothing && not_found("$host/$owner is not listed here")
+    execute!(kb, "DELETE FROM code_orgs WHERE id = ?", (oid,))
+    tasks_changed!()
+    return String[]
+end
+
+"""
+    choose_org!(kb, pid, host, owner; take = [], untake = [], decline = [], undecline = [], add = true, read = true,
+                by, caller = local_caller()) -> Vector{String}
+
+Choose among the candidates of organization `owner` in `pid`'s scope, by their repositories'
+addresses: `take` them (linked to the project, or for the knowledge base, added to it; read together
+unless `read` is false), `untake` codebases (unlinked from the project and declined; the knowledge
+base's own are dropped from it on the Documents page instead), `decline` candidates, or `undecline`
+them. Returns the codebases taken.
+"""
+function choose_org!(kb::KB, pid::Scope, host::AbstractString, owner::AbstractString; take = String[], untake = String[],
+                     decline = String[], undecline = String[], add::Bool = true, read::Bool = true, by::AbstractString,
+                     caller::Caller = local_caller())
+    oid = find_org(kb, pid, host, owner)
+    oid === nothing && not_found("$host/$owner is not listed here")
+    candidates = Set(String(r.remote) for r in query(kb, "SELECT remote FROM org_repositories WHERE org_id = ?", (oid,)))
+    out = String[]
+    for remote in clone_url.(take)
+        remote in candidates || not_found("$remote is not one of $owner's repositories")
+        cid = codebase_id(kb, remote; add, read = false, caller)
+        pid === nothing ? decline!(kb, nothing, [remote]; on = false) : link_codebase!(kb, pid, cid; by)
+        push!(out, String(scalar(kb, "SELECT doc_id FROM papers WHERE id = ?", (cid,))))
+    end
+    isempty(untake) || pid === nothing && error("A codebase is taken out of the knowledge base by dropping it, on the Documents page")
+    foreach(id -> unlink_codebase!(kb, pid, id), untake)
+    decline!(kb, pid, filter(in(candidates), clone_url.(decline)))
+    decline!(kb, pid, filter(in(candidates), clone_url.(undecline)); on = false)
+    read && read_unread!(kb, out)
+    tasks_changed!()
+    return out
 end
 
 """
     list_org!(kb, oid; read = true) -> Vector{String}
 
-List the repositories of organization `oid` (a `project_orgs` row) as its project's candidates:
-each one new is recorded, with whether it is a fork or archived, and one no longer listed is marked
-gone. A codebase of the project whose repository is now archived is marked so. With the
-organization's `auto`, a candidate neither archived, declined nor a fork (without `forks`) is linked,
-and with `read` read at once. Returns the codebases linked. What stopped the listing is kept with the
-organization, and thrown; either way the time it was listed is kept, for [`list_project_orgs!`](@ref).
+List the repositories of organization `oid` (a `code_orgs` row) as candidates in its scope: each one
+new is recorded, with whether it is a fork or archived, and one no longer listed is marked gone. A
+codebase whose repository is now archived is marked so. With the organization's `auto`, a candidate
+neither taken, archived, declined nor a fork (without `forks`) is taken (linked to its project, or
+added to the knowledge base), and with `read` read at once. Returns the codebases taken. What stopped
+the listing is kept with the organization, and thrown; either way the time it was listed is kept, for
+[`list_code_orgs!`](@ref).
 """
 function list_org!(kb::KB, oid::Integer; read::Bool = true)
-    o = only(query(kb, "SELECT * FROM project_orgs WHERE id = ?", (oid,)))
+    o = only(query(kb, "SELECT * FROM code_orgs WHERE id = ?", (oid,)))
+    pid = ismissing(o.project_id) ? nothing : Int(o.project_id)
     repos = try
         org_repositories(kb.config, String(o.owner))
     catch e
-        execute!(kb, "UPDATE project_orgs SET listed_at = ?, problem = ? WHERE id = ?", (now_iso(), failure_message(e), oid))
+        execute!(kb, "UPDATE code_orgs SET listed_at = ?, problem = ? WHERE id = ?", (now_iso(), failure_message(e), oid))
         rethrow()
     end
     # The repositories of the first listing are the organization's from the start, not new.
@@ -245,27 +325,27 @@ function list_org!(kb::KB, oid::Integer; read::Bool = true)
                         ON CONFLICT (org_id, remote) DO UPDATE SET name = excluded.name, fork = excluded.fork,
                                                                    archived = excluded.archived, gone_at = NULL""",
                  (oid, remote, r.name, r.fork ? 1 : 0, r.archived ? 1 : 0, seen))
-        execute!(kb, """UPDATE papers SET repository_archived_at = ? WHERE remote = ? AND (repository_archived_at IS NULL) = ?
-                        AND id IN (SELECT codebase_id FROM project_codebases WHERE project_id = ?)""",
-                 (r.archived ? now_iso() : missing, remote, r.archived ? 1 : 0, o.project_id))
+        execute!(kb, """UPDATE papers SET repository_archived_at = ? WHERE remote = ? AND $(kind_in(CODEBASE))
+                        AND (repository_archived_at IS NULL) = ?""", (r.archived ? now_iso() : missing, remote, r.archived ? 1 : 0))
     end
     for r in query(kb, "SELECT remote FROM org_repositories WHERE org_id = ? AND gone_at IS NULL", (oid,))
         r.remote in listed || execute!(kb, "UPDATE org_repositories SET gone_at = ? WHERE org_id = ? AND remote = ?", (now_iso(), oid, r.remote))
     end
-    execute!(kb, "UPDATE project_orgs SET listed_at = ?, problem = NULL WHERE id = ?", (now_iso(), oid))
+    execute!(kb, "UPDATE code_orgs SET listed_at = ?, problem = NULL WHERE id = ?", (now_iso(), oid))
     new = String[]
     if o.auto == 1
-        for r in query(kb, """SELECT remote FROM org_repositories r WHERE org_id = ? AND gone_at IS NULL AND declined_at IS NULL
-                                  AND archived = 0 AND (fork = 0 OR ? = 1)
-                                  AND NOT EXISTS (SELECT 1 FROM project_codebases pc JOIN papers d ON d.id = pc.codebase_id
-                                                  WHERE pc.project_id = ? AND d.remote = r.remote)""", (oid, o.forks, o.project_id))
+        have = taken(kb, pid)
+        for r in query(kb, """SELECT remote FROM org_repositories WHERE org_id = ? AND gone_at IS NULL AND declined_at IS NULL
+                              AND archived = 0 AND (fork = 0 OR ? = 1) ORDER BY lower(name)""", (oid, o.forks))
+            haskey(have, r.remote) && continue
             id = try
                 link_repository!(kb, r.remote)
             catch e
                 e isa DroppedError && continue
                 rethrow()
             end
-            link_codebase!(kb, Int(o.project_id), Int(paper_id(kb, id)); by = String(o.added_by)) && push!(new, id)
+            pid === nothing || link_codebase!(kb, pid, Int(paper_id(kb, id)); by = String(o.added_by))
+            push!(new, id)
         end
         read && read_unread!(kb, new)
     end
@@ -274,16 +354,16 @@ function list_org!(kb::KB, oid::Integer; read::Bool = true)
 end
 
 """
-    list_project_orgs!(kb; every = Hour(20), now = now(UTC)) -> Int
+    list_code_orgs!(kb; every = Hour(20), now = now(UTC)) -> Int
 
-List again each project's organization not listed for `every` (see [`list_org!`](@ref)), as
-[`follow_commits`](@ref) asks for: the repositories added to it since are the project's candidates,
-or with its `auto`, linked and read. A failure is kept with its organization and logged, tried again
-after `every` too, and the others are listed still. Returns how many codebases were linked.
+List again each organization not listed for `every` (see [`list_org!`](@ref)), as
+[`follow_commits`](@ref) asks for: the repositories added to it since are candidates, or with its
+`auto`, taken and read. A failure is kept with its organization and logged, tried again after `every`
+too, and the others are listed still. Returns how many codebases were taken.
 """
-function list_project_orgs!(kb::KB; every::Period = Hour(20), now::DateTime = Dates.now(UTC))
+function list_code_orgs!(kb::KB; every::Period = Hour(20), now::DateTime = Dates.now(UTC))
     n = 0
-    for r in query(kb, "SELECT id, owner FROM project_orgs WHERE listed_at IS NULL OR listed_at < ? ORDER BY id", (iso(now - every),))
+    for r in query(kb, "SELECT id, owner FROM code_orgs WHERE listed_at IS NULL OR listed_at < ? ORDER BY id", (iso(now - every),))
         try
             n += length(list_org!(kb, Int(r.id)))
         catch e
