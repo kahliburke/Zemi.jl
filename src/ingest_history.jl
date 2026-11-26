@@ -1,35 +1,55 @@
-# Ingestion events share the append-only audit log. Each document attempt gets a durable
+# Ingestion events share the audit table. Each document attempt gets a durable
 # identifier, including synchronous ingests that have no in-memory job.
 function ingest_event!(kb, attempt, action, detail)
     execute!(kb, "INSERT INTO audit (at, who, action, target, detail) VALUES (?, 'Zemi ingestion', ?, ?, ?)",
              (now_iso(), "ingest." * action, attempt, JSON.json(detail)))
 end
 
+"Remove all history events for attempts that finished before the retention cutoff."
+function prune_ingest_history!(kb; at = now(UTC))
+    days = kb.config.ingestion_history_days
+    days == 0 && return
+    # A terminal event is the last row of its attempt. Its id also bounds the deletion
+    # so an empty set of expired attempts needs no scan of the rest of the audit log.
+    execute!(kb, """WITH expired AS MATERIALIZED (
+                        SELECT id, target FROM audit WHERE action = 'ingest.stage'
+                        AND at < strftime('%Y-%m-%dT%H:%M:%SZ', ?, ?)
+                        AND json_extract(detail, '\$.stage') IN ('done', 'warning', 'failed', 'cancelled', 'interrupted'))
+                    DELETE FROM audit WHERE id <= (SELECT max(id) FROM expired)
+                        AND action IN ('ingest.started', 'ingest.stage')
+                        AND target IN (SELECT target FROM expired)""", (iso(at), "-$days days"))
+end
+
+follow_ingest_history(kb) = every!(() -> prune_ingest_history!(kb), "Pruning ingestion history"; seconds = 3600)
+
 "Recent ingestion attempts and their recorded stages, newest first. `before` pages by stable audit id."
 function ingest_history(kb, caller; before = typemax(Int), limit = 25, doc_id = "", run = "")
     document = "json_extract(a.detail, '\$.document')"
     hidden = JSON.json(collect(hidden_documents(kb, caller)))
-    starts = query(kb, """SELECT a.id, a.at, a.target, a.detail FROM audit a
-                          JOIN papers p ON p.doc_id = $document
-                          WHERE a.action = 'ingest.started' AND a.id < ? AND (? = '' OR p.doc_id = ?)
-                            AND (? = '' OR json_extract(a.detail, '\$.run') = ?)
-                            AND p.doc_id NOT IN (SELECT value FROM json_each(?))
-                          ORDER BY a.id DESC LIMIT ?""", (before, doc_id, doc_id, run, run, hidden, clamp(limit, 1, 100)))
+    # Read the page and its stages in one snapshot, including during retention cleanup.
+    rows = query(kb, """WITH starts AS (
+                           SELECT a.id, a.at, a.target, a.detail FROM audit a
+                           JOIN papers p ON p.doc_id = $document
+                           WHERE a.action = 'ingest.started' AND a.id < ? AND (? = '' OR p.doc_id = ?)
+                             AND (? = '' OR json_extract(a.detail, '\$.run') = ?)
+                             AND p.doc_id NOT IN (SELECT value FROM json_each(?))
+                           ORDER BY a.id DESC LIMIT ?)
+                       SELECT s.*, e.at AS event_at, e.detail AS event_detail FROM starts s
+                       LEFT JOIN audit e ON e.target = s.target AND e.action = 'ingest.stage' AND e.id > s.id
+                       ORDER BY s.id DESC, e.id""", (before, doc_id, doc_id, run, run, hidden, clamp(limit, 1, 100)))
     out = []
-    for r in starts
-        start = JSON.parse(r.detail)
-        push!(out, (; cursor = r.id, attempt = r.target, at = r.at, document = start["document"],
-                    run = start["run"], job = start["job"], events = []))
-    end
-    isempty(out) && return out
-    events = Dict(x.attempt => x.events for x in out)
-    for r in query(kb, """SELECT target, at, detail FROM audit WHERE id > ? AND action = 'ingest.stage'
-                          AND target IN ($(in_marks(length(out)))) ORDER BY id""", (last(starts).id, keys(events)...))
-        detail = JSON.parse(r.detail)
+    for r in rows
+        if isempty(out) || last(out).cursor != r.id
+            start = JSON.parse(r.detail)
+            push!(out, (; cursor = r.id, attempt = r.target, at = r.at, document = start["document"],
+                        run = start["run"], job = start["job"], events = []))
+        end
+        ismissing(r.event_at) && continue
+        detail = JSON.parse(r.event_detail)
         if SHARED_MODE[] && get(detail, "error", nothing) isa AbstractString
             detail["error"] = redact(detail["error"], kb.config)
         end
-        push!(events[r.target], (; at = r.at, detail))
+        push!(last(out).events, (; at = r.event_at, detail))
     end
     return out
 end

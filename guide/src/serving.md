@@ -51,6 +51,11 @@ server restarts. Open an attempt to see its models, reported token counts and er
 retry a failed document individually with document management permission. The MCP tool
 `zemi.ingest_history` reads the same history and accepts a document ID or run ID.
 
+Completed attempts are kept for 90 days after their final stage. Set **Configuration → Ingestion →
+History retention (days)** or `history_days` under `[ingestion]` in the TOML config. Choose 0 to
+keep history indefinitely. The service checks at startup and hourly, and each new ingestion also
+checks. Attempts without a final stage remain available for diagnosis after a restart.
+
 ```@raw html
 <figure class="shot">
   <img class="light-only" src="./assets/screenshots/operations-light.png" alt="The Operations page's jobs">

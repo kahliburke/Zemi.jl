@@ -28,6 +28,7 @@ const shown = computed(() => (conf.value?.settings ?? []).filter(s => shared.val
 const groups = computed(() => [
   { title: 'Who does what', keys: ['summarizer', 'code_summarizer', 'record_summarizer', 'judge', 'tutor', 'tutor_effort', 'notebooker', 'analyst', 'watch.judge'] },
   { title: 'Search', keys: ['search.layers', 'search.keyword'] },
+  { title: 'Ingestion', keys: ['ingestion.history_days'] },
   { title: 'New on arXiv', keys: ['watch.categories', 'watch.days', 'watch.hours', 'watch.read_from', 'watch.record_from'] },
   { title: 'The group', keys: ['group.name', 'group.field', 'group.description', 'group.focus_areas', 'group.questions', 'group.panels', 'contact'] },
   { title: 'Sharing', keys: ['dataset.role', 'dataset.stream', 'dataset.content', 'dataset.store', 'dataset.endpoint', 'dataset.bucket',

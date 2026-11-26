@@ -796,6 +796,7 @@ function ingest!(kb::KB, ids::AbstractVector{<:AbstractString};
     run = string(uuid4())
     job = get(task_local_storage(), :zemi_job_id, nothing)
     attempts = transaction(kb) do
+        prune_ingest_history!(kb)
         map(ids) do id
             attempt = string(uuid4())
             ingest_event!(kb, attempt, "started", (; document = id, run, job))

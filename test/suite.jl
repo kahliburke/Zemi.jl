@@ -7660,3 +7660,51 @@ end
         close(kb)
     end
 end
+
+@zset "ingestion history retention" begin
+    path = joinpath(mktempdir(), "config.toml")
+    @test K.load_config(path).ingestion_history_days == 90
+    write(path, "data_dir = 'data'\n[ingestion]\nhistory_days = 2\n")
+    kb = open_kb(K.load_config(path))
+    try
+        setting = only(s for s in K.settings_json(kb)["settings"] if s["key"] == "ingestion.history_days")
+        @test setting["value"] == 2
+        @test_throws "history_days" K.save_settings!(kb, Dict("ingestion.history_days" => -1); path)
+        @test K.load_config(path).ingestion_history_days == 2
+
+        at = K.parse_iso("2026-08-15T08:30:00Z")
+        expired = "2026-08-13T08:29:59Z"
+        boundary = "2026-08-13T08:30:00Z"
+        record(at, action, target, stage) = K.execute!(kb,
+            "INSERT INTO audit (at, who, action, target, detail) VALUES (?, 'test', ?, ?, ?)",
+            (at, action, target, K.JSON.json((; stage))))
+        stages = ["done", "warning", "failed", "interrupted", "cancelled"]
+        for stage in [stages; "active"; "recent"]
+            record(expired, "ingest.started", stage, "started")
+            record(expired, "ingest.stage", stage, "read")
+        end
+        for stage in stages
+            record(expired, "ingest.stage", stage, stage)
+        end
+        record(boundary, "ingest.stage", "recent", "done")
+        record(expired, "settings.change", "failed", "done")
+        rows() = K.query(kb, "SELECT target, action FROM audit ORDER BY id")
+        old = rows()
+        K.save_settings!(kb, Dict("ingestion.history_days" => 0); path)
+        K.prune_ingest_history!(kb; at)
+        @test rows() == old
+        K.save_settings!(kb, Dict("ingestion.history_days" => 2); path)
+        kept = filter(r -> r.target in ("active", "recent") || r.action == "settings.change", old)
+        K.prune_ingest_history!(kb; at)
+        @test rows() == kept
+        K.prune_ingest_history!(kb; at)
+        @test rows() == kept
+
+        record("2000-01-01T00:00:00Z", "ingest.stage", "old-failure", "failed")
+        id = add_codebase!(kb, mktempdir(); name = "Reef")
+        @test only(ingest!(kb, [id]; classify = false, layers = Layer[])).ok
+        @test !any(r -> r.target == "old-failure", rows())
+    finally
+        close(kb)
+    end
+end

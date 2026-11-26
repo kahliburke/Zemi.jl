@@ -611,6 +611,7 @@ Base.@kwdef struct Config
     search_keyword::Bool = true
     landscape_layer::String = ""
     landscape_clusters::Int = 0
+    ingestion_history_days::Int = 90
     watch_categories::Vector{String} = String[]
     watch_days::Int = 7
     watch_hours::Float64 = 24.0
@@ -787,6 +788,7 @@ function load_config(path::AbstractString = config_path())
         search_keyword = Bool(get(get(t, "search", Dict()), "keyword", true)),
         landscape_layer = get(get(t, "landscape", Dict()), "layer", ""),
         landscape_clusters = get(get(t, "landscape", Dict()), "clusters", 0),
+        ingestion_history_days = get(get(t, "ingestion", Dict()), "history_days", d.ingestion_history_days),
         watch_categories = String.(get(get(t, "watch", Dict()), "categories", d.watch_categories)),
         watch_days = Int(get(get(t, "watch", Dict()), "days", d.watch_days)),
         watch_hours = Float64(get(get(t, "watch", Dict()), "hours", d.watch_hours)),
@@ -896,6 +898,7 @@ function validate(c::Config)
             error("$role: $name runs $(s.model), whose own file and shell tools Kaimon does not hold to its folder. " *
                   "A shared service runs Claude or OpenCode agents")
     end
+    c.ingestion_history_days >= 0 || error("[ingestion] history_days must be zero or a positive number of days")
     b = c.backup
     b.every_hours > 0 || error("[backup] every_hours must be more than 0, got $(b.every_hours)")
     for (k, v) in ("keep_all_hours" => b.keep_all_hours, "keep_half_daily_days" => b.keep_half_daily_days,
