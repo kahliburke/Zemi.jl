@@ -2095,7 +2095,7 @@ end
         pid = K.paper_id(pub, "2609.00001")
         K.execute!(pub, "UPDATE papers SET title = 'Corals' WHERE id = ?", (pid,))
         K.execute!(pub, "INSERT INTO mentions (paper_id, source, channel, posted_at, author) VALUES (?, 'seminar', 'reading-list', 1.7e9, 'Ada')", (pid,))
-        K.execute!(pub, "INSERT INTO summaries VALUES (?, 'p:2609.00001', 'sum', 'm', 1, 'x', 'About corals.', 1, 1, ?)", (pid, K.now_iso()))
+        K.execute!(pub, "INSERT INTO summaries VALUES (?, 'p:2609.00001', 'sum', 'm', 1, 'x', 'About corals.', 1, 1, ?, 'pdf')", (pid, K.now_iso()))
         K.execute!(pub, "INSERT INTO classifications VALUES (?, 'sum', 'm', '{\"category\": \"physics.ao-ph\"}', ?)", (pid, K.now_iso()))
         coll = K.ensure_layer!(pub, layer, 3)
         units = K.units(pub, layer, "2609.00001")
@@ -2139,6 +2139,7 @@ end
         @test [m.source for m in ms] == ["seminar", "added"] && first(ms).author == "Ada"
         @test occursin("plankton", K.read_paper(con, "2609.00001"))
         @test only(x.text for x in summaries(con, "2609.00001")) == "About corals."
+        @test K.site_paper(con, "2609.00001"; related = false).provenance.read_mode == "pdf"
         @test classification(con, "2609.00001")["category"] == "physics.ao-ph"
         @test any(startswith("c:2609.00001:"), K.keyword_ranking(con, "corals"))          # the keyword index is rebuilt
         got = K.fetch_vectors(K.collection_name(con.config, layer), ids)
@@ -2246,7 +2247,7 @@ end
         K.store_parse!(kb, id, K.ParsedPaper(1, [head("1. Body"), body(text)], [K.Section(1, 1, "1", "1. Body", "1. Body", 1, 1)]))
         K.execute!(kb, "UPDATE papers SET title = ? WHERE doc_id = ?", (text, id))
     end
-    summarize!(kb, id, text) = K.execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, 'sum', 'm', 1, 'x', ?, 1, 1, ?)",
+    summarize!(kb, id, text) = K.execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, 'sum', 'm', 1, 'x', ?, 1, 1, ?, NULL)",
                                           (K.paper_id(kb, id), "p:$id", text, K.now_iso()))
     streams_of(kb) = Dict(r.doc_id => r.stream for r in K.query(kb, "SELECT doc_id, stream FROM dataset_docs"))
     store = DirStore(mktempdir())
@@ -4013,6 +4014,9 @@ end
         @test total(s, "2609.00001") == (37, 11)
         @test [x.text for x in summaries(kb, "2609.00001"; summarizer = "agent-t")] ==
               ["The paper.\nTopics: a, b", "Section 1, read whole.", "Section 2, read whole."]
+        source = K.paper_json(K.site_paper(kb, "2609.00001"; related = false))["provenance"]
+        @test source.model == "opus" && source.summarizer == s.name && source.read_mode == "text"
+        @test source.prompt_version == K.prompt_version(s) && !isempty(source.input_sha) && !isempty(source.created_at)
         n = length(opened)
         @test summarize_paper!(kb, s, "2609.00001") == 0 && length(opened) == n   # current: no agent opened
         # A paper summary from an older brief is out of date even when every section summary is current.
@@ -4359,7 +4363,7 @@ end
                                                           piece(:heading, "2. Two", 2), piece(:paragraph, repeat("Second words. ", 30), 2)], sections))
         pid = K.paper_id(kb, "2609.00001")
         for ord in 1:2, (name, text) in ("careful" => "A careful summary.", "sloppy" => "A sloppy summary.")
-            K.execute!(kb, "INSERT INTO summaries VALUES (?, ?, ?, 'm', 1, 'x', ?, 1, 1, ?)", (pid, "s:2609.00001:$ord", name, text, K.now_iso()))
+            K.execute!(kb, "INSERT INTO summaries VALUES (?, ?, ?, 'm', 1, 'x', ?, 1, 1, ?, NULL)", (pid, "s:2609.00001:$ord", name, text, K.now_iso()))
         end
         judge = Summarizer(; name = "judge", url = "http://127.0.0.1:$port", model = "m")
         r = judge_summaries(kb, judge, ["sloppy", "careful"]; ids = ["2609.00001"], sections = 5)

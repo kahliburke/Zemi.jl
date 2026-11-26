@@ -1,3 +1,5 @@
+migration!(30, ["ALTER TABLE summaries ADD COLUMN read_mode TEXT"])
+
 # LLM-written summaries of sections and papers. A section summary is written from the section's
 # parsed text; the paper summary from the title, abstract and the section summaries, so it covers
 # the whole paper without sending the whole paper. Summaries are stored with a hash of their input
@@ -361,7 +363,7 @@ function summarize_paper!(kb::KB, s::Summarizer, doc_id::AbstractString; progres
     if get(have, "p:$doc_id", "") != input_sha(prompt)
         progress("summarizing the paper")
         text, tin, tout = complete(s, system, prompt)
-        save_summary!(kb, p.id, "p:$doc_id", s, input_sha(prompt), text, tin, tout)
+        save_summary!(kb, p.id, "p:$doc_id", s, input_sha(prompt), text, tin, tout; read_mode = "section summaries")
         n += 1
     end
     # Sections that no longer exist (after a re-parse) lose their summaries.
@@ -451,10 +453,11 @@ Store summaries written outside the pipeline (by an agent, say) as the summarize
 `sections` maps a section's `ord` to its summary, and `paper` is the paper summary with its
 "Topics:" line. Sections the pipeline would not summarize are rejected, so imported and generated
 summaries cover the same units and can be compared. Optional `tokens` are the reported input
-and output for the whole turn. Store them once on the paper row. Returns the number stored.
+and output for the whole turn, stored once on the paper row; `read_mode`, what the writer read for it.
+Returns the number stored.
 """
 function import_summaries!(kb::KB, s::Summarizer, doc_id::AbstractString; sections::AbstractDict, paper::AbstractString,
-                           tokens = (missing, missing))
+                           tokens = (missing, missing), read_mode = missing)
     sections = Dict{Int,String}(Int(k) => String(v) for (k, v) in sections)
     p = paper_row(kb, doc_id)
     listed = section_texts(kb, doc_id)
@@ -467,14 +470,14 @@ function import_summaries!(kb::KB, s::Summarizer, doc_id::AbstractString; sectio
         for (ord, text) in sections
             save_summary!(kb, p.id, "s:$doc_id:$ord", s, input_sha(inputs.sections[ord]), strip(text), missing, missing)
         end
-        save_summary!(kb, p.id, "p:$doc_id", s, input_sha(inputs.paper), strip(paper), tokens...)
+        save_summary!(kb, p.id, "p:$doc_id", s, input_sha(inputs.paper), strip(paper), tokens...; read_mode)
     end
     return length(sections) + 1
 end
 
-save_summary!(kb, pid, key, s, sha, text, tin, tout) =
-    execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (pid, key, s.name, s.model, prompt_version(s), sha, text, tin, tout, now_iso()))
+save_summary!(kb, pid, key, s, sha, text, tin, tout; read_mode = missing) =
+    execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (pid, key, s.name, s.model, prompt_version(s), sha, text, tin, tout, now_iso(), read_mode))
 
 """
     shown_summarizer(kb, doc_id) -> Union{String,Nothing}

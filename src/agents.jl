@@ -338,7 +338,7 @@ function agent_summarize_paper!(kb::KB, s::Summarizer, doc_id::AbstractString; p
     written = Dict{Int,String}(parse(Int, string(k)) => String(v) for (k, v) in get(d, "sections", Dict()))
     missed = setdiff((t.ord for t in sections), keys(written))
     isempty(missed) || error("The $(s.name) agent left out sections $(sort!(collect(missed)))")
-    return import_summaries!(kb, s, doc_id; sections = written, paper = String(d["paper"]), tokens)
+    return import_summaries!(kb, s, doc_id; sections = written, paper = String(d["paper"]), tokens, read_mode = String(reads))
 end
 
 # A summary worker opens a fresh Kaimon session for a single turn. Its final session
@@ -451,7 +451,8 @@ function agent_summarize_long!(kb::KB, s::Summarizer, id::AbstractString, sectio
     tokens = summary_turn(s, dir, "Read BRIEF-whole.md and follow it for the document in whole.md.";
                           system = summary_prompts(id).agent_system(kb.config))
     got = agent_json(dir, "whole.json", s)
-    save_summary!(kb, p.id, "p:$id", s, sha(paper_input(sections)), strip(String(got["paper"])), tokens...)
+    save_summary!(kb, p.id, "p:$id", s, sha(paper_input(sections)), strip(String(got["paper"])), tokens...;
+                  read_mode = "section summaries from text")
     return length(todo) + 1
 end
 

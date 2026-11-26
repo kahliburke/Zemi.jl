@@ -126,6 +126,7 @@ Base.@kwdef struct SitePaper
     doi::Union{String,Nothing}
     posts::Vector{Any}
     summary::String
+    provenance::Union{NamedTuple,Nothing} = nothing
     topics::Vector{String}
     sections::Vector{Any}
     related::Vector{Any}
@@ -214,7 +215,7 @@ function site_data(kb::KB, ids::AbstractVector; related::Bool = true)
     pids = [Int(r.id) for r in values(rows)]
     within = isempty(pids) ? "paper_id IN (NULL)" : "paper_id IN ($(join(pids, ',')))"
     grouped(sql) = (out = Dict{Int,Vector{Any}}(); foreach(r -> push!(get!(Vector{Any}, out, Int(r.paper_id)), r), query(kb, sql)); out)
-    summaries = grouped("SELECT paper_id, unit_key, summarizer, text, created_at FROM summaries WHERE $within")
+    summaries = grouped("SELECT paper_id, unit_key, summarizer, model, prompt_version, input_sha, read_mode, text, created_at FROM summaries WHERE $within")
     sections = grouped("SELECT paper_id, ord, title, level, page_start, page_end FROM sections WHERE $within ORDER BY paper_id, $(section_order())")
     parsed = Set(Int(r.paper_id) for r in query(kb, "SELECT paper_id FROM parses WHERE $within"))
     classifications = Dict(Int(r.paper_id) => JSON.parse(r.data) for r in query(kb, "SELECT paper_id, data FROM classifications WHERE $within"))
@@ -252,8 +253,11 @@ function site_paper(kb::KB, doc_id::AbstractString; summarizer = nothing, relate
     wrote = sort([r for r in sums if startswith(r.unit_key, "p:")]; by = r -> r.created_at, rev = true)
     sname = something(summarizer, any(r -> r.summarizer == want, wrote) ? want : isempty(wrote) ? "" : String(first(wrote).summarizer))
     shown = [r for r in sums if r.summarizer == sname]
-    paper_summary = [String(r.text) for r in shown if startswith(r.unit_key, "p:")]
-    summary, topics = isempty(paper_summary) ? ("", String[]) : split_topics(first(paper_summary))
+    paper = findfirst(r -> r.unit_key == "p:$doc_id", shown)
+    row = paper === nothing ? nothing : shown[paper]
+    summary, topics = row === nothing ? ("", String[]) : split_topics(row.text)
+    provenance = row === nothing ? nothing : (; row.summarizer, row.model, row.prompt_version, row.input_sha,
+                                               row.created_at, read_mode = coalesce(row.read_mode, nothing))
     section_summary = Dict(String(r.unit_key) => String(r.text) for r in shown if startswith(r.unit_key, "s:"))
     sections = [(; s.ord, s.title, s.level, s.page_start, s.page_end, summary = get(section_summary, "s:$doc_id:$(s.ord)", nothing))
                 for s in get(d.sections, pid, Any[])]
@@ -262,7 +266,7 @@ function site_paper(kb::KB, doc_id::AbstractString; summarizer = nothing, relate
     return SitePaper(; doc_id = String(doc_id), title = coalesce(p.title, doc_id), authors = json_list(p.authors),
         published = coalesce(p.published, ""), category = coalesce(p.primary_category, ""),
         abstract = coalesce(p.abstract, ""), journal_ref = coalesce(p.journal_ref, nothing), doi = coalesce(p.doi, nothing),
-        posts, summary, topics, sections,
+        posts, summary, provenance, topics, sections,
         related = related && processed ? get(d.related, doc_id, []) : [], processed,
         classification = get(d.classifications, pid, nothing), version = coalesce(p.version, ""),
         blocks = get(d.blocks, pid, Dict{Int,Vector{Symbol}}()),
@@ -412,7 +416,7 @@ function paper_json(sp::SitePaper; cited_by = [], notebooks = [], cite = nothing
         "relevance" => r isa Integer && 0 <= r <= 3 ?
                        Dict("level" => r, "label" => RELEVANCE_BADGE[r+1], "note" => string(something(get(c, "relevance_note", nothing), ""))) : nothing,
         "one_line" => get(c, "one_line", nothing), "doi" => sp.doi, "daily" => sp.daily, "posts" => posts,
-        "summary" => sp.summary, "topics" => sp.topics, "abstract" => sp.abstract, "processed" => sp.processed,
+        "summary" => sp.summary, "provenance" => sp.provenance, "topics" => sp.topics, "abstract" => sp.abstract, "processed" => sp.processed,
         "notebooks" => [Dict("title" => nb.title, "page" => notebook_page_name(nb), "summary" => first(nb.summary, 240),
                              "by" => nb.kind == "agent" ? "made by an agent" : !isempty(nb.added_by) ? "added by " * nb.added_by : "added")
                         for nb in notebooks],

@@ -143,7 +143,7 @@ function export_document(kb::KB, doc_id::AbstractString)
         "sections" => rows_as_dicts(query(kb, "SELECT ord, level, number, title, path, page_start, page_end FROM sections WHERE paper_id = ? ORDER BY ord", (pid,))),
         "blocks" => rows_as_dicts(query(kb, "SELECT ord, section, kind, page, x0, y0, x1, y1, text FROM blocks WHERE paper_id = ? ORDER BY ord", (pid,))),
         "chunks" => rows_as_dicts(query(kb, "SELECT ord, section, page_start, page_end, text FROM chunks WHERE paper_id = ? ORDER BY ord", (pid,))),
-        "summaries" => rows_as_dicts(query(kb, """SELECT unit_key, summarizer, model, prompt_version, input_sha, text, created_at
+        "summaries" => rows_as_dicts(query(kb, """SELECT unit_key, summarizer, model, prompt_version, input_sha, text, created_at, read_mode
             FROM summaries WHERE paper_id = ? AND summarizer IN ($(in_marks(max(length(sources), 1)))) ORDER BY summarizer, unit_key""",
             (pid, (isempty(sources) ? [""] : sources)...))),
         "classification" => isempty(classification) ? nothing : only(rows_as_dicts(classification)),
@@ -819,8 +819,8 @@ function import_document!(kb::KB, doc::AbstractDict, vectors::AbstractVector{UIn
             execute!(kb, "DELETE FROM summaries WHERE paper_id = ? AND summarizer = ?", (pid, name))
         end
         for x in doc["summaries"]
-            execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (pid, x["unit_key"], x["summarizer"], x["model"], x["prompt_version"], x["input_sha"], x["text"], missing, missing, x["created_at"]))
+            execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (pid, x["unit_key"], x["summarizer"], x["model"], x["prompt_version"], x["input_sha"], x["text"], missing, missing, x["created_at"], val(get(x, "read_mode", nothing))))
         end
         c = doc["classification"]
         c === nothing || execute!(kb, "INSERT OR REPLACE INTO classifications VALUES (?, ?, ?, ?, ?)",
