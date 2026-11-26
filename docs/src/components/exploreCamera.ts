@@ -16,7 +16,8 @@ export function cameraMover(read: () => View | null, apply: (v: View) => void) {
   // Critically damped: no overshoot, and a changed goal keeps the speed it has (Game Programming Gems 4, 1.10).
   function step(now: number) {
     const v = read()
-    if (!goal || !v) { frame = 0; return }
+    // No view, or one of another kind than the goal (the map became the space): nothing to move.
+    if (!goal || !v || v.length !== goal.length) { goal = null; frame = 0; return }
     const dt = Math.min(0.05, (now - last) / 1000 || 0.016)
     last = now
     const w = 2 / ease, x = w * dt, k = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x)

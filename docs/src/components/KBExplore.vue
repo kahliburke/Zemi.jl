@@ -253,7 +253,7 @@ function goToRow(key: string) {
   stopDrift()                                    // or it selects the next document a moment later
   selected.value = null
   litRow.value = key
-  frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => legendKey(n) === key && n.x !== undefined), 0.7)
+  frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => legendKey(n) === key && placed(n)), 0.7)
 }
 // The view framing nodes `ns`: the share `most` of them nearest their middle, so outliers do not hold it far out.
 // The part of the map nothing is drawn over, in pixels from its corner: right of the card (or a search's
@@ -270,15 +270,19 @@ function uncovered() {
   const narrow = right - left < at.width / 3
   return { left: narrow ? 0 : left, right: narrow ? at.width : right, top: barBottom.value, bottom: at.height, width: at.width, height: at.height }
 }
+// Where a node is fixed (every node is, see `graphData`): known as soon as it is drawn, before the graph's
+// first tick gives it `x` and `y`, so a move just after a redraw finds it.
+const placed = (n: GNode) => n.fx !== undefined
+const spot = (n: GNode): [number, number, number] => [n.fx!, n.fy!, n.fz ?? 0]
 function frameNodes(ns: GNode[], most: number, ms = 1100) {
   if (!ns.length || !graph) return
-  const mid = ['x', 'y', 'z'].map(a => ns.reduce((t, n) => t + ((n as any)[a] ?? 0), 0) / ns.length)
-  const apart = (n: GNode) => Math.hypot(n.x - mid[0], n.y - mid[1], (n.z ?? 0) - mid[2])
+  const mid = [0, 1, 2].map(a => ns.reduce((t, n) => t + spot(n)[a], 0) / ns.length)
+  const apart = (n: GNode) => Math.hypot(...spot(n).map((v, a) => v - mid[a]))
   const core = ns.slice().sort((a, b) => apart(a) - apart(b)).slice(0, Math.max(3, Math.ceil(ns.length * most)))
   const open = uncovered()
-  if (view.value === '2d') {
+  if (drawnView === '2d') {
     // Into the part of the map no card or panel covers.
-    const xs = core.map(n => n.x), ys = core.map(n => n.y), pad = 30
+    const xs = core.map(n => spot(n)[0]), ys = core.map(n => spot(n)[1]), pad = 30
     const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
     const k = Math.min((open.right - open.left) / (x1 - x0 + 2 * pad), (open.bottom - open.top) / (y1 - y0 + 2 * pad), 8)
     camera.to([(x0 + x1) / 2 - ((open.left + open.right) / 2 - open.width / 2) / k,
@@ -298,7 +302,7 @@ watch(selected, n => { if (n) litRow.value = null })
 function resetView() {
   stopDrift()
   litRow.value = null
-  frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => n.x !== undefined), 1)
+  frameNodes((graph?.graphData().nodes ?? []).filter(placed), 1)
 }
 // A legend row's documents shaded from faint to full by how much each stands out in it: its links among
 // the documents here (the cluster's middle deciding among the unlinked), how central it is in meaning,
@@ -823,11 +827,12 @@ function go(n: Node, remember = true) {
   if (remember && selected.value && selected.value.id !== n.id) trail.push(selected.value)
   selected.value = n
   const g = graph?.graphData().nodes.find((x: GNode) => x.id === n.id)
-  if (!g || g.x === undefined) return
-  if (view.value === '2d') camera.to([g.x, g.y, Math.log(Math.max(graph.zoom(), 3))], moveMs(900))
+  if (!g || !placed(g)) return
+  const [x, y, z] = spot(g)
+  if (drawnView === '2d') camera.to([x, y, Math.log(Math.max(graph.zoom(), 3))], moveMs(900))
   else {
-    const d = 90, r = Math.hypot(g.x, g.y, g.z) || 1
-    camera.to([g.x * (1 + d / r), g.y * (1 + d / r), g.z * (1 + d / r), g.x, g.y, g.z], moveMs(1400))
+    const d = 90, r = Math.hypot(x, y, z) || 1
+    camera.to([x * (1 + d / r), y * (1 + d / r), z * (1 + d / r), x, y, z], moveMs(1400))
   }
 }
 function back() { const n = trail.pop(); if (n) go(n, false) }
@@ -836,14 +841,14 @@ function back() { const n = trail.pop(); if (n) go(n, false) }
 function settle(was: View | null) {
   drawnView = view.value
   if (was) applyView(was)
-  setTimeout(() => keepSelected() || frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => n.x !== undefined), 1, 900),
+  setTimeout(() => keepSelected() || frameNodes((graph?.graphData().nodes ?? []).filter(placed), 1, 900),
              was ? 0 : 300)
 }
 // After the map is drawn again (another view, layout or theme), the selected document stays selected and
 // in view; false when there is none on this map to keep.
 function keepSelected() {
   const n = selected.value && byId.value.get(selected.value.id)
-  if (!n || !graph?.graphData().nodes.some((x: GNode) => x.id === n.id && x.x !== undefined)) return false
+  if (!n || !graph?.graphData().nodes.some((x: GNode) => x.id === n.id && placed(x))) return false
   selected.value = n
   go(n, false)
   restyle()
@@ -871,7 +876,7 @@ watch(query, q => {
       if (selected.value) selected.value = null
       await nextTick()                                     // the matches' list drawn, so the view frames beside it
       const shown = new Set(order.value.slice(0, 12))
-      frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => shown.has(n.id) && n.x !== undefined), 0.9)
+      frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => shown.has(n.id) && placed(n)), 0.9)
     } catch { /* left as it was */ }
   }, 350)
 })
