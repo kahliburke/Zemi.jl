@@ -36,8 +36,8 @@ async function record() {
     <button v-if="maintainer && !opened" @click="opened = true">Record milestone</button>
     <form v-if="maintainer && opened" @submit.prevent="record">
       <fieldset :disabled="busy">
-        <label>Milestone <select v-model="form.stage"><option v-for="(label, value) in stages" :key="value" :value="value">{{ label }}</option></select></label>
-        <label>Internal edition <select v-model="form.version"><option v-for="v in latest" :key="v" :value="v">v{{ v }}</option></select></label>
+        <label><span id="milestone-stage">Milestone</span><select v-model="form.stage" aria-labelledby="milestone-stage"><option v-for="(label, value) in stages" :key="value" :value="value">{{ label }}</option></select></label>
+        <label><span id="milestone-edition">Internal edition</span><select v-model="form.version" aria-labelledby="milestone-edition"><option v-for="v in latest" :key="v" :value="v">v{{ v }}</option></select></label>
         <label>Repository, journal or conference <input v-model="form.venue" required></label>
         <label>Event date <input v-model="form.date" type="date" required></label>
         <label>External link, DOI or preprint ID <input v-model="form.reference" :required="['preprint','published'].includes(form.stage)"></label>
