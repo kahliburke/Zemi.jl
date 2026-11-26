@@ -4,7 +4,7 @@
 // finding or record to its page, a task to open in the panel (`data-task`), a person as a name. Code is left alone.
 // The tutor cites papers as `[arXiv:2401.00001]` (several: `[arXiv:…; arXiv:…]`), each a link to its
 // page here, or to arXiv for one the knowledge base does not hold.
-import { getJSON, mediaUrl } from './kbApi'
+import { getJSON, mediaHref } from './kbApi'
 import { escapeHtml } from './kbUtils'
 import { paperHref, codeHref, codebaseHref, notebookHref, authorHref, findingHref, taskHref, recordHref } from './kbLinks'
 import { citedAs, isArxivId, splitCodeTarget } from './kbKinds'
@@ -108,7 +108,7 @@ export function href(kind: string, target: string): string {
 export function sourceHref(kind: string, target: string, label = ''): string {
   if (kind === 'paper') return !isArxivId(target) || (label && label !== target) ? href(kind, target) : `https://arxiv.org/abs/${target}`
   if (kind === 'url') return /^https?:\/\//.test(target) ? target : ''
-  if (kind === 'result') return target.startsWith('media/') ? mediaUrl(target) : ''
+  if (kind === 'result') return target.startsWith('media/') ? mediaHref(target) : ''
   return href(kind, target)
 }
 

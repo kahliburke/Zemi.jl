@@ -105,7 +105,7 @@ DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
                                                       "KBDownload", "KBBibliography", "KBMissing", "KBWatch", "KBDaily", "KBInLibraries", "KBAuthors", "KBAccount",
                                                       "KBSources", "KBServices",
                                                       "KBAccountPage", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate", "KBPalette",
-                                                      "KBProjects", "KBFindings", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
+                                                      "KBProjects", "KBFindings", "KBMarkdownAttachment", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
                                                       "KBStatusTables", "KBCodeFilePage", "KBCodebasePage", "KBCodebases", "KBDayPage",
                                                       "KBRecordPage", "KBRecords", "KBResourcePage", "KBResources", "KBExplore",
                                                       "KBSetup", "KBOpenSource")]

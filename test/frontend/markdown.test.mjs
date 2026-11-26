@@ -99,3 +99,11 @@ test('the tutor\'s citations, to the page of a paper held and to arXiv otherwise
   assert.match(html, /<a href="https:\/\/x.org"[^>]*>arXiv:2401.00001<\/a>/)                 // a link written as one stays
   assert.match(md('[arXiv:2401.00001]', { refs: true }), /href="https:\/\/arxiv.org\/abs\/2401.00001"/)
 })
+
+test('Markdown attachment links open the reader under the site base', () => {
+  const h = 'a'.repeat(64)
+  globalThis.__KB_BASE__ = '/demo'
+  try {
+    assert.ok(md(`[note](media/${h}/notes.MD)`).includes(`href="/demo/attachments/?file=media%2F${h}%2Fnotes.MD"`))
+  } finally { delete globalThis.__KB_BASE__ }
+})

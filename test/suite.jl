@@ -7147,6 +7147,9 @@ end
     @test up.status == 200 && got["type"] == "text/plain; charset=utf-8" && startswith(got["address"], "media/")
     back = K.handle(kb, K.HTTP.Request("GET", "/api/" * got["address"]))
     @test back.status == 200 && String(back.body) == "Some notes."
+    download = K.handle(kb, K.HTTP.Request("GET", "/api/" * got["address"] * "?download=1"))
+    @test download.status == 200 && String(download.body) == "Some notes."
+    @test K.HTTP.header(download, "Content-Disposition") == "attachment; filename=\"notes.txt\""
     # Swept when nothing refers to it any more, after a grace period.
     K.create_project!(kb, "Media"; key = "MD", by = me)
     K.create_task!(kb, "MD", "Plot"; body = "The plot: ![plot]($(m.address))", by = me)

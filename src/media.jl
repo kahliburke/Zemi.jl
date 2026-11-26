@@ -114,7 +114,7 @@ The response serving file `hash` as `name`: its type, kept for good (an address 
 it names), pages and SVG sandboxed so their scripts cannot run here, and kinds a browser does not
 show offered as downloads.
 """
-function media_response(kb::KB, hash::AbstractString, name::AbstractString)
+function media_response(kb::KB, hash::AbstractString, name::AbstractString; download::Bool = false)
     f = media_file(kb, hash)
     path = f === nothing ? "" : media_path(kb.config, hash)
     f !== nothing && !isfile(path) && restore_media!(kb, hash)
@@ -123,14 +123,14 @@ function media_response(kb::KB, hash::AbstractString, name::AbstractString)
     headers = ["Content-Type" => type, "X-Content-Type-Options" => "nosniff", "Cache-Control" => "private, max-age=31536000, immutable"]
     (startswith(type, "text/html") || startswith(type, "image/svg")) && push!(headers, "Content-Security-Policy" => "sandbox")
     shown = startswith(type, "image/") || startswith(type, "video/") || startswith(type, "text/") || type == "application/pdf"
-    shown || push!(headers, "Content-Disposition" => "attachment; filename=\"$(media_name(name))\"")
+    (download || !shown) && push!(headers, "Content-Disposition" => "attachment; filename=\"$(media_name(name))\"")
     return HTTP.Response(200, headers, read(path))
 end
 
 # A file, to those who may have it: as no file, to anyone else.
 route!("GET", "/api/media/:hash/:name"; need = "tasks.view") do c
     media_visible(c.kb, c.caller, c[:hash]) || return HTTP.Response(404, ["Content-Type" => "text/plain"], "No such file.")
-    media_response(c.kb, c[:hash], c[:name])
+    media_response(c.kb, c[:hash], c[:name]; download = get(c.params, "download", "") == "1")
 end
 
 # Attach a file: its bytes the body, its name `?name=`. In a project (`?project=`), by someone who
