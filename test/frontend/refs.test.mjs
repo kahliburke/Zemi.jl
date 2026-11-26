@@ -84,7 +84,12 @@ test('a reference as the picker writes it', () => {
   assert.equal(refFor('paper', '2401.00001'), '@arXiv:2401.00001')
   assert.equal(refFor('paper', 'doc-5f13926ae1'), '@doc-5f13926ae1')
   assert.equal(refFor('record', 'rec-notes-2026-10-02'), '@rec-notes-2026-10-02')
+  // In the open project's main codebase by its path; in another of its codebases, with that codebase.
+  setCodebase('code-kb')
   assert.equal(refFor('code', 'code-kb:src/tasks.jl#update_project!'), '@code:src/tasks.jl#update_project!')
+  assert.equal(refFor('code', 'src/tasks.jl'), '@code:src/tasks.jl')
+  assert.equal(refFor('code', 'code-shore:tide.jl', 'tide.jl'), '@[tide.jl](code:code-shore:tide.jl)')
+  setCodebase('')
   assert.equal(refFor('notebook', 'notebooks/papers/2409-00785/scaling.jl', 'Error scaling'),
                '@[Error scaling](notebook:notebooks/papers/2409-00785/scaling.jl)')
   assert.equal(refText({ kind: 'person', target: 'bea@example.org', label: 'Bea Moss', detail: '' }), '@[Bea Moss](person:bea@example.org)')
