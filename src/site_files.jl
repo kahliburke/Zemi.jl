@@ -42,8 +42,8 @@ end
 """
     file_response(f; status = 200, req = nothing) -> HTTP.Response
 
-File `f` of the site. Content-hashed assets are kept for good; images not hashed (the logos) for a
-day; pages and data are asked about each time. Each carries an `ETag` of its content, so a browser
+File `f` of the site. Content-hashed assets are kept for good, other images for a day, and pages,
+data and the knowledge base's logo and icons (see [`BRAND_IMAGES`](@ref)) are asked about each time. Each carries an `ETag` of its content, so a browser
 asking about a copy it has (`If-None-Match`, from `req`) is told it is current without the file.
 """
 function file_response(f::AbstractString; status = 200, req::Union{HTTP.Request,Nothing} = nothing)
@@ -52,7 +52,8 @@ function file_response(f::AbstractString; status = 200, req::Union{HTTP.Request,
     # knowledge base's own images, which keep their names when they change (the logo, say).
     hashed = occursin(r"/assets/[^/]*\.[A-Za-z0-9_-]{8}\.[a-z0-9]+$", f)
     cache = hashed ? "public, max-age=31536000, immutable" :
-            ext in (".png", ".jpg", ".jpeg", ".svg", ".ico", ".webp", ".gif") ? "public, max-age=86400" : "no-cache"
+            ext in (".png", ".jpg", ".jpeg", ".svg", ".ico", ".webp", ".gif") && !(basename(f) in BRAND_FILES) ? "public, max-age=86400" :
+            "no-cache"
     tag = file_etag(f)
     headers = ["Cache-Control" => cache, "ETag" => tag, "X-Content-Type-Options" => "nosniff"]
     # An SVG opened on its own runs no script on the site's origin, whoever put it there.
@@ -115,13 +116,13 @@ const SERVICE_WORKER = joinpath(pkgdir(@__MODULE__), "docs", "src", "assets", "z
     web_manifest(c) -> Dict
 
 What a phone or computer installs the site as: the group's name, opening at the front page, in a
-window of its own, with the site's logo as its icon.
+window of its own, with the site's logo as its icon, named by its content so a new logo is fetched anew.
 """
 function web_manifest(c::Config)
     name = isempty(c.group.name) ? "Zemi" : c.group.name
     return Dict("name" => name, "short_name" => first(name, 12), "start_url" => "/", "scope" => "/", "display" => "standalone",
                 "background_color" => "#1b1b1f", "theme_color" => "#1b1b1f",
-                "icons" => [Dict("src" => "/android-chrome-512x512.png", "sizes" => "256x256", "type" => "image/png", "purpose" => "any")])
+                "icons" => [Dict("src" => "/android-chrome-512x512.png?v=" * strip(file_etag(site_icon(c, "logo.png")), '"')[1:12], "sizes" => "256x256", "type" => "image/png", "purpose" => "any")])
 end
 
 "The head line naming the site's icon, for the service's own pages."

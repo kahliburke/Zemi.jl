@@ -1101,7 +1101,17 @@ end
     @test HTTP.header(K.file_response(K.site_file(c, "/assets/chunk.Hash0001.js")), "Cache-Control") == "public, max-age=31536000, immutable"
     logo = joinpath(mkpath(joinpath(mktempdir(), "content", "assets")), "logo.png")        # a name kept when it changes
     write(logo, "png")
-    @test HTTP.header(K.file_response(logo), "Cache-Control") == "public, max-age=86400"
+    @test HTTP.header(K.file_response(logo), "Cache-Control") == "no-cache"
+    figure = tempname() * ".png"; write(figure, "png")
+    @test HTTP.header(K.file_response(figure), "Cache-Control") == "public, max-age=86400"
+    # A phone installing the site is given the logo it has now, under a name of its own.
+    icon() = K.web_manifest(c)["icons"][1]["src"]
+    before = icon()
+    own = K.content_path(c, "assets", "logo.png")
+    @test !isfile(own) && startswith(before, "/android-chrome-512x512.png?v=")
+    mkpath(dirname(own)); write(own, "another logo")
+    @test icon() != before
+    rm(own)
     svg = tempname() * ".svg"; write(svg, "<svg></svg>")
     @test HTTP.header(K.file_response(svg), "Content-Security-Policy") == "sandbox"            # no script on the site's origin
     @test_throws ErrorException K.build_site!(c; build = failing)

@@ -7,6 +7,9 @@
 const BRAND_IMAGES = Dict("logo" => ["logo.png", "icon.png", "favicon.ico"],
                           "hero-light" => ["hero-light.svg", "hero-light.png"], "hero-dark" => ["hero-dark.svg", "hero-dark.png"])
 
+"The files of [`BRAND_IMAGES`](@ref): kept under names that stay when they change, so browsers ask about them each time."
+const BRAND_FILES = Set(Iterators.flatten(values(BRAND_IMAGES)))
+
 "Image `img` (a matrix of colours) as a square, centred on a transparent ground."
 function square_image(img::AbstractMatrix)
     h, w = size(img)
