@@ -95,20 +95,44 @@ title and abstract (recorded but not yet read, or found by the watch), on a map 
 out and clustered afresh.
 
 - **Map** lays them out flat; **Space** in three dimensions, to turn with the mouse, or fly through
-  with F (WASD to move, the mouse to steer). The clusters are the landscape's, named where they lie.
-- **Show** chooses the layout: **t-SNE** keeps each document's close neighbourhood; **UMAP** keeps
-  more of how the groups lie to each other. Either way, close together means alike.
+  with F (WASD to move, the mouse to steer). The clusters are the landscape's, named where they lie;
+  a map without the landscape's clusters finds its own.
 - Clicking a document moves there and shows its card: its authors, its summary or abstract, its
   links, and the documents nearest it in meaning, with lines drawn to them, fainter the less alike.
-  Double-click opens its page; Backspace goes back.
+  From the card, copy its citation or a link to this view. Double-click opens its page; Backspace
+  goes back.
 - The search box lights up what Zemi's search finds; Enter goes to the best, Tab to the next.
-  **Drift** moves on by itself every few seconds to the nearest document not yet visited.
-- **Suggested links** lists the pairs most alike that no link joins yet, across the whole
-  knowledge base, the cluster you are in, or between your own notes and documents and the shared ones:
-  from there, copy a paper's citation for a note, or add a document to a finding as evidence. The
-  slider in **Show** sets how alike they must be.
-- **Show** colours documents by cluster, by kind, or by whose they are: yours, your projects', or
-  everyone's.
+  **Drift** moves on by itself to the nearest document not yet visited, pausing as long as you set.
+  Its trail lists where it went, to copy as text.
+- **Suggested links** lists the pairs most alike that no link joins yet: **Everywhere**, in **This
+  cluster**, or **Yours**, your own notes, records and findings beside what they do not link to yet.
+  For each pair, copy a paper's citation for a note, add a document to a finding as evidence, **Link**
+  the two as related, or say they are **Not related**, which stops suggesting the pair.
+
+The panel at the top right has two tabs:
+
+- **Legend**: **Colour by** cluster, kind, or whose a document is (yours, your projects', everyone's).
+  A row goes to its cluster and lights it; **Shade by** then shades its documents by how often they
+  are cited and referred to, how central they are to the cluster, or how relevant the watch rated them.
+- **Settings**: the layout, which documents and which kinds of link are drawn, and the pairs close in
+  meaning that no link joins, with a slider for how alike they must be. Of the layouts, **t-SNE**
+  keeps each document's close neighbourhood, **UMAP** more of how the groups lie to each other, and
+  **PaCMAP** both, the most evenly. Either way, close together means alike.
+
+**A map of its own.** A part of the knowledge base laid out by itself uses the whole map, and its
+clusters are found again at a finer grain, so one cluster of the full map comes apart into its
+subtopics:
+
+- a cluster, from ⤢ on its legend row, and a cluster of that map in turn, a level further in;
+- a project's library, chosen under **Settings**;
+- the documents a search finds (**Map these**: the first 100, and **top** beside its name sets how
+  many, up to 500);
+- a drift's documents with the nearest of each (**Map this drift**, beside its trail).
+
+The path above the map leads back to the maps it came from and to **All documents**. The address
+names the part (`?set=cluster:4`, `?set=project:KB`, `?set=q:kelp`), so a map of one can be
+reloaded and shared; each reader sees only what they may. A larger part is laid out as a job, its
+progress over the map. Too few documents to lay out are said to be so.
 
 A paper's or record's page shows its neighbourhood in a small map, with **Explore from here**. The
 map is made with the landscape in a sync, and when the page is opened after documents changed.

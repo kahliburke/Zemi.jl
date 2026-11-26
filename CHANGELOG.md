@@ -28,9 +28,16 @@
   development site included, and follows it when it moves. `zemi connect --background` for it has
   the knowledge base sync the folders itself whenever it runs, with no login service.
   `zemi connect --status` says where the folders go, what syncs them and whether it is syncing now.
+- **Bibliographies**: a `.bib` file in one's library (BibTeX or BibLaTeX, from JabRef or Zotero) is
+  read entry by entry, each as the PDF it links, its arXiv paper, the paper its DOI has a copy of,
+  or a resource. Its keys cite those documents in the person's notes, notebooks and `/api/bib`.
+- **Your library** has a page of its own, first in the top bar's menu, run for one person too: its
+  folders, each `.bib` file with the entries whose PDFs are missing, and the machines syncing it.
 - **Explore**: every document one may see placed by meaning, on a map or in a 3D space to fly
   through, with the links people made between them (citations, references, evidence, task links)
-  and the pairs most alike that no link joins yet. A paper's or record's page shows its neighbourhood.
+  and the pairs most alike that no link joins yet, to link as related or set aside. A cluster, a
+  project's library, a search or a drift can be mapped by itself, its clusters found again at a
+  finer grain. A paper's or record's page shows its neighbourhood.
 - **The Obsidian plugin** (`zemi obsidian VAULT` installs it) puts the knowledge base beside one's
   notes: a pane with a paper note's summary and figures and the documents nearest the note, search
   to insert a citation, and paper notes added by arXiv id or DOI. A note's citations link to what
