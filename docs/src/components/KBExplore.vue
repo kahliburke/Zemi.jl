@@ -76,8 +76,9 @@ function applyView(v: View) {
   else graph.cameraPosition({ x: v[0], y: v[1], z: v[2] }, { x: v[3], y: v[4], z: v[5] }, 0)
 }
 const camera = cameraMover(readView, applyView)
-// The view the graph was drawn as, which a redraw in the same view starts from.
+// The view the graph was drawn as, which a redraw in the same view starts from, and what was drawn in it.
 let drawnView: '2d' | '3d' | null = null
+let drawnShape = ''
 
 // ── The graph's data ───────────────────────────────────────────────────────────────────────────────
 
@@ -140,6 +141,7 @@ const pairs = computed<Pair[]>(() => {
 // The subset mapped (see `explore_set` in src/explore_sets.jl), as the address names it, and how many a
 // search's subset takes.
 const subset = ref('')
+let arrivedAt: string | null = null              // the address's document, once gone to
 const setSize = ref(100)
 
 async function load() {
@@ -164,8 +166,11 @@ async function load() {
     driftTrail.value = s.spec.slice(5).split(',').map(id => byId.value.get(id)).filter((n): n is Node => !!n).map(node => ({ node }))
     restyle()
   }
+  // The document the address names, gone to once on arriving: not again each time the data is refreshed.
   const center = new URLSearchParams(location.search).get('center')
+  if (center === arrivedAt) return
   if (center && !byId.value.has(center) && !abstracts.value && data.value?.abstract_only) { abstracts.value = true; return }
+  arrivedAt = center
   if (center) {
     const node = byId.value.get(center)
     if (node) {
@@ -429,6 +434,10 @@ async function draw() {
   if (!box.value || !data.value) return
   // Another layout, map or theme in the same view carries on from where the view is.
   const was = drawnView === view.value ? readView() : null
+  // The same map drawn again (its data refreshed, links or colours changed): the view stays as it is.
+  const shape = `${view.value} ${layout.value} ${subset.value} ${data.value.abstracts}`
+  const same = was !== null && shape === drawnShape
+  drawnShape = shape
   if (!was) camera.stop()
   graph?._destructor?.()
   box.value.innerHTML = ''
@@ -485,7 +494,7 @@ async function draw() {
       })
     graph.d3Force('charge')?.strength(-12)
     graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
-    settle(was)
+    settle(was, same)
   } else {
     const ForceGraph3D = (await import('3d-force-graph')).default as any
     const SpriteText = (await import('three-spritetext')).default as any
@@ -539,7 +548,7 @@ async function draw() {
       clusterLabels.push({ sprite: s, id: c.id })
       graph.scene().add(s)
     }
-    settle(was)
+    settle(was, same)
     three = THREE
     nearest3d = null
     ring3d = null
@@ -849,13 +858,14 @@ function clicked(n: GNode) {
 }
 
 /** Move the view to `n` and show its card, keeping where one came from. */
-function go(n: Node, remember = true) {
+// To document `n`: `remember`ed for Back; in the map, closer in where `zoomIn` asks (a person picking it).
+function go(n: Node, remember = true, zoomIn = true) {
   if (remember && selected.value && selected.value.id !== n.id) trail.push(selected.value)
   selected.value = n
   const g = graph?.graphData().nodes.find((x: GNode) => x.id === n.id)
   if (!g || !placed(g)) return
   const [x, y, z] = spot(g)
-  if (drawnView === '2d') camera.to([x, y, Math.log(Math.max(graph.zoom(), 3))], moveMs(900))
+  if (drawnView === '2d') camera.to([x, y, Math.log(zoomIn ? Math.max(graph.zoom(), 3) : graph.zoom())], moveMs(900))
   else {
     // From the side the view is turned to now, at the distance it is (not farther than a document's
     // neighbourhood needs): the view slides across and turns about the document, without swinging round.
@@ -865,21 +875,21 @@ function go(n: Node, remember = true) {
   }
 }
 function back() { const n = trail.pop(); if (n) go(n, false) }
-// A graph just drawn: shown first as the one before it was (`was`), then moved to the selected document,
-// or to the whole map.
-function settle(was: View | null) {
+// A graph just drawn: shown first as the one before it was (`was`). The same map again stays there; another
+// moves to the selected document, at the zoom it has, or to the whole map.
+function settle(was: View | null, same = false) {
   drawnView = view.value
   if (was) applyView(was)
-  setTimeout(() => keepSelected() || frameAll(900),
-             was ? 0 : 300)
+  if (same) { keepSelected(false); return }
+  setTimeout(() => keepSelected() || frameAll(900), was ? 0 : 300)
 }
 // After the map is drawn again (another view, layout or theme), the selected document stays selected and
 // in view; false when there is none on this map to keep.
-function keepSelected() {
+function keepSelected(move = true) {
   const n = selected.value && byId.value.get(selected.value.id)
   if (!n || !graph?.graphData().nodes.some((x: GNode) => x.id === n.id && placed(x))) return false
   selected.value = n
-  go(n, false)
+  if (move) go(n, false, false)
   restyle()
   return true
 }
