@@ -19,7 +19,7 @@ html.kbx-takeover .VPFooter { display: none; }
 .kbx-crumb { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .kbx-top { display: inline-flex; align-items: center; gap: 4px; color: var(--vp-c-text-2); white-space: nowrap; }
 .kbx-top input { width: 4rem; padding: 0 4px; border: 1px solid var(--vp-c-divider); border-radius: 4px; background: var(--vp-c-bg); }
-.kbx-map-row { display: inline-flex; align-items: center; padding: 1px 4px; color: var(--vp-c-text-3); border-radius: 4px; }
+.kbx-map-row { display: inline-flex; align-items: center; margin-left: 5px; padding: 1px 4px; color: var(--vp-c-text-3); border-radius: 4px; }
 .kbx-map-row:hover, .kbx-map-row:focus-visible { color: var(--vp-c-brand-1); background: var(--vp-c-default-soft); }
 /* Its tip, above the row and inside the panel, which scrolls and would cut off anything outside it. */
 .kbx-map-row:hover::after, .kbx-map-row:focus-visible::after {
