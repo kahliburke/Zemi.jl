@@ -160,7 +160,9 @@ With `[shared] sign_up = "open"`, anyone may sign in, as `default_role` (`"Reade
 the roles and add others.
 
 The bibliography is at `/api/bib`: BibTeX of the papers, uploads and records the caller may see, or
-only those cited by the keys in `?keys=arXiv:2401.01234,rec-…`. A program reads it with an API token
+only those cited by the keys in `?keys=arXiv:2401.01234,rec-…`. A document the caller's own
+bibliographies key (see [Bibliographies](work.md#Bibliographies)) is in it under that key as well as
+its own, and `?keys=` takes either. A program reads it with an API token
 that has `read` (`Authorization: Bearer zemi_…`); the search page links it for download. A Slate
 notebook citing the knowledge base signs in instead: the notebook asks for the `read` scope by
 OAuth, and you approve it on the knowledge base's own page. That works run for one person too, where

@@ -247,7 +247,14 @@ like any other document, for their searches and agents alone. Nobody else sees w
 their role, until its owner shares it. It is private as a private repository is: kept from the other
 members, not hidden from those who run the service.
 
-**`zemi connect`** keeps a folder on your machine in step with your library, an Obsidian vault say:
+A library is read by what is in it: [PDFs](#PDFs) as documents, [Obsidian vaults](#Obsidian-vaults)
+as notes, and [bibliographies](#Bibliographies) (`.bib` files) entry by entry, each entry as the
+document it names.
+
+### Syncing a folder
+
+`zemi connect` keeps a folder on your machine in step with your library: an Obsidian vault, a
+reference manager's folder, or any folder of PDFs:
 
 ```sh
 zemi connect https://kb.example.org ~/Documents/Obsidian/Notes --skip Private
@@ -297,7 +304,17 @@ synced. Signing a machine out there revokes its sign-in.
 </figure>
 ```
 
-**An Obsidian vault** in a library (a folder holding `.obsidian`) is read as notes. Each note is a
+### PDFs
+
+A PDF anywhere in a library is read in full as a document, its owner's. The same file in two people's
+libraries is one document, held for both; one no longer in anyone's library is removed.
+
+A paper is one document whoever brings it in: once anyone adds it to the group's library, it is open
+to every reader.
+
+### Obsidian vaults
+
+A folder holding `.obsidian` is read as an Obsidian vault, its notes as records. Each note is a
 record: its title the `title` property, else its first heading, else its file's name; its date a date
 property, else a daily note's day (by the vault's daily notes' folder and format), else when its file
 changed. Its text keeps its headings; its properties follow it. Wikilinks become references to the
@@ -331,38 +348,9 @@ them as `[see @a, p. 3]`), becomes in the note's record references to the docume
 labelled as in prose: `(see Hale 2024, p. 3)`. A key the knowledge base has no document for is left
 as written.
 
-**A bibliography** in a library (a `.bib` file, BibTeX or BibLaTeX, as JabRef or another reference
-manager keeps it) is read entry by entry, so a folder holding the file and its PDFs can be synced
-like a vault:
+### The Obsidian plugin
 
-```sh
-zemi connect https://kb.example.org ~/Documents/References
-```
-
-Each entry comes in as the document it is, private to you as the rest of your library is:
-
-- **The PDF it links**, by its `file` field, when that PDF is in the folder you sync. It is read in
-  full, under the entry's title, authors, year and DOI. A path is taken from the `.bib` file's folder,
-  or from the file directory JabRef keeps in it. A path from another machine (`C:\Users\…`, or an
-  absolute path outside the folder) is matched by how it ends: `…/References/papers/hale2024.pdf` finds
-  `papers/hale2024.pdf`.
-- Else **its arXiv paper**, by `eprint` (with `archivePrefix` or `eprinttype` arXiv), an arXiv
-  address, or arXiv's DOI.
-- Else **the paper its DOI has a copy of**: its arXiv copy, or an open PDF OpenAlex knows.
-- Else **a resource**, made of what the entry says: its type (a book, a report, a thesis, a web page),
-  authors (a braced name, `{World Health Organization}`, is an organization), date, journal or book,
-  publisher, address, when it was accessed, its abstract and note.
-
-The entry's key cites its document for you: `[@hale2024]` in your notes and notebooks names the paper,
-as `[@arXiv:2401.00001]` does, and the bibliography a notebook takes from the site (`/api/bib`) has the
-entry under both keys. Your keys are yours: another person's `hale2024` is theirs. Zemi only reads the
-file, which stays your record. An entry edited is read again; one given a PDF since it came in as a
-resource becomes the paper, in the resource's place; one removed lets its document go, unless a PDF
-in your library is that document still. A PDF no entry links is read as any PDF in your library.
-Under **Your library**, each `.bib` file shows its entries and the documents they came in as, the
-entries whose linked PDFs are not in the folder, and what in the file could not be read.
-
-**The Obsidian plugin**, in `obsidian/` (desktop only), keeps the knowledge base beside your notes.
+The Obsidian plugin, in `obsidian/` (desktop only), keeps the knowledge base beside your notes.
 `zemi obsidian VAULT` builds it and installs it in the vault (its folder, or the name of a vault
 Obsidian has opened), turned on, and connects the vault as `zemi connect` does, which the plugin
 needs: with the site `zemi connect` keeps folders at, else the knowledge base run here, which then
@@ -408,13 +396,99 @@ before. It gives:
 
 The plugin writes nothing into the vault but the citations, links and paper notes you ask for.
 
-**A PDF** anywhere in a library is read in full as a document, its owner's. The same file in two
-people's libraries is one document, held for both; one no longer in anyone's library is removed.
+### Bibliographies
 
-A paper is one document whoever brings it in: once anyone adds it to the group's library, it is open
-to every reader.
+A `.bib` file in a library, BibTeX or BibLaTeX as JabRef, Zotero or another reference manager writes
+it, is read entry by entry. Sync the folder that holds the file and its PDFs:
 
-**Sharing and contributing.** The Documents page lists your library (`my library`; everyone sees
+```sh
+zemi connect https://kb.example.org ~/Documents/References
+```
+
+```text
+References/
+├── references.bib
+├── papers/
+│   └── hale2024.pdf
+└── reports/
+    └── lindqvist2025.pdf
+```
+
+```bibtex
+@Article{hale2024,
+  author  = {Hale, Rowan and Lindqvist, Bea},
+  title   = {Bank Collapse as a Late Sediment Source},
+  journal = {Journal of Field Hydrology},
+  year    = {2024},
+  file    = {:papers/hale2024.pdf:PDF},
+}
+
+@TechReport{lindqvist2025,
+  author      = {Lindqvist, Bea},
+  title       = {Sediment Transport in Braided Reaches},
+  institution = {Field Hydrology Group},
+  year        = {2025},
+  file        = {:C\:\\Users\\bea\\References\\reports\\lindqvist2025.pdf:PDF},
+}
+
+@Misc{osei2026,
+  author        = {Osei, Kwame},
+  title         = {Tidal Mixing in Shallow Estuaries},
+  year          = {2026},
+  eprint        = {2601.00001},
+  archivePrefix = {arXiv},
+}
+
+@Book{byron2019,
+  author    = {Byron, Ada and Bj{\"o}rk, Lena},
+  title     = {Field Methods for Rivers \& Lakes},
+  publisher = {Riverside Press},
+  year      = {2019},
+}
+```
+
+Each entry comes in as the document it is, private to you as the rest of your library is. Above,
+`hale2024` and `lindqvist2025` come in as their PDFs, `osei2026` as its arXiv paper and `byron2019` as
+a book:
+
+- **The PDF it links**, by its `file` field, when that PDF is in the folder you sync. It is read in
+  full, under the entry's title, authors, year and DOI. A path is taken from the `.bib` file's folder,
+  or from the file directory JabRef keeps in it (`@Comment{jabref-meta: fileDirectory:papers;}`). A
+  path from another machine (`C:\Users\…`, or an absolute path outside the folder) is matched by how it
+  ends, down to the file's name alone where only one file has it: `…\References\reports\lindqvist2025.pdf`
+  finds `reports/lindqvist2025.pdf`.
+- Else **its arXiv paper**, by `eprint` (with `archivePrefix` or `eprinttype` arXiv), an arXiv
+  address, or arXiv's DOI.
+- Else **the paper its DOI has a copy of**: its arXiv copy, or an open PDF OpenAlex knows.
+- Else **a resource**, made of what the entry says: its type (a book, a report, a thesis, a web page),
+  authors (a braced name, `{World Health Organization}`, is an organization), date, journal or book,
+  publisher, address, when it was accessed, its abstract and note.
+
+The file is read as BibTeX writes it: `@String` macros, `#` joining, braces or quotes, LaTeX accents
+and commands (`{\"o}`, `\&`), and names in any of BibTeX's orders, `and others` ending a list as
+"et al.". BibLaTeX's `date` is read as well as `year` and `month`. `crossref` and `xdata` are not
+followed, so an entry takes nothing from the entry it names: give a chapter its book's title itself.
+
+From Zotero, export a collection as BibTeX with **Export Files** and sync the folder it writes: the
+`.bib` and the PDFs beside it in `files/`. A Better BibTeX export, which names the PDFs where Zotero
+keeps them, is read too when the folder synced holds those PDFs. A group's Zotero library is kept in
+step another way (see [Resources and Zotero](#Resources-and-Zotero)).
+
+The entry's key cites its document for you: `[@hale2024]` in your notes and notebooks names it, as
+`[@arXiv:2401.00001]` does, and the citations the Obsidian plugin inserts use your key. The bibliography a
+notebook takes from the site (`/api/bib`, or `zemi bib`) has the entry under both keys. Your keys are
+yours: another person's `hale2024` is theirs.
+
+Zemi only reads the file, which stays your record. An entry edited is read again; one given a PDF
+since it came in as a resource becomes the paper, in the resource's place; one removed lets its
+document go, unless a PDF in your library is that document still. A PDF no entry links is read as any
+PDF in your library. Under **Your library** on the account page, each `.bib` file shows its entries
+and the documents they came in as, the entries whose linked PDFs are not in the folder, and what in
+the file could not be read.
+
+### Sharing and contributing
+
+The Documents page lists your library (`my library`; everyone sees
 theirs there), with who sees each document: private, shared with projects, or shared with everyone.
 Select documents to act on them:
 
@@ -438,8 +512,10 @@ Select documents to act on them:
 Removing your library (`POST /api/library/remove`) takes its files and everything held for you alone,
 shared or not. What you contributed stays, and so does what others hold too.
 
-**For those who run the server.** What libraries hold is kept in the site's library store, in a
-space of each person's own:
+### The library store
+
+For those who run the server: what libraries hold is kept in the site's library store, in a space of
+each person's own:
 
 ```toml
 [library]
