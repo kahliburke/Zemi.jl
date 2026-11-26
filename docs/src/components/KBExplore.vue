@@ -533,7 +533,7 @@ async function draw() {
       })
     graph.d3Force('charge')?.strength(-12)
     graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
-    setTimeout(() => graph?.zoomToFit(600, 40), 300)
+    setTimeout(() => keepSelected() || graph?.zoomToFit(600, 40), 300)
   } else {
     const ForceGraph3D = (await import('3d-force-graph')).default as any
     const SpriteText = (await import('three-spritetext')).default as any
@@ -587,7 +587,7 @@ async function draw() {
       clusterLabels.push({ sprite: s, id: c.id })
       graph.scene().add(s)
     }
-    setTimeout(() => graph?.zoomToFit(800, 30), 300)
+    setTimeout(() => keepSelected() || graph?.zoomToFit(800, 30), 300)
     three = THREE
     nearest3d = null
     ring3d = null
@@ -949,6 +949,16 @@ function go(n: Node, remember = true) {
   }
 }
 function back() { const n = trail.pop(); if (n) go(n, false) }
+// After the map is drawn again (another view, layout or theme), the selected document stays selected and
+// in view; false when there is none on this map to keep.
+function keepSelected() {
+  const n = selected.value && byId.value.get(selected.value.id)
+  if (!n || !graph?.graphData().nodes.some((x: GNode) => x.id === n.id && x.x !== undefined)) return false
+  selected.value = n
+  go(n, false)
+  restyle()
+  return true
+}
 const open = (n: Node) => window.open(n.page, '_blank', 'noopener')
 
 // Searching: Zemi's search, its hits lit where they lie; Enter goes to the best, Tab to the next.
