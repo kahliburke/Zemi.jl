@@ -75,6 +75,8 @@
 /* Controls that need the knowledge base API: the page marks <html> once the API answers. */
 .kb-live-only { display: none !important; }
 html.kb-live .kb-live-only { display: inline-block !important; }
+.kb-shared-only { display: none; }
+html.kb-shared .kb-shared-only { display: inline; }
 .kb-posted { font-size: 0.85rem; color: var(--vp-c-text-2); }
 .kb-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: -0.4rem 0 1.5rem; }
 .kb-tag {

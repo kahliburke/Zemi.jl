@@ -203,3 +203,40 @@ Slate hub, or the one on `[notebooks] slate_port`. `ZEMI_SITE_NOTEBOOKS=0` leave
 | `[media] max_mb` | `200` | the largest file people and agents may attach |
 | `[media.backup]` | none | a copy of every attached file, as `[dataset]` names a store |
 | `[service] mode`, `dev`, `port`, `dev_port` | `"solo"`, `false`, `8000`, `5173` | how Kaimon serves it as its extension (see [Serving modes](serving.md#In-Kaimon)): for one person or `"shared"`, built or from VitePress's development server; `port` and `dev_port` are `zemi`'s and `zemi dev`'s too, under `ZEMI_PORT` and `ZEMI_DEV_PORT` |
+
+### Public instance information
+
+Anyone can read `/about` on a shared service, including before signing in. The sign-in page and the
+site footer link to it. Zemi supplies the software credit, installed package version and upstream
+repository. All instance details are optional. An empty configuration shows only the software block.
+Use the following **fictional example** in the instance TOML file and replace only the entries you
+want to publish.
+
+```toml
+[about]
+operator = "Example Research Association"
+contact = "contact@example.invalid"
+hosting_provider = "Example Cloud"
+data_region = "Example region"
+domain_holder = "Example Research Association"
+funding = """Hosting and domain → Example Research Association
+AI calls → Example Research Grant"""
+infer_models = true
+models = ["Example model via Example Provider"]
+note = "Fictional example for the configuration guide."
+```
+
+If `about.contact` is blank, the page uses the existing top-level `contact`. The location is the
+storage location declared by the operator. Funding and notes are plain text and can span lines.
+
+When the config selects models, summarizers or embedding layers, or follows a dataset model profile,
+the page automatically lists the
+models configured for the selected roles and active layers, once per model and provider or agent
+runtime. These names describe the configuration. Unselected presets and
+unused trial layers are omitted. The page identifies recognized services and runtimes by name.
+Custom endpoint URLs, key settings and filesystem paths are excluded from the inferred list.
+
+Set `infer_models = true` to also report the selected built-in defaults on an otherwise unconfigured
+instance. Use `models` to supplement inferred entries, or set `infer_models = false` and supply the
+entire public list yourself. The privacy page links directly to the models section whenever it has
+entries.

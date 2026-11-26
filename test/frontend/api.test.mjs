@@ -95,3 +95,19 @@ test('a repeated step never overlaps itself, and stops', async () => {
   assert.ok(seen >= 2)
   assert.ok(runs <= seen + 1)
 })
+
+test('instance footer links are shown only on a live shared service', async () => {
+  const classes = new Map()
+  const classList = document.documentElement.classList
+  const toggle = classList.toggle
+  classList.toggle = (name, on) => classes.set(name, on)
+  try {
+    for (const [answer, shown] of [[{ status: 200, body: { me: { via: 'session' } } }, true],
+                                    [{ status: 200, body: { me: { via: 'local' } } }, false],
+                                    [{ status: 404 }, false]]) {
+      answers([answer])
+      await connect(true)
+      assert.equal(classes.get('kb-shared'), shown)
+    }
+  } finally { classList.toggle = toggle }
+})

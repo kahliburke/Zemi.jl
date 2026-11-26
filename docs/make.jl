@@ -168,7 +168,7 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
         # service's, to those who may see it.
         data = "{ target: $target, bypass: req => kbExists(path.join(__dirname, '../public', decodeURIComponent(req.url.split('?')[0]))) ? req.url : undefined }"
         # A client connecting by OAuth (a notebook citing the knowledge base) asks the service too.
-        config = replace(config, vite => vite * "\n    server: { proxy: { '/api/': $target, '/auth/': $target, '^/mcp(\\\\?|\$)': $target, " *
+        config = replace(config, vite => vite * "\n    server: { proxy: { '/api/': $target, '/auth/': $target, '^/(about|privacy)([?]|\$)': $target, '^/mcp(\\\\?|\$)': $target, " *
                                          "'/oauth/': $target, '^/\\\\.well-known/oauth-': $target, '/kb-data/': $data } },"; count = 1)
         # A page made from a template that has no page of its own here is its kind's template, as
         # the built site answers it (see kbTemplates.ts): the router asks for the page's `.md`.
@@ -257,9 +257,10 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     base = something(match(r"base: '([^']*)'", config), (; captures = ["/"])).captures[1]
     footer = r"footer: \{\s*message: '[^']*',"
     occursin(footer, config) || @warn "No footer message in the VitePress config to replace"
-    config = replace(config, footer => "docFooter: { prev: false, next: false },\n    footer: {\n      message: 'Built with " *
-        "<a href=\"https://github.com/kahliburke/Zemi.jl\">Zemi</a> and <a href=\"https://github.com/kahliburke/KaimonSlate.jl\">Kaimon Slate</a>" *
-        " · <a href=\"$(rstrip(base, '/'))/open-source$(CLEAN_URLS ? "" : ".html")\">Open source</a>',"; count = 1)
+    api_root = KBase.html_escape(rstrip(kb_api, '/'))
+    open_source = KBase.html_escape(rstrip(base, '/') * "/open-source" * (CLEAN_URLS ? "" : ".html"))
+    message = """Built with <a href="https://github.com/kahliburke/Zemi.jl">Zemi</a> and <a href="https://github.com/kahliburke/KaimonSlate.jl">Kaimon Slate</a> · <a href="$open_source">Open source</a><span class="kb-shared-only vp-raw"> · <a href="$api_root/privacy">Privacy</a> · <a href="$api_root/about">About</a></span>"""
+    config = replace(config, footer => "docFooter: { prev: false, next: false },\n    footer: {\n      message: $(KBase.JSON.json(message)),"; count = 1)
     # Open source ends the sidebar, not the top bar: the top bar is for the knowledge base's parts.
     opensource = r"\{\s*text:\s*'Open source',\s*link:\s*'[^']*'\s*\},?\s*"
     occursin(opensource, config) || @warn "No Open source entry in the VitePress config's nav"

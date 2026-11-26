@@ -66,6 +66,7 @@ export function connect(retry = false): Promise<void> {
     }
     if (mode.value !== 'live') mode.value = 'static'
     document.documentElement.classList.toggle('kb-live', mode.value === 'live')
+    document.documentElement.classList.toggle('kb-shared', mode.value === 'live' && shared.value)
   })()
   return pending
 }
