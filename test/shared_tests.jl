@@ -1186,6 +1186,8 @@ end
     signed = ["Cookie" => "other=1; kb_session=$secret"]
     @test String(req("GET", "/papers/a"; headers = signed).body) == "paper a"
     @test String(req("GET", "/kb/?q=reef"; headers = signed).body) == "search"
+    old = req("GET", "/generated/kb/papers/a.html?from=note"; headers = signed)                 # a link kept from before
+    @test old.status == 301 && HTTP.header(old, "Location") == "/kb/papers/a.html?from=note"
     @test String(req("GET", "/findings"; headers = signed).body) == "findings"
     @test req("GET", "/api/status"; headers = signed).status == 200
     # A change with the cookie must come from the site's own pages, with the API's header.
