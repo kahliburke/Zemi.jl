@@ -134,7 +134,7 @@ const SHOTS = [
     await page.waitForSelector('.kbp-card')
     await page.keyboard.press('ControlOrMeta+k')
     await page.locator('.kbpal-input').fill('recover')
-    await page.waitForSelector('.kbpal-group:has-text("In the knowledge base")')
+    await page.waitForSelector('.kbpal-group:has-text("Results")')
   }],
 ]
 // ZEMI_SHOTS=setup,palette takes those alone.
