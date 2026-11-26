@@ -1,8 +1,11 @@
 <script setup lang="ts">
 // A block of rendered text cut to a few lines, its end faded, with More to read the rest: only where it
 // runs well past them. Text that runs two lines or less past is shown whole, since More would hide no
-// more than it takes. Measured at the cut height each time the text changes.
+// more than it takes. Measured at the cut height each time the text changes. Attributes given it (such as
+// `data-share-text`, see kbShare.ts) go on the text itself, not its heading or the More button.
 import { ref, watch, nextTick, onMounted } from 'vue'
+
+defineOptions({ inheritAttrs: false })
 
 const props = defineProps<{ html: string; head?: string; lines?: number }>()
 
@@ -30,7 +33,7 @@ onMounted(measure)
   <div class="kbc">
     <div ref="box" class="kbc-box" :class="{ open: more || whole, clipped }" :style="{ '--kbc-lines': lines ?? 6 }">
       <p v-if="head" class="kbc-head">{{ head }}</p>
-      <div class="kbc-text" v-html="html"></div>
+      <div class="kbc-text" v-bind="$attrs" v-html="html"></div>
     </div>
     <button v-if="clipped || more" class="kbc-more" :aria-expanded="more" @click="more = !more">{{ more ? 'Less' : 'More' }}</button>
   </div>
