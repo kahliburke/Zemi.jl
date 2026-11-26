@@ -166,11 +166,15 @@ configuration adds one, since its readers see what is read from it. The first li
 project's main codebase, the one `@code:path` refers to; the star makes another main. An agent
 working in any of them finds the project.
 
-A GitHub organization or account (`github.com/<owner>`) links each of its repositories, without its
-forks unless asked and without archived ones. It is listed again each day: a repository added to it
-is linked and read; one archived since stays, marked, and is not fetched again; one it no longer
-lists is marked, not unlinked. With the GitHub App installed for the organization, its private
-repositories the App may read are listed too.
+Several repositories may be linked at once, apart by commas. A GitHub organization or account
+(`github.com/<owner>`) is listed instead: its repositories become the project's candidates, and
+**Choose** ticks those to link, beside any linked on their own. Only those linked are read. The
+organization is listed again each day, its new repositories marked new; with **link new ones as
+they appear** they are linked and read, without forks unless asked and never archived ones. A
+repository unticked or unlinked is declined, and not linked again by itself. One archived since it
+was linked stays, marked, and is not fetched again; one the organization no longer lists is marked,
+not unlinked. With the GitHub App installed for the organization, its private repositories the App
+may read are listed too.
 
 When a project has codebases, a commit in any of them naming a task is recorded on it: on a trailer line
 (`Tasks: RB-12`, or `Task:`, `Refs:`) or after `Part of`, as its work; anywhere else, as a mention.

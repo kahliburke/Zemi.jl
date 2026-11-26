@@ -97,7 +97,7 @@ route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
     i === nothing && not_found("No project $key")
     p = projects(kb)[i]
     Dict("project" => Dict(pairs(p)), "statuses" => STATUS_JSON, "codebases" => Any[codebase_json(kb, x) for x in project_codebases(kb, key)],
-         "orgs" => Any[Dict(pairs(o)) for o in project_orgs(kb, key)],
+         "orgs" => Any[merge(Dict(pairs(o)), Dict(:repositories => Any[Dict(pairs(r)) for r in o.repositories])) for o in project_orgs(kb, key)],
          "access" => access_name(project_access(kb, c.caller, key)), "manages_members" => manages_members(kb, c.caller, key),
          "agents" => Dict(pairs(agents_at_work(kb, key))),
          "files" => project_files(kb, key),
@@ -133,12 +133,14 @@ route!("POST", "/api/projects/:key"; need = "tasks.edit", project = MAINTAIN) do
     Dict("project" => Dict(pairs(only(p for p in projects(c.kb) if p.key == uppercase(c[:key])))))
 end
 
-# Link a codebase or an organization to a project, unlink it (`remove`), or make one main (see project_codebase!).
+# Link codebases or an organization to a project (`codebase`, or several as `codebases`), unlink them
+# (`remove`), or make one main (see project_codebase!).
 route!("POST", "/api/projects/:key/codebases"; need = "tasks.edit", project = MAINTAIN) do c
     d = json_body(c)
-    ids = project_codebase!(c.kb, c[:key], String(get(d, "codebase", "")); remove = get(d, "remove", false) == true,
-                            main = get(d, "main", false) == true, forks = get(d, "forks", false) == true,
-                            add = can(c.caller, "paper.add"), by = person_of(c), c.caller)
+    named = haskey(d, "codebases") ? String.(d["codebases"]) : [String(get(d, "codebase", ""))]
+    flag(k) = get(d, k, false) == true
+    ids = project_codebase!(c.kb, c[:key], named; remove = flag("remove"), main = flag("main"), forks = flag("forks"),
+                            auto = flag("auto"), add = can(c.caller, "paper.add"), by = person_of(c), c.caller)
     Dict("codebases" => ids)
 end
 

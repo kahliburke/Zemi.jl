@@ -1,20 +1,20 @@
 <!--
   On a project's board: its codebases (see src/project_codebases.jl), the main one first, and the
-  GitHub organizations it takes repositories from. Agents working in any of them find the project, and
-  the commits in each are recorded against its tasks. A maintainer links another (a codebase the
-  knowledge base has, a repository's address, a folder on the service's machine, or an organization),
-  unlinks one, or makes one main. One not yet in the knowledge base is added only by someone who may add
+  GitHub organizations it lists repositories from (KBOrgRepositories). Agents working in any of them
+  find the project, and the commits in each are recorded against its tasks. A maintainer links more (a
+  codebase the knowledge base has, repositories' addresses, a folder on the service's machine, or an
+  organization to choose from), unlinks one, or makes one main. One not yet in the knowledge base is added only by someone who may add
   sources, and a folder, in a shared service, by someone who may change its configuration.
 -->
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { getJSON, post, can, shared } from './kbApi'
-import { when } from './kbFormat'
 import KBIcon from './KBIcon.vue'
+import KBOrgRepositories, { type ProjectOrg } from './KBOrgRepositories.vue'
 
 export type ProjectCodebase = { id: string; title: string; rev: string; remote: string; page: string; main: boolean
                                 org: string; gone: boolean; archived: boolean }
-export type ProjectOrg = { host: string; owner: string; forks: boolean; listed_at: string; problem: string }
+export type { ProjectOrg }
 
 const props = defineProps<{ project: string; codebases: ProjectCodebase[]; orgs: ProjectOrg[]; manages: boolean }>()
 const emit = defineEmits<{ changed: [] }>()
@@ -28,39 +28,39 @@ const known = ref<{ id: string; title: string }[] | null>(null)
 const draft = ref<string | null>(null)
 const NEW = '+new'
 const address = ref('')
-const forks = ref(false)
 const error = ref('')
 const busy = ref(false)
 const adds = computed(() => can('paper.add'))
 const linkable = computed(() => (known.value ?? []).filter(c => !props.codebases.some(x => x.id === c.id)))
 const hint = computed(() => (!shared.value || can('config.edit') ? 'https://github.com/owner/repo, a folder (~/code/project)' : 'https://github.com/owner/repo') +
-  ', or github.com/organization')
+  ', or github.com/organization; several apart by commas')
+// The organization just listed, whose repositories open to choose from.
+const listed = ref('')
 // An organization, as the service reads one: github.com/<owner> or org:<owner>.
 const isOrg = computed(() => draft.value === NEW && /^(org:|(https?:\/\/)?(www\.)?github\.com\/)[A-Za-z0-9][A-Za-z0-9-]*\/?$/i.test(address.value.trim()))
 const remoteName = (u: string) => u.replace(/^https:\/\//, '')
 
 async function start() {
   draft.value = adds.value ? NEW : ''
-  address.value = ''; forks.value = false; error.value = ''
+  address.value = ''; error.value = ''
   if (!known.value) try { known.value = await getJSON('/api/tasks/codebases') } catch (e: any) { error.value = e.message }
   if (linkable.value.length) draft.value = linkable.value[0].id
 }
-async function send(body: Record<string, unknown>) {
+async function send(body: Record<string, unknown>, done?: () => void) {
   if (busy.value) return
   busy.value = true; error.value = ''
-  try { await post(`/api/projects/${props.project}/codebases`, JSON.stringify(body)); emit('changed'); return true }
+  try { await post(`/api/projects/${props.project}/codebases`, JSON.stringify(body)); emit('changed'); done?.(); return true }
   catch (e: any) { error.value = e.message; return false }
   finally { busy.value = false }
 }
 async function save() {
-  const codebase = draft.value === NEW ? address.value.trim() : draft.value
-  if (!codebase) return
-  if (await send({ codebase, forks: isOrg.value && forks.value })) { draft.value = null; known.value = null }
+  const named = draft.value === NEW ? address.value.split(/[\n,]/).map(x => x.trim()).filter(Boolean) : [draft.value ?? '']
+  if (!named.length || !named[0]) return
+  const org = isOrg.value ? address.value.trim().replace(/^org:/i, '').replace(/^(https?:\/\/)?(www\.)?github\.com\//i, '').replace(/\/$/, '') : ''
+  if (await send({ codebases: named })) { draft.value = null; known.value = null; listed.value = org.toLowerCase() }
 }
 const remove = (c: ProjectCodebase) => confirm(`Unlink ${c.title} from ${props.project}? Its commits stop being recorded against the project's tasks.`) &&
   send({ codebase: c.id, remove: true })
-const removeOrg = (o: ProjectOrg) => confirm(`Stop taking in ${o.host}/${o.owner}, and unlink the codebases it brought?`) &&
-  send({ codebase: `${o.host}/${o.owner}`, remove: true })
 const makeMain = (c: ProjectCodebase) => send({ codebase: c.id, main: true })
 const marks = (c: ProjectCodebase) => [c.archived && 'archived', c.gone && `no longer in ${c.org}`].filter(Boolean).join(' · ')
 </script>
@@ -85,14 +85,8 @@ const marks = (c: ProjectCodebase) => [c.archived && 'archived', c.gone && `no l
     <span v-else class="kb-dim kbpc-dim">No codebase linked</span>
     <button v-if="manages && draft === null" class="kbpc-icon" title="Link a codebase or an organization" aria-label="Link a codebase or an organization"
             @click="start"><KBIcon name="plus" :size="15" /></button>
-    <div v-for="o in orgs" :key="o.owner" class="kbpc-org">
-      <span class="kb-dim">Repositories of</span>
-      <a :href="`https://${o.host}/${o.owner}`" target="_blank" rel="noopener">{{ o.host }}/{{ o.owner }}</a>
-      <span class="kb-dim kbpc-dim">{{ o.forks ? 'with forks · ' : '' }}{{ o.listed_at ? `listed ${when(o.listed_at)}` : 'not listed yet' }}</span>
-      <span v-if="o.problem" class="kbpc-problem" :title="o.problem">could not be listed: {{ o.problem }}</span>
-      <button v-if="manages" class="kbpc-x" :title="`Stop taking in ${o.owner}`" :aria-label="`Stop taking in ${o.owner}`" :disabled="busy"
-              @click="removeOrg(o)"><KBIcon name="close" :size="13" /></button>
-    </div>
+    <KBOrgRepositories v-for="o in orgs" :key="o.owner" :org="o" :manages="manages" :busy="busy" :open="o.owner.toLowerCase() === listed"
+                       @send="send" />
     <div v-if="draft !== null" class="kbpc-add">
       <select v-model="draft" class="kbpc-select" aria-label="Codebase">
         <option v-for="c in linkable" :key="c.id" :value="c.id">{{ c.title }}</option>
@@ -100,8 +94,7 @@ const marks = (c: ProjectCodebase) => [c.archived && 'archived', c.gone && `no l
       </select>
       <input v-if="draft === NEW" v-model="address" class="kbpc-new" aria-label="A repository's address, a folder or an organization"
              :placeholder="hint" @keydown.enter="save" />
-      <label v-if="isOrg" class="kbpc-forks"><input v-model="forks" type="checkbox" /> with forks</label>
-      <button class="kbpc-small" :disabled="busy || (draft === NEW && !address.trim()) || !draft" @click="save">{{ isOrg ? 'Link its repositories' : 'Link' }}</button>
+      <button class="kbpc-small" :disabled="busy || (draft === NEW && !address.trim()) || !draft" @click="save">{{ isOrg ? 'List its repositories' : 'Link' }}</button>
       <button class="kbpc-small" @click="draft = null">Cancel</button>
     </div>
     <p v-if="error" class="kbpc-error">{{ error }}</p>
@@ -134,10 +127,7 @@ const marks = (c: ProjectCodebase) => [c.archived && 'archived', c.gone && `no l
 .kbpc-x:hover { color: var(--vp-c-danger-1); background: var(--vp-c-danger-soft); }
 .kbpc-mark { font-size: 0.75rem; color: var(--vp-c-warning-1); }
 .kbpc-more { font-size: 0.8rem; }
-.kbpc-org { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; }
-.kbpc-problem { font-size: 0.75rem; color: var(--vp-c-danger-1); max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kbpc-add { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
 .kbpc-new { min-width: 18rem; flex: 1; font-size: 0.85rem; }
-.kbpc-forks { font-size: 0.8rem; display: inline-flex; gap: 0.25rem; align-items: center; }
 .kbpc-error { flex-basis: 100%; margin: 0; font-size: 0.8rem; color: var(--vp-c-danger-1); }
 </style>

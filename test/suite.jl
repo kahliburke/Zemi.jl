@@ -3926,7 +3926,7 @@ end
     @test [(c.id, c.main) for c in K.project_codebases(kb, "MC")] == [(ida, true)] && isempty(K.projects(kb; path = b))
 
     # A knowledge base from before keeps each project's one codebase, as its main one.
-    foreach(t -> K.execute!(kb, "DROP TABLE $t"), ("project_codebases", "project_orgs"))
+    foreach(t -> K.execute!(kb, "DROP TABLE $t"), ("project_codebases", "org_repositories", "project_orgs"))
     K.execute!(kb, "ALTER TABLE papers DROP COLUMN repository_archived_at")
     K.execute!(kb, "ALTER TABLE projects ADD COLUMN codebase_id INTEGER REFERENCES papers(id) ON DELETE SET NULL")
     K.execute!(kb, "UPDATE projects SET codebase_id = ? WHERE key = 'MC'", (K.paper_id(kb, idb),))
@@ -3958,28 +3958,47 @@ end
         K.GITHUB_API[] = "http://127.0.0.1:$port"
         K.create_project!(kb, "Lab"; key = "LB", by = me)
         @test_throws "paper.add" K.project_codebase!(kb, "LB", "github.com/ada-lab"; add = false, by = me)
-        reef = only(K.project_codebase!(kb, "LB", "github.com/ada-lab"; read = false, by = me))
-        @test [(c.id, c.org, c.main) for c in K.project_codebases(kb, "LB")] == [(reef, "ada-lab", true)]
+        # Listed, its repositories are candidates to choose from: none linked or read.
+        @test isempty(K.project_codebase!(kb, "LB", "github.com/ada-lab"; by = me))
+        @test isempty(K.project_codebases(kb, "LB"))
         o = only(K.project_orgs(kb, "LB"))
-        @test o.owner == "ada-lab" && !o.forks && !isempty(o.listed_at) && isempty(o.problem)
-        # Listed again a day later: a new repository is linked and read; one archived since is marked.
+        @test o.owner == "ada-lab" && !o.auto && !isempty(o.listed_at) && isempty(o.problem)
+        @test [(r.name, r.fork, r.archived, r.new, r.codebase) for r in o.repositories] ==
+              [("kelp", true, false, false, ""), ("old", false, true, false, ""), ("reef", false, false, false, "")]
+        # Chosen, with a repository of no organization, mixed in one call.
+        solo = repo("solo")
+        reef_url, kelp_url = "file://$(dirs["reef"])", "file://$(dirs["kelp"])"
+        linked = K.project_codebase!(kb, "LB", "$reef_url, file://$solo"; read = false, by = me)
+        reef, solo_id = linked
+        @test [(c.id, c.org) for c in K.project_codebases(kb, "LB")] == [(reef, "ada-lab"), (solo_id, "")]
+        @test only(r.codebase for r in only(K.project_orgs(kb, "LB")).repositories if r.name == "reef") == reef
+        # One unlinked is declined; so is one named without being linked. A later listing links neither.
+        K.project_codebase!(kb, "LB", reef; remove = true, by = me)
+        @test isempty(K.project_codebase!(kb, "LB", kelp_url; remove = true, by = me))
+        @test [(r.name, r.declined) for r in only(K.project_orgs(kb, "LB")).repositories] == [("kelp", true), ("old", false), ("reef", true)]
+        # Listed again a day later: a new repository is a candidate, marked new; one archived since is marked.
+        K.project_codebase!(kb, "LB", reef_url; read = false, by = me)                # chosen again: no longer declined
         push!(listing, entry("lagoon")); listing[1]["archived"] = true
-        @test K.list_project_orgs!(kb) == 0                                      # not due yet
-        @test K.list_project_orgs!(kb; now = K.Dates.now(K.UTC) + K.Dates.Day(1)) == 1
-        lagoon = only(c.id for c in K.project_codebases(kb, "LB") if c.id != reef)
+        @test K.list_project_orgs!(kb) == 0                                          # not due yet
+        @test K.list_project_orgs!(kb; now = K.Dates.now(K.UTC) + K.Dates.Day(1)) == 0
+        rs = Dict(r.name => r for r in only(K.project_orgs(kb, "LB")).repositories)
+        @test rs["lagoon"].new && isempty(rs["lagoon"].codebase) && !rs["reef"].declined && rs["reef"].archived
+        @test only(c.archived for c in K.project_codebases(kb, "LB") if c.id == reef)
+        # Linking new ones as they appear: those not declined, archived or forks, read together.
+        @test K.project_codebase!(kb, "LB", "github.com/ada-lab"; auto = true, by = me) == [K.link_repository!(kb, "file://$(dirs["lagoon"])")]
+        lagoon = K.project_codebases(kb, "LB")[end].id
         reading = only(j for j in lock(() -> collect(values(K.JOBS)), K.JOBS_LOCK) if j.name == "ingest $lagoon")
         @test wait(reading).status == :done && K.codebase_read(kb, lagoon)
-        @test [(c.id, c.archived, c.gone) for c in K.project_codebases(kb, "LB")] == [(reef, true, false), (lagoon, false, false)]
-        @test !(reef in [String(r.doc_id) for r in K.query(kb, "SELECT doc_id FROM papers WHERE repository_archived_at IS NULL AND kind = 'code'")])
+        @test only(K.project_orgs(kb, "LB")).auto
         # One the organization no longer lists is marked gone, not unlinked.
         filter!(r -> r["name"] != "reef", listing)
         K.list_org!(kb, Int(K.scalar(kb, "SELECT id FROM project_orgs")); read = false)
-        @test [(c.id, c.gone) for c in K.project_codebases(kb, "LB")] == [(reef, true), (lagoon, false)]
-        # Unlinked with the codebases it brought; taken in again with forks.
-        @test sort(K.project_codebase!(kb, "LB", "org:ada-lab"; remove = true, by = me)) == sort([reef, lagoon])
-        @test isempty(K.project_codebases(kb, "LB")) && isempty(K.project_orgs(kb, "LB"))
-        @test length(K.project_codebase!(kb, "LB", "github.com/ada-lab"; forks = true, read = false, by = me)) == 2   # kelp and lagoon
-        @test only(K.project_orgs(kb, "LB")).forks
+        @test [(c.id, c.gone) for c in K.project_codebases(kb, "LB")] == [(solo_id, false), (reef, true), (lagoon, false)]
+        # No longer listed, the organization's chosen codebases stay.
+        @test isempty(K.project_codebase!(kb, "LB", "org:ada-lab"; remove = true, by = me))
+        @test isempty(K.project_orgs(kb, "LB")) && [c.id for c in K.project_codebases(kb, "LB")] == [solo_id, reef, lagoon]
+        @test all(c -> c.org == "", K.project_codebases(kb, "LB"))
+        K.project_codebase!(kb, "LB", "github.com/ada-lab"; by = me)
         # A listing that fails is kept with the organization.
         K.execute!(kb, "UPDATE project_orgs SET owner = 'nobody'")
         @test_throws "No GitHub organization" K.list_org!(kb, Int(K.scalar(kb, "SELECT id FROM project_orgs")))

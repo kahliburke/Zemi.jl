@@ -83,8 +83,9 @@ credentials = "/srv/zemi/.config/zemi/files_key"
 
 **GitHub App** (only for private codebases): *Contents: Read-only*, no webhook, private key at the
 path above, installed on the repositories. Link a project with
-`project_codebase(project, "https://github.com/owner/repo")`, or each repository of an organization
-the App is installed for with `project_codebase(project, "github.com/<organization>")`. A repository the service hasn't read yet
+`project_codebase(project, "https://github.com/owner/repo")`; `project_codebase(project,
+"github.com/<organization>")` lists the repositories of an organization the App is installed for, to
+choose from on the board. A repository the service hasn't read yet
 is cloned with the service's credentials, so adding one takes `paper.add`. A folder on the server, such
 as a checkout kept there, is read in place and added only by someone with `config.edit`. A codebase the App reads is
 shown only to the members of the projects linked to it (see [Serving](serving.md)).

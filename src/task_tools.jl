@@ -624,34 +624,50 @@ project_create_tool(name::String, key::String; description::String = "", codebas
 tool!("project_create", project_create_tool; need = "tasks.edit")
 
 """
-    project_codebase(project::String, codebase::String; remove::Bool=false, main::Bool=false, forks::Bool=false) -> String
+    project_codebase(project::String, codebase::String; remove::Bool=false, main::Bool=false, forks::Bool=false, auto::Bool=false) -> String
 
-Link project `project` to a codebase: its id (`code-…`, as `papers` lists codebases), its
-repository's address (`https://github.com/owner/repo`), or a folder on the service's machine
-(`~/code/project`). Agents working in any of a project's codebases find it with `projects(path=…)`,
-and the commits in each are recorded against its tasks. The first linked is the project's main
-codebase, the one `@code:path` refers to; `main` makes this one main. A GitHub organization or
-account (`github.com/<owner>`) links each of its repositories, without forks unless `forks` and
-without archived ones, and the ones it gains are linked each night. `remove` unlinks the codebase,
-or the organization and the codebases it brought. Adding one the knowledge base doesn't have takes
-paper.add, and a folder, in a shared service, config.edit.
+Link project `project` to codebases, one or several apart by commas or lines: a codebase's id
+(`code-…`, as `papers` lists codebases), a repository's address (`https://github.com/owner/repo`),
+or a folder on the service's machine (`~/code/project`). Agents working in any of a project's
+codebases find it with `projects(path=…)`, and the commits in each are recorded against its tasks.
+The first linked is the project's main codebase, the one `@code:path` refers to; `main` makes this
+one main. A GitHub organization or account (`github.com/<owner>`) is listed, its repositories
+becoming the project's candidates: link those wanted by their addresses. With `auto` the
+organization's new repositories are linked as they appear (forks only with `forks`, archived ones
+never). Naming the organization again lists it again. `remove` unlinks a codebase (a candidate
+unlinked, or named without being linked, is declined and not linked by itself again), or stops
+listing an organization. Adding one the knowledge base doesn't have takes paper.add, and a
+folder, in a shared service, config.edit.
 """
 function project_codebase_tool(project::String, codebase::String; remove::Bool = false, main::Bool = false,
-                               forks::Bool = false)::String
+                               forks::Bool = false, auto::Bool = false)::String
     refusing() do
         tool_needs(project, MAINTAIN)
         key = uppercase(strip(project))
-        ids = project_codebase!(kb(), key, codebase; remove, main, forks, add = can(tool_caller(), "paper.add"),
+        ids = project_codebase!(kb(), key, codebase; remove, main, forks, auto, add = can(tool_caller(), "paper.add"),
                                 by = tool_actor(), caller = tool_caller())
-        org = named_org(codebase)
-        what = org === nothing ? "codebase $(only(ids))" : "$(join(org, '/')) ($(isempty(ids) ? "no new repositories" : join(ids, ", ")))"
-        remove && return "Project $key is no longer linked to $what."
+        io = IOBuffer()
+        if remove
+            print(io, isempty(ids) ? "Done." : "Project $key is no longer linked to $(join(ids, ", ")).")
+        else
+            isempty(ids) || print(io, "Project $key is linked to $(join(ids, ", ")).")
+            if SHARED_MODE[] && length(ids) == 1 && codebase_dir(kb(), only(ids)) == clone_dir(kb().config, only(ids))
+                id = only(ids)
+                print(io, fetch_codebase!(kb(), id) ? " Fetched from its repository." : " It can't be fetched yet: $(codebase_problem(kb(), id)).")
+            end
+        end
         codes = project_codebases(kb(), key)
-        listing = "Its codebases: " * join(("$(c.id)$(c.main ? " (main)" : "")" for c in codes), ", ") * "."
-        (org !== nothing || !SHARED_MODE[]) && return "Project $key is linked to $what. $listing"
-        id = only(ids)
-        fetch_codebase!(kb(), id) || return "Project $key is linked to codebase $id, which can't be fetched yet: $(codebase_problem(kb(), id)). $listing"
-        return "Project $key is linked to codebase $id, fetched from its repository. $listing"
+        print(io, "\nIts codebases: ", isempty(codes) ? "none" : join(("$(c.id)$(c.main ? " (main)" : "")" for c in codes), ", "), ".")
+        for o in project_orgs(kb(), key)
+            any(n -> named_org(n) == (o.host, o.owner), named_codebases(codebase)) || continue
+            open = [r for r in o.repositories if isempty(r.codebase) && !r.declined && !r.gone]
+            println(io, "\n\n$(o.host)/$(o.owner): $(length(o.repositories)) repositories, $(count(r -> !isempty(r.codebase), o.repositories)) linked" *
+                        (o.auto ? ", new ones linked as they appear" : "") * (isempty(o.problem) ? "" : "; could not be listed: $(o.problem)"))
+            for r in open
+                println(io, "- $(r.name): $(replace(r.remote, r"\.git$" => ""))", r.fork ? " (fork)" : "", r.archived ? " (archived)" : "", r.new ? " (new)" : "")
+            end
+        end
+        String(strip(String(take!(io))))
     end
 end
 tool!("project_codebase", project_codebase_tool; need = "tasks.edit")

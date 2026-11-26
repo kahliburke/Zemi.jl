@@ -50,13 +50,13 @@ codebase shows it to the project's members, so one `caller` may not see is none 
 they decide who sees codebases (`paper.manage`).
 
 A codebase added here is read at once, as one added from the Manage page is (see
-[`start_codebase_reading`](@ref)).
+[`start_codebase_reading`](@ref)), unless `read` is false.
 """
-function codebase_id(kb::KB, codebase::AbstractString; add::Bool = true, caller::Caller = local_caller())
+function codebase_id(kb::KB, codebase::AbstractString; add::Bool = true, read::Bool = true, caller::Caller = local_caller())
     codebase = strip(codebase)
     (isempty(codebase) || lowercase(codebase) == "none") && return missing
     linkable(doc_id) = can(caller, "paper.manage") ? doc_id : seen_document(kb, caller, doc_id)
-    added(doc_id) = (start_codebase_reading(kb, doc_id); paper_id(kb, doc_id))
+    added(doc_id) = (read && start_codebase_reading(kb, doc_id); paper_id(kb, doc_id))
     if is_repository(codebase)
         known = query(kb, "SELECT id, doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND remote = ?", (clone_url(codebase),))
         isempty(known) || (linkable(first(known).doc_id); return Int(first(known).id))
