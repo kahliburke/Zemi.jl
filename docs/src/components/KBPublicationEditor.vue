@@ -71,7 +71,7 @@ function publish() {
 }
 </script>
 <template>
-  <h1>{{ preview ? 'Review draft' : 'Prepare publication' }}</h1>
+  <h1>{{ preview ? 'Review draft' : 'Prepare internal publication' }}</h1>
   <p>{{ project }} · v{{ version }}</p>
   <p v-if="error" role="alert">{{ error }}</p>
   <form v-if="!preview" @submit.prevent="save">
@@ -108,7 +108,7 @@ function publish() {
       <button v-if="allowed" type="button" @click="publish">Publish v{{ version }} {{ audience === 'instance' ? 'to the instance' : 'in ' + project }}</button>
     </fieldset>
   </template>
-  <button type="button" :disabled="busy" @click="emit('close')">Back to publications</button>
+  <button type="button" :disabled="busy" @click="emit('close')">Back to internal publications</button>
 </template>
 <style scoped>
 fieldset { border: 0; padding: 0; }

@@ -69,7 +69,7 @@ function publication_publish_tool(id::Int, revision::String; audience::String = 
 end
 tool!("publication_publish", publication_publish_tool; need = "tasks.edit")
 
-"""Read a publication, optionally at a specific numbered version. Contributors can read its pending draft
+"""Read an internal publication, optionally at a specific numbered version. Contributors can read its pending draft
 with draft=true. The revision returned is needed to edit the manuscript or publish that draft."""
 function publication_tool(id::Int; version::Int = 0, draft::Bool = false)::String
     refusing() do

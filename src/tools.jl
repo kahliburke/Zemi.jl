@@ -83,7 +83,7 @@ other work, each saying how it was made) are found too.
 - `keyword`: include keyword search (false for meaning-only search).
 - `layers`: comma-separated layer names to use, or "all" (default: the layers built on the
   strongest model; see `status`).
-- `project`: a project's key, to search only the papers in its library, its findings and its publications.
+- `project`: a project's key, to search only the papers in its library, its findings and its internal publications.
 - `kind`: "paper", "code", "record", "publication" or "finding" for only those (a comma list for several).
 """
 function search_tool(query::String; limit::Int = 8, category::String = "", since::Int = 0,
@@ -102,7 +102,7 @@ function search_tool(query::String; limit::Int = 8, category::String = "", since
     isempty(hits) && isempty(found) && isempty(works) && return "No matches for \"$query\"."
     findings = isempty(found) ? "" : "## Findings (read one with `finding`)\n\n" * join(("- $(f.ref) [$(f.status)] $(f.claim)" for f in found), "\n")
     papers = isempty(hits) ? "" : format_hits(hits)
-    publications = isempty(works) ? "" : "## Publications\n\n" * join(("- $(w.title) — $(w.authors), v$(w.version) " *
+    publications = isempty(works) ? "" : "## Internal publications\n\n" * join(("- $(w.title) — $(w.authors), v$(w.version) " *
         site_base(kb().config) * publication_url(w.id, w.version) for w in works), "\n")
     return join(filter(!isempty, [papers, findings, publications]), "\n\n")
 end

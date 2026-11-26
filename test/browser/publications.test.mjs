@@ -5,9 +5,9 @@ import { open, api, closeBrowser, SITE } from './browser.mjs'
 after(closeBrowser)
 
 test('publish a Markdown manuscript, revise it and revisit the citation', async () => {
-  const { page, close, errors } = await open('/publications/?project=BR', 'button:text-is("New publication")')
+  const { page, close, errors } = await open('/publications/?project=BR', 'button:text-is("New internal publication")')
   try {
-    await page.getByRole('button', { name: 'New publication' }).click()
+    await page.getByRole('button', { name: 'New internal publication' }).click()
     await page.getByLabel('Import manuscript').setInputFiles({
       name: 'survey.md', mimeType: 'text/markdown',
       buffer: Buffer.from('---\ntitle: Transect survey\ndate: 2026-04-12\n---\n## Results\nFirst measurement.')
@@ -34,7 +34,7 @@ test('publish a Markdown manuscript, revise it and revisit the citation', async 
     const results = await api('/api/search?q=transects&kinds=publication')
     assert.ok(results.publications.some(w => w.id === id && w.version === 2))
     await page.goto(SITE + '/kb/?q=transects')
-    await page.getByRole('button', { name: 'publications', exact: true }).click()
+    await page.getByRole('button', { name: 'internal publications', exact: true }).click()
     await page.locator('.kb-search').getByRole('link', { name: /Transect survey/ }).filter({ visible: true }).first().waitFor()
     await page.goto(SITE + '/publications/' + id + '/')
     await page.getByText('Second measurement.', { exact: true }).waitFor()

@@ -4,9 +4,9 @@
     Projects, records and findings need `zemi` or `zemi --shared`; a static copy cannot show them. The
     screenshots are of the demo served by `zemi --shared`.
 
-## Research publications
+## Internal publications
 
-Open **Publications** on a project board. Contributors can start a manuscript from Markdown,
+Open **Internal publications** on a project board. Contributors can start a manuscript from Markdown,
 a PDF or a file already on the project. Markdown frontmatter can supply its title and date.
 Name the authors and their contributions, including any agents, add an abstract, and cite
 findings, notes, code or data in the manuscript. **Save and preview** makes a project draft
@@ -20,7 +20,7 @@ Earlier editions keep their text, authors, date and manuscript PDF.
 Project members can read the published work. A maintainer can choose all instance readers
 when releasing the first edition. Later editions keep that audience. Links to supporting
 documents retain those documents’ own access rules. The knowledge base search offers a
-**publications** filter and searches the latest published title, authors, abstract and Markdown.
+**internal publications** filter and searches the latest published title, authors, abstract and Markdown.
 
 Agents have the same workflow over MCP. For example, in the fictional project `FW`:
 

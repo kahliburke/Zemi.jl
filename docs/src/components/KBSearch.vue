@@ -28,7 +28,7 @@ type Hit = { id: string; slug: string; kind?: string; page?: string; title: stri
 const query = ref('')
 // The kinds of document found: every kind, or one (see src/kinds.jl).
 const KINDS = [{ id: '', label: 'everything' }, { id: 'paper', label: 'papers' }, { id: 'code', label: 'codebases' },
-               { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }, { id: 'finding', label: 'findings' }, { id: 'publication', label: 'publications' }]
+               { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }, { id: 'finding', label: 'findings' }, { id: 'publication', label: 'internal publications' }]
 const kind = searchKind
 const choose = (k: string) => { searchKind.value = k }
 const hits = ref<Hit[]>([])
@@ -203,7 +203,7 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
       </li>
     </ol>
     <section v-if="publications.length" class="kb-findings">
-      <h3>Publications</h3>
+      <h3>Internal publications</h3>
       <a v-for="p in publications" :key="p.id" class="kb-finding" :href="pageLink(`/publications/${p.id}/`)">
         <strong>{{ p.title }}</strong> · {{ p.authors }} · v{{ p.version }}
       </a>

@@ -64,11 +64,11 @@ async function cite() {
 </script>
 <template>
   <KBNeedsService permission="read">
-    <p v-if="loading">Loading publications…</p>
+    <p v-if="loading">Loading internal publications…</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <KBPublicationEditor v-if="editing" :project="project" :edition="draft" :files="files" :maintainer="access === 'maintainer'" @close="load" />
     <article v-else-if="reader">
-      <a :href="pageLink('/publications/')">Publications</a>
+      <a :href="pageLink('/publications/')">Internal publications</a>
       <h1>{{ reader.title }}</h1>
       <p>{{ reader.authors }}</p>
       <p v-if="reader.date">Manuscript dated {{ reader.date }}</p>
@@ -86,16 +86,16 @@ async function cite() {
       <button v-if="contributor && reader.version === reader.latest" @click="edit(reader.id, true)">{{ reader.has_draft ? 'Review draft' : 'Prepare next version' }}</button>
     </article>
     <template v-else-if="!loading && !error">
-      <h1>Publications</h1>
+      <h1>Internal publications</h1>
       <p v-if="project"><a :href="projectHref(project)">{{ project }}</a></p>
-      <button v-if="contributor" @click="edit()">New publication</button>
+      <button v-if="contributor" @click="edit()">New internal publication</button>
       <section v-if="drafts.length">
         <h2>Project drafts</h2>
         <ul><li v-for="d in drafts" :key="d.id"><button @click="edit(d.id)">{{ d.title }} · draft v{{ d.version }}</button></li></ul>
       </section>
       <h2 v-if="drafts.length">Published</h2>
       <ul v-if="works.length"><li v-for="w in works" :key="w.id"><a :href="href(w.id)">{{ w.title }}</a> · {{ w.authors }} · v{{ w.version }}</li></ul>
-      <p v-else>No publications yet.</p>
+      <p v-else>No internal publications yet.</p>
     </template>
   </KBNeedsService>
 </template>
