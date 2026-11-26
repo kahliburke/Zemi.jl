@@ -10,7 +10,7 @@ using Base64
 using CodecZlib
 using CodecZstd: ZstdCompressor, ZstdDecompressor, ZstdCompressorStream, ZstdDecompressorStream
 using Dates
-using LinearAlgebra: dot, norm, svd
+using LinearAlgebra: dot, norm, qr, svd
 import Random
 using SHA
 import Tar

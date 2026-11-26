@@ -279,10 +279,25 @@ function spherical_kmeans(X::AbstractMatrix, k::Integer; iterations::Integer = 1
     return [renumber[a] for a in assign], C[:, order]
 end
 
-"The columns of `X` on their first `dims` principal components (one row each), each signed so its skew is positive."
+"""
+The columns of `X` on their first `dims` principal components (one row each), each signed so its skew
+is positive. Past a few hundred columns and rows the components are found by a randomized SVD (a
+seeded random projection, sharpened by passes through `X`), which costs a small fraction of a full one.
+"""
 function principal_start(X::AbstractMatrix, dims::Integer)
     centred = X .- sum(X; dims = 2) ./ size(X, 2)
-    U, S, _ = svd(centred')
+    A = centred'
+    k = dims + 10
+    if min(size(A)...) <= 4k
+        U, S, _ = svd(A)
+    else
+        Q = Matrix(qr(A * randn(Random.MersenneTwister(1), size(A, 2), k)).Q)
+        for _ in 1:4
+            Q = Matrix(qr(A * Matrix(qr(A' * Q).Q)).Q)
+        end
+        F = svd(Q' * A)
+        U, S = Q * F.U, F.S
+    end
     Y = U[:, 1:dims] .* S[1:dims]'
     for a in 1:dims
         sum(Y[:, a] .^ 3) < 0 && (Y[:, a] .*= -1)
