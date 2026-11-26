@@ -504,6 +504,19 @@ end
     @test [r["target"] for r in matches if r["kind"] == "task"] == [tr]
     @test [r["target"] for r in matches if r["kind"] == "finding"] == [fr]
 
+    # Shareable workspace searches include the activity item containing the words.
+    K.note_task!(kb, tr, "MathInterchange weekly meeting"; by = K.person("boss"))
+    K.note_task!(kb, "OT-1", "MathInterchange workshop"; by = K.person("boss"))
+    for view in ("suggestions", "results")
+        target = "/api/search?view=$view&q=MathInterchange&kinds=task&layers=none"
+        data = call(reader, "GET", target)[2]
+        item = only(data["tasks"])
+        @test item["ref"] == tr && only(item["matches"])["event"] > 0
+        @test call(boss, "GET", target * "&project=MN")[2]["tasks"] == [item]
+        @test call(reader, "GET", target * "&project=OT")[1] == 404
+        @test isempty(data["hits"])
+    end
+
     # The board learns what one may do in a project; an invitation can name projects to join.
     @test call(maker, "GET", "/api/projects/MN")[2]["access"] == "maintainer" && call(other, "GET", "/api/projects/MN")[2]["access"] == "contributor"
     K.invite!(kb, "new@x.org"; roles = ["Curator"], projects = Dict("mn" => "contributor"))
