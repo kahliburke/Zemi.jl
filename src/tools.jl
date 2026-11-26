@@ -667,7 +667,12 @@ function format_status(kb::KB)
     n(sql) = scalar(kb, sql)
     io = IOBuffer()
     # The shared service tells callers what it holds, not where (see `redact`).
-    SHARED_MODE[] ? println(io, "Knowledge base") : println(io, "Knowledge base at $(db_path(c))")
+    println(io, "Knowledge base: ", site_title(c), " (Zemi ", pkgversion(@__MODULE__), ")")
+    if SHARED_MODE[]
+        isempty(c.shared.base_url) || println(io, "Website: ", c.shared.base_url)
+    else
+        println(io, "Database: ", db_path(c))
+    end
     println(io, "Papers: $(n("SELECT count(*) FROM papers")) recorded, ",
         "$(n("SELECT count(*) FROM papers WHERE metadata_at IS NOT NULL")) with metadata, ",
         "$(n("SELECT count(*) FROM files")) downloaded, $(n("SELECT count(*) FROM parses")) parsed ",
