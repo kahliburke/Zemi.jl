@@ -969,6 +969,16 @@ end
         did = K.people_did(kb, "PU", as(boss))
         @test first(did).who == "Ada Lovelace" && first(did).kind == "created" && first(did).ref == made && first(did).title == "Check the seals"
         @test first(did).event == first(K.task(kb, made).activity).id                       # opened at it
+        author = K.person("Ada Lovelace"; id = "ada@x.org")
+        note = K.note_task!(kb, made, "First reading"; by = author)
+        later = K.note_task!(kb, made, "Second reading"; by = author)
+        K.execute!(kb, "UPDATE task_events SET at = ? WHERE id = ?", (K.iso_ago(K.Minute(2)), note))
+        K.execute!(kb, "UPDATE task_events SET at = ? WHERE id = ?", (K.iso_ago(K.Minute(1)), later))
+        K.edit_note!(kb, made, note, "Corrected reading"; by = author)
+        did = K.people_did(kb, "PU", as(boss))
+        notes = filter(e -> e.event in (later, note), did)
+        @test [e.event for e in notes] == [later, note]
+        @test isempty(notes[1].edited_at) && notes[2].edited_at == only(K.note_history(kb, note)).at
         ada_named = K.Caller(as(ada).user_id, "Ada Lovelace", "ada@x.org", Set(["tasks.view"]), :session, nothing, nothing, nothing)
         @test !any(e -> e.who == "Ada Lovelace", K.people_did(kb, "PU", ada_named))             # your own are left out
 
@@ -2226,8 +2236,10 @@ end
     @test length(to("bea")) == 1 && isempty(to("ada"))
     n = only(to("bea"))
     @test n["title"] == "2 things wait on you" && occursin("PU-1 assigned to you", n["body"]) && occursin("Ada: Which gasket?", n["body"])
-    round(140)
-    @test length(to("bea")) == 1                                   # sent once
+    question = only(e.id for e in K.task(kb, "PU-1").activity if e.kind == "question")
+    @test call(ada, "POST", "/api/tasks/PU-1/notes/$question", Dict("text" => "Which gasket size?"))[1] == 200
+    round(71); round(140)
+    @test length(to("bea")) == 1                                   # editing the question does not notify Bea again
     # One thing alone says what it is, and opens its task.
     call(ada, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Order spares", "assignee" => "bea@x.org"))
     round(200); round(270)

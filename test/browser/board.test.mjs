@@ -73,6 +73,31 @@ test('a card opens in the panel, its plan rendered', async () => {
   await close()
 })
 
+test('an edited note shows both timestamps and opens its earlier text', async () => {
+  const task = await api('/api/tasks', { project: 'BR', title: 'Review the measurements' })
+  const url = `/api/tasks/${task.ref}`
+  try {
+    const posted = await api(url + '/notes', { text: 'Initial reading' })
+    const note = posted.activity.at(-1)
+    const { page, close } = await open(`/projects#${task.ref}/${note.id}`, `[data-event="${note.id}"]`)
+    try {
+      const row = page.locator(`[data-event="${note.id}"]`)
+      const history = row.getByRole('button', { name: /^edited / })
+      assert.equal(await history.count(), 0)
+      const updated = await api(`${url}/notes/${note.id}`, { text: 'Corrected reading' })
+      const edited = updated.activity.find(e => e.id === note.id)
+      await page.reload()
+      await history.waitFor()
+      assert.equal(await row.locator('.kbp-when').getAttribute('datetime'), note.at)
+      assert.equal(await history.locator('time').getAttribute('datetime'), edited.edited_at)
+      assert.ok((await history.locator('time').innerText()).trim())
+      await history.click()
+      await row.getByText('Initial reading', { exact: true }).waitFor()
+      assert.equal(await history.getAttribute('aria-expanded'), 'true')
+    } finally { await close() }
+  } finally { await api(url + '/delete', {}) }
+})
+
 test('the address opens a task, and switching projects follows', async () => {
   const { page, errors, close } = await open('/projects#BR-2', '.kbp-panel')
   assert.match(await page.locator('.kbp-panel').innerText(), /Scan the reef crest/)
