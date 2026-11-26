@@ -65,8 +65,10 @@ let graph: any = null
 function readView(): View | null {
   if (!graph) return null
   if (drawnView === '2d') { const c = graph.centerAt(); return [c.x, c.y, Math.log(graph.zoom())] }
-  const c = graph.cameraPosition()
-  return [c.x, c.y, c.z, c.lookAt.x, c.lookAt.y, c.lookAt.z]
+  // The point turned about is the controls' target; the camera's own look-at answer is only a point
+  // ahead of it, far off.
+  const c = graph.camera().position, t = graph.controls()?.target ?? graph.cameraPosition().lookAt
+  return [c.x, c.y, c.z, t.x, t.y, t.z]
 }
 function applyView(v: View) {
   if (!graph) return
@@ -275,12 +277,12 @@ function uncovered() {
 // Where a node is fixed (every node is, see `graphData`): known as soon as it is drawn, before the graph's
 // first tick gives it `x` and `y`, so a move just after a redraw finds it.
 const placed = (n: GNode) => n.fx !== undefined
-// The whole map, as the view first shows it: the documents with a place by meaning (not those set on the
-// ring around it), all but the farthest few, so outliers do not hold the view far out.
+// The whole map, as the view first shows it: every document with a place by meaning, not those set on
+// the ring around it.
 const frameAll = (ms?: number) => {
   const ns: GNode[] = (graph?.graphData().nodes ?? []).filter(placed)
   const mapped = ns.filter(n => n.cluster !== undefined)
-  frameNodes(mapped.length >= 3 ? mapped : ns, 0.95, ms)
+  frameNodes(mapped.length >= 3 ? mapped : ns, 1, ms)
 }
 const spot = (n: GNode): [number, number, number] => [n.fx!, n.fy!, n.fz ?? 0]
 function frameNodes(ns: GNode[], most: number, ms = 1100) {
@@ -298,13 +300,28 @@ function frameNodes(ns: GNode[], most: number, ms = 1100) {
                (y0 + y1) / 2 - ((open.top + open.bottom) / 2 - open.height / 2) / k, Math.log(k)], ms)
     return
   }
-  // From the side the camera is on, back as far as the group needs to fit in what is uncovered.
-  const r = Math.max(20, ...core.map(apart))
+  // From the side the camera is on: each document as the camera would see it, and the nearest distance
+  // at which every one lies within the uncovered part of the view, across and up; the point looked at
+  // then shifted so they sit in the middle of that part.
   const cam = graph.camera(), from = cam.position
-  const away = Math.hypot(from.x - mid[0], from.y - mid[1], from.z - mid[2]) || 1
-  const d = (r / Math.sin((cam.fov * Math.PI) / 360)) * 1.05 * Math.max(open.width / (open.right - open.left), open.height / (open.bottom - open.top))
-  camera.to([mid[0] + (from.x - mid[0]) * d / away, mid[1] + (from.y - mid[1]) * d / away, mid[2] + (from.z - mid[2]) * d / away,
-             mid[0], mid[1], mid[2]], ms)
+  const unit = (v: number[]) => { const l = Math.hypot(...v) || 1; return v.map(x => x / l) }
+  const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+  const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  const back = unit([from.x - mid[0], from.y - mid[1], from.z - mid[2]])
+  const across = unit(cross([cam.up.x, cam.up.y, cam.up.z], back)), up = cross(back, across)
+  const tanUp = Math.tan((cam.fov * Math.PI) / 360), tanAcross = tanUp * open.width / open.height
+  const fitAcross = tanAcross * (open.right - open.left) / open.width, fitUp = tanUp * (open.bottom - open.top) / open.height
+  // Centred on the middle of their spread as the camera sees it, not their average, which one far side pulls.
+  const seen = core.map(n => { const p = spot(n).map((v, a) => v - mid[a]); return [dot(p, across), dot(p, up), dot(p, back)] })
+  const cx = (Math.min(...seen.map(q => q[0])) + Math.max(...seen.map(q => q[0]))) / 2
+  const cy = (Math.min(...seen.map(q => q[1])) + Math.max(...seen.map(q => q[1]))) / 2
+  let d = 30
+  for (const [x, y, z] of seen) d = Math.max(d, z + Math.abs(x - cx) / fitAcross, z + Math.abs(y - cy) / fitUp)
+  d *= 1.04
+  const shiftAcross = cx - (((open.left + open.right) / 2 - open.width / 2) / (open.width / 2)) * d * tanAcross
+  const shiftUp = cy + (((open.top + open.bottom) / 2 - open.height / 2) / (open.height / 2)) * d * tanUp
+  const look = [0, 1, 2].map(a => mid[a] + across[a] * shiftAcross + up[a] * shiftUp)
+  camera.to([look[0] + back[0] * d, look[1] + back[1] * d, look[2] + back[2] * d, look[0], look[1], look[2]], ms)
 }
 watch(selected, n => { if (n) litRow.value = null })
 // Back to the whole map in view, nothing lit; the selected document stays selected.
