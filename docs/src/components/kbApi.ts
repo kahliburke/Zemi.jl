@@ -247,3 +247,9 @@ export function uploadMedia(file: File, progress: (share: number) => void = () =
 
 /** Where a file's address in text (`media/<hash>/<name>`) is served from. */
 export const mediaUrl = (address: string) => `${api.value}/api/${address}`
+
+export const isMarkdownMedia = (address: string) => /^media\/[0-9a-f]{64}\/[A-Za-z0-9._-]+\.[mM][dD]$/.test(address)
+/** The human-readable page for an attached Markdown document, or the original media URL. */
+export const mediaHref = (address: string) => isMarkdownMedia(address)
+  ? withBase('/attachments/') + '?file=' + encodeURIComponent(address)
+  : mediaUrl(address)

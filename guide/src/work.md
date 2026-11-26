@@ -169,6 +169,11 @@ When a project has a codebase, a commit naming a task is recorded on it: on a tr
 A new commit that says `Fixes`, `Closes`, `Resolves` or `Implements RB-12` also moves the task to
 review, if it is in progress and has not moved since. The first reading of a repository only records.
 
+A link to an attached `.md` file opens a reading view with the same Markdown formatting as a task
+note. A YAML header can supply the title and date. Expand **Metadata** for its other fields, or use
+**Download original Markdown** for the exact file, including the header. Files over 2 MiB are
+available to download.
+
 ## Records
 
 A record is the group's own record of its work, usually a meeting: a title, a date, the people in
