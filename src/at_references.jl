@@ -199,9 +199,13 @@ function at_reference_matches(kb::KB, q::AbstractString; limit::Integer = 5, pro
     starts, word = esc * "%", "% " * esc * "%"
     # Text matched at the start of a word: a space put before it lets the first word match too.
     found = NamedTuple[]
+    # Apply the per-kind limit to the caller's projects. Matches in another project
+    # would otherwise use the available slots before the picker can show them.
+    projects = JSON.json(collect(visible_projects(kb, caller)))
     for r in query(kb, """SELECT p.key || '-' || t.number AS ref, t.title FROM tasks t JOIN projects p ON p.id = t.project_id
-                          WHERE t.archived_at IS NULL AND (lower(p.key || '-' || t.number) LIKE ? ESCAPE '\\' OR ' ' || lower(t.title) LIKE ? ESCAPE '\\')
-                          ORDER BY lower(p.key || '-' || t.number) = ? DESC, t.updated_at DESC LIMIT ?""", (starts, word, q, limit))
+                          WHERE p.key IN (SELECT value FROM json_each(?)) AND t.archived_at IS NULL
+                          AND (lower(p.key || '-' || t.number) LIKE ? ESCAPE '\\' OR ' ' || lower(t.title) LIKE ? ESCAPE '\\')
+                          ORDER BY lower(p.key || '-' || t.number) = ? DESC, t.updated_at DESC LIMIT ?""", (projects, starts, word, q, limit))
         push!(found, (; kind = "task", target = String(r.ref), label = String(r.ref), detail = String(r.title)))
     end
     hidden = hidden_documents(kb, caller)
@@ -230,8 +234,9 @@ function at_reference_matches(kb::KB, q::AbstractString; limit::Integer = 5, pro
         end
     end
     for r in query(kb, """SELECT p.key || '-F' || f.number AS ref, f.claim FROM findings f JOIN projects p ON p.id = f.project_id
-                          WHERE lower(p.key || '-F' || f.number) LIKE ? ESCAPE '\\' OR ' ' || lower(f.claim) LIKE ? ESCAPE '\\'
-                          ORDER BY f.updated_at DESC LIMIT ?""", (starts, word, limit))
+                          WHERE p.key IN (SELECT value FROM json_each(?))
+                          AND (lower(p.key || '-F' || f.number) LIKE ? ESCAPE '\\' OR ' ' || lower(f.claim) LIKE ? ESCAPE '\\')
+                          ORDER BY lower(p.key || '-F' || f.number) = ? DESC, f.updated_at DESC LIMIT ?""", (projects, starts, word, q, limit))
         push!(found, (; kind = "finding", target = String(r.ref), label = String(r.ref), detail = String(r.claim)))
     end
     for p in people(kb)
