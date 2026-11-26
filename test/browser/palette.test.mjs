@@ -20,7 +20,7 @@ test('Cmd-K opens the palette, not the site search, and a task found opens on it
   assert.match(await page.locator('.kbpal-item.on').innerText(), /Read the reef papers[\s\S]*Task · BR-1/)
   await page.keyboard.press('Enter')
   await page.waitForSelector('.kbp-panel')
-  assert.match(page.url(), /projects\.html#BR-1$/)
+  assert.match(page.url(), /\/projects#BR-1$/)
   assert.deepEqual(errors, [])
   await close()
 })

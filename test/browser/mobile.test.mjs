@@ -31,7 +31,7 @@ test('on a phone the board fits the screen, and a task opens over the whole of i
 })
 
 test('on a phone the documents table scrolls in place', async () => {
-  const { page, errors, close } = await open('/generated/kb/manage', '.kbm-table', PHONE)
+  const { page, errors, close } = await open('/kb/manage', '.kbm-table', PHONE)
   assert.equal(await sideways(page), false)
   assert.deepEqual(errors, [])
   await close()

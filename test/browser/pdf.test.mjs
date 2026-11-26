@@ -14,7 +14,7 @@ const focused = page => page.evaluate(() => document.activeElement?.className ??
 
 test("a section's PDF opens at its page, and Escape closes it", async () => {
   const { id, slug } = await paper()
-  const { page, errors, close } = await open(`/generated/kb/papers/${slug}`, '.kbst summary button.kbpdf-chip')
+  const { page, errors, close } = await open(`/kb/papers/${slug}`, '.kbst summary button.kbpdf-chip')
   const chip = page.locator('.kbst summary button.kbpdf-chip').first()
   const n = Number((await chip.innerText()).match(/^PDF p\. (\d+)$/)[1])
   const sent = page.waitForResponse(r => r.url().includes(`/api/pdf/${id}`))
@@ -36,7 +36,7 @@ test("a section's PDF opens at its page, and Escape closes it", async () => {
 
 test("the paper's PDF opens from its buttons, and the backdrop closes it", async () => {
   const { slug } = await paper()
-  const { page, errors, close } = await open(`/generated/kb/papers/${slug}`, '.kb-buttons button.kb-button')
+  const { page, errors, close } = await open(`/kb/papers/${slug}`, '.kb-buttons button.kb-button')
   await page.locator('.kb-buttons button', { hasText: 'Uploaded PDF' }).click()
   await page.waitForSelector('.kbpdf-box iframe')
   await page.mouse.click(4, 4)
@@ -47,7 +47,7 @@ test("the paper's PDF opens from its buttons, and the backdrop closes it", async
 
 test("a section opens on its pages, recolored for the dark theme, with its text a click away", async () => {
   const { id, slug } = await paper()
-  const { page, errors, close } = await open(`/generated/kb/papers/${slug}`, '.kbst summary')
+  const { page, errors, close } = await open(`/kb/papers/${slug}`, '.kbst summary')
   const section = page.locator('details.kbst').first()
   const drawn = page.waitForResponse(r => r.url().includes('/api/page-image') && r.url().includes(`id=${encodeURIComponent(id)}`))
   await section.locator('summary').click()
@@ -69,7 +69,7 @@ test("a section opens on its pages, recolored for the dark theme, with its text 
 
 test('without the service, an upload offers no PDF', async () => {
   const { slug } = await paper()
-  const { page, errors, close } = await open(`/generated/kb/papers/${slug}`, '.kbst summary', {
+  const { page, errors, close } = await open(`/kb/papers/${slug}`, '.kbst summary', {
     prepare: p => p.route('**/api/status', route => route.fulfill({ status: 404, body: '' })) })
   await page.waitForFunction(() => !document.documentElement.classList.contains('kb-live') &&
                                    document.querySelector('.kb-buttons .kb-button-plain'))

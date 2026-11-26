@@ -247,7 +247,7 @@ route!("GET", "/api/search") do c
     t = @elapsed hits = want.documents ? search(kb, q; limit, layers, keyword, want.kinds, except = unfound_documents(kb, c.caller)) : []
     found = want.findings && can(c.caller, "tasks.view") ?
         search_findings(kb, q; projects = visible_projects(kb, c.caller), limit = want.documents ? 5 : 3limit) : NamedTuple[]
-    page = site_link(kb.config, "generated/kb/index")
+    page = site_link(kb.config, "kb/index")
     Dict("query" => q, "seconds" => t, "k" => kb.config.rrf_k, "hits" => [hit_json(kb, h) for h in hits],
          "link" => isempty(page) ? "" : page * "?q=" * HTTP.escapeuri(q),
          "findings" => Any[Dict(pairs(f)) for f in found])

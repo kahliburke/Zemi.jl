@@ -202,7 +202,7 @@ function bib_name(n)
 end
 
 """
-    bib_entry(kb, id; pages = "generated/kb/", docpage = true, key = cite_key(kb, id)) -> String
+    bib_entry(kb, id; pages = "kb/", docpage = true, key = cite_key(kb, id)) -> String
 
 A document's BibTeX entry, keyed by `key` (see [`cite_key`](@ref)). A paper is an article: its authors, title,
 year, arXiv record, DOI, journal (its journal reference, else its arXiv record) and `url` (the arXiv
@@ -212,7 +212,7 @@ type calls for (see [`resource_bib`](@ref)). With `docpage`, the entry
 also names the knowledge base's page for it under the docs source, which the docs site links a
 citation to.
 """
-function bib_entry(kb::KB, id::AbstractString; pages::AbstractString = "generated/kb/", docpage::Bool = true,
+function bib_entry(kb::KB, id::AbstractString; pages::AbstractString = "kb/", docpage::Bool = true,
                    key::AbstractString = cite_key(kb, id))
     p = paper_row(kb, id)
     arxiv = is_arxiv_id(id)
@@ -251,14 +251,14 @@ const RESOURCE_ENTRIES = Dict("article" => "article", "news" => "article", "maga
                               "book section" => "incollection", "conference paper" => "inproceedings", "report" => "techreport")
 
 """
-    resource_bib(kb, id; pages = "generated/kb/", docpage = true) -> String
+    resource_bib(kb, id; pages = "kb/", docpage = true) -> String
 
 Resource `id`'s BibTeX entry: an article (in its journal or newspaper), a book or a chapter of one,
 a conference paper, or a report (of its institution), with what a style prints of each; anything
 else (a data set, a portal, software, a law) a `misc`, published where it appeared or by whom, and
 noting its type. Each with its authors, title, date, DOI, address and when it was accessed there.
 """
-function resource_bib(kb::KB, id::AbstractString; pages::AbstractString = "generated/kb/", docpage::Bool = true,
+function resource_bib(kb::KB, id::AbstractString; pages::AbstractString = "kb/", docpage::Bool = true,
                       key::AbstractString = cite_key(kb, id))
     r = resource_row(kb, id)
     field(k, v; escape = true) = isempty(string(v)) ? "" : "  $k = {$(escape ? bib_escape(v) : v)},\n"
@@ -309,7 +309,7 @@ the service answers it at `/api/bib`.
 """
 function bibliography(kb::KB; ids = nothing, caller::Union{Caller,Nothing} = nothing,
                       space::Union{AbstractString,Nothing} = caller === nothing ? nothing : cite_space(caller), keys = nothing,
-                      docpage::Bool = false, pages::AbstractString = "generated/kb/")
+                      docpage::Bool = false, pages::AbstractString = "kb/")
     ids === nothing && (ids = [String(r.id) for r in query(kb, "SELECT doc_id AS id FROM papers WHERE $(kind_in(k -> k.cited))")])
     if caller !== nothing
         unseen = hidden_documents(kb, caller)

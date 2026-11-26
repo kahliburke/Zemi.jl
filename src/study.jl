@@ -427,12 +427,12 @@ function draft_markdown(kb::KB, study::Study, slug::AbstractString)
 end
 
 """
-    write_study_bib(kb, study; pages = "generated/kb/") -> String
+    write_study_bib(kb, study; pages = "kb/") -> String
 
 Write the study's bibliography, `references.bib` in its folder: an entry for every paper of the
 knowledge base its drafts cite. The file is only rewritten when it changes. Returns its path.
 """
-function write_study_bib(kb::KB, study::Study; pages::AbstractString = "generated/kb/")
+function write_study_bib(kb::KB, study::Study; pages::AbstractString = "kb/")
     slugs = [[slugify(t.name) for t in study.themes]; [s.slug for s in study.syntheses]]
     ids = unique(id for slug in slugs for d in (read_draft(draft_path(study, slug)),) if d !== nothing
                  for id in cited_ids(d.body) if !ismissing(paper_id(kb, id)))
@@ -482,12 +482,12 @@ function study_text(kb::KB, study::Study, slug::AbstractString)
 end
 
 """
-    papers_table(kb, papers; shown = 12, pages = "generated/kb/") -> StudyMarkdown
+    papers_table(kb, papers; shown = 12, pages = "kb/") -> StudyMarkdown
 
 A theme's papers as a table, strongest first: strength, year, the paper linked to its page with its
 first author, and whether it has been read in full or only its abstract is known.
 """
-function papers_table(kb::KB, papers::AbstractVector{EvidencePaper}; shown::Integer = 12, pages::AbstractString = "generated/kb/")
+function papers_table(kb::KB, papers::AbstractVector{EvidencePaper}; shown::Integer = 12, pages::AbstractString = "kb/")
     read_in_full = Set(r.id for r in query(kb, "SELECT p.doc_id AS id FROM papers p JOIN parses x ON x.paper_id = p.id"))
     rows = ["| Strength | Year | Paper | Read |", "|---:|:--|:--|:--|"]
     for p in first(papers, shown)
@@ -513,11 +513,11 @@ function overlaps_table(evidence)
 end
 
 """
-    crossings_table(evidence, theme_name; pages = "generated/kb/") -> StudyMarkdown
+    crossings_table(evidence, theme_name; pages = "kb/") -> StudyMarkdown
 
 The papers of one theme that other themes found too, as a table: where the work meets.
 """
-function crossings_table(evidence, name::AbstractString; pages::AbstractString = "generated/kb/")
+function crossings_table(evidence, name::AbstractString; pages::AbstractString = "kb/")
     found = crossings(evidence, name)
     isempty(found) && return StudyMarkdown("*No paper of “$(name)” is found by another theme.*")
     rows = ["| Paper | Year | Also found by |", "|:--|:--|:--|"]

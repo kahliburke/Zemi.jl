@@ -73,7 +73,7 @@ function codebase_page_json(kb::KB, p)
         "languages" => [Dict("language" => l, "files" => n) for (l, n) in stats.languages],
         "summary" => summary, "topics" => topics, "access" => p.access,
         "classification" => c === nothing ? [] : [Dict("label" => l, "value" => v) for (l, v) in classification_rows(c)],
-        "tree" => "/code/$slug.json", "pages" => "/generated/kb/code/$slug/files/")
+        "tree" => "/code/$slug.json", "pages" => "/kb/code/$slug/files/")
 end
 
 "The file of codebase `p`'s tree, `tree` (see [`code_tree`](@ref)), as its page browses it (KBCodeTree.vue)."
@@ -150,10 +150,10 @@ The addresses of a codebase's pages, scripts and data on the site, each with the
 page's script (a copy of its kind's template's, see [`stamp_templates!`](@ref)), or a data file.
 """
 const CODEBASE_ADDRESSES = [
-    r"^generated/kb/code/(?<slug>code-[a-z0-9-]+)(?:/|/index|/index\.html)?$" => :page,
-    r"^generated/kb/code/(?<slug>code-[a-z0-9-]+)/files/(?<page>[^/]+?)(?:\.html)?$" => :file_page,
-    r"^assets/generated_kb_code_(?<slug>code-[a-z0-9-]+)_index\.md(?<tail>\..+\.js)$" => :page_script,
-    r"^assets/generated_kb_code_(?<slug>code-[a-z0-9-]+)_files_(?<page>.+)\.md(?<tail>\..+\.js)$" => :file_script,
+    r"^(?:generated/)?kb/code/(?<slug>code-[a-z0-9-]+)(?:/|/index|/index\.html)?$" => :page,
+    r"^(?:generated/)?kb/code/(?<slug>code-[a-z0-9-]+)/files/(?<page>[^/]+?)(?:\.html)?$" => :file_page,
+    r"^assets/(?:generated_)?kb_code_(?<slug>code-[a-z0-9-]+)_index\.md(?<tail>\..+\.js)$" => :page_script,
+    r"^assets/(?:generated_)?kb_code_(?<slug>code-[a-z0-9-]+)_files_(?<page>.+)\.md(?<tail>\..+\.js)$" => :file_script,
     r"^kb-data/codebase/(?<slug>code-[a-z0-9-]+)/index\.json$" => :page_data,
     r"^kb-data/code/(?<slug>code-[a-z0-9-]+)/(?<page>[^/]+)\.json$" => :file_data,
     r"^code/(?<slug>code-[a-z0-9-]+)\.json$" => :tree,
@@ -195,7 +195,7 @@ function codebase_site_response(kb::KB, caller::Caller, path::AbstractString; re
         f = joinpath(root, template * ".html")
         return isfile(f) ? file_response(f; req) : nothing
     end
-    page = what == :page_script ? "generated/kb/code/$(p.doc_id)/index" : "generated/kb/code/$(p.doc_id)/files/$(m[:page])"
+    page = what == :page_script ? "kb/code/$(p.doc_id)/index" : "kb/code/$(p.doc_id)/files/$(m[:page])"
     scripts = template_scripts(root, template)
     j = findfirst(((tail, _),) -> copy_tail(tail) == m[:tail], scripts)
     j === nothing && return nothing

@@ -85,7 +85,7 @@ test('a line of text, its \\( \\) mathematics as $ $', () => {
 test('a link from the site\'s root stays under its base', () => {
   globalThis.__KB_BASE__ = '/docs'
   try {
-    assert.match(md('[a paper](/generated/kb/papers/2401-00001.html)'), /href="\/docs\/generated\/kb\/papers\/2401-00001\.html"/)
+    assert.match(md('[a paper](/generated/kb/papers/2401-00001.html)'), /href="\/docs\/kb\/papers\/2401-00001\.html"/)
     assert.match(md('[elsewhere](//example.org/x)'), /href="\/\/example.org\/x"/)
     assert.match(md('[here](#notes)'), /href="#notes"/)
   } finally { delete globalThis.__KB_BASE__ }
@@ -94,7 +94,7 @@ test('a link from the site\'s root stays under its base', () => {
 test('the tutor\'s citations, to the page of a paper held and to arXiv otherwise', () => {
   const titles = new Map([['2401.00001', 'A Study of [Reefs]']])
   const html = md('As shown [arXiv:2401.00001; arXiv:2402.00002], and [arXiv:2401.00001](https://x.org).', { refs: true, titles })
-  assert.match(html, /\(<a class="kb-ref kb-ref-paper" href="\/generated\/kb\/papers\/2401-00001\.html">A Study of \[Reefs\]<\/a>; /)
+  assert.match(html, /\(<a class="kb-ref kb-ref-paper" href="\/kb\/papers\/2401-00001\.html">A Study of \[Reefs\]<\/a>; /)
   assert.match(html, /<a href="https:\/\/arxiv.org\/abs\/2402.00002" target="_blank" rel="noopener">arXiv:2402.00002<\/a>\)/)
   assert.match(html, /<a href="https:\/\/x.org"[^>]*>arXiv:2401.00001<\/a>/)                 // a link written as one stays
   assert.match(md('[arXiv:2401.00001]', { refs: true }), /href="https:\/\/arxiv.org\/abs\/2401.00001"/)

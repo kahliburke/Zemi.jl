@@ -67,7 +67,16 @@ checks. Attempts without a final stage remain available for diagnosis after a re
     They are stored in the knowledge base's database and edited through the API. On a static copy
     their pages show only "Needs a running Zemi server."
 
+## Page addresses
+
+Zemi serves the knowledge base at `/kb/`, findings at `/findings` and projects at
+`/projects`. A link can include a search or a specific finding, for example
+`/kb/?q=reef` or `/findings#KB-F3`.
+
 ## Static copy
+
+Set `ZEMI_SITE_CLEAN_URLS=0` when building for a static host that requires literal
+HTML filenames. The public demo uses this setting.
 
 A built site is a folder any web server can host. Without the API, search uses `papers.json` and
 shows *offline*. The demo is a static copy.

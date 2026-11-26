@@ -2,6 +2,7 @@ Manifest.toml
 docs/build/
 docs/slate/
 docs/src/generated/
+docs/src/kb/
 docs/node_modules/
 docs/package-lock.json
 docs/src/.vitepress/cache/

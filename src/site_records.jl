@@ -53,8 +53,8 @@ The addresses of a record's page, its script (a copy of its kind's template's, s
 [`page_slug`](@ref) leaves as it is).
 """
 const RECORD_ADDRESSES = [
-    r"^generated/kb/records/(?<slug>rec-[a-z0-9-]+)(?:\.html)?$" => :page,
-    r"^assets/generated_kb_records_(?<slug>rec-[a-z0-9-]+)\.md(?<tail>\..+\.js)$" => :page_script,
+    r"^(?:generated/)?kb/records/(?<slug>rec-[a-z0-9-]+)(?:\.html)?$" => :page,
+    r"^assets/(?:generated_)?kb_records_(?<slug>rec-[a-z0-9-]+)\.md(?<tail>\..+\.js)$" => :page_script,
     r"^kb-data/records/(?<slug>rec-[a-z0-9-]+)\.json$" => :page_data]
 
 """
@@ -76,7 +76,7 @@ function record_site_response(kb::KB, caller::Caller, path::AbstractString; req:
     (isempty(rows) || !document_visible(kb, caller, first(rows).doc_id)) && return not_found_page(kb.config)
     p = first(rows)
     what == :page_data && return live_data_response(record_page_json(kb, p))
-    return live_page_response(kb, "records", "generated/kb/records/$(p.doc_id)", what, m; req)
+    return live_page_response(kb, "records", "kb/records/$(p.doc_id)", what, m; req)
 end
 
 "A page's data, answered for one caller: not kept by the browser."
@@ -106,8 +106,8 @@ end
 
 "The addresses of a paper's page, its script and its data on the site, each with the paper's slug (see [`page_slug`](@ref))."
 const PAPER_ADDRESSES = [
-    r"^generated/kb/papers/(?<slug>[^/]+?)(?:\.html)?$" => :page,
-    r"^assets/generated_kb_papers_(?<slug>[^/]+?)\.md(?<tail>\..+\.js)$" => :page_script,
+    r"^(?:generated/)?kb/papers/(?<slug>[^/]+?)(?:\.html)?$" => :page,
+    r"^assets/(?:generated_)?kb_papers_(?<slug>[^/]+?)\.md(?<tail>\..+\.js)$" => :page_script,
     r"^kb-data/papers/(?<slug>[^/]+)\.json$" => :page_data]
 
 """
@@ -130,7 +130,7 @@ function closed_paper_response(kb::KB, caller::Caller, path::AbstractString; req
     id = String(first(rows).doc_id)
     document_visible(kb, caller, id) || return not_found_page(kb.config)
     what == :page_data && return live_data_response(paper_json(site_paper(kb, id); notebooks = paper_notebooks(kb, id), cite = cite_json(kb, id)))
-    return live_page_response(kb, "papers", "generated/kb/papers/$(m[:slug])", what, m; req)
+    return live_page_response(kb, "papers", "kb/papers/$(m[:slug])", what, m; req)
 end
 
 """

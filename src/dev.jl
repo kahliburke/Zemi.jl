@@ -124,7 +124,7 @@ Write the knowledge base's pages into the docs source folder `src` (and its publ
 those `removed`, as paths relative to it.
 """
 function diff_site_pages!(kb::KB, src::AbstractString, public::AbstractString)
-    pages_dir = joinpath(src, "generated", "kb")
+    pages_dir = joinpath(src, "kb")
     # A file is only written when it changes, so its time says whether it did.
     files() = isdir(pages_dir) ? Dict(joinpath(root, f) => mtime(joinpath(root, f)) for (root, _, fs) in walkdir(pages_dir) for f in fs) :
                                  Dict{String,Float64}()
@@ -206,7 +206,7 @@ What the pages are written by besides the knowledge base: docs/make.jl and the c
 """
 dev_sources(docs::AbstractString) =
     (site = () -> newest([joinpath(docs, "make.jl"), joinpath(docs, "src")];
-                         keep = f -> endswith(f, ".md") && !occursin("$(Base.Filesystem.path_separator)generated", f)),
+                         keep = f -> endswith(f, ".md") && first(splitpath(relpath(f, joinpath(docs, "src")))) ∉ ("generated", "kb")),
      code = () -> newest([joinpath(dirname(docs), "src")]; keep = endswith(".jl")))
 
 "The port VitePress's development server takes for `zemi dev`: `ZEMI_DEV_PORT`, else `[service] dev_port`."

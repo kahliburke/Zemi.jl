@@ -85,9 +85,6 @@ function waiting_items(kb::KB, caller::Caller)
     return out
 end
 
-"The site's page `path` (`projects#PU-2`), from its root, as a notification opens it: on whatever address the browser has the site at."
-page_path(path::AbstractString) = (i = findfirst('#', path); i === nothing ? "/$path.html" : "/$(path[1:i-1]).html$(path[i:end])")
-
 """
     notification(c, items) -> Dict
 

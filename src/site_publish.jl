@@ -50,7 +50,7 @@ end
 
 "The folders of the package the site is built from, and the folders in them builds write."
 const SITE_SOURCE_DIRS = ("src", "ext", joinpath("docs", "src"), joinpath("docs", "src", ".vitepress", "theme"))
-const SITE_SOURCE_SKIP = ("generated", "node_modules", "build", "slate", "kb_public")
+const SITE_SOURCE_SKIP = ("generated", "kb", "node_modules", "build", "slate", "kb_public")
 
 """
     site_source_files(config; package = pkgdir(Zemi)) -> Vector{Pair{String,String}}

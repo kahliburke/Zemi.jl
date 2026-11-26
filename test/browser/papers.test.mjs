@@ -6,11 +6,11 @@ import { open, closeBrowser } from './browser.mjs'
 after(closeBrowser)
 
 test("a paper's page, from a link in the site: its title, header, outline and tab", async () => {
-  const { page, errors, close } = await open('/generated/kb/timeline', '.vp-doc a[href*="papers/"]')
+  const { page, errors, close } = await open('/kb/timeline', '.vp-doc a[href*="papers/"]')
   await page.locator('.vp-doc a', { hasText: 'Figures to look at' }).first().click()
   await page.waitForSelector('h1#paper-title')
   assert.equal((await page.locator('h1#paper-title').innerText()).trim(), 'Figures to look at')
-  assert.match(page.url(), /\/generated\/kb\/papers\/doc-[0-9a-f]+(\.html)?$/)
+  assert.match(page.url(), /\/kb\/papers\/doc-[0-9a-f]+(\.html)?$/)
   assert.match(await page.locator('.kb-paper-head').innerText(), /Uploaded PDF/)
   await page.waitForFunction(() => document.title.startsWith('Figures to look at'))
   await page.waitForSelector('.VPDocAsideOutline a:has-text("Figures and tables")')
@@ -19,7 +19,7 @@ test("a paper's page, from a link in the site: its title, header, outline and ta
 })
 
 test("a paper's Cite panel: its reference, citation, BibTeX, address and link, each to copy", async () => {
-  const { page, errors, close } = await open('/generated/kb/timeline', '.vp-doc a[href*="papers/"]')
+  const { page, errors, close } = await open('/kb/timeline', '.vp-doc a[href*="papers/"]')
   await page.locator('.vp-doc a', { hasText: 'Figures to look at' }).first().click()
   await page.waitForSelector('h1#paper-title')
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
