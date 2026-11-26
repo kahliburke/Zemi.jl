@@ -14,7 +14,8 @@ import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 
 type Node = { id: string; kind: string; title: string; year?: string; page: string; links: number; status?: string; project?: string
               access?: 'open' | 'projects' | 'private'; mine?: boolean; read?: boolean
-              x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]; cluster?: number
+              x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]; px?: [number, number]; pp?: [number, number, number]
+              cluster?: number
               central?: number; rating?: number }
 type Cluster = { id: number; name: string; description: string; size: number }
 type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean, boolean][]; clusters: Cluster[];
@@ -48,7 +49,7 @@ const keep = (key: string, v: unknown) => { try { localStorage.setItem(`kb-explo
 const view = ref<'2d' | '3d'>(stored('view', '2d'))
 const fly = ref(false)
 // Where documents are placed: by t-SNE (close neighbourhoods kept) or UMAP (more of how groups lie to each other).
-const layout = ref<'tsne' | 'umap'>(stored('layout', 'tsne'))
+const layout = ref<'tsne' | 'umap' | 'pacmap'>(stored('layout', 'tsne'))
 watch(layout, v => keep('layout', v))
 const colourBy = ref<'cluster' | 'kind' | 'whose'>(stored('colour', 'cluster'))
 const shownLinks = ref<string[]>(stored('links', ['cites', 'refers', 'related', 'evidence']))
@@ -303,7 +304,8 @@ function graphData() {
   const deep = view.value === '3d'
   const nodes: GNode[] = g.nodes.filter(visibleNode).map(n => {
     const o: GNode = { ...n } as GNode
-    const flat = layout.value === 'umap' && n.ux ? n.ux : n.x, space = layout.value === 'umap' && n.up ? n.up : n.p
+    const flat = layout.value === 'umap' && n.ux ? n.ux : layout.value === 'pacmap' && n.px ? n.px : n.x
+    const space = layout.value === 'umap' && n.up ? n.up : layout.value === 'pacmap' && n.pp ? n.pp : n.p
     if (flat && !deep) { o.fx = flat[0] * SCALE_2D; o.fy = -flat[1] * SCALE_2D }
     if (space && deep) { o.fx = space[0] * SCALE_3D; o.fy = space[1] * SCALE_3D; o.fz = space[2] * SCALE_3D }
     return o
@@ -403,7 +405,7 @@ async function draw() {
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
       .enableNodeDrag(false)                                                     // placed by meaning, not by hand
       .cooldownTicks(1)
-      .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => drawNearest2d(ctx, scale))
+      .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => { drawTrail2d(ctx, scale); drawNearest2d(ctx, scale) })
       .onRenderFramePost((ctx: CanvasRenderingContext2D, scale: number) => {
         drawNearestLabels2d(ctx, scale)
         drawFocus2d(ctx, scale)                                              // its title over the rest
@@ -440,16 +442,19 @@ async function draw() {
       .nodeThreeObject((n: GNode) => {
         const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: disc, color: shade(n), transparent: true, depthWrite: false }))
         const d = spriteSize(n)
-        sprite.scale.set(d, d, 1)
-        sprite.onBeforeRender = (renderer: any, _scene: any, camera: any) => keepFocusInSight(sprite, n, renderer, camera)
+        sprite.userData.d = d; sprite.scale.set(d, d, 1)
+        sprite.onBeforeRender = (renderer: any, _scene: any, camera: any) => {
+          fitDisc(sprite, n, renderer, camera)
+          keepFocusInSight(sprite, n, renderer, camera)
+        }
         if (n.id === selected.value?.id) { sprite.material.depthTest = false; sprite.renderOrder = 999 }
         sprites.set(n.id, { sprite, node: n })
         return sprite
       })
       .linkColor(linkColour).linkOpacity(0.55)
-      .linkWidth((l: GLink) => (l.kind === 'similar' ? 0 : 0.6))           // 0: a plain line, the cheapest drawn
-      .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 2.5 : 0))
-      .linkDirectionalArrowRelPos(1)
+      // Plain lines, a pixel wide however near: tubes and arrowheads have a size in the space and swell up
+      // close. Which way a link goes is in the card.
+      .linkWidth(0)
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
       .enableNodeDrag(false)
       .cooldownTicks(1)
@@ -480,6 +485,7 @@ async function draw() {
     nearest3d = null
     ring3d = null
     title3d = null
+    trail3d = null
     restyle()
   }
 }
@@ -551,6 +557,14 @@ const pixelSize = (d: number, renderer: any, camera: any) =>
 let focusFrame = -1
 let focus: { at: any; distance: number; radius: number } | null = null
 let scratch: any = null
+// A disc no wider on screen than `DISC_MOST` pixels (the selected one twice that): up close the space
+// between documents keeps growing and the discs do not, so a tight group comes apart.
+const DISC_MOST = 34
+function fitDisc(sprite: any, n: GNode, renderer: any, camera: any) {
+  const most = DISC_MOST * (n.id === selected.value?.id ? 2 : 1) * pixelSize(camera.position.distanceTo(sprite.position), renderer, camera)
+  const k = Math.min(sprite.userData.d, most)
+  if (sprite.scale.x !== k) { sprite.scale.set(k, k, 1); sprite.updateMatrixWorld() }
+}
 function keepFocusInSight(sprite: any, n: GNode, renderer: any, camera: any) {
   if (renderer.info.render.frame !== focusFrame) {
     focusFrame = renderer.info.render.frame
@@ -751,13 +765,14 @@ function restyle() {
   graph.linkColor(linkColour)
   showNearest3d()
   showRing3d()
+  showTrail3d()
   const rel = relevantClusters.value
   for (const { sprite, id } of clusterLabels) sprite.material.opacity = !rel || rel.has(id) ? 1 : DIMMED
   if (view.value === '2d') { graph.nodeColor(shade).nodeVal(size); return }
   for (const { sprite, node } of sprites.values()) {
     sprite.material.color.set(shade(node))
     const d = spriteSize(node)
-    sprite.scale.set(d, d, 1)
+    sprite.userData.d = d; sprite.scale.set(d, d, 1)
     const focused = node.id === selected.value?.id
     sprite.material.depthTest = !focused
     sprite.renderOrder = focused ? 999 : 0
@@ -845,6 +860,45 @@ let driftTimer: ReturnType<typeof setInterval> | undefined
 const seen = new Set<string>()
 // Where a drift has been, in order, with how alike each step was to the one before.
 const driftTrail = ref<{ node: Node; similarity?: number }[]>([])
+watch(() => driftTrail.value.length, () => showTrail3d())
+// The trail drawn where it went: a line through each document in turn, the earliest steps faintest.
+const TRAIL = '#ffb454'
+function trailNodes(): GNode[] {
+  if (driftTrail.value.length < 2 || !graph) return []
+  const at = new Map<string, GNode>(graph.graphData().nodes.map((n: GNode) => [n.id, n]))
+  return driftTrail.value.map(t => at.get(t.node.id)).filter((n): n is GNode => !!n && n.x !== undefined)
+}
+function drawTrail2d(ctx: CanvasRenderingContext2D, scale: number) {
+  const ns = trailNodes()
+  if (ns.length < 2) return
+  ctx.save()
+  ctx.lineCap = 'round'; ctx.lineWidth = 2.5 / scale
+  for (let i = 1; i < ns.length; i++) {
+    ctx.strokeStyle = TRAIL + Math.round((0.25 + 0.75 * i / (ns.length - 1)) * 255).toString(16).padStart(2, '0')
+    ctx.beginPath(); ctx.moveTo(ns[i - 1].x, ns[i - 1].y); ctx.lineTo(ns[i].x, ns[i].y); ctx.stroke()
+  }
+  ctx.fillStyle = TRAIL
+  for (const n of ns) { ctx.beginPath(); ctx.arc(n.x, n.y, 2.5 / scale, 0, 2 * Math.PI); ctx.fill() }
+  ctx.restore()
+}
+let trail3d: any = null
+function showTrail3d() {
+  if (!graph || view.value !== '3d' || !three) return
+  if (trail3d) { graph.scene().remove(trail3d); trail3d.traverse((o: any) => { o.geometry?.dispose(); o.material?.dispose() }); trail3d = null }
+  const ps = driftTrail.value.map(t => sprites.get(t.node.id)?.sprite.position).filter(Boolean)
+  if (ps.length < 2) return
+  const bg = new three.Color(isDark.value ? 0x111116 : 0xfafafa), c = new three.Color(TRAIL)
+  const cols = ps.flatMap((_, i) => { const k = bg.clone().lerp(c, 0.3 + 0.7 * i / (ps.length - 1)); return [k.r, k.g, k.b] })
+  const geometry = new three.BufferGeometry().setFromPoints(ps)
+  geometry.setAttribute('color', new three.Float32BufferAttribute(cols, 3))
+  // A line a pixel wide is lost among the others: a dot at each step, a constant size on screen, marks it.
+  trail3d = new three.Group()
+  const line = new three.Line(geometry, new three.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, depthTest: false }))
+  const dots = new three.Points(geometry.clone(), new three.PointsMaterial({ vertexColors: true, size: 7, sizeAttenuation: false, depthTest: false }))
+  line.renderOrder = dots.renderOrder = 997
+  trail3d.add(line, dots)
+  graph.scene().add(trail3d)
+}
 function drift() {
   if (drifting.value) { stopDrift(); return }
   const start = selected.value ?? data.value?.nodes.find(n => n.x) ?? null
@@ -968,7 +1022,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         </div>
         <button class="kbx-btn" :class="{ on: drifting }" title="Move from document to document along the nearest in meaning, one every few seconds" @click="drift">{{ drifting ? 'Stop' : 'Drift' }}</button>
         <label v-if="drifting" class="kbx-speed" title="Seconds at each document">
-          <input v-model.number="driftEvery" type="range" min="1" max="10" step="0.5" aria-label="Seconds at each document">
+          <input v-model.number="driftEvery" type="range" min="0.1" max="10" step="0.1" aria-label="Seconds at each document">
           <span>{{ driftEvery }} s</span>
         </label>
         <button class="kbx-btn" :class="{ on: showPairs }" title="Pairs of documents close in meaning that nothing links yet" @click="showPairs = !showPairs">Suggested links</button>
@@ -986,6 +1040,8 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
             <div class="kbx-seg kbx-seg-small kbx-wide" role="group" aria-label="Layout">
               <button :class="{ on: layout === 'tsne' }" title="Keeps each document's close neighbourhood" @click="layout = 'tsne'">t-SNE</button>
               <button :class="{ on: layout === 'umap' }" title="Keeps more of how the groups lie to each other" @click="layout = 'umap'">UMAP</button>
+              <button v-if="data?.nodes.some(n => n.px)" :class="{ on: layout === 'pacmap' }"
+                      title="Keeps the neighbourhoods and how the groups lie to each other, the most evenly" @click="layout = 'pacmap'">PaCMAP</button>
             </div>
           </template>
           <span class="kbx-label">Colour by</span>

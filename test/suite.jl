@@ -3179,6 +3179,11 @@ end
         ux = Dict(id => d["ux"] for (id, d) in m["docs"])
         nearest_by_umap(id) = argmin(o -> o == id ? Inf : sum(abs2, ux[o] .- ux[id]), collect(keys(ux)))
         @test all(id -> topic_of[nearest_by_umap(id)] == topic_of[id], collect(keys(ux)))
+        # And by PaCMAP.
+        @test all(d -> length(d["px"]) == 2 && length(d["pp"]) == 3 && all(v -> -1.3 <= v <= 1.3, [d["px"]; d["pp"]]), values(m["docs"]))
+        px = Dict(id => d["px"] for (id, d) in m["docs"])
+        nearest_by_pacmap(id) = argmin(o -> o == id ? Inf : sum(abs2, px[o] .- px[id]), collect(keys(px)))
+        @test all(id -> topic_of[nearest_by_pacmap(id)] == topic_of[id], collect(keys(px)))
         @test !K.explore_map!(kb).changed && !K.explore_stale(kb)
         # Without a landscape, clusters of the map's own, labelled by their titles' words.
         mv(K.landscape_path(c), K.landscape_path(c) * ".kept")

@@ -414,6 +414,82 @@ function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500
 end
 
 """
+    pacmap(X; neighbours = 10, mid_ratio = 0.5, far_ratio = 2, iterations = 450, dims = 2, seed = 1) -> Matrix
+
+A layout in `dims` dimensions of the unit columns of `X` (one row per column) by PaCMAP: pairs of near
+neighbours drawn together, pairs of middling distance drawn together more weakly, and far pairs pushed
+apart, weighted in three phases so the arrangement of groups forms first and neighbourhoods settle last.
+Keeps neighbourhoods as [`umap`](@ref) does and more of the arrangement between groups; seeded.
+"""
+function pacmap(X::AbstractMatrix; neighbours::Integer = 10, mid_ratio::Real = 0.5, far_ratio::Real = 2,
+                iterations::Integer = 450, dims::Integer = 2, seed::Integer = 1)
+    n = size(X, 2)
+    # A small collection has few true neighbours each: no more than a quarter of it.
+    k = clamp(neighbours, 1, max(1, (n - 1) ÷ 4))
+    rng = Random.Xoshiro(seed)
+    distance(s) = sqrt(max(2 - 2s, 0.0))
+    d2(i, j) = max(2 - 2 * dot(view(X, :, i), view(X, :, j)), 0.0)
+    # Near pairs: of each column's nearest, those nearest by distance scaled by both ends' local spread
+    # (the mean distance to their 4th to 6th nearest), so dense and sparse places count alike.
+    candidates = nearest_columns(X, min(k + 50, n - 1))
+    spread = map(candidates) do c
+        ds = [distance(s) for (_, s) in c]
+        max(length(ds) >= 6 ? sum(ds[4:6]) / 3 : ds[end], 1e-10)
+    end
+    near = Tuple{Int,Int}[]
+    for i in 1:n
+        scaled = sort!([(distance(s)^2 / (spread[i] * spread[j]), j) for (j, s) in candidates[i]])
+        foreach(((_, j),) -> push!(near, (i, j)), first(scaled, k))
+    end
+    # Mid-near pairs: of six columns drawn at random, the second nearest.
+    others(i) = (j = rand(rng, 1:n - 1); j >= i ? j + 1 : j)
+    mid = Tuple{Int,Int}[]
+    for i in 1:n, _ in 1:max(1, round(Int, k * mid_ratio))
+        drawn = sort!([(d2(i, j), j) for j in (others(i) for _ in 1:6)])
+        push!(mid, (i, drawn[2][2]))
+    end
+    # Far pairs: columns drawn at random, other than the near.
+    taken = Set(near)
+    far = Tuple{Int,Int}[]
+    for i in 1:n, _ in 1:max(1, round(Int, k * far_ratio))
+        j = others(i)
+        (i, j) in taken || push!(far, (i, j))
+    end
+    start = principal_start(X, dims)
+    start .*= 0.01 / max(sqrt(sum(abs2, start[:, 1] .- sum(start[:, 1]) / n) / n), eps())
+    Y = permutedims(start)                                     # a column each, for speed (assigned once: the closure below reads it)
+    G, M, V = zeros(dims, n), zeros(dims, n), zeros(dims, n)
+    # Each pair's pull (or, negative, push) on the derivative of its loss in d̃ = 1 + |yi - yj|².
+    function pull!(pairs, coefficient)
+        for (i, j) in pairs
+            dd = 1.0
+            for c in 1:dims
+                dd += (Y[c, i] - Y[c, j])^2
+            end
+            g = coefficient(dd)
+            for c in 1:dims
+                x = g * (Y[c, i] - Y[c, j])
+                G[c, i] += x; G[c, j] -= x
+            end
+        end
+    end
+    for it in 1:iterations
+        near_w, mid_w, far_w = it <= 100 ? (2.0, 1000 * (1 - (it - 1) / 100) + 3 * (it - 1) / 100, 1.0) :
+                               it <= 200 ? (3.0, 3.0, 1.0) : (1.0, 0.0, 1.0)
+        fill!(G, 0)
+        pull!(near, dd -> near_w * 20 / (10 + dd)^2)
+        mid_w > 0 && pull!(mid, dd -> mid_w * 20000 / (10000 + dd)^2)
+        pull!(far, dd -> -far_w * 2 / (1 + dd)^2)
+        # Adam, at rate 1.
+        @. M = 0.9 * M + 0.1 * G
+        @. V = 0.999 * V + 0.001 * G^2
+        rate = sqrt(1 - 0.999^it) / (1 - 0.9^it)
+        @. Y -= rate * M / (sqrt(V) + 1e-7)
+    end
+    return permutedims(Y)
+end
+
+"""
 The parameters `(a, b)` of UMAP's curve `1/(1 + a d^2b)` for `min_dist` (spread 1): fitted by least squares,
 on a grid, to 1 below `min_dist` and `exp(-(d - min_dist))` above.
 """
