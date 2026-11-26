@@ -1,23 +1,26 @@
 <!--
   A person's own account in the shared service: who they are (the name they are shown by, theirs to
   change), their roles, what they may do and
-  today's allowances, their library (KBLibraryStatus), and their API tokens, for scripts and for Claude: made with the permissions
-  chosen (never more than their own), shown once, and revoked here.
+  today's allowances, what their library holds (its page is KBLibraryStatus), and their API tokens,
+  for scripts and for Claude: made with the permissions chosen (never more than their own), shown
+  once, and revoked here.
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
 import KBNotifications from './KBNotifications.vue'
-import KBLibraryStatus from './KBLibraryStatus.vue'
 import KBPermissionPicker, { type PermissionGroup } from './KBPermissionPicker.vue'
 import { ref, computed, onMounted } from 'vue'
 import { mode, connect, getJSON, post } from './kbApi'
 import { day } from './kbFormat'
+import { pageLink } from './kbLinks'
 
 type Token = { id: number; name: string; prefix: string; permissions: string[]; created_at: string; expires_at: string;
                last_used: string; revoked: boolean; scope: string }
 type Account = { name: string; email: string; via: string; permissions: string[]; quotas: Record<string, number | null>;
                  accounts: boolean; roles: string[]; tokens: Token[]; permission_groups: PermissionGroup[] }
 const acct = ref<Account | null>(null)
+// What their library holds, for a line leading to its page.
+const library = ref<{ folders: number; documents: number } | null>(null)
 const error = ref('')
 const name = ref('')
 const days = ref(90)
@@ -56,6 +59,12 @@ async function load() {
     shownAs.value = acct.value?.name ?? ''
     if (preset.value !== 'choose') pick(preset.value)
   } catch (e: any) { error.value = e.message }
+  if (acct.value?.permissions.includes('library')) {
+    try {
+      const lib = await getJSON('/api/library')
+      library.value = { folders: lib.folders.length, documents: lib.folders.reduce((n: number, f: any) => n + f.documents, 0) }
+    } catch { library.value = null }
+  }
 }
 onMounted(async () => { await connect(); if (mode.value === 'live') await load() })
 
@@ -104,7 +113,11 @@ const live = computed(() => (acct.value?.tokens ?? []).filter(t => !t.revoked &&
 
         <KBNotifications />
 
-        <KBLibraryStatus v-if="acct.permissions.includes('library')" />
+        <template v-if="library">
+          <h2>Your library</h2>
+          <p>{{ library.folders }} {{ library.folders === 1 ? 'folder' : 'folders' }} · {{ library.documents }}
+            {{ library.documents === 1 ? 'document' : 'documents' }} · <a :href="pageLink('/service/library')">Open your library</a></p>
+        </template>
 
         <h2>Tokens</h2>
         <p class="kb-dim">Keep secret.</p>

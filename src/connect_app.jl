@@ -5,8 +5,8 @@
 # when no other process does (see connect_service.jl); while another does, it shows that one's status
 # and changes the folder list it reads.
 #
-#   ↑/↓ choose a folder · a add · d remove · e what of it syncs · s sync now · p pause · o the
-#   library's page · b background · q quit. The mouse resizes the panes and the table's columns,
+#   ↑/↓ choose a folder · a add · d remove · e what of it syncs · s sync now · p pause · c clear the
+#   activity · o the library's page · b background · q quit. The mouse resizes the panes and the table's columns,
 #   sorts by a column, and scrolls the activity.
 
 import Tachikoma as TK
@@ -155,7 +155,13 @@ function TK.update!(m::ConnectApp, e::TK.KeyEvent)
         tell!(m, paused ? "Syncing again" : "Paused: nothing is synced until you press p again")
     elseif k == :char && c == 'o'
         site = get(m.config, "site", "")
-        isempty(site) || site == "local" || open_quietly("$site/service/account")
+        page = library_page(site)
+        page !== nothing ? open_quietly(page) :
+            tell!(m, isempty(site) ? "No site yet: add a folder" : "The knowledge base on this machine is not served now"; error = true)
+    elseif k == :char && c == 'c'
+        clear_activity!(m.status)
+        refresh!(m)
+        tell!(m, "Activity cleared")
     elseif k == :char && c == 'b'
         to_background!(m)
     end
@@ -250,6 +256,13 @@ function to_background!(m::ConnectApp)
         tell!(m, "Starting the background service")
         TK.spawn_task!(start_background, m.tq, :background)
     end
+end
+
+"The page of one's library at `site`: for `local`, where the knowledge base run here is opened (`nothing` while it is not served)."
+function library_page(site::AbstractString)
+    site == "local" || return isempty(site) ? nothing : "$site/service/library"
+    s = local_served(load_config())
+    return s === nothing ? nothing : "$(rstrip(s.url, '/'))/service/library"
 end
 
 "Open `url` in the browser, saying nothing on the terminal the app draws on."
@@ -460,7 +473,7 @@ function TK.view(m::ConnectApp, f::TK.Frame)
                (note, c !== nothing && c["state"] in ("error", "missing"))
     TK.render(TK.Paragraph(msg; style = err ? TK.tstyle(:error) : TK.tstyle(:text)), rows[2], buf)
     paused = get(m.config, "paused", false) === true
-    keys = "a add · d remove · e what syncs · s sync now · p $(paused ? "resume" : "pause") · o library · b background · q quit"
+    keys = "a add · d remove · e what syncs · s sync now · p $(paused ? "resume" : "pause") · c clear activity · o library · b background · q quit"
     TK.render(TK.StatusBar(; left = [TK.Span(" " * keys, TK.tstyle(:text_dim))]), rows[3], buf)
     m.dialog == :none || draw_dialog(m, inner, buf)
     return nothing

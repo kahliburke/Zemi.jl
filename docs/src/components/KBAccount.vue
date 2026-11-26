@@ -1,6 +1,6 @@
 <!--
-  The top bar's menu of the service's own pages: those the person's roles open (their account and
-  tokens, operations, configuration, setup, administration). In the shared service it is the account
+  The top bar's menu of the service's own pages: those the person's roles open (their library, their
+  account and tokens, operations, configuration, setup, administration). In the shared service it is the account
   menu, under the person's initials, with who is signed in and signing out; an admin viewing the
   service as someone (see view_as! in src/accounts.jl) sees whom, with the way back. Run for one
   person there are no accounts, and it has the pages alone.
@@ -18,6 +18,7 @@ const link = (p: string) => pageLink(`/service/${p}`)
 const initials = computed(() => (me.value?.name || me.value?.email || '?').split(/[\s@.]+/).filter(Boolean).slice(0, 2)
   .map(w => w[0].toUpperCase()).join(''))
 const pages = computed(() => [
+  can('library') && { label: 'Library', href: link('library') },
   shared.value && { label: 'Account', href: link('account') },
   can('server.view') && { label: 'Operations', href: link('operations') },
   can('config.view') && { label: 'Configuration', href: link('configuration') },

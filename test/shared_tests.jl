@@ -2498,6 +2498,23 @@ end
             draw()
             @test TK.find_text(tb, "Notes") !== nothing && TK.find_text(tb, "in step") !== nothing && TK.find_text(tb, "Not sent") !== nothing && TK.find_text(tb, "Private") !== nothing
             @test TK.find_text(tb, "sent") !== nothing && TK.find_text(tb, "Tides.md") !== nothing
+            # c clears the activity: hidden at once, gone from the status at the syncer's next write, and
+            # what moves after shown.
+            TK.update!(m, TK.KeyEvent('c'))
+            @test isempty(m.status["activity"]) && TK.find_text(draw(), "Nothing moved yet.") !== nothing
+            K.write_status(s)
+            @test isempty(s.status["activity"]) && isempty(K.read_connect_status()["activity"])
+            write(joinpath(vault, "Waves.md"), "Swell.\n")
+            K.sync_pass!(s; remote)
+            @test [e["path"] for e in K.read_connect_status()["activity"]] == ["Waves.md"]
+            K.clear_activity!()
+            @test isempty(K.read_connect_status()["activity"])
+            rm(joinpath(vault, "Waves.md"))
+            K.sync_pass!(s; remote)
+            @test paths() == ["Notes/Tides.md"]
+            # o opens the library's page: at the site, or where the knowledge base run here is opened.
+            @test K.library_page(site) == "$site/service/library" && K.library_page("") === nothing
+            @test K.library_page("local") === nothing                                      # not served here
             # Narrow, the table and the activity stay within their panes; the mouse resizes the panes.
             small = TK.TestBackend(50, 16)
             TK.view(m, TK.Frame(small.buf, TK.Rect(1, 1, 50, 16), TK.GraphicsRegion[], TK.PixelSnapshot[]))
@@ -2583,6 +2600,9 @@ end
             @test timedwait(() -> here() == ["Notes/Tides.md"], 20) == :ok
             st = K.read_connect_status()
             @test st["by"] == K.LOCAL_SYNCER && st["pid"] == getpid() && only(st["folders"])["state"] in ("in step", "syncing")
+            # The library's page says so.
+            machine() = K.library_overview(kb, K.local_caller())["this_machine"]
+            @test machine()["by"] == K.LOCAL_SYNCER && only(machine()["folders"])["name"] == "Notes" && !machine()["paused"]
             # A pass asked for is made at once.
             write(joinpath(vault, "Currents.md"), "Rip currents.\n")
             K.request_pass()
@@ -2590,13 +2610,14 @@ end
             # Stopped, it lets go of the syncing and ends, which the app or a pass can take up.
             @test K.connect_cli(["--stop"]) == 0 && !K.synced_by_local()
             @test K.JSON.parse(String(follow().body))["syncing"] == false && istaskdone(t)
-            @test K.syncing_pid() === nothing && K.read_connect_status()["by"] == ""
+            @test K.syncing_pid() === nothing && K.read_connect_status()["by"] == "" && machine()["by"] == ""
             # Turned on from the command line, and taken up when the knowledge base is told.
             @test K.connect_cli(["--background"]) == 0 && K.follow_connect!(kb) isa Task
             K.set_background!(false); follow()
             # Folders kept with a knowledge base elsewhere are not its to sync.
             c = K.load_connect_config(); c["site"] = "https://kb.example.org"; K.save_connect_config!(c)
             @test_throws "not the knowledge base run here" K.set_background!(true)
+            @test machine() === nothing
             # Only the person running it can tell it.
             @test K.handle(kb, K.HTTP.Request("POST", "/api/connect/follow"), K.ANONYMOUS).status in (401, 403)
         end

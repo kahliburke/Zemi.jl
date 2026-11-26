@@ -11,7 +11,7 @@ import KBNeedsService from './KBNeedsService.vue'
 import KBTitle from './KBTitle.vue'
 import { ref, computed, onMounted, watch } from 'vue'
 import { mode, status, connect, post, getJSON, api, shared, jobs, followJobs, finishedJobs, blockers, latest, isStale, can, type Job } from './kbApi'
-import { kbPage } from './kbLinks'
+import { kbPage, pageLink } from './kbLinks'
 import { isCodebase, hasAccess, isResource } from './kbKinds'
 import { byline } from './kbFormat'
 import KBJobs from './KBJobs.vue'
@@ -253,7 +253,7 @@ const who = (d: Doc) => byline(d.authors)
       </div>
       <div v-if="state === 'mine'" class="kbm-intro">
         <p>Notes and files synced from your machines, private until you share them. Select some to share or
-          contribute them.</p>
+          contribute them. <a :href="pageLink('/service/library')">Your library</a> shows each folder synced and how it stands.</p>
         <p v-if="!docs.length && !loading && !q">Empty. To sync a folder, such as an Obsidian vault: <code>{{ connectCommand }}</code></p>
       </div>
       <p v-if="unavailable.length" class="kbm-dim kbm-unavailable">

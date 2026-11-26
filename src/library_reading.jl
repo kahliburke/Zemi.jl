@@ -184,7 +184,25 @@ function library_overview(kb::KB, caller::Caller)
                         (caller.user_id, now_iso()))]
     return Dict("folders" => folders, "used" => library_usage(kb, space), "limit" => library_limit(kb.config),
                 "reading" => being_read(space), "connections" => connections,
+                "this_machine" => space == "people/local" ? local_syncing() : nothing,
                 "person" => Dict("name" => caller_name(caller), "email" => caller.email))
+end
+
+"""
+    local_syncing() -> Union{Dict,Nothing}
+
+How `zemi connect` on this machine keeps folders in step with the knowledge base run here, from the
+status it keeps (see [`Syncer`](@ref)): who syncs (`by`: the knowledge base, `zemi connect`, or ""
+for no one now), when it last wrote (`updated`), an `error` that stopped its last pass, and each
+folder's `name`, `state` and `message`. `nothing` when its folders go elsewhere, or there are none.
+"""
+function local_syncing()
+    c = try load_connect_config() catch; return nothing end
+    get(c, "site", "") == "local" && !isempty(get(c, "folders", Any[])) || return nothing
+    s = read_connect_status()
+    by = syncing_pid() === nothing ? "" : isempty(s["by"]) ? "zemi connect" : String(s["by"])
+    return Dict("by" => by, "updated" => s["updated"], "paused" => get(c, "paused", false) === true, "error" => s["error"],
+                "folders" => [Dict("name" => f["name"], "state" => f["state"], "message" => f["message"]) for f in s["folders"]])
 end
 
 # What one's library holds, and what keeps it in step.

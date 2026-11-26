@@ -106,7 +106,7 @@ DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
     [(name = n, import_path = "@/$n.vue") for n in ("KBSearch", "KBSettings", "KBUpload", "KBManager", "KBCodeTree", "KBSync", "KBLandscape",
                                                       "KBDownload", "KBBibliography", "KBMissing", "KBWatch", "KBDaily", "KBInLibraries", "KBAuthors", "KBAccount",
                                                       "KBSources", "KBServices",
-                                                      "KBAccountPage", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate", "KBPalette",
+                                                      "KBAccountPage", "KBLibraryStatus", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate", "KBPalette",
                                                       "KBProjects", "KBFindings", "KBMarkdownAttachment", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
                                                       "KBStatusTables", "KBCodeFilePage", "KBCodebasePage", "KBCodebases", "KBDayPage",
                                                       "KBRecordPage", "KBRecords", "KBResourcePage", "KBResources", "KBExplore",

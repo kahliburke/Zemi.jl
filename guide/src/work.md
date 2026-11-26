@@ -275,8 +275,8 @@ knowledge base reads, and so do the subfolders and files `--skip` names.
 when it last changed and was checked, and each file as it moves. Its keys add a folder (`a`, Tab
 completing the path), remove one (`d`: stop syncing it, or also remove its files from your library),
 choose what of it syncs from a tree of its files and folders (`e`: space switches one on or off),
-sync now (`s`), pause (`p`), open your library's page (`o`), hand the syncing to the background
-(`b`) and quit (`q`). It syncs while open, unless the background does; then it shows that progress,
+sync now (`s`), pause (`p`), clear the activity (`c`), open your library's page (`o`), hand the
+syncing to the background (`b`) and quit (`q`). It syncs while open, unless the background does; then it shows that progress,
 and the folders it changes are taken up there. Off a terminal, `zemi connect` prints a line for each change instead.
 
 ```@raw html
@@ -292,15 +292,17 @@ them from now and at every login (a launch agent on a Mac, a systemd user servic
 in `~/.local/share/zemi/connect/connect.log`. `--status` says how the folders stand and who syncs
 them, and `--stop` stops either. `--once` syncs once.
 
-**Your library** on the account page shows each folder in your library (its files, the documents read
-from it, whether it is a vault or holds a bibliography, when it last changed), how much of your space it uses, and each
-machine signed in to keep it in step: whether `zemi connect` is syncing there now, and when it last
-synced. Signing a machine out there revokes its sign-in.
+**Library**, in the menu under your badge at the top right, shows each folder in your library (its
+files, the documents read from it, whether it is a vault or holds a bibliography, when it last
+changed), how much of your space it uses, and each machine signed in to keep it in step: whether
+`zemi connect` is syncing there now, and when it last synced. Signing a machine out there revokes
+its sign-in. On the knowledge base run on this machine, it shows instead how this machine's
+`zemi connect` stands: who syncs the folders, and those not in step.
 
 ```@raw html
 <figure class="shot">
-  <img class="light-only" src="./assets/screenshots/library-account-light.png" alt="Your library on the account page: its folders and the machines keeping it in step">
-  <img class="dark-only" src="./assets/screenshots/library-account-dark.png" alt="Your library on the account page: its folders and the machines keeping it in step">
+  <img class="light-only" src="./assets/screenshots/library-account-light.png" alt="Your library's page: its folders and the machines keeping it in step">
+  <img class="dark-only" src="./assets/screenshots/library-account-dark.png" alt="Your library's page: its folders and the machines keeping it in step">
 </figure>
 ```
 
@@ -482,7 +484,7 @@ yours: another person's `hale2024` is theirs.
 Zemi only reads the file, which stays your record. An entry edited is read again; one given a PDF
 since it came in as a resource becomes the paper, in the resource's place; one removed lets its
 document go, unless a PDF in your library is that document still. A PDF no entry links is read as any
-PDF in your library. Under **Your library** on the account page, each `.bib` file shows its entries
+PDF in your library. On your library's page, each `.bib` file shows its entries
 and the documents they came in as, the entries whose linked PDFs are not in the folder, and what in
 the file could not be read.
 
