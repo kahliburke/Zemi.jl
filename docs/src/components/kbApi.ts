@@ -229,10 +229,10 @@ export function followJobs(id?: string): Promise<void> {
 export type Media = { hash: string; name: string; type: string; size: number; address: string }
 
 /** Upload a file to keep with what is written in `project` (see src/media.jl), reporting the share sent so far. */
-export function uploadMedia(file: File, progress: (share: number) => void = () => {}, project = ''): Promise<Media> {
+export function uploadMedia(file: File, progress: (share: number) => void = () => {}, project = '', keep = false): Promise<Media> {
   return new Promise((resolve, reject) => {
     const x = new XMLHttpRequest()
-    x.open('POST', `${api.value}/api/media?name=${encodeURIComponent(file.name)}${project ? `&project=${encodeURIComponent(project)}` : ''}`)
+    x.open('POST', `${api.value}/api/media?name=${encodeURIComponent(file.name)}${project ? `&project=${encodeURIComponent(project)}` : ''}${keep ? '&keep=1' : ''}`)
     x.setRequestHeader('Content-Type', file.type || 'application/octet-stream')
     x.setRequestHeader('X-Zemi', '1')
     x.upload.onprogress = e => e.lengthComputable && progress(e.loaded / e.total)

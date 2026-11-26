@@ -5,6 +5,18 @@
 # are swept after a while. With `[media.backup]` configured, every file is also copied to a private
 # store, and a file missing from disk is restored from it.
 
+# An upload deliberately kept on a project. media_projects separately grants access, including
+# to uploads staged by an editor before their text is saved. Old access grants cannot tell these apart.
+migration!(29, ["""CREATE TABLE project_files (
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    hash TEXT NOT NULL REFERENCES media(hash),
+    name TEXT NOT NULL,
+    PRIMARY KEY (project_id, hash, name))""", "CREATE INDEX project_files_hash ON project_files(hash)"])
+
+project_files(kb, key) = query(kb, """SELECT f.name, 'media/' || f.hash || '/' || f.name AS address
+                                      FROM project_files f JOIN projects p ON p.id = f.project_id
+                                      WHERE p.key = ? ORDER BY f.name COLLATE NOCASE, f.hash""", (key,))
+
 media_dir(c::Config) = joinpath(c.data_dir, "media")
 media_path(c::Config, hash::AbstractString) = joinpath(media_dir(c), hash[1:2], hash)
 
@@ -32,31 +44,38 @@ end
 const MEDIA_ADDRESS = r"media/([0-9a-f]{64})/([A-Za-z0-9._-]+)"
 
 """
-    add_media!(kb, bytes, name; by, user = nothing, project = nothing) -> NamedTuple
+    add_media!(kb, bytes, name; by, user = nothing, project = nothing, keep = false) -> NamedTuple
 
 Keep file `bytes`, named `name`, attached by `by` (and their account, `user`, where they have one)
 in `project` (its key) where given, and return `(; hash,
 name, type, size, address)`, `address` what text refers to it by. The same content added again is
-kept once, and belongs to each project it was attached in. Refused beyond the configured size
+kept once, and belongs to each project it was attached in. With `keep`, it also stays on the
+project board under this name. Refused beyond the configured size
 (`[media] max_mb`).
 """
 function add_media!(kb::KB, bytes::AbstractVector{UInt8}, name::AbstractString; by::AbstractString,
-                    user::Union{Integer,Nothing} = nothing, project::Union{AbstractString,Nothing} = nothing)
+                    user::Union{Integer,Nothing} = nothing, project::Union{AbstractString,Nothing} = nothing, keep::Bool = false)
+    keep && project === nothing && error("Choose a project to keep this file in")
     max = kb.config.media_max_mb * 1024^2
     length(bytes) > max && throw(Refusal(413, "$(media_name(name)) is $(round(length(bytes) / 1024^2; digits = 1)) MB; files here are at most $(kb.config.media_max_mb) MB"))
     isempty(bytes) && error("$(media_name(name)) is empty")
     hash = bytes2hex(sha256(bytes))
     name, type = media_name(name), media_type(name)
     path = media_path(kb.config, hash)
-    if !isfile(path)
-        mkpath(dirname(path))
-        tmp = path * ".part"
-        write(tmp, bytes)
-        mv(tmp, path; force = true)
+    transaction(kb) do
+        execute!(kb, "INSERT OR IGNORE INTO media (hash, name, type, size, added_by, added_at, added_by_user) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                 (hash, name, type, length(bytes), by, now_iso(), something(user, missing)))
+        project === nothing || belongs!(kb, hash, project)
+        keep && execute!(kb, "INSERT OR IGNORE INTO project_files (project_id, hash, name) VALUES (?, ?, ?)",
+                         (project_id(kb, project), hash, name))
+        if !isfile(path)
+            mkpath(dirname(path))
+            tmp = path * ".part"
+            write(tmp, bytes)
+            mv(tmp, path; force = true)
+        end
     end
-    execute!(kb, "INSERT OR IGNORE INTO media (hash, name, type, size, added_by, added_at, added_by_user) VALUES (?, ?, ?, ?, ?, ?, ?)",
-             (hash, name, type, length(bytes), by, now_iso(), something(user, missing)))
-    project === nothing || belongs!(kb, hash, project)
+    keep && tasks_changed!()
     back_up_soon(kb, hash)
     return (; hash, name, type, size = length(bytes), address = "media/$hash/$name")
 end
@@ -139,7 +158,7 @@ route!("POST", "/api/media"; need = "tasks.edit") do c
     project = get(c.params, "project", "")
     isempty(project) || need_project!(c.kb, c.caller, project, CONTRIBUTE)
     Dict(pairs(add_media!(c.kb, body_bytes(c), get(c.params, "name", "file"); by = caller_name(c.caller), user = c.caller.user_id,
-                          project = isempty(project) ? nothing : project)))
+                          project = isempty(project) ? nothing : project, keep = get(c.params, "keep", "") == "1")))
 end
 
 """
@@ -149,7 +168,7 @@ The files text refers to: in task titles and plans, notes and their earlier vers
 milestone descriptions, and findings (their write-ups, earlier versions and evidence).
 """
 function media_in_use(kb::KB)
-    used = Set{String}()
+    used = Set{String}(r.hash for r in query(kb, "SELECT DISTINCT hash FROM project_files"))
     for sql in ("SELECT title || ' ' || body AS text FROM tasks", "SELECT text FROM task_events", "SELECT text FROM task_note_edits",
                 "SELECT description AS text FROM projects", "SELECT description AS text FROM milestones",
                 "SELECT claim || ' ' || body || ' ' || status_reason AS text FROM findings",
@@ -174,14 +193,22 @@ function sweep_media!(kb::KB; grace::Period = Day(7), now::DateTime = Dates.now(
     cutoff = iso(now - grace)
     gone = [String(r.hash) for r in query(kb, "SELECT hash FROM media WHERE added_at < ?", (cutoff,)) if !(r.hash in used)]
     store = media_backup(kb.config)
+    removed = 0
     for h in gone
-        rm(media_path(kb.config, h); force = true)
-        execute!(kb, "DELETE FROM media WHERE hash = ?", (h,))
+        # Another upload may have kept this hash since we collected the sweep candidates.
+        swept = transaction(kb) do
+            changed!(kb, """DELETE FROM media WHERE hash = ? AND added_at < ?
+                            AND NOT EXISTS (SELECT 1 FROM project_files WHERE hash = ?)""", (h, cutoff, h)) > 0 || return false
+            rm(media_path(kb.config, h); force = true)
+            return true
+        end
+        swept || continue
+        removed += 1
         store === nothing || try delete_object!(store, media_key(h)) catch e
             @warn "The backup of a removed file could not be deleted; the next sweep tries again" hash = h exception = e
         end
     end
-    return length(gone)
+    return removed
 end
 
 "For a running service: now and every few hours, sweep unused files and bring the backup up to date."
@@ -319,7 +346,7 @@ function receive_upload!(kb::KB, token::AbstractString, bytes::AbstractVector{UI
     up = lock(() -> get(UPLOADS, token, nothing), UPLOADS_LOCK)
     up === nothing && not_found("This upload link is unknown or used: ask media_upload for another")
     up.expires > now(UTC) || (lock(() -> delete!(UPLOADS, token), UPLOADS_LOCK); throw(Refusal(410, "This upload link expired: ask media_upload for another")))
-    m = add_media!(kb, bytes, up.name; by = up.by.name, user = up.user, project = up.project)
+    m = add_media!(kb, bytes, up.name; by = up.by.name, user = up.user, project = up.project, keep = up.ref == up.project)
     lock(() -> delete!(UPLOADS, token), UPLOADS_LOCK)            # used once it is kept
     note = 0
     if up.post && is_task_ref(up.ref)

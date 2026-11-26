@@ -97,12 +97,31 @@ route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
     Dict("project" => Dict(pairs(p)), "statuses" => STATUS_JSON, "codebase" => codebase_json(kb, p.codebase),
          "access" => access_name(project_access(kb, c.caller, key)), "manages_members" => manages_members(kb, c.caller, key),
          "agents" => Dict(pairs(agents_at_work(kb, key))),
+         "files" => project_files(kb, key),
          "people_did" => Any[Dict(pairs(e)) for e in people_did(kb, key, c.caller)],
          "findings" => Int(scalar(kb, "SELECT count(*) FROM findings WHERE project_id = ? AND archived_at IS NULL", (project_id(kb, key),))),
          "records" => [Dict("id" => r.id, "title" => r.title, "day" => record_day(r.date)) for r in visible_records(kb, c.caller; project = key)],
          "milestones" => [Dict(pairs(m)) for m in milestones(kb, key)],
          "tasks" => Any[task_json(t) for t in tasks(kb; project = key, limit = 5000)],
          "changed_by_others" => Dict(r => Dict(pairs(x)) for (r, x) in changed_by_others(kb, key, my_name(c))))
+end
+
+# Keep an existing attachment on the board, including one uploaded before project files
+# were recorded. The association must already exist in this project.
+route!("POST", "/api/projects/:key/files"; need = "tasks.edit", project = CONTRIBUTE) do c
+    address = strip(String(get(json_body(c), "address", "")))
+    m = match(MEDIA_ADDRESS, address)
+    (m !== nothing && m.match == address) || error("Use the file's media/<hash>/<name> reference")
+    hash, name = m.captures
+    pid = project_id(c.kb, c[:key])
+    transaction(c.kb) do
+        execute!(c.kb, """INSERT OR IGNORE INTO project_files (project_id, hash, name)
+                          SELECT project_id, hash, ? FROM media_projects WHERE project_id = ? AND hash = ?""", (name, pid, hash))
+        scalar(c.kb, "SELECT 1 FROM project_files WHERE project_id = ? AND hash = ? AND name = ?", (pid, hash, name)) === 1 ||
+            not_found("No such attachment in this project")
+    end
+    tasks_changed!()
+    ok_json()
 end
 
 route!("POST", "/api/projects/:key"; need = "tasks.edit", project = MAINTAIN) do c
