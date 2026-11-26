@@ -333,7 +333,7 @@ function mix(a: string, b: string, t: number) {
   return '#' + [0, 1, 2].map(i => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t).toString(16).padStart(2, '0')).join('')
 }
 // The panel on the right: the legend, or what the map shows; open or folded away.
-const panelOpen = ref<boolean>(stored('legend', true))
+const panelOpen = ref<boolean>(stored('legend', typeof window === 'undefined' || window.innerWidth > 640))
 watch(panelOpen, v => keep('legend', v))
 const panel = ref<'colours' | 'show'>(stored('panel', 'colours'))
 watch(panel, v => keep('panel', v))
@@ -887,7 +887,18 @@ function fullScreen() {
   else frame.value?.requestFullscreen?.()
 }
 const onFullScreen = () => { full.value = document.fullscreenElement === frame.value; nextTick(resize) }
+// Where the top row ends, however many lines it wraps to: the panels open below it.
+const bar = ref<HTMLElement | null>(null)
+const barBottom = ref(52)
 onLive(() => {
+  const measure = () => { if (bar.value) barBottom.value = bar.value.offsetTop + bar.value.offsetHeight + 8 }
+  const watcher = new ResizeObserver(measure)
+  if (bar.value) watcher.observe(bar.value)
+  measure()
+  return () => watcher.disconnect()
+})
+onLive(() => {
+  document.documentElement.classList.add('kbx-takeover')
   subset.value = new URLSearchParams(location.search).get('set') ?? ''
   load()
   addEventListener('popstate', fromAddress)
@@ -896,6 +907,7 @@ onLive(() => {
   addEventListener('keydown', key)
   return () => {
     removeEventListener('resize', resize); removeEventListener('keydown', key); removeEventListener('popstate', fromAddress)
+    document.documentElement.classList.remove('kbx-takeover')
     document.removeEventListener('fullscreenchange', onFullScreen)
     clearTimeout(jobTimer); stopDrift(); graph?._destructor?.()
   }
@@ -1111,7 +1123,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 
 <template>
   <KBNeedsService>
-    <div ref="frame" class="kbx" :class="{ dark: isDark, full }">
+    <div ref="frame" class="kbx" :class="{ dark: isDark, full }" :style="{ '--kbx-top': barBottom + 'px' }">
       <div ref="box" class="kbx-canvas"></div>
       <p v-if="loading" class="kbx-status">Loading the map…</p>
       <p v-else-if="error" class="kbx-status kb-error">{{ error }}</p>
@@ -1125,7 +1137,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <button class="kbx-btn" @click="shownKinds.splice(0, shownKinds.length, ...NODE_KINDS.map(([k]) => k))">Show all</button>
       </p>
 
-      <div class="kbx-bar">
+      <div ref="bar" class="kbx-bar">
         <nav v-if="subset" class="kbx-crumbs" aria-label="Where on the map">
           <a href="#" @click.prevent="leaveSet">All documents</a><span aria-hidden="true">›</span>
           <span class="kbx-crumb" :title="data?.set?.name">{{ data?.set?.name ?? '…' }}</span>
@@ -1345,7 +1357,10 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 
 <style scoped>
 :global(.kbx-page) { padding: 8px 12px !important; max-width: none !important; }
-.kbx { position: relative; height: calc(100vh - var(--vp-nav-height, 64px) - 16px); min-height: 480px; border-radius: 10px;
+/* The page is the map: the window does not scroll, and the footer is not drawn beneath it. */
+:global(html.kbx-takeover), :global(html.kbx-takeover body) { overflow: hidden; overscroll-behavior: none; }
+:global(html.kbx-takeover .VPFooter) { display: none; }
+.kbx { position: relative; height: calc(100dvh - var(--vp-nav-height, 64px) - 16px); min-height: 320px; border-radius: 10px;
        overflow: hidden; border: 1px solid var(--vp-c-divider); background: #fafafa; }
 .kbx.dark { background: #111116; }
 .kbx.full { height: 100vh; border-radius: 0; border: 0; }
@@ -1372,7 +1387,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-speed span { min-width: 2.6rem; }
 .kbx-btn { padding: 4px 10px; font-size: 13px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg); color: var(--vp-c-text-1); }
 .kbx-btn.on { background: var(--vp-c-brand-soft); }
-.kbx-panel { position: absolute; top: 52px; right: 10px; max-height: calc(100% - 64px); overflow: auto; border: 1px solid var(--vp-c-divider);
+.kbx-panel { position: absolute; top: var(--kbx-top, 52px); right: 10px; max-height: calc(100% - var(--kbx-top, 52px) - 12px); overflow: auto; border: 1px solid var(--vp-c-divider);
               background: color-mix(in srgb, var(--vp-c-bg) 72%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
               border-radius: 8px; padding: 4px 10px; font-size: 12px; }
 .kbx-panel { width: 18rem; padding: 6px 12px 10px; }
@@ -1433,7 +1448,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-building-card .kbx-building-then { margin-top: 6px; font-size: 13px; color: var(--vp-c-text-2); }
 .kbx-said { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 13px; background: var(--vp-c-bg);
             padding: 3px 12px; border-radius: 8px; border: 1px solid var(--vp-c-divider); cursor: pointer; }
-.kbx-card, .kbx-pairs { position: absolute; top: 52px; left: 10px; width: min(24rem, 45%); max-height: calc(100% - 64px); overflow: auto;
+.kbx-card, .kbx-pairs { position: absolute; top: var(--kbx-top, 52px); left: 10px; width: min(24rem, 45%); max-height: calc(100% - var(--kbx-top, 52px) - 12px); overflow: auto;
                         background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); border-radius: 10px; padding: 10px 14px; font-size: 13px;
                         box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); }
 .kbx-pairs { left: auto; right: 10px; top: auto; bottom: 46px; max-height: 45%; }
