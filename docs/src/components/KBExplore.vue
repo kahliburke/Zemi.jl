@@ -75,6 +75,11 @@ type Detail = { id: string; title: string; authors: string[]; published: string;
 const detail = ref<Detail | null>(null)
 // What the card reads out: the summary, or a note's opening until it has one, or the abstract.
 const cardText = computed(() => detail.value ? detail.value.summary || detail.value.excerpt || detail.value.abstract : '')
+// Whether it runs past the card's few lines: only then is its end faded, with More to read the rest.
+const sumBox = ref<HTMLElement | null>(null)
+const clipped = ref(false)
+const measureSummary = () => { const el = sumBox.value; clipped.value = !!el && el.scrollHeight > el.clientHeight + 2 }
+watch(cardText, () => nextTick(measureSummary))
 const details = new Map<string, Detail>()
 const more = ref(false)
 const render = shallowRef<Render>(escapeText)
@@ -1285,11 +1290,11 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <h3><a :href="selected.page" target="_blank" rel="noopener">{{ selected.title }}</a></h3>
         <template v-if="detail && detail.id === selected.id">
           <p v-if="byline(detail)" class="kbx-byline">{{ byline(detail) }}</p>
-          <div v-if="cardText" class="kbx-summary" :class="{ open: more }">
+          <div v-if="cardText" ref="sumBox" class="kbx-summary" :class="{ open: more, clipped }">
             <p class="kbx-sum-head">{{ detail.summary ? 'Summary' : detail.excerpt ? 'From the note' : 'Abstract' }}</p>
             <div class="kbx-sum-text" v-html="render(cardText)"></div>
           </div>
-          <button v-if="cardText.length > 420" class="kbx-more" @click="more = !more">{{ more ? 'Less' : 'More' }}</button>
+          <button v-if="clipped || more" class="kbx-more" @click="more = !more">{{ more ? 'Less' : 'More' }}</button>
           <div v-if="detail.topics.length" class="kbx-topics"><span v-for="t in detail.topics" :key="t">{{ t }}</span></div>
         </template>
         <div class="kbx-actions kbx-tools">
@@ -1503,7 +1508,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-list a:hover { color: var(--vp-c-brand-1); }
 .kbx-byline { margin: -4px 0 8px; font-size: 12px; color: var(--vp-c-text-2); }
 .kbx-summary { position: relative; max-height: 9.5em; overflow: hidden; font-size: 13px; line-height: 1.5; }
-.kbx-summary:not(.open)::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2.5em;
+.kbx-summary.clipped:not(.open)::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2.5em;
                                  background: linear-gradient(transparent, var(--vp-c-bg)); }
 .kbx-summary.open { max-height: none; }
 .kbx-sum-head { margin: 0 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-3); }
