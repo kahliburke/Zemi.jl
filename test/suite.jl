@@ -3365,7 +3365,7 @@ end
             @test isempty(g["nodes"]) && g["job"] !== nothing && g["set"]["count"] == length(members) && !g["set"]["few"]
             job = K.JOBS[g["job"]]
             wait(job.done)
-            @test job.status == :done
+            @test job.status == :done && job.share !== nothing && 0.5 < job.share <= 1          # how far it had come, step by step
             g = K.explore_set_graph(kb, me, s.spec; abstracts = true)
             @test g["job"] === nothing && Set(n["id"] for n in g["nodes"]) == Set(members) && g["set"]["name"] == cl["name"]
             @test all(n -> length(n["x"]) == 2 && length(n["px"]) == 2 && length(n["pp"]) == 3, g["nodes"]) && length(g["clusters"]) >= 2

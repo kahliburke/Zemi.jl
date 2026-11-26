@@ -74,7 +74,7 @@ function read_links!(kb::KB; progress = msg -> nothing, cancelled = () -> false)
     first_time = isempty(was)
     for (n, id) in enumerate(todo)
         cancelled() && break
-        n % 200 == 1 && progress("Reading the links of $(length(todo)) documents: $n")
+        n % 200 == 1 && progress("Reading links: $n of $(length(todo))")
         doc = ids[id]
         out = try links_from(kb, doc; index, rows) catch e
             @warn "The links of $doc could not be read" exception = e maxlog = 5
@@ -387,7 +387,7 @@ own, labelled by the words of the open documents' titles. Saved as `explore.json
 directory; returns `(; data, changed)`, or `nothing` with fewer than three documents. Nothing is made
 again while the vectors and clusters are as they were.
 """
-function explore_map!(kb::KB; force::Bool = false, progress = msg -> nothing, cancelled = () -> false)
+function explore_map!(kb::KB; force::Bool = false, progress = (msg, share = nothing) -> nothing, cancelled = () -> false)
     c = kb.config
     l = try landscape_layer(c) catch; return nothing end
     rows = explore_rows(kb, l)
@@ -397,18 +397,23 @@ function explore_map!(kb::KB; force::Bool = false, progress = msg -> nothing, ca
     last = read_explore(c)
     !force && last !== nothing && get(last, "input_sha", "") == input_sha && return (; data = last, changed = false)
 
-    progress("Exploring $(length(rows)) documents: reading their vectors")
+    progress("$(length(rows)) documents · reading vectors", 0.0)
     coll = collection_name(c, l)
     got = Qdrant.collection_exists(coll) ? fetch_vectors(coll, [r.point_id for r in rows]) : Dict()
     rows = [r for r in rows if haskey(got, r.point_id)]
     length(rows) < 3 && return nothing
     X = unit_columns(reduce(hcat, [Float64.(got[r.point_id][1]) for r in rows]))
     views = Dict{String,Any}()
-    for (name, keep) in (("read", findall(r -> Bool(r.read), rows)), ("all", collect(eachindex(rows))))
+    made = [(name, keep) for (name, keep) in (("read", findall(r -> Bool(r.read), rows)), ("all", collect(eachindex(rows))))
+            if length(keep) >= 3]
+    # The share done: the vectors read, then each map in proportion to its documents.
+    total, before = sum(length(k) for (_, k) in made; init = 0), 0
+    for (name, keep) in made
         cancelled() && return nothing
-        length(keep) < 3 && continue
-        views[name] = explore_view(c, X[:, keep], rows[keep], land; progress, cancelled,
-                                   what = name == "read" ? "documents read in full" : "documents")
+        at(f) = 0.05 + 0.95 * (before + f * length(keep)) / max(total, 1)
+        views[name] = explore_view(c, X[:, keep], rows[keep], land; progress = (m, f) -> progress(m, at(f)), cancelled,
+                                   what = name == "read" ? "read in full" : "")
+        before += length(keep)
     end
     cancelled() && return nothing
     data = Dict("version" => EXPLORE_VERSION, "input_sha" => input_sha, "built_at" => now_iso(), "layer" => l.name,
@@ -421,10 +426,12 @@ end
 """
 One map (see [`explore_map!`](@ref)): of the documents `rows`, whose unit vectors are `X`'s columns.
 Without the landscape's clusters (`land`), it makes `clusters` of its own, or as many as suit its size.
+`progress(msg, share)` is told each step and the share of the map done before it, by the steps' usual times.
 """
 function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancelled, what, clusters::Integer = c.landscape_clusters)
     n = length(rows)
-    progress("Exploring $n $what: finding each one's nearest")
+    label = strip("$n documents $what")
+    progress("$label · nearest neighbours", 0.0)
     near = nearest_columns(X, EXPLORE_NEIGHBOURS)
     library = nearest_library(X, [is_record(r.id) for r in rows], 5)
     # Laid out by t-SNE: all of them, or the most often near others where there are too many.
@@ -435,21 +442,21 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
         foreach(ns -> foreach(((m, _),) -> often[m] += 1, ns), near)
         sort!(partialsortperm(often, 1:EXPLORE_LAYOUT_LIMIT; rev = true))
     end
-    progress("Exploring $n $what: laying out the map")
+    progress("$label · t-SNE map", 0.05)
     # The nearest by meaning of the laid out, as rows of their layout, for bringing in groups left apart.
     row = Dict(r => k for (k, r) in enumerate(laid))
     near_laid = [[(row[m], s) for (m, s) in near[i] if haskey(row, m)] for i in laid]
     flat = centred(packed(tsne(X[:, laid]; dims = 2); near = near_laid))
     cancelled() && return nothing
-    progress("Exploring $n $what: laying out the space")
+    progress("$label · t-SNE space", 0.25)
     deep = centred(packed(tsne(X[:, laid]; dims = 3); near = near_laid))
     cancelled() && return nothing
     # UMAP too, which keeps more of how the groups lie to each other: every document, its cost growing with their number.
-    progress("Exploring $n $what: laying out the map and the space by UMAP")
+    progress("$label · UMAP", 0.45)
     uflat, udeep = centred(packed(umap(X; dims = 2, min_dist = 0.4); near)), centred(packed(umap(X; dims = 3, min_dist = 0.4); near))
     cancelled() && return nothing
     # And PaCMAP, which keeps the arrangement between groups better still.
-    progress("Exploring $n $what: laying out the map and the space by PaCMAP")
+    progress("$label · PaCMAP", 0.75)
     pflat, pdeep = centred(packed(pacmap(X; dims = 2); near)), centred(packed(pacmap(X; dims = 3); near))
     pos2, pos3 = zeros(n, 2), zeros(n, 3)
     pos2[laid, :], pos3[laid, :] = flat, deep
@@ -510,11 +517,12 @@ end
 
 Bring what the explore page draws up to date: the links read from documents changed since (see
 [`read_links!`](@ref)), and, where Qdrant answers, the map (see [`explore_map!`](@ref)) when its
-vectors or clusters changed.
+vectors or clusters changed. `progress` is told each step, and the share done where it takes one.
 """
-function explore!(kb::KB; progress = msg -> nothing, cancelled = () -> false)
-    read_links!(kb; progress, cancelled)
-    cancelled() || !can_map(kb) || explore_map!(kb; progress, cancelled)
+function explore!(kb::KB; progress = (msg, share = nothing) -> nothing, cancelled = () -> false)
+    say(msg, share = nothing) = applicable(progress, msg, share) ? progress(msg, share) : progress(msg)
+    read_links!(kb; progress = say, cancelled)
+    cancelled() || !can_map(kb) || explore_map!(kb; progress = say, cancelled)
     return nothing
 end
 
@@ -538,7 +546,7 @@ function explore_soon!(kb::KB)
         j !== nothing && j.status == :running && return j
         links_behind(kb) || (explore_stale(kb) && can_map(kb)) || return nothing
         EXPLORE_JOB[] = start_job("explore") do job
-            explore!(kb; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
+            explore!(kb; progress = (m, share = nothing) -> report!(job, m; share), cancelled = () -> cancelled(job))
         end
     end
 end

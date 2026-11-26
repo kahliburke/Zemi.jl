@@ -56,6 +56,7 @@ watch(selected, async n => {
 })
 const error = ref('')
 const building = ref('')
+const buildShare = ref<number | null>(null)          // how much of the map's making is done, where its job says
 const loading = ref(true)
 const box = ref<HTMLDivElement | null>(null)
 let graph: any = null
@@ -148,7 +149,8 @@ async function load() {
   try {
     const g: Graph = await getJSON(`/api/graph?${q}`)
     data.value = g
-    building.value = g.job ? (g.set ? `Laying out ${g.set.count} documents by themselves…` : 'Placing what is new here…') : ''
+    building.value = g.job ? (g.set ? `Mapping ${g.set.count.toLocaleString()} documents…` : 'Updating the map…') : ''
+    buildShare.value = null
     if (g.job) watchJob(g.job)
   } catch (e: any) { error.value = `The map could not be loaded: ${e.message ?? e}` }
   loading.value = false
@@ -205,10 +207,10 @@ function watchJob(id: string) {
   jobTimer = setTimeout(async () => {
     try {
       const j = await getJSON(`/api/jobs/${id}`)
-      if (j.status === 'running') { building.value = j.message || building.value; watchJob(id); return }
-      building.value = ''
+      if (j.status === 'running') { building.value = j.message || building.value; buildShare.value = j.share ?? null; watchJob(id); return }
+      building.value = ''; buildShare.value = null
       if (j.status === 'done') await load()
-    } catch { building.value = '' }
+    } catch { building.value = ''; buildShare.value = null }
   }, 2000)
 }
 
@@ -1090,7 +1092,8 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
       <div v-if="building" class="kbx-building" role="status">
         <div class="kbx-building-card">
           <p><span class="kb-spinner"></span> {{ building }}</p>
-          <p class="kbx-building-then">The map redraws when this is done.</p>
+          <div v-if="buildShare !== null" class="kbx-meter" role="progressbar" :aria-valuenow="Math.round(buildShare * 100)"
+               aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${Math.round(buildShare * 100)}%` }"></span></div>
         </div>
       </div>
       <p v-if="said" class="kbx-said" @click="said = ''">{{ said }}</p>

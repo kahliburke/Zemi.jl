@@ -111,7 +111,7 @@ end
 The map of documents `ids` alone, made as the full map is (see [`explore_view`](@ref)), with clusters
 of its own: kept for the next to ask, as long as the full map is as it was.
 """
-function subset_view!(kb::KB, ids; progress = msg -> nothing, cancelled = () -> false)
+function subset_view!(kb::KB, ids; progress = (msg, share = nothing) -> nothing, cancelled = () -> false)
     v = cached_subset(kb, ids)
     v === nothing || return v
     c, m = kb.config, read_explore(kb.config)
@@ -122,7 +122,7 @@ function subset_view!(kb::KB, ids; progress = msg -> nothing, cancelled = () -> 
     rows = [r for r in rows if haskey(got, r.point_id)]
     length(rows) < 3 && return nothing
     X = unit_columns(reduce(hcat, [Float64.(got[r.point_id][1]) for r in rows]))
-    v = explore_view(c, X, rows, nothing; progress, cancelled, what = "documents in this set", clusters = 0)
+    v = explore_view(c, X, rows, nothing; progress, cancelled, what = "in this set", clusters = 0)
     (v === nothing || cancelled()) && return nothing
     key = subset_key(m, ids)
     lock(SUBSET_LOCK) do
@@ -143,7 +143,7 @@ function subset_soon!(kb::KB, ids)
         j !== nothing && j.status == :running && return j
         SUBSET_JOBS[key] = start_job("explore a set") do job
             try
-                subset_view!(kb, ids; progress = msg -> report!(job, msg), cancelled = () -> cancelled(job))
+                subset_view!(kb, ids; progress = (m, share = nothing) -> report!(job, m; share), cancelled = () -> cancelled(job))
             finally
                 lock(() -> delete!(SUBSET_JOBS, key), SUBSET_LOCK)
             end

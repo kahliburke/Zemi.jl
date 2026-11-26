@@ -89,7 +89,8 @@ html.kbx-takeover .VPFooter { display: none; }
 .kbx-building-card { background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); border-radius: 12px; padding: 18px 26px;
                      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25); text-align: center; max-width: min(32rem, 90%); }
 .kbx-building-card p { margin: 0; font-size: 15px; display: flex; gap: 10px; align-items: center; justify-content: center; }
-.kbx-building-card .kbx-building-then { margin-top: 6px; font-size: 13px; color: var(--vp-c-text-2); }
+.kbx-meter { margin-top: 10px; height: 4px; border-radius: 2px; background: var(--vp-c-default-soft); overflow: hidden; }
+.kbx-meter span { display: block; height: 100%; border-radius: 2px; background: var(--vp-c-brand-1); transition: width 0.6s ease; }
 .kbx-said { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 13px; background: var(--vp-c-bg);
             padding: 3px 12px; border-radius: 8px; border: 1px solid var(--vp-c-divider); cursor: pointer; }
 .kbx-card, .kbx-pairs { position: absolute; top: var(--kbx-top, 52px); left: 10px; width: min(24rem, 45%); max-height: calc(100% - var(--kbx-top, 52px) - 12px); overflow: auto;
