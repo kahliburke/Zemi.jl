@@ -5642,9 +5642,9 @@ end
         status, body = get("/api/search?q=reef+crest")
         @test status == 200 && body["hits"][1]["id"] == id && body["findings"] == []
         # Findings are a kind of their own: asked for alone, no documents are searched; with other kinds, none.
-        @test K.search_kinds("") == (; kinds = nothing, documents = true, findings = true)
-        @test K.search_kinds("paper, code") == (; kinds = ["paper", "code"], documents = true, findings = false)
-        @test K.search_kinds("finding") == (; kinds = String[], documents = false, findings = true)
+        @test K.search_kinds("") == (; kinds = nothing, documents = true, findings = true, publications = true)
+        @test K.search_kinds("paper, code") == (; kinds = ["paper", "code"], documents = true, findings = false, publications = false)
+        @test K.search_kinds("finding") == (; kinds = String[], documents = false, findings = true, publications = false)
         @test get("/api/search?q=reef+crest&kinds=finding")[2]["hits"] == []
         top = body["hits"][1]
         @test only(top["evidence"])["ranking"] == "keyword" && only(top["evidence"])["rank"] == 1
@@ -5758,7 +5758,8 @@ end
           Set(["search", "paper", "read", "figures", "figure", "page", "references", "similar", "ingest", "add_pdf", "ingest_code", "papers", "records", "status", "daily", "sync", "publish", "job_status",
                "projects", "tasks", "task", "next_task", "plan", "task_update", "task_note", "task_note_edit", "task_diff", "task_link", "project_create", "project_codebase", "library", "library_add", "milestones",
                "milestone_create", "milestone_update", "milestone_activate", "milestone_done", "task_wait", "task_search", "task_match", "task_status", "task_attach", "media_upload", "media", "task_note_remove",
-               "findings", "finding", "finding_draft", "finding_update", "finding_comment", "finding_evidence", "ingest_history"])
+               "findings", "finding", "finding_draft", "finding_update", "finding_comment", "finding_evidence", "ingest_history",
+               "publication", "publication_draft", "publication_publish"])
     # Each says what it needs over /mcp; those that read the service's own disk are offered no one there.
     @test all(t -> t.need === nothing || t.need in K.PERMISSION_NAMES, K.TOOLS[])
     # Each permission is in one group of those the forms choose them by, with what it allows.

@@ -40,7 +40,7 @@ const pages = computed(() => [
   ['Search', kbPage('index')], ['Paper of the Day', kbPage('daily')], ['Landscape', kbPage('landscape')], ['Topics', kbPage('topics')],
   ['Authors', kbPage('authors')], ['Missing papers', kbPage('missing')], ['New on arXiv', kbPage('watch')], ['Timeline', kbPage('timeline')],
   ['Status', kbPage('status')], ['Documents', kbPage('manage')], ['Codebases', kbPage('code/')],
-  ['Projects', pageLink('/projects')], ['Findings', pageLink('/findings')],
+  ['Projects', pageLink('/projects')], ['Publications', pageLink('/publications/')], ['Findings', pageLink('/findings')],
   ...(shared.value ? [['Account', pageLink('/service/account')]] : []),
   ...(can('server.view') ? [['Operations', pageLink('/service/operations')]] : []),
   ...(can('config.view') ? [['Configuration', pageLink('/service/configuration')]] : []),

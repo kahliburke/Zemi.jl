@@ -83,26 +83,28 @@ other work, each saying how it was made) are found too.
 - `keyword`: include keyword search (false for meaning-only search).
 - `layers`: comma-separated layer names to use, or "all" (default: the layers built on the
   strongest model; see `status`).
-- `project`: a project's key, to search only the papers in its library, and its findings.
-- `kind`: "paper", "code", "record" or "finding" for only those (a comma list for several).
+- `project`: a project's key, to search only the papers in its library, its findings and its publications.
+- `kind`: "paper", "code", "record", "publication" or "finding" for only those (a comma list for several).
 """
 function search_tool(query::String; limit::Int = 8, category::String = "", since::Int = 0,
                      keyword::Bool = true, layers::String = "", project::String = "", kind::String = "")::String
     isempty(project) || tool_needs(project, VIEW)
     only = isempty(project) ? nothing : library_papers(kb(), project)
-    only !== nothing && isempty(only) && return "$(uppercase(strip(project)))'s library has no papers yet: see `library`."
     caller = tool_caller()
     want = search_kinds(kind)
-    hits = !want.documents ? [] : search(kb(), query; limit, keyword, only, except = unfound_documents(kb(), caller), want.kinds,
+    hits = !want.documents || (only !== nothing && isempty(only)) ? [] : search(kb(), query; limit, keyword, only, except = unfound_documents(kb(), caller), want.kinds,
         category = isempty(category) ? nothing : category,
         since = since == 0 ? nothing : since,
         layers = isempty(layers) ? kb().config.search_layers : layers == "all" ? nothing : split_list(layers))
     seen = isempty(project) ? visible_projects(kb(), caller) : (uppercase(strip(project)),)
     found = want.findings && can(caller, "tasks.view") ? search_findings(kb(), query; projects = seen, limit = want.documents ? 5 : limit) : NamedTuple[]
-    isempty(hits) && isempty(found) && return "No matches for \"$query\"."
+    works = want.publications ? publication_list(kb(), caller; q = query, project, limit) : []
+    isempty(hits) && isempty(found) && isempty(works) && return "No matches for \"$query\"."
     findings = isempty(found) ? "" : "## Findings (read one with `finding`)\n\n" * join(("- $(f.ref) [$(f.status)] $(f.claim)" for f in found), "\n")
-    want.documents || return findings
-    return (isempty(hits) ? "No documents match." : format_hits(hits)) * (isempty(findings) ? "" : "\n\n" * findings)
+    papers = isempty(hits) ? "" : format_hits(hits)
+    publications = isempty(works) ? "" : "## Publications\n\n" * join(("- $(w.title) — $(w.authors), v$(w.version) " *
+        site_base(kb().config) * publication_url(w.id, w.version) for w in works), "\n")
+    return join(filter(!isempty, [papers, findings, publications]), "\n\n")
 end
 tool!("search", search_tool; need = "read")
 

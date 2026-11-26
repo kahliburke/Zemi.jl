@@ -148,7 +148,8 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
         else
             # A codebase the site is built without, any record and any paper not open to all are answered here, to those who may see them.
             caller, path = shared ? caller : local_caller(), HTTP.unescapeuri(uri.path)
-            live = codebase_site_response(kb, caller, path; req)
+            live = publication_site_response(kb, caller, path; req)
+            live === nothing && (live = codebase_site_response(kb, caller, path; req))
             live === nothing && (live = record_site_response(kb, caller, path; req))
             live === nothing && (live = closed_paper_response(kb, caller, path; req))
             f = live === nothing ? site_file(kb.config, uri.path) : nothing

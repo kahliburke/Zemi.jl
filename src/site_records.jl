@@ -76,23 +76,22 @@ function record_site_response(kb::KB, caller::Caller, path::AbstractString; req:
     (isempty(rows) || !document_visible(kb, caller, first(rows).doc_id)) && return not_found_page(kb.config)
     p = first(rows)
     what == :page_data && return live_data_response(record_page_json(kb, p))
-    return live_page_response(kb, "records", "kb/records/$(p.doc_id)", what, m; req)
+    return live_page_response(kb, Dict(TEMPLATED)["records"].template, "kb/records/$(p.doc_id)", what, m; req)
 end
 
 "A page's data, answered for one caller: not kept by the browser."
 live_data_response(data) = (r = json_response(data); HTTP.setheader(r, "Cache-Control" => "no-store"); r)
 
 """
-    live_page_response(kb, kind, page, what, m; req = nothing) -> Union{HTTP.Response,Nothing}
+    live_page_response(kb, template, page, what, m; req = nothing) -> Union{HTTP.Response,Nothing}
 
-A page of templated `kind` (see `TEMPLATED`) the service answers rather than the site (`page`, its
+A page drawn from `template` the service answers rather than the site (`page`, its
 address without `.html`): for `what` `:page`, the kind's built template; for `:page_script`, the copy of
 its script that names `page`, its tail `m[:tail]`. `nothing` when the site served lacks the template.
 """
-function live_page_response(kb::KB, kind::AbstractString, page::AbstractString, what::Symbol, m; req = nothing)
+function live_page_response(kb::KB, template::AbstractString, page::AbstractString, what::Symbol, m; req = nothing)
     root = current_site(kb.config)
     root === nothing && return nothing
-    template = Dict(TEMPLATED)[kind].template
     if what == :page
         f = joinpath(root, template * ".html")
         return isfile(f) ? file_response(f; req) : nothing
@@ -130,7 +129,7 @@ function closed_paper_response(kb::KB, caller::Caller, path::AbstractString; req
     id = String(first(rows).doc_id)
     document_visible(kb, caller, id) || return not_found_page(kb.config)
     what == :page_data && return live_data_response(paper_json(site_paper(kb, id); notebooks = paper_notebooks(kb, id), cite = cite_json(kb, id)))
-    return live_page_response(kb, "papers", "kb/papers/$(m[:slug])", what, m; req)
+    return live_page_response(kb, Dict(TEMPLATED)["papers"].template, "kb/papers/$(m[:slug])", what, m; req)
 end
 
 """

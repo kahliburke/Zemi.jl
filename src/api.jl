@@ -250,6 +250,7 @@ route!("GET", "/api/search") do c
     page = site_link(kb.config, "kb/index")
     Dict("query" => q, "seconds" => t, "k" => kb.config.rrf_k, "hits" => [hit_json(kb, h) for h in hits],
          "link" => isempty(page) ? "" : page * "?q=" * HTTP.escapeuri(q),
+         "publications" => want.publications ? publication_list(kb, c.caller; q, limit) : [],
          "findings" => Any[Dict(pairs(f)) for f in found])
 end
 
@@ -330,6 +331,10 @@ end
 # of those the caller may find: the Knowledge base page's list, while its search is set to that kind.
 route!("GET", "/api/recent") do c
     kind = get(c.params, "kind", "")
+    if kind == "publication"
+        works = publication_list(c.kb, c.caller; limit = int_param(c.params, "limit", 15, 1:100))
+        return [(; w.id, w.title, authors = [w.authors], kind, url = publication_url(w.id), posted = first(w.published_at, 10)) for w in works]
+    end
     any(k -> k.name == kind, DOCUMENT_KINDS) || error("No kind of document named $(repr(kind))")
     found = list_documents(c.kb; state = kind, except = unfound_documents(c.kb, c.caller), limit = int_param(c.params, "limit", 15, 1:100))
     Any[Dict("id" => d.id, "page" => d.page, "title" => d.title, "authors" => d.authors, "kind" => d.kind, "posted" => d.posted)

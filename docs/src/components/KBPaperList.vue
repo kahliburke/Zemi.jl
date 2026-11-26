@@ -9,7 +9,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vitepress'
 import { pageDrawn } from './kbTemplates'
-import { paperHref, kbPage } from './kbLinks'
+import { paperHref, kbPage, pageLink } from './kbLinks'
 import { getJSON } from './kbApi'
 import { searchKind } from './kbSearchPrefs'
 import { loadPapers, type Paper } from './kbData'
@@ -37,7 +37,7 @@ const months = computed(() => {
 })
 
 // The recent documents of the kind the search is set to, while it is set to one (findings are not documents).
-type Recent = { id: string; page: string; title: string; authors: string[]; kind: string; posted: string }
+type Recent = { id: string; page: string; url?: string; title: string; authors: string[]; kind: string; posted: string }
 const ofKind = ref<Recent[] | null>(null)
 let asked = 0
 watch(searchKind, async k => {
@@ -78,7 +78,7 @@ defineExpose({ count: computed(() => shown.value.length) })
   </template>
   <ul v-else-if="ofKind" class="kbpl">
     <li v-for="d in ofKind" :key="d.id">
-      <a :href="kbPage(d.page)">{{ d.title }}</a><template v-if="d.authors.length"> · {{ byline(d.authors, 1, d.authors.length) }}</template><template v-if="d.posted"> · {{ d.posted }}</template>
+      <a :href="d.url ? pageLink(d.url) : kbPage(d.page)">{{ d.title }}</a><template v-if="d.authors.length"> · {{ byline(d.authors, 1, d.authors.length) }}</template><template v-if="d.posted"> · {{ d.posted }}</template>
     </li>
     <li v-if="!ofKind.length" class="kb-dim">None of this kind yet.</li>
   </ul>

@@ -3,17 +3,17 @@
 # task_vectors.jl). Findings belong to projects, so a search names which ones it may see.
 
 """
-    search_kinds(given) -> (; kinds, documents, findings)
+    search_kinds(given) -> (; kinds, documents, findings, publications)
 
 What a search asks for, from its comma-separated kinds (empty for everything): the kinds of
-document (`nothing` for every kind), whether to search documents at all, and whether findings,
-named as the kind `finding`.
+document (`nothing` for every kind), whether to search documents, and whether to include findings
+and publications, named as the kinds `finding` and `publication`.
 """
 function search_kinds(given::AbstractString)
     asked = split_list(given)
-    isempty(asked) && return (; kinds = nothing, documents = true, findings = true)
-    kinds = filter(!=("finding"), asked)
-    return (; kinds, documents = !isempty(kinds), findings = "finding" in asked)
+    isempty(asked) && return (; kinds = nothing, documents = true, findings = true, publications = true)
+    kinds = filter(k -> k ∉ ("finding", "publication"), asked)
+    return (; kinds, documents = !isempty(kinds), findings = "finding" in asked, publications = "publication" in asked)
 end
 
 """

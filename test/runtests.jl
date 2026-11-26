@@ -106,4 +106,5 @@ end
 @testset "Zemi" begin
     include("suite.jl")
     include("shared_tests.jl")
+    include("publications.jl")
 end

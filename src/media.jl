@@ -169,7 +169,8 @@ milestone descriptions, and findings (their write-ups, earlier versions and evid
 """
 function media_in_use(kb::KB)
     used = Set{String}(r.hash for r in query(kb, "SELECT DISTINCT hash FROM project_files"))
-    for sql in ("SELECT title || ' ' || body AS text FROM tasks", "SELECT text FROM task_events", "SELECT text FROM task_note_edits",
+    union!(used, (r.pdf_hash for r in query(kb, "SELECT DISTINCT pdf_hash FROM publication_editions WHERE pdf_hash IS NOT NULL")))
+    for sql in ("SELECT body AS text FROM publication_editions", "SELECT title || ' ' || body AS text FROM tasks", "SELECT text FROM task_events", "SELECT text FROM task_note_edits",
                 "SELECT description AS text FROM projects", "SELECT description AS text FROM milestones",
                 "SELECT claim || ' ' || body || ' ' || status_reason AS text FROM findings",
                 "SELECT claim || ' ' || body || ' ' || status_reason AS text FROM finding_versions",
@@ -198,7 +199,9 @@ function sweep_media!(kb::KB; grace::Period = Day(7), now::DateTime = Dates.now(
         # Another upload may have kept this hash since we collected the sweep candidates.
         swept = transaction(kb) do
             changed!(kb, """DELETE FROM media WHERE hash = ? AND added_at < ?
-                            AND NOT EXISTS (SELECT 1 FROM project_files WHERE hash = ?)""", (h, cutoff, h)) > 0 || return false
+                            AND NOT EXISTS (SELECT 1 FROM project_files WHERE hash = ?)
+                            AND NOT EXISTS (SELECT 1 FROM publication_editions WHERE pdf_hash = ?
+                                            OR instr(body, 'media/' || ? || '/') > 0)""", (h, cutoff, h, h, h)) > 0 || return false
             rm(media_path(kb.config, h); force = true)
             return true
         end

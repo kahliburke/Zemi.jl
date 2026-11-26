@@ -13,7 +13,7 @@ import { mode, publicDemo, connect, getJSON, latest, isStale } from './kbApi'
 import { loadPapers, type Paper } from './kbData'
 import { byline } from './kbFormat'
 import { current, vectorless, searchKind } from './kbSearchPrefs'
-import { kbPage, findingHref } from './kbLinks'
+import { pageLink, kbPage, findingHref } from './kbLinks'
 import { markedSnippet } from './kbUtils'
 import { refsTextHtml, clipRefs } from './kbRefs'
 
@@ -28,11 +28,12 @@ type Hit = { id: string; slug: string; kind?: string; page?: string; title: stri
 const query = ref('')
 // The kinds of document found: every kind, or one (see src/kinds.jl).
 const KINDS = [{ id: '', label: 'everything' }, { id: 'paper', label: 'papers' }, { id: 'code', label: 'codebases' },
-               { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }, { id: 'finding', label: 'findings' }]
+               { id: 'record', label: 'records' }, { id: 'resource', label: 'resources' }, { id: 'finding', label: 'findings' }, { id: 'publication', label: 'publications' }]
 const kind = searchKind
 const choose = (k: string) => { searchKind.value = k }
 const hits = ref<Hit[]>([])
 type Found = { ref: string; claim: string; status: string; snippet: string }
+const publications = ref<{ id: number; title: string; authors: string; version: number }[]>([])
 const found = ref<Found[]>([])
 const busy = ref(false)
 const error = ref('')
@@ -100,7 +101,7 @@ const keywords = latest()
 function runSearch(q: string, delay = 350) {
   clearTimeout(timer)
   error.value = ''
-  if (!q.trim()) { searching.cancel(); keywords.cancel(); busy.value = false; partial.value = false; hits.value = []; found.value = []; seconds.value = null; return }
+  if (!q.trim()) { searching.cancel(); keywords.cancel(); busy.value = false; partial.value = false; hits.value = []; found.value = []; publications.value = []; seconds.value = null; return }
   if (mode.value === 'static') { hits.value = searchStatic(q); return }
   // Busy from the keystroke, not from when the pause in typing ends.
   busy.value = true
@@ -114,12 +115,12 @@ function runSearch(q: string, delay = 350) {
     if (c.layers.length && c.keyword)
       keywords(signal => getJSON(url('none', true), { signal })).then(data => {
         if (answered) return
-        hits.value = data.hits; found.value = data.findings ?? []; seconds.value = null; partial.value = true
+        hits.value = data.hits; found.value = data.findings ?? []; publications.value = data.publications ?? []; seconds.value = null; partial.value = true
       }).catch(() => {})
     try {
       const data = await searching(signal => getJSON(url(c.layers.length ? c.layers.join(',') : 'none', c.keyword), { signal }))
       answered = true
-      hits.value = data.hits; found.value = data.findings ?? []; seconds.value = data.seconds; partial.value = false
+      hits.value = data.hits; found.value = data.findings ?? []; publications.value = data.publications ?? []; seconds.value = data.seconds; partial.value = false
     } catch (e: any) {
       if (isStale(e)) return
       error.value = `Search failed: ${e.message ?? e}`
@@ -201,6 +202,12 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
         </div>
       </li>
     </ol>
+    <section v-if="publications.length" class="kb-findings">
+      <h3>Publications</h3>
+      <a v-for="p in publications" :key="p.id" class="kb-finding" :href="pageLink(`/publications/${p.id}/`)">
+        <strong>{{ p.title }}</strong> · {{ p.authors }} · v{{ p.version }}
+      </a>
+    </section>
     <div v-if="found.length" class="kb-findings">
       <div class="kb-findings-head">Findings</div>
       <a v-for="f in found" :key="f.ref" class="kb-finding" :href="findingHref(f.ref)">
@@ -210,7 +217,7 @@ const pagesOf = (p: Passage) => p.page_start === p.page_end ? `p. ${p.page_start
       </a>
     </div>
     </div>
-    <p v-if="query.trim() && !busy && !hits.length && !found.length && !error" class="kb-note">Nothing found.</p>
+    <p v-if="query.trim() && !busy && !hits.length && !found.length && !publications.length && !error" class="kb-note">Nothing found.</p>
   </div>
 </template>
 

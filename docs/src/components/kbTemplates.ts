@@ -34,6 +34,7 @@ const keyPatterns = KINDS.map(k => ({
 }))
 
 function templateKey(key: string): string | undefined {
+  if (/^publications_\d+_(?:v\d+_)?index\.md$/.test(key)) return keyOf('publications/index')
   const hit = keyPatterns.find(p => p.pattern.test(key))
   return hit && keyOf(hit.kind.template)
 }

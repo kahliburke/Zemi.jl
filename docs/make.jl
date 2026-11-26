@@ -107,7 +107,7 @@ DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
                                                       "KBDownload", "KBBibliography", "KBMissing", "KBWatch", "KBDaily", "KBInLibraries", "KBAuthors", "KBAccount",
                                                       "KBSources", "KBServices",
                                                       "KBAccountPage", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate", "KBPalette",
-                                                      "KBProjects", "KBFindings", "KBMarkdownAttachment", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
+                                                      "KBProjects", "KBPublications", "KBFindings", "KBMarkdownAttachment", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
                                                       "KBStatusTables", "KBCodeFilePage", "KBCodebasePage", "KBCodebases", "KBDayPage",
                                                       "KBRecordPage", "KBRecords", "KBResourcePage", "KBResources", "KBExplore",
                                                       "KBSetup", "KBInstall", "KBOpenSource")]
@@ -183,6 +183,16 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
         config = replace(config, plugins => plugins * raw"""
       {
         name: 'kb-templated-pages',
+        enforce: 'pre',
+        // Give each live edition its own Markdown id so the router keeps its permalink on reload.
+        resolveId(source) {
+          if (/^\/publications\/[1-9]\d*\/(?:v[1-9]\d*\/)?index\.md$/.test(source))
+            return path.join(__dirname, '..', source)
+        },
+        load(id) {
+          if (/\/publications\/[1-9]\d*\/(?:v[1-9]\d*\/)?index\.md$/.test(id))
+            return kbRead(path.join(__dirname, '../publications/index.md'), 'utf8')
+        },
         configureServer(server) {
           const kinds = """ * kinds * raw""".map(k => ({
             pattern: new RegExp('^/' + k.folder.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('[^/]+') + '/[^/]+\\.md$'),
@@ -195,7 +205,7 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
           })
         },
       },"""; count = 1)
-        config = "import { existsSync as kbExists } from 'node:fs'\n" * config
+        config = "import { existsSync as kbExists, readFileSync as kbRead } from 'node:fs'\n" * config
     end
     # The components read the knowledge base API's address from `__KB_API__`, link to the site's pages
     # as the config has them (kbLinks.ts), and know the pages made from a template (kbTemplates.ts)
