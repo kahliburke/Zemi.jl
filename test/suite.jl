@@ -355,7 +355,7 @@ end
         title == "Larval dispersal on fringing reefs" ? work("Larval Dispersal On Fringing Reefs") : nothing)
     # By the DOI on the first page, when the record's title is printed there too.
     r = K.lookup_upload(page((:title, "PHYSICA"), (:front, "Larval dispersal on fringing reefs"), (:footnote, "https://doi.org/10.1234/X.")); find)
-    @test r == (; title = "Larval dispersal on fringing reefs", authors = ["D. del-Monte-Hale"], year = "1996", journal = "Physica D",
+    @test r == (; title = "Larval dispersal on fringing reefs", authors = ["D. del-Monte-Hale"], orcids = [nothing], year = "1996", journal = "Physica D",
                 journal_ref = "Physica D 91, 1 (1996)", doi = "10.1234/x", abstract = "Larval dispersal")
     @test first(asked) == "10.1234/x"
     # A DOI whose record's title is not on the page is not taken; an exact title is found instead.
@@ -573,7 +573,60 @@ end
     @test co.papers == ["2609.00003", "2609.00002"] && Set(co.variants) == Set(["Cyrus Okafor", "C. Okafor"])   # a non-breaking space is a space
     listed = K.format_paper_list(kb, "", "", 30; author = "iles")
     @test occursin("2 paper(s)", listed) && !occursin("2609.00003", listed)
-    @test Dict("name" => "D. Iles", "key" => "iles|d") in K.paper_json(K.site_paper(kb, "2609.00002"; related = false))["authors"]
+    @test Dict("name" => "D. Iles", "key" => "name:D. Iles") in K.paper_json(K.site_paper(kb, "2609.00002"; related = false))["authors"]
+    close(kb)
+end
+
+@zset "author identities and co-publication visibility" begin
+    x = "https://orcid.org/0000-0002-1694-233X" # example from ORCID's checksum documentation
+    @test K.orcid_uri("0000-0002-1694-233x") == K.orcid_uri(replace(x, "https:" => "http:")) == x
+    @test all(isnothing ∘ K.orcid_uri, (nothing, "", "0000-0002-1694-2330", x * "?next=other", "https://elsewhere.test/0000-0002-1694-233X"))
+    name = "Example Author"
+    work = Dict("authorships" => [Dict("author" => Dict("display_name" => name, "orcid" => x)),
+                                   Dict("raw_author_name" => "E. Author", "raw_orcid" => x, "author" => Dict("display_name" => name))],
+                "primary_location" => nothing, "biblio" => nothing, "publication_year" => nothing, "title" => "Example",
+                "doi" => nothing, "abstract_inverted_index" => nothing)
+    rec = K.work_record(work)
+    @test rec.authors == [name, "E. Author"] && rec.orcids == [nothing, x]
+    stored = K.stored_orcids(rec.authors, rec.orcids)
+    @test K.byline_ids(rec.authors, stored) == [nothing, x]
+    @test all(isnothing, K.byline_ids(reverse(rec.authors), stored))
+    kb = open_kb(temp_config())
+    K.ensure_roles!(kb)
+    reader = K.add_test_account!(kb, "Graph Reader"; roles = ["Reader"])
+    curator = K.add_test_account!(kb, "Graph Curator"; roles = ["Curator"])
+    who(id) = K.account_caller(kb, id, :session)
+    ids = ["2609.00101", "2609.00102", "2609.00103"]
+    add_papers!(kb, ids)
+    for id in ids
+        K.execute!(kb, "UPDATE papers SET metadata_at = ?, authors = ?, author_orcids = ? WHERE doc_id = ?",
+                   (K.now_iso(), K.JSON.json(rec.authors), stored, id))
+    end
+    K.set_document_access!(kb, ids[2], "private"; holder = curator)
+    K.set_document_access!(kb, ids[3], "projects")
+    K.create_project!(kb, "Consortium"; key = "CO", owner = curator, by = K.person("Curator"))
+    K.link_document!(kb, ids[3], "CO")
+    @test [p.id for p in K.author_publications(kb)] == [ids[1]]
+    api(c) = K.handle(kb, K.HTTP.Request("GET", "/api/author-publications"), c)
+    read = api(who(reader))
+    @test read.status == 200 && K.HTTP.header(read, "Cache-Control") == "no-store"
+    @test [p["id"] for p in K.JSON.parse(String(read.body))] == [ids[1]]
+    @test Set(p.id for p in K.author_publications(kb, who(curator))) == Set(ids)
+    edit(id, value, old; caller = who(curator), signature = name) = K.handle(kb, K.HTTP.Request("POST", "/api/author-orcid",
+        ["Content-Type" => "application/json"], K.JSON.json(Dict("paper" => id, "position" => 1, "name" => signature,
+        "orcid" => value, "previous" => old))), caller)
+    @test edit(ids[1], x, nothing; caller = who(reader)).status == 403
+    K.set_roles!(kb, reader, ["Curator"])
+    @test edit(ids[2], x, nothing; caller = who(reader)).status == 404
+    @test edit(ids[1], x, nothing; signature = "Elsewhere").status == 409
+    @test edit(ids[1], "0000-0002-1694-2330", nothing).status == 400
+    @test edit(ids[1], x, nothing).status == 200
+    @test edit(ids[1], "", nothing).status == 409
+    @test only(K.author_publications(kb)).authors[1].orcid == x
+    @test edit(ids[1], "", x).status == 200
+    @test isnothing(only(K.author_publications(kb)).authors[1].orcid)
+    corrected = K.scalar(kb, "SELECT author_orcids FROM papers WHERE doc_id = ?", (ids[1],))
+    @test K.byline_ids(rec.authors, K.refreshed_orcids(rec.authors, [x, x], corrected)) == [nothing, x]
     close(kb)
 end
 
@@ -1997,6 +2050,8 @@ end
                    (K.paper_id(kb, id), at, who))
     end
     K.execute!(kb, "UPDATE papers SET title = 'T ' || doc_id, abstract = 'A', authors = '[\"X\"]', categories = '[]', metadata_at = 'x'")
+    uri = "https://orcid.org/0000-0002-1694-233X"
+    K.execute!(kb, "UPDATE papers SET author_orcids = ? WHERE doc_id = '2609.00001'", (K.stored_orcids(["X"], [uri]),))
     base = joinpath(mktempdir(), "base.json")
     @test export_base_set(kb, base; source = "seminar") == 2
     close(kb)
@@ -2006,6 +2061,7 @@ end
     @test K.scalar(fresh, "SELECT count(*) FROM papers") == 2
     @test [m.author for m in mentions(fresh, "2609.00001")] == ["Ada", "Alan"]
     @test K.paper_row(fresh, "2609.00002").title == "T 2609.00002"
+    @test K.byline_ids(["X"], K.paper_row(fresh, "2609.00001").author_orcids) == [uri]
     @test seed!(fresh, base) == 0
     close(fresh)
     @test K.scalar(open_kb(temp_config(base_set = "")), "SELECT count(*) FROM papers") == 0

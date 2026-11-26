@@ -253,6 +253,37 @@ route!("GET", "/api/search") do c
          "findings" => Any[Dict(pairs(f)) for f in found])
 end
 
+route!(c -> live_data_response(author_publications(c.kb, c.caller)), "GET", "/api/author-publications")
+
+# A catalogue correction is scoped to one byline on one visible work.
+route!("POST", "/api/author-orcid"; need = "paper.manage") do c
+    d = json_body(c)
+    id = String(get(d, "paper", ""))
+    name = String(get(d, "name", ""))
+    slot = get(d, "position", 0)
+    input = get(d, "orcid", "")
+    input isa AbstractString || error("Enter an ORCID iD")
+    uri = orcid_uri(input)
+    isempty(strip(input)) || uri !== nothing || error("Check the ORCID spelling and final check digit")
+    transaction(c.kb) do
+        seen_document(c.kb, c.caller, id)
+        rows = query(c.kb, "SELECT authors, author_orcids FROM papers WHERE doc_id = ? AND $(literature_sql(closed = true))", (id,))
+        isempty(rows) && not_found("No such paper")
+        row = only(rows)
+        names = json_list(row.authors)
+        record = byline_record(names, row.author_orcids)
+        ids = record.ids
+        slot isa Int && 1 <= slot <= length(names) && byline_name(names[slot]) == name &&
+            haskey(d, "previous") && ids[slot] == d["previous"] || throw(Refusal(409, "The byline changed. Reload the authors page."))
+        ids[slot] = uri
+        execute!(c.kb, "UPDATE papers SET author_orcids = ? WHERE doc_id = ?", (stored_orcids(names, ids; curated = union(record.curated, [slot])), id))
+        audit!(c.kb, c.caller, "paper.author_orcid"; target = id, detail = Dict("position" => slot, "orcid" => uri))
+    end
+    note_changes!([id])
+    touch(changes_stamp(c.kb.config))
+    (; orcid = uri)
+end
+
 # One paper, as on its page.
 route!("GET", "/api/paper/*paper") do c
     sp = site_paper(c.kb, seen_document(c.kb, c.caller, normalize_id(c[:paper])))
