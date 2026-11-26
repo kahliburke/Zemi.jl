@@ -30,6 +30,7 @@ type Paper = {
   category: { id: string; title: string; slug: string } | null; published: string; venue: string | null
   document_type: string | null; relevance: { level: number; label: string; note: string } | null
   one_line: string | null; doi: string | null; daily: string; posts: Post[]
+  provenance?: { summarizer: string; model: string; prompt_version: number | string; input_sha: string; created_at: string; read_mode: string | null } | null
   summary: string; topics: string[]; abstract: string; processed: boolean
   notebooks: { title: string; page: string; summary: string; by: string }[]
   figures: number; tables: number; sections: Section[]; references: Reference[]; here: (Link & { label: string })[]
@@ -37,6 +38,8 @@ type Paper = {
   cite?: { reference: string; citation: string; bibtex: string }
 }
 
+const readingMaterials: Record<string, string> = { pdf: 'PDF', text: 'Extracted text', figures: 'Text and figures',
+  'section summaries': 'Section summaries', 'section summaries from text': 'Section summaries from extracted text' }
 const { data: paper, error, render } = useTemplatedPage<Paper>('papers', 'No such paper in this knowledge base.', { title: p => p.title })
 
 const linkHref = (l: Link) => kbPage(l.page)
@@ -107,6 +110,16 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
 
       <template v-if="paper.summary">
         <div class="tip custom-block"><p class="custom-block-title">Summary</p><div v-html="render(paper.summary)"></div></div>
+        <details v-if="paper.provenance">
+          <summary>How this summary was produced</summary>
+          <dl>
+            <dt>Summarizer / model</dt><dd>{{ paper.provenance.summarizer }} / {{ paper.provenance.model }}</dd>
+            <dt>Reading material</dt><dd>{{ readingMaterials[paper.provenance.read_mode ?? ''] ?? paper.provenance.read_mode ?? 'Not recorded' }}</dd>
+            <dt>Created (UTC)</dt><dd>{{ paper.provenance.created_at }}</dd>
+            <dt>Prompt version</dt><dd>{{ paper.provenance.prompt_version }}</dd>
+            <dt>Input fingerprint</dt><dd><code>{{ paper.provenance.input_sha }}</code></dd>
+          </dl>
+        </details>
         <div v-if="paper.topics.length" class="kb-tags"><span v-for="t in paper.topics" :key="t" class="kb-tag">{{ t }}</span></div>
       </template>
 

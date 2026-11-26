@@ -337,7 +337,7 @@ function agent_summarize_paper!(kb::KB, s::Summarizer, doc_id::AbstractString; p
     written = Dict{Int,String}(parse(Int, string(k)) => String(v) for (k, v) in get(d, "sections", Dict()))
     missed = setdiff((t.ord for t in sections), keys(written))
     isempty(missed) || error("The $(s.name) agent left out sections $(sort!(collect(missed)))")
-    return import_summaries!(kb, s, doc_id; sections = written, paper = String(d["paper"]))
+    return import_summaries!(kb, s, doc_id; sections = written, paper = String(d["paper"]), read_mode = String(reads))
 end
 
 # ── Long documents ──────────────────────────────────────────────────────────────────────────────
@@ -434,7 +434,7 @@ function agent_summarize_long!(kb::KB, s::Summarizer, id::AbstractString, sectio
         agent_turn(agent, "Read BRIEF-whole.md and follow it for the document in whole.md."; timeout = s.timeout)
     end
     got = agent_json(dir, "whole.json", s)
-    save_summary!(kb, p.id, "p:$id", s, sha(paper_input(sections)), strip(String(got["paper"])), missing, missing)
+    save_summary!(kb, p.id, "p:$id", s, sha(paper_input(sections)), strip(String(got["paper"])), missing, missing; read_mode = "section summaries from text")
     return length(todo) + 1
 end
 
