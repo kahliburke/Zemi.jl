@@ -8,6 +8,7 @@ after(closeBrowser)
 test('a finding reads as a write-up, with its sources beside it', async () => {
   const { page, errors, close } = await open('/findings#BR-F1', '.kbf-claim')
   assert.equal(await page.locator('.kbf-claim').innerText(), 'The crest is sharp')
+  await page.locator('.kbf-body mjx-container').waitFor()                    // its mathematics, once typeset
   assert.equal(await page.locator('.kbf-body mjx-container').count(), 1)
   assert.match(await page.locator('.kbf-sources').innerText(), /FROM[\s\S]*Read the reef papers/i)
   assert.deepEqual(errors, [])

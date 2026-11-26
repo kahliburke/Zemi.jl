@@ -223,15 +223,16 @@ test('the review dashboard opens', async () => {
 
 test("a click to the right of a record's title, or of the Records heading, does nothing", async () => {
   const { page, errors, close } = await open('/projects#BR', '.kbp-records')
-  const records = page.locator('details.kbp-records')
-  if (!(await records.evaluate(d => d.open))) await page.locator('.kbp-records-head .kbp-waiting-label').click()
-  const link = page.locator('.kbp-records-list a', { hasText: 'Reef crest review' })
+  // The Records section, not the project's files below it, which are drawn alike.
+  const records = page.locator('details.kbp-records').filter({ has: page.locator('.kbp-records-head', { hasText: /^Records/ }) })
+  if (!(await records.evaluate(d => d.open))) await records.locator('.kbp-records-head .kbp-waiting-label').click()
+  const link = records.locator('.kbp-records-list a', { hasText: 'Reef crest review' })
   await link.waitFor()
-  const at = await link.boundingBox(), list = await page.locator('.kbp-records-list').boundingBox()
+  const at = await link.boundingBox(), list = await records.locator('.kbp-records-list').boundingBox()
   assert.ok(at.x + at.width < list.x + list.width - 40, 'the link is as wide as its title')
   const before = page.url()
   await page.mouse.click(list.x + list.width - 10, at.y + at.height / 2)
-  const head = await page.locator('.kbp-records-head').boundingBox()
+  const head = await records.locator('.kbp-records-head').boundingBox()
   await page.mouse.click(list.x + list.width - 10, head.y + head.height / 2)
   await page.waitForTimeout(300)
   assert.equal(page.url(), before)
