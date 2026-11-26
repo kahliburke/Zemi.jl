@@ -55,7 +55,7 @@ try {
   const cdp = await context.newCDPSession(page)
   assert.deepEqual((await cdp.send('Page.getInstallabilityErrors')).installabilityErrors, [])
   const [paper] = await (await context.request.get(url + 'papers.json')).json()
-  const article = url + 'generated/kb/papers/' + paper.slug + '.html'
+  const article = url + 'kb/papers/' + paper.slug + '.html'
   await page.goto(article)
   await page.locator('#paper-title').waitFor()
   const title = await page.locator('#paper-title').innerText()

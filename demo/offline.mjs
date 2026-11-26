@@ -32,9 +32,9 @@ const { count, size, warnings } = await injectManifest({
   swDest: dest,
   globDirectory: site,
   globPatterns: [
-    'index.html', 'generated/kb/index.html', 'generated/kb/papers/*.html',
+    'index.html', 'kb/index.html', 'kb/papers/*.html',
     'papers.json', 'daily.json', 'kb-data/papers/*.json',
-    'assets/{app.*,style.*,*.woff2,index.md.*,generated_kb_index.md.*,generated_kb_papers_*.js}',
+    'assets/{app.*,style.*,*.woff2,index.md.*,kb_index.md.*,kb_papers_*.js}',
     'assets/chunks/metadata.*.js', ...[...chunks].filter(file => file.startsWith('assets/chunks/')),
     'vp-icons.css', 'siteinfo.js', 'manifest.webmanifest',
     '{favicon.ico,logo.png,hero-light.*,hero-dark.*,zemi-icon-*.png}',
