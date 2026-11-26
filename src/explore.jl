@@ -74,7 +74,7 @@ function read_links!(kb::KB; progress = msg -> nothing, cancelled = () -> false)
     first_time = isempty(was)
     for (n, id) in enumerate(todo)
         cancelled() && break
-        n % 200 == 1 && progress("Reading the links of $(length(todo)) documents: $n")
+        n % 200 == 1 && progress("Reading links: $n of $(length(todo))")
         doc = ids[id]
         out = try links_from(kb, doc; index, rows) catch e
             @warn "The links of $doc could not be read" exception = e maxlog = 5
@@ -220,16 +220,15 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 8
+const EXPLORE_VERSION = 9
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
 
 """
-The most documents laid out by t-SNE, whose cost grows with the square of their number: the rest are
-placed among their nearest documents.
+The most documents laid out by t-SNE (see [`tsne`](@ref)): the rest are placed among their nearest documents.
 """
-const EXPLORE_LAYOUT_LIMIT = 4000
+const EXPLORE_LAYOUT_LIMIT = 50_000
 
 explore_path(c::Config) = joinpath(c.data_dir, "explore.json")
 
@@ -310,6 +309,55 @@ function nearest_library(X::AbstractMatrix, own::AbstractVector{Bool}, k::Intege
 end
 
 """
+    packed(Y; near = nothing, link = 6, most = 0.2, few = 0.05) -> Matrix
+
+Positions `Y` (one row each) with a few documents left far apart brought in: points within `link` times
+the layout's typical spacing (the median distance from a point to its nearest) are one group, and a group
+of no more than `few` of the documents, further than `most` of the layout's radius (from its middle to all
+but the farthest tenth) from those placed before it, the biggest groups placed first, is moved straight
+toward one of them until that is the gap: the one nearest it in meaning (`near`, each row's nearest as `(row, similarity)`), else the
+nearest on the layout. A group keeps its shape; larger groups, and those nearer, stay where the layout put
+them: only the wide empty space goes that a layout can leave around a few documents unlike any others.
+"""
+function packed(Y::AbstractMatrix; near = nothing, link::Real = 6, most::Real = 0.2, few::Real = 0.05)
+    n = size(Y, 1)
+    n < 3 && return Y
+    Y = copy(Y)
+    D = [sqrt(sum(abs2, view(Y, i, :) .- view(Y, j, :))) for i in 1:n, j in 1:n]
+    spacing = sort!([minimum(D[i, j] for j in 1:n if j != i) for i in 1:n])[cld(n, 2)]
+    spacing > 0 || return Y
+    middle = sum(Y; dims = 1) ./ n
+    radius = sort!([sqrt(sum(abs2, view(Y, i, :) .- vec(middle))) for i in 1:n])[clamp(ceil(Int, 0.9n), 1, n)]
+    widest = most * radius
+    # Groups: joined wherever two points are within `link` spacings.
+    root = collect(1:n)
+    find(i) = (while root[i] != i; root[i] = root[root[i]]; i = root[i]; end; i)
+    for i in 1:n, j in i+1:n
+        D[i, j] <= link * spacing && (root[find(i)] = find(j))
+    end
+    groups = collect(values(foldl((g, i) -> (push!(get!(g, find(i), Int[]), i); g), 1:n; init = Dict{Int,Vector{Int}}())))
+    length(groups) == 1 && return Y
+    sort!(groups; by = length, rev = true)
+    placed = copy(first(groups))
+    for g in groups[2:end]
+        # Toward the placed document it is most like, from its member most like it; else the nearest on the layout.
+        here = Set(placed)
+        alike = near === nothing ? () : ((s, i, j) for i in g for (j, s) in near[i] if j in here)
+        a, b = isempty(alike) ? minimum((D[i, j], i, j) for i in g for j in placed)[2:3] : maximum(alike)[2:3]
+        d = D[a, b]
+        if d > widest && length(g) <= max(3, few * n)
+            step = (Y[b, :] .- Y[a, :]) .* ((d - widest) / d)
+            Y[g, :] .+= step'
+            for i in g, j in 1:n                                       # its distances to the rest, as moved
+                D[i, j] = D[j, i] = sqrt(sum(abs2, view(Y, i, :) .- view(Y, j, :)))
+            end
+        end
+        append!(placed, g)
+    end
+    return Y
+end
+
+"""
 Positions `Y` (one row each) about their centre, scaled so all but the farthest few lie within -1 to 1:
 a layout's outliers do not crowd the rest together. Those beyond are drawn in to 1.3.
 """
@@ -339,7 +387,7 @@ own, labelled by the words of the open documents' titles. Saved as `explore.json
 directory; returns `(; data, changed)`, or `nothing` with fewer than three documents. Nothing is made
 again while the vectors and clusters are as they were.
 """
-function explore_map!(kb::KB; force::Bool = false, progress = msg -> nothing, cancelled = () -> false)
+function explore_map!(kb::KB; force::Bool = false, progress = (msg, share = nothing) -> nothing, cancelled = () -> false)
     c = kb.config
     l = try landscape_layer(c) catch; return nothing end
     rows = explore_rows(kb, l)
@@ -349,18 +397,23 @@ function explore_map!(kb::KB; force::Bool = false, progress = msg -> nothing, ca
     last = read_explore(c)
     !force && last !== nothing && get(last, "input_sha", "") == input_sha && return (; data = last, changed = false)
 
-    progress("Exploring $(length(rows)) documents: reading their vectors")
+    progress("$(length(rows)) documents · reading vectors", 0.0)
     coll = collection_name(c, l)
     got = Qdrant.collection_exists(coll) ? fetch_vectors(coll, [r.point_id for r in rows]) : Dict()
     rows = [r for r in rows if haskey(got, r.point_id)]
     length(rows) < 3 && return nothing
     X = unit_columns(reduce(hcat, [Float64.(got[r.point_id][1]) for r in rows]))
     views = Dict{String,Any}()
-    for (name, keep) in (("read", findall(r -> Bool(r.read), rows)), ("all", collect(eachindex(rows))))
+    made = [(name, keep) for (name, keep) in (("read", findall(r -> Bool(r.read), rows)), ("all", collect(eachindex(rows))))
+            if length(keep) >= 3]
+    # The share done: the vectors read, then each map in proportion to its documents.
+    total, before = sum(length(k) for (_, k) in made; init = 0), 0
+    for (name, keep) in made
         cancelled() && return nothing
-        length(keep) < 3 && continue
-        views[name] = explore_view(c, X[:, keep], rows[keep], land; progress, cancelled,
-                                   what = name == "read" ? "documents read in full" : "documents")
+        at(f) = 0.05 + 0.95 * (before + f * length(keep)) / max(total, 1)
+        views[name] = explore_view(c, X[:, keep], rows[keep], land; progress = (m, f) -> progress(m, at(f)), cancelled,
+                                   what = name == "read" ? "read in full" : "")
+        before += length(keep)
     end
     cancelled() && return nothing
     data = Dict("version" => EXPLORE_VERSION, "input_sha" => input_sha, "built_at" => now_iso(), "layer" => l.name,
@@ -370,11 +423,18 @@ function explore_map!(kb::KB; force::Bool = false, progress = msg -> nothing, ca
     return (; data, changed = true)
 end
 
-"One map (see [`explore_map!`](@ref)): of the documents `rows`, whose unit vectors are `X`'s columns."
-function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancelled, what)
+"""
+One map (see [`explore_map!`](@ref)): of the documents `rows`, whose unit vectors are `X`'s columns.
+Without the landscape's clusters (`land`), it makes `clusters` of its own, or as many as suit its size.
+`progress(msg, share)` is told each step and the share of the map done before it, by the steps' usual times.
+"""
+function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancelled, what, clusters::Integer = c.landscape_clusters)
     n = length(rows)
-    progress("Exploring $n $what: finding each one's nearest")
-    near = nearest_columns(X, EXPLORE_NEIGHBOURS)
+    label = strip("$n documents $what")
+    progress("$label · nearest neighbours", 0.0)
+    # Each one's nearest, found once: the map keeps the first few, UMAP and PaCMAP take more.
+    wide = nearest_columns(X, EXPLORE_NEIGHBOURS + 50)
+    near = [first(ns, EXPLORE_NEIGHBOURS) for ns in wide]
     library = nearest_library(X, [is_record(r.id) for r in rows], 5)
     # Laid out by t-SNE: all of them, or the most often near others where there are too many.
     laid = if n <= EXPLORE_LAYOUT_LIMIT
@@ -384,19 +444,25 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
         foreach(ns -> foreach(((m, _),) -> often[m] += 1, ns), near)
         sort!(partialsortperm(often, 1:EXPLORE_LAYOUT_LIMIT; rev = true))
     end
-    progress("Exploring $n $what: laying out the map")
-    flat = centred(tsne(X[:, laid]; dims = 2))
+    progress("$label · t-SNE map", 0.05)
+    # The nearest by meaning of the laid out, as rows of their layout, for bringing in groups left apart.
+    row = Dict(r => k for (k, r) in enumerate(laid))
+    near_laid = [[(row[m], s) for (m, s) in near[i] if haskey(row, m)] for i in laid]
+    flat = centred(packed(tsne(X[:, laid]; dims = 2); near = near_laid))
     cancelled() && return nothing
-    progress("Exploring $n $what: laying out the space")
-    deep = centred(tsne(X[:, laid]; dims = 3))
+    progress("$label · t-SNE space", 0.25)
+    deep = centred(packed(tsne(X[:, laid]; dims = 3); near = near_laid))
     cancelled() && return nothing
     # UMAP too, which keeps more of how the groups lie to each other: every document, its cost growing with their number.
-    progress("Exploring $n $what: laying out the map and the space by UMAP")
-    uflat, udeep = centred(umap(X; dims = 2, min_dist = 0.4)), centred(umap(X; dims = 3, min_dist = 0.4))
+    # And PaCMAP, which keeps the arrangement between groups better still. Each of these four on a thread
+    # of its own, from the nearest found above.
+    progress("$label · UMAP and PaCMAP", 0.45)
+    laid_out(f) = Threads.@spawn centred(packed(f(); near))
+    u2, u3 = laid_out(() -> umap(X; dims = 2, min_dist = 0.4, near = wide)), laid_out(() -> umap(X; dims = 3, min_dist = 0.4, near = wide))
+    p2, p3 = laid_out(() -> pacmap(X; dims = 2, near = wide)), laid_out(() -> pacmap(X; dims = 3, near = wide))
+    uflat, udeep, pflat, pdeep = fetch(u2), fetch(u3), fetch(p2), fetch(p3)
     cancelled() && return nothing
-    # And PaCMAP, which keeps the arrangement between groups better still.
-    progress("Exploring $n $what: laying out the map and the space by PaCMAP")
-    pflat, pdeep = centred(pacmap(X; dims = 2)), centred(pacmap(X; dims = 3))
+    progress("$label · clusters", 0.9)
     pos2, pos3 = zeros(n, 2), zeros(n, 3)
     pos2[laid, :], pos3[laid, :] = flat, deep
     # The rest among their nearest laid out, a little apart.
@@ -410,7 +476,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     end
 
     # The landscape's clusters, each centred on its members here; every document joins the nearest.
-    clusters, assign = Dict{String,Any}[], ones(Int, n)
+    wanted, clusters, assign = clusters, Dict{String,Any}[], ones(Int, n)
     col = Dict(r.id => i for (i, r) in enumerate(rows))
     if land !== nothing && !isempty(land["clusters"])
         members = Dict{Int,Vector{Int}}()
@@ -427,7 +493,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     end
     # With no landscape, clusters of its own, labelled by the words of the titles every reader sees.
     if isempty(clusters)
-        k = c.landscape_clusters > 0 ? c.landscape_clusters : clamp(round(Int, sqrt(n / 4)), 2, 16)
+        k = wanted > 0 ? wanted : clamp(round(Int, sqrt(n / 4)), 2, 16)
         assign, _ = spherical_kmeans(X, k)
         open_titles = [coalesce(r.title, "") for r in rows if coalesce(r.access, "open") == "open"]
         all_titles = [coalesce(r.title, "") for r in rows]
@@ -456,11 +522,12 @@ end
 
 Bring what the explore page draws up to date: the links read from documents changed since (see
 [`read_links!`](@ref)), and, where Qdrant answers, the map (see [`explore_map!`](@ref)) when its
-vectors or clusters changed.
+vectors or clusters changed. `progress` is told each step, and the share done where it takes one.
 """
-function explore!(kb::KB; progress = msg -> nothing, cancelled = () -> false)
-    read_links!(kb; progress, cancelled)
-    cancelled() || !can_map(kb) || explore_map!(kb; progress, cancelled)
+function explore!(kb::KB; progress = (msg, share = nothing) -> nothing, cancelled = () -> false)
+    say(msg, share = nothing) = applicable(progress, msg, share) ? progress(msg, share) : progress(msg)
+    read_links!(kb; progress = say, cancelled)
+    cancelled() || !can_map(kb) || explore_map!(kb; progress = say, cancelled)
     return nothing
 end
 
@@ -484,7 +551,7 @@ function explore_soon!(kb::KB)
         j !== nothing && j.status == :running && return j
         links_behind(kb) || (explore_stale(kb) && can_map(kb)) || return nothing
         EXPLORE_JOB[] = start_job("explore") do job
-            explore!(kb; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
+            explore!(kb; progress = (m, share = nothing) -> report!(job, m; share), cancelled = () -> cancelled(job))
         end
     end
 end
@@ -514,17 +581,19 @@ with the similarity, and whether a link joins the two already). The documents kn
 abstract are left out, and the map of those read in full drawn, unless `abstracts` or `center` is one
 of them (`abstract_only` counts those left out). `center` keeps the nodes within `depth` steps of that
 one, `project` those of a project and the nodes next to them; past `limit` nodes, the most linked are kept.
+`view`, a map of some documents only (see [`subset_view!`](@ref)), is drawn instead, of its documents (`only`).
 """
 function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", depth::Integer = 1, links = GRAPH_LINKS,
-                       kinds = ("paper", "record", "code", "resource", "finding"), project::AbstractString = "", limit::Integer = 3000, abstracts::Bool = false)
+                       kinds = ("paper", "record", "code", "resource", "finding"), project::AbstractString = "", limit::Integer = 3000, abstracts::Bool = false,
+                       view = nothing, only = nothing)
     hidden = unfound_documents(kb, caller)
     rows = Dict(String(r.doc_id) => r for r in query(kb, """
         SELECT p.id, p.doc_id, p.kind, coalesce(p.title, w.title) AS title, coalesce(p.published, w.published) AS published, p.access,
                EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read, w.relevance AS rating, p.metadata_at
         FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id"""))
-    abstracts = abstracts || !isempty(center) && haskey(rows, center) && !Bool(rows[center].read)
+    abstracts = abstracts || view !== nothing || !isempty(center) && haskey(rows, center) && !Bool(rows[center].read)
     m = read_explore(kb.config)
-    v = m === nothing ? nothing : get(get(m, "views", Dict()), abstracts ? "all" : "read", nothing)
+    v = view !== nothing ? view : m === nothing ? nothing : get(get(m, "views", Dict()), abstracts ? "all" : "read", nothing)
     docs = v === nothing ? Dict{String,Any}() : v["docs"]
     held = caller.user_id === nothing ? Set{String}() : held_documents(kb, caller.user_id)
     byrow = Dict(Int(r.id) => d for (d, r) in rows)
@@ -619,6 +688,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
         ids = around(seeds, 1)
     end
     isempty(center) || (ids = around([String(center)], clamp(depth, 1, 3)))
+    only === nothing || intersect!(ids, only)
     degree = Dict{String,Int}()
     for (a, b, _) in E
         degree[a] = get(degree, a, 0) + 1; degree[b] = get(degree, b, 0) + 1
@@ -658,20 +728,24 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
                 "similar" => [Any[at[a], at[b], s, (a, b) in linked || get(judged, (a, b), false), haskey(judged, (a, b)) && !judged[(a, b)]]
                               for ((a, b), s) in S if haskey(at, a) && haskey(at, b)],
                 "clusters" => clusters, "built_at" => m === nothing ? nothing : m["built_at"], "abstracts" => abstracts,
-                "abstract_only" => count(id -> seen(id) && !Bool(rows[id].read), keys(everything)))
+                "abstract_only" => view !== nothing ? 0 : count(id -> seen(id) && !Bool(rows[id].read), keys(everything)))
 end
 
 # The graph of what the caller may see, for the explore page (see `explore_graph`): `?center=<id>` and
 # `?depth=1|2|3`, `?links=cites,refers,evidence,task`, `?kinds=paper,record,…`, `?project=KEY`,
-# `?limit=`, `?abstracts=1` with the documents known only by their abstract. Asking starts bringing the
-# map up to date where it is behind (`job`, while it runs).
+# `?limit=`, `?abstracts=1` with the documents known only by their abstract, `?set=` a subset mapped by
+# itself (see `explore_set`, with `?n=` a search's documents). Asking starts bringing the map up to date
+# where it is behind (`job`, while it runs), or making the subset's.
 route!("GET", "/api/graph") do c
     p = c.params
     list(k, default) = isempty(get(p, k, "")) ? default : Tuple(String.(strip.(split(p[k], ','))))
-    g = explore_graph(c.kb, c.caller; center = get(p, "center", ""), depth = int_param(p, "depth", 1, 1:3),
-                      links = list("links", GRAPH_LINKS), kinds = list("kinds", ("paper", "record", "code", "resource", "finding")),
-                      project = get(p, "project", ""), limit = int_param(p, "limit", 3000, 1:20000),
-                      abstracts = get(p, "abstracts", "") in ("1", "true"))
+    links, kinds = list("links", GRAPH_LINKS), list("kinds", ("paper", "record", "code", "resource", "finding"))
+    abstracts = get(p, "abstracts", "") in ("1", "true")
+    isempty(get(p, "set", "")) ||
+        return explore_set_graph(c.kb, c.caller, p["set"]; abstracts, links, kinds,
+                                 n = int_param(p, "n", SUBSET_SEARCH.default, 1:SUBSET_SEARCH.most))
+    g = explore_graph(c.kb, c.caller; center = get(p, "center", ""), depth = int_param(p, "depth", 1, 1:3), links, kinds,
+                      project = get(p, "project", ""), limit = int_param(p, "limit", 3000, 1:20000), abstracts)
     job = try explore_soon!(c.kb) catch e
         @warn "The map could not be brought up to date" exception = e maxlog = 1
         nothing
@@ -692,7 +766,8 @@ explore_page(c::Config, id::AbstractString, metadata_at) =
 
 What the explore page's card says of document `id`, as far as `caller` may see it: its title, authors,
 date, venue and abstract (the watch's where the document has none of its own yet), its summary and
-topics as the summarizer shown for its kind wrote them, and whether it was read in full.
+topics as the summarizer shown for its kind wrote them, and whether it was read in full. A record with
+no summary yet gives the opening of its text (`excerpt`): its abstract only says where it came from.
 """
 function explore_node(kb::KB, caller::Caller, id::AbstractString)
     seen_document(kb, caller, id)
@@ -710,10 +785,18 @@ function explore_node(kb::KB, caller::Caller, id::AbstractString)
     pick === nothing && !isempty(wrote) && (pick = 1)
     summary, topics = pick === nothing ? ("", String[]) : split_topics(String(wrote[pick].text))
     authors = try json_list(r.authors) catch; String[] end
-    return Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "authors" => authors,
+    excerpt = isempty(summary) && is_record(id) ? record_excerpt(kb, id) : ""
+    return Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "authors" => authors, "excerpt" => excerpt,
                             "published" => coalesce(r.published, ""), "venue" => coalesce(r.journal_ref, ""),
                             "abstract" => coalesce(r.abstract, ""), "summary" => summary, "topics" => topics,
                             "read" => Bool(r.read), "page" => explore_page(kb.config, id, r.metadata_at))
+end
+
+"The opening of record `id`'s text, its figures left out, for a card: at most `most` characters."
+function record_excerpt(kb::KB, id::AbstractString; most::Integer = 1200)
+    doc = try record_document(kb, id) catch; return "" end
+    text = strip(replace(join((strip(String(s["text"])) for s in doc["sections"]), "\n\n"), FIGURE_IMAGE => ""))
+    return length(text) > most ? rstrip(first(text, most)) * "…" : String(text)
 end
 
 # What the explore page's card says of one document (`?id=`, see `explore_node`).

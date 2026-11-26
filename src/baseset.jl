@@ -16,8 +16,10 @@ function export_base_set(kb::KB, path::AbstractString; source::AbstractString)
     papers = map(rows) do p
         posts = query(kb, "SELECT channel, posted_at, author, url FROM mentions WHERE paper_id = ? AND source = ? ORDER BY posted_at",
                       (p.id, source))
+        names = json_list(p.authors)
         Dict("doc_id" => p.doc_id, "version" => coalesce(p.version, ""), "title" => p.title,
-             "authors" => json_list(p.authors), "published" => p.published, "updated" => p.updated,
+             "authors" => names, "orcids" => byline_ids(names, p.author_orcids),
+             "published" => p.published, "updated" => p.updated,
              "primary_category" => p.primary_category, "categories" => json_list(p.categories),
              "doi" => coalesce(p.doi, nothing), "journal_ref" => coalesce(p.journal_ref, nothing),
              "abstract" => p.abstract,
@@ -49,6 +51,8 @@ function seed!(kb::KB, path::AbstractString = kb.config.base_set)
                 (p["doc_id"], p["version"], p["title"], p["abstract"], JSON.json(p["authors"]), p["published"],
                  p["updated"], p["primary_category"], JSON.json(p["categories"]), something(p["doi"], missing),
                  something(p["journal_ref"], missing), now_iso(), now_iso()))
+            ids = stored_orcids(p["authors"], get(p, "orcids", nothing))
+            ismissing(ids) || execute!(kb, "UPDATE papers SET author_orcids = ? WHERE doc_id = ?", (ids, p["doc_id"]))
             pid = paper_id(kb, p["doc_id"])
             for m in p["posts"]
                 execute!(kb, """

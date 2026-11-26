@@ -32,9 +32,31 @@ function syncing_pid()
     pid > 0 && isvalidpid(host, pid) ? Int(pid) : nothing
 end
 
-"The status the syncer last wrote (see [`Syncer`](@ref)), or an empty one."
+"The status the syncer last wrote (see [`Syncer`](@ref)), or an empty one, without the activity cleared since."
 read_connect_status() =
-    (f = connect_status_path(); isfile(f) ? (try Dict{String,Any}(JSON.parsefile(f)) catch; empty_status() end) : empty_status())
+    drop_cleared!((f = connect_status_path(); isfile(f) ? (try Dict{String,Any}(JSON.parsefile(f)) catch; empty_status() end) : empty_status()))
+
+# Clearing the activity: the latest entry cleared, kept beside the status so that it is cleared
+# whichever process syncs. It and those before it are hidden at once, and dropped at the syncer's
+# next write. Once they are gone it matches nothing, and what came after stays.
+connect_cleared_path() = joinpath(connect_dir(), "$(connect_key()).cleared")
+
+"Clear the activity `status` shows: what moved until now."
+function clear_activity!(status::AbstractDict = read_connect_status())
+    isempty(status["activity"]) && return nothing
+    mkpath(connect_dir())
+    write_atomic(connect_cleared_path(), JSON.json(last(status["activity"])))
+    return nothing
+end
+
+function drop_cleared!(status::AbstractDict)
+    f = connect_cleared_path()
+    isfile(f) || return status
+    cleared = try JSON.parsefile(f) catch; return status end
+    i = findlast(==(cleared), status["activity"])
+    i === nothing || deleteat!(status["activity"], 1:i)
+    return status
+end
 empty_status() = Dict{String,Any}("site" => "", "pid" => 0, "by" => "", "updated" => "", "syncing" => false, "paused" => false,
                                   "error" => "", "folders" => Any[], "activity" => Any[])
 
@@ -86,10 +108,10 @@ function release!(s::Syncer)
 end
 
 "A copy of the status, safe to read while a pass changes it."
-status_copy(s::Syncer) = lock(() -> deepcopy(s.status), s.guard)
+status_copy(s::Syncer) = lock(() -> deepcopy(drop_cleared!(s.status)), s.guard)
 
 write_status(s::Syncer) = (mkpath(connect_dir());
-                           write_atomic(connect_status_path(), lock(() -> JSON.json(merge(s.status, Dict("updated" => now_iso()))), s.guard)))
+                           write_atomic(connect_status_path(), lock(() -> JSON.json(merge(drop_cleared!(s.status), Dict("updated" => now_iso()))), s.guard)))
 
 const MOVED = Dict(:sent => "sent", :received => "received", :removed_here => "removed here", :removed_there => "removed there",
                    :waiting => "waits", :error => "error", :removed => "removed from the library")

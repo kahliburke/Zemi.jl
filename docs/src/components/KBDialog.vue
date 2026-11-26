@@ -9,7 +9,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { closeOnEscape, holdFocus, dialogId } from './kbDialog'
 
 defineOptions({ inheritAttrs: false })
-const props = withDefaults(defineProps<{ label?: string; width?: string; top?: boolean; bare?: boolean; shade?: number }>(),
+const props = withDefaults(defineProps<{ label?: string; to?: HTMLElement; width?: string; top?: boolean; bare?: boolean; shade?: number }>(),
                            { width: 'min(36rem, 92vw)', shade: 0.4 })
 const emit = defineEmits<{ close: [] }>()
 
@@ -26,7 +26,7 @@ onBeforeUnmount(() => { stop(); release() })
 </script>
 
 <template>
-  <Teleport to="body">
+  <Teleport :to="to ?? 'body'">
     <div class="kb-dialog-backdrop" :class="{ top }" :style="{ background: `rgba(0, 0, 0, ${shade})` }" @click.self="emit('close')">
       <div ref="box" class="kb-dialog" :class="{ bare }" role="dialog" aria-modal="true" :aria-label="label" :aria-labelledby="heading"
            tabindex="-1" :style="{ width }" v-bind="$attrs"><slot /></div>

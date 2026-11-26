@@ -215,7 +215,12 @@ end
 const LABEL_STOPWORDS = Set(split("""a an and are as at by for from in into is of on or the to with via using use based
     its their this that we our new study analysis towards toward under over between through than via""", r"\s+"))
 
-"A cluster's three most distinctive title words, against all titles."
+"""
+A cluster's three most distinctive title words, against all titles: those far more common in its
+titles than in all (each weighted by how common it is in the cluster), so a word every cluster shares
+names none, nor one no more common in it than in all. A word must be in two of the cluster's titles
+where it has more than three.
+"""
 function keyword_label(titles, all_titles)
     words(t) = unique(w for w in (lowercase(m.match) for m in eachmatch(r"[\p{L}][\p{L}\p{N}-]+", t))
                       if length(w) > 2 && !(w in LABEL_STOPWORDS))
@@ -223,8 +228,12 @@ function keyword_label(titles, all_titles)
     foreach(t -> foreach(w -> df[w] = get(df, w, 0) + 1, words(t)), all_titles)
     tf = Dict{String,Int}()
     foreach(t -> foreach(w -> tf[w] = get(tf, w, 0) + 1, words(t)), titles)
-    score(w) = tf[w] / length(titles) * log(length(all_titles) / df[w])
-    top = first(sort!(collect(keys(tf)); by = w -> (-score(w), w)), 3)
+    least = length(titles) > 3 ? 2 : 1
+    inside(w) = tf[w] / length(titles)
+    score(w) = inside(w) * log(inside(w) / (max(get(df, w, 0), tf[w]) / max(length(all_titles), 1)))
+    pool = [w for w in keys(tf) if tf[w] >= least && score(w) > 0]
+    isempty(pool) && (pool = collect(keys(tf)))
+    top = first(sort!(pool; by = w -> (-score(w), w)), 3)
     return isempty(top) ? "Unnamed" : join(top, " · ")
 end
 
@@ -270,10 +279,25 @@ function spherical_kmeans(X::AbstractMatrix, k::Integer; iterations::Integer = 1
     return [renumber[a] for a in assign], C[:, order]
 end
 
-"The columns of `X` on their first `dims` principal components (one row each), each signed so its skew is positive."
+"""
+The columns of `X` on their first `dims` principal components (one row each), each signed so its skew
+is positive. Past a few hundred columns and rows the components are found by a randomized SVD (a
+seeded random projection, sharpened by passes through `X`), which costs a small fraction of a full one.
+"""
 function principal_start(X::AbstractMatrix, dims::Integer)
     centred = X .- sum(X; dims = 2) ./ size(X, 2)
-    U, S, _ = svd(centred')
+    A = centred'
+    k = dims + 10
+    if min(size(A)...) <= 4k
+        U, S, _ = svd(A)
+    else
+        Q = Matrix(qr(A * randn(Random.MersenneTwister(1), size(A, 2), k)).Q)
+        for _ in 1:4
+            Q = Matrix(qr(A * Matrix(qr(A' * Q).Q)).Q)
+        end
+        F = svd(Q' * A)
+        U, S = Q * F.U, F.S
+    end
     Y = U[:, 1:dims] .* S[1:dims]'
     for a in 1:dims
         sum(Y[:, a] .^ 3) < 0 && (Y[:, a] .*= -1)
@@ -281,58 +305,27 @@ function principal_start(X::AbstractMatrix, dims::Integer)
     return Y
 end
 
+"The principal components t-SNE works on, of a layout's vectors: their fine structure, at a fraction of the cost."
+const TSNE_DIMS = 100
+
 """
     tsne(X; perplexity = 30, iterations = 1000, dims = 2) -> Matrix
 
 A layout in `dims` dimensions of the unit columns of `X` (one row per column) by t-SNE over their
-cosine distances, starting from their principal components, so the layout is the same for the same
-vectors and moves little as papers are added.
+squared distances (two less twice their cosine similarity), starting from their principal components
+with a fixed seed, so the layout is the same for the same vectors and moves little as papers are added.
+By Barnes–Hut, whose cost grows with n log n, on their first `TSNE_DIMS` principal components.
 """
 function tsne(X::AbstractMatrix; perplexity::Real = 30, iterations::Integer = 1000, dims::Integer = 2)
     n = size(X, 2)
-    D = max.(2 .- 2 .* (X' * X), 0)                 # squared distances between unit vectors
-    P = zeros(n, n)
-    target = log(min(perplexity, (n - 1) / 3))
-    for i in 1:n
-        d = D[:, i]
-        nearest = minimum(d[j] for j in 1:n if j != i)    # (subtracted before exponentiating, for range)
-        lo, hi, beta = 0.0, Inf, 1.0
-        p = zeros(n)
-        for _ in 1:100
-            p .= exp.(-beta .* (d .- nearest))
-            p[i] = 0
-            s = sum(p)
-            H = log(s) + beta * (sum(d .* p) / s - nearest)     # the entropy of row i
-            abs(H - target) < 1e-5 && break
-            if H > target
-                lo = beta; beta = isinf(hi) ? 2beta : (beta + hi) / 2
-            else
-                hi = beta; beta = (beta + lo) / 2
-            end
-        end
-        P[:, i] = p ./ sum(p)
-    end
-    P = max.((P .+ P') ./ (2n), 1e-12)
-    # Start from the principal components, at a small scale.
-    Y = principal_start(X, dims)
-    Y .*= 1e-4 / max(sqrt(sum(abs2, Y[:, 1]) / n), eps())
-    gains, step = ones(n, dims), zeros(n, dims)
-    rate = max(n / 48, 50.0)
-    for it in 1:iterations
-        exaggeration, momentum = it <= 250 ? (12.0, 0.5) : (1.0, 0.8)
-        sq = sum(abs2, Y; dims = 2)
-        num = 1 ./ (1 .+ sq .+ sq' .- 2 .* (Y * Y'))
-        num[diagind(num)] .= 0
-        Q = max.(num ./ sum(num), 1e-12)
-        W = (exaggeration .* P .- Q) .* num
-        grad = 4 .* (vec(sum(W; dims = 2)) .* Y .- W * Y)
-        same = sign.(grad) .== sign.(step)
-        gains .= max.(ifelse.(same, gains .* 0.8, gains .+ 0.2), 0.01)
-        step .= momentum .* step .- rate .* gains .* grad
-        Y .+= step
-        Y .-= sum(Y; dims = 1) ./ n
-    end
-    return Y
+    # On principal components of our own, all of those asked for: TSne's PCA keeps only those needed for
+    # most of the variance, which for a few vectors can be fewer than the layout's dimensions. Given them
+    # at their full number, it starts from the first `dims` and reduces no further.
+    r = clamp(min(TSNE_DIMS, size(X, 1), n - 1), dims + 1, size(X, 1))
+    Z = principal_start(X, r)
+    return TSne.tsne(Z, dims, r, iterations, Float64(min(perplexity, (n - 1) / 3));
+                     method = :barneshut, pca_init = true, progress = false,
+                     rng = Random.MersenneTwister(1))
 end
 
 """
@@ -344,10 +337,11 @@ while sampled pairs are pushed apart, from the principal components. More of the
 groups is kept than by [`tsne`](@ref); seeded, so the layout is the same for the same vectors.
 """
 function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500, min_dist::Real = 0.1, dims::Integer = 2,
-              seed::Integer = 1)
+              seed::Integer = 1, near = nothing)
     n = size(X, 2)
     k = min(neighbours, n - 1)
-    near = nearest_columns(X, k)
+    # Each column's nearest, as `nearest_columns` gives them: found here unless given (at least `k` each).
+    near = near === nothing ? nearest_columns(X, k) : [first(ns, k) for ns in near]
     # Each column's neighbours, weighted so its own nearest is 1 and the weights sum to log2(k).
     I, J, W = Int[], Int[], Float64[]
     for i in 1:n
@@ -385,13 +379,25 @@ function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500
     every = maximum(weight) ./ weight                          # epochs between an edge's samplings
     next = copy(every)
     negatives = 5
+    umap_epochs!(Y, edges, every, next, a, b, epochs, rng)
+    return permutedims(Y)
+end
+
+# UMAP's optimization (see `umap`): each edge drawn together as often as its weight says, and a few random
+# pairs pushed apart for each; the step shrinking to nothing over the epochs. In place on `Y`, a column a point.
+function umap_epochs!(Y::Matrix{Float64}, edges, every, next, a::Float64, b::Float64, epochs::Integer, rng)
+    dims, n = size(Y)
+    negatives = 5
     clip(g) = clamp(g, -4.0, 4.0)
-    for epoch in 1:epochs
+    @inbounds for epoch in 1:epochs
         rate = 1 - (epoch - 1) / epochs
         for (e, (i, j)) in enumerate(edges)
             next[e] > epoch && continue
             next[e] += every[e]
-            d2 = sum(abs2, view(Y, :, i) .- view(Y, :, j))
+            d2 = 0.0
+            for c in 1:dims
+                d2 += (Y[c, i] - Y[c, j])^2
+            end
             if d2 > 0
                 g = -2a * b * d2^(b - 1) / (1 + a * d2^b)
                 for c in 1:dims
@@ -402,7 +408,10 @@ function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500
             for _ in 1:negatives
                 m = rand(rng, 1:n)
                 m == i && continue
-                d2 = sum(abs2, view(Y, :, i) .- view(Y, :, m))
+                d2 = 0.0
+                for c in 1:dims
+                    d2 += (Y[c, i] - Y[c, m])^2
+                end
                 g = 2b / ((0.001 + d2) * (1 + a * d2^b))
                 for c in 1:dims
                     Y[c, i] += (d2 > 0 ? clip(g * (Y[c, i] - Y[c, m])) : 4.0) * rate
@@ -410,7 +419,7 @@ function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500
             end
         end
     end
-    return permutedims(Y)
+    return Y
 end
 
 """
@@ -422,7 +431,7 @@ apart, weighted in three phases so the arrangement of groups forms first and nei
 Keeps neighbourhoods as [`umap`](@ref) does and more of the arrangement between groups; seeded.
 """
 function pacmap(X::AbstractMatrix; neighbours::Integer = 10, mid_ratio::Real = 0.5, far_ratio::Real = 2,
-                iterations::Integer = 450, dims::Integer = 2, seed::Integer = 1)
+                iterations::Integer = 450, dims::Integer = 2, seed::Integer = 1, near = nothing)
     n = size(X, 2)
     # A small collection has few true neighbours each: no more than a quarter of it.
     k = clamp(neighbours, 1, max(1, (n - 1) ÷ 4))
@@ -431,7 +440,7 @@ function pacmap(X::AbstractMatrix; neighbours::Integer = 10, mid_ratio::Real = 0
     d2(i, j) = max(2 - 2 * dot(view(X, :, i), view(X, :, j)), 0.0)
     # Near pairs: of each column's nearest, those nearest by distance scaled by both ends' local spread
     # (the mean distance to their 4th to 6th nearest), so dense and sparse places count alike.
-    candidates = nearest_columns(X, min(k + 50, n - 1))
+    candidates = near === nothing ? nearest_columns(X, min(k + 50, n - 1)) : [first(ns, min(k + 50, n - 1)) for ns in near]
     spread = map(candidates) do c
         ds = [distance(s) for (_, s) in c]
         max(length(ds) >= 6 ? sum(ds[4:6]) / 3 : ds[end], 1e-10)

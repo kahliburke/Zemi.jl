@@ -375,9 +375,12 @@ A new session for person `uid`, lasting `shared.session_days`: the secret for it
 """
 function start_session!(kb::KB, uid::Integer, shared::SharedConfig; agent::AbstractString = "")
     s = new_secret()
-    execute!(kb, "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen, agent) VALUES (?, ?, ?, ?, ?, ?)",
-             (secret_hash(s), uid, now_iso(), iso_in(Day(shared.session_days)), now_iso(), first(agent, 300)))
-    execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (now_iso(), uid))
+    transaction(kb) do
+        at = now_iso()
+        execute!(kb, "INSERT INTO sessions (token_hash, user_id, created_at, expires_at, last_seen, agent) VALUES (?, ?, ?, ?, ?, ?)",
+                 (secret_hash(s), uid, at, iso_in(Day(shared.session_days)), at, first(agent, 300)))
+        execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (at, uid))
+    end
     return s
 end
 
@@ -407,9 +410,15 @@ function session_caller(kb::KB, secret::AbstractString)
         end_session!(kb, secret)
         return ANONYMOUS
     end
-    seen_now(s.last_seen) && execute!(kb, "UPDATE sessions SET last_seen = ? WHERE token_hash = ?", (now_iso(), h))
-    ismissing(s.acting_as) || return account_caller(kb, s.acting_as, :session; admin = Int(s.user_id))
-    return account_caller(kb, s.user_id, :session)
+    caller = ismissing(s.acting_as) ? account_caller(kb, s.user_id, :session) :
+             account_caller(kb, s.acting_as, :session; admin = Int(s.user_id))
+    if caller !== ANONYMOUS
+        # The person using the cookie owns the session, even while viewing as another member.
+        record_use!(kb, s.user_id, s.last_seen) do at
+            changed!(kb, "UPDATE sessions SET last_seen = ? WHERE token_hash = ? AND last_seen = ?", (at, h, s.last_seen))
+        end
+    end
+    return caller
 end
 
 """
@@ -417,6 +426,18 @@ Whether a session's or token's use is to be written down now: when it was last w
 over a minute ago. A page asks every few seconds, and each write waits its turn for the database.
 """
 seen_now(last) = coalesce(last, "") < iso_in(Minute(-1))
+
+# Update the credential and its owner together. A concurrent request may already have updated
+# the credential, and a different session or token may already have recorded the owner's activity.
+function record_use!(update_credential!, kb::KB, uid, last)
+    seen_now(last) || return
+    transaction(kb) do
+        at = now_iso()
+        update_credential!(at) > 0 && !ismissing(uid) || return
+        execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ? AND (last_seen IS NULL OR last_seen < ?)",
+                 (at, uid, iso_in(Minute(-1))))
+    end
+end
 
 """
     create_token!(kb, uid; name, permissions = nothing, projects = nothing, days = 90) -> (; id, token)
@@ -466,11 +487,16 @@ function token_caller(kb::KB, token::AbstractString; mcp::Bool = false)
     # A token of the person who runs a knowledge base for one person, who has no account, is nothing
     # to the shared service.
     ismissing(t.user_id) && SHARED_MODE[] && return ANONYMOUS
-    seen_now(t.last_used) && execute!(kb, "UPDATE api_tokens SET last_used = ? WHERE id = ?", (now_iso(), t.id))
     only = Set{String}(JSON.parse(t.permissions))
-    ismissing(t.user_id) && return owner_caller(:owner; token_id = Int(t.id), only)
-    return account_caller(kb, t.user_id, :token; token_id = Int(t.id), only,
-                          projects = ismissing(t.projects) ? nothing : Set{String}(JSON.parse(t.projects)))
+    caller = ismissing(t.user_id) ? owner_caller(:owner; token_id = Int(t.id), only) :
+             account_caller(kb, t.user_id, :token; token_id = Int(t.id), only,
+                            projects = ismissing(t.projects) ? nothing : Set{String}(JSON.parse(t.projects)))
+    if caller !== ANONYMOUS
+        record_use!(kb, t.user_id, t.last_used) do at
+            changed!(kb, "UPDATE api_tokens SET last_used = ? WHERE id = ? AND last_used IS ?", (at, t.id, t.last_used))
+        end
+    end
+    return caller
 end
 
 """

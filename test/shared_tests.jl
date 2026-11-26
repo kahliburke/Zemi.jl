@@ -50,9 +50,11 @@ shared_config(; kw...) = K.SharedConfig(; base_url = "http://127.0.0.1:8800", ad
     recently = K.iso_in(K.Dates.Second(-30))
     K.execute!(kb, "UPDATE sessions SET last_seen = ?", (recently,))
     @test K.session_caller(kb, s).user_id == student && seen() == recently
-    K.execute!(kb, "UPDATE sessions SET last_seen = ?", (K.iso_in(K.Dates.Minute(-2)),))
+    stale = K.iso_in(K.Dates.Minute(-2))
+    K.execute!(kb, "UPDATE sessions SET last_seen = ?", (stale,))
+    K.execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (stale, student))
     K.session_caller(kb, s)
-    @test seen() > recently
+    @test K.scalar(kb, "SELECT last_seen FROM users WHERE id = ?", (student,)) == seen() > recently
     K.execute!(kb, "UPDATE sessions SET expires_at = '2000-01-01T00:00:00Z'")
     @test K.session_caller(kb, s) === K.ANONYMOUS
     @test K.scalar(kb, "SELECT count(*) FROM sessions") == 0                   # an expired session is removed
@@ -100,6 +102,54 @@ shared_config(; kw...) = K.SharedConfig(; base_url = "http://127.0.0.1:8800", ad
     K.audit!(kb, learner, "token.create"; target = "laptop", detail = Dict("permissions" => ["read"]))
     e = first(K.audit_log(kb))
     @test e.who == "student@example.org" && e.action == "token.create" && e.detail["permissions"] == ["read"]
+    close(kb)
+end
+
+@zset "last seen in administration" begin
+    kb = open_kb(temp_config())
+    K.ensure_roles!(kb)
+    sh = shared_config()
+    admin = K.sign_in!(kb, sh, "Campus", "boss"; email = "boss@example.org", verified = true)
+    member = K.add_test_account!(kb, "Member"; roles = ["Reader"])
+    last_seen(id) = K.scalar(kb, "SELECT last_seen FROM users WHERE id = ?", (id,))
+    # total_changes() belongs to the connection that performs the writes.
+    writes() = lock(() -> K.scalar(kb, "SELECT total_changes()"), kb.lock)
+    stale = K.iso_in(K.Dates.Minute(-5))
+    recent = K.iso_in(K.Dates.Second(-20))
+
+    @test ismissing(last_seen(admin))
+    session = K.start_session!(kb, admin, sh)
+    hash = K.secret_hash(session)
+    session_seen() = K.scalar(kb, "SELECT last_seen FROM sessions WHERE token_hash = ?", (hash,))
+    @test last_seen(admin) == session_seen() > recent
+
+    K.view_as!(kb, session, member; caller = K.session_caller(kb, session))
+    K.execute!(kb, "UPDATE sessions SET last_seen = ? WHERE token_hash = ?", (stale, hash))
+    K.execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (stale, admin))
+    viewing = K.session_caller(kb, session)
+    @test viewing.user_id == member && viewing.admin == admin
+    @test last_seen(admin) == session_seen() > stale
+    @test ismissing(last_seen(member))
+    before = writes()
+    K.session_caller(kb, session)
+    @test writes() == before
+
+    t = K.create_token!(kb, admin; name = "client")
+    token_seen() = K.scalar(kb, "SELECT last_used FROM api_tokens WHERE id = ?", (t.id,))
+    # First token use is recorded even when another credential recently updated the person.
+    K.execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (recent, admin))
+    @test ismissing(token_seen())
+    @test K.token_caller(kb, t.token).user_id == admin
+    @test token_seen() > recent && last_seen(admin) == recent
+
+    K.execute!(kb, "UPDATE api_tokens SET last_used = ? WHERE id = ?", (stale, t.id))
+    K.execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (stale, admin))
+    @test K.token_caller(kb, t.token; mcp = true).user_id == admin
+    @test last_seen(admin) == token_seen() > stale
+    before = writes()
+    K.token_caller(kb, t.token; mcp = true)
+    K.session_caller(kb, session)
+    @test writes() == before
     close(kb)
 end
 
@@ -490,6 +540,32 @@ end
     @test only(K.tokens(kb; uid = boss)).projects == ["MN"]
     @test K.project_access(kb, K.token_caller(kb, K.create_token!(kb, other; name = "all mine").token), "OT") == K.NO_ACCESS
     @test_throws "No project ZZ" K.create_token!(kb, boss; name = "bad", projects = ["ZZ"])
+
+    # Search suggestions count visible tasks and findings before taking the first five.
+    tr = K.create_task!(kb, "MN", "Reef survey"; by = K.person("boss"))
+    fr = K.create_finding!(kb, "MN", "Reef finding"; by = K.person("boss"))
+    for i in 1:6
+        K.create_task!(kb, "OT", "Reef survey $i"; by = K.person("boss"))
+        K.create_finding!(kb, "OT", "Reef finding $i"; by = K.person("boss"))
+    end
+    K.execute!(kb, "UPDATE tasks SET updated_at = '2099' WHERE project_id = ?", (K.project_id(kb, "OT"),))
+    K.execute!(kb, "UPDATE findings SET updated_at = '2099' WHERE project_id = ?", (K.project_id(kb, "OT"),))
+    matches = call(reader, "GET", "/api/tasks/references?q=reef")[2]
+    @test [r["target"] for r in matches if r["kind"] == "task"] == [tr]
+    @test [r["target"] for r in matches if r["kind"] == "finding"] == [fr]
+
+    # Shareable workspace searches include the activity item containing the words.
+    K.note_task!(kb, tr, "MathInterchange weekly meeting"; by = K.person("boss"))
+    K.note_task!(kb, "OT-1", "MathInterchange workshop"; by = K.person("boss"))
+    for view in ("suggestions", "results")
+        target = "/api/search?view=$view&q=MathInterchange&kinds=task&layers=none"
+        data = call(reader, "GET", target)[2]
+        item = only(data["tasks"])
+        @test item["ref"] == tr && only(item["matches"])["event"] > 0
+        @test call(boss, "GET", target * "&project=MN")[2]["tasks"] == [item]
+        @test call(reader, "GET", target * "&project=OT")[1] == 404
+        @test isempty(data["hits"])
+    end
 
     # The board learns what one may do in a project; an invitation can name projects to join.
     @test call(maker, "GET", "/api/projects/MN")[2]["access"] == "maintainer" && call(other, "GET", "/api/projects/MN")[2]["access"] == "contributor"
@@ -919,6 +995,16 @@ end
         did = K.people_did(kb, "PU", as(boss))
         @test first(did).who == "Ada Lovelace" && first(did).kind == "created" && first(did).ref == made && first(did).title == "Check the seals"
         @test first(did).event == first(K.task(kb, made).activity).id                       # opened at it
+        author = K.person("Ada Lovelace"; id = "ada@x.org")
+        note = K.note_task!(kb, made, "First reading"; by = author)
+        later = K.note_task!(kb, made, "Second reading"; by = author)
+        K.execute!(kb, "UPDATE task_events SET at = ? WHERE id = ?", (K.iso_ago(K.Minute(2)), note))
+        K.execute!(kb, "UPDATE task_events SET at = ? WHERE id = ?", (K.iso_ago(K.Minute(1)), later))
+        K.edit_note!(kb, made, note, "Corrected reading"; by = author)
+        did = K.people_did(kb, "PU", as(boss))
+        notes = filter(e -> e.event in (later, note), did)
+        @test [e.event for e in notes] == [later, note]
+        @test isempty(notes[1].edited_at) && notes[2].edited_at == only(K.note_history(kb, note)).at
         ada_named = K.Caller(as(ada).user_id, "Ada Lovelace", "ada@x.org", Set(["tasks.view"]), :session, nothing, nothing, nothing)
         @test !any(e -> e.who == "Ada Lovelace", K.people_did(kb, "PU", ada_named))             # your own are left out
 
@@ -2177,8 +2263,10 @@ end
     @test length(to("bea")) == 1 && isempty(to("ada"))
     n = only(to("bea"))
     @test n["title"] == "2 things wait on you" && occursin("PU-1 assigned to you", n["body"]) && occursin("Ada: Which gasket?", n["body"])
-    round(140)
-    @test length(to("bea")) == 1                                   # sent once
+    question = only(e.id for e in K.task(kb, "PU-1").activity if e.kind == "question")
+    @test call(ada, "POST", "/api/tasks/PU-1/notes/$question", Dict("text" => "Which gasket size?"))[1] == 200
+    round(71); round(140)
+    @test length(to("bea")) == 1                                   # editing the question does not notify Bea again
     # One thing alone says what it is, and opens its task.
     call(ada, "POST", "/api/tasks", Dict("project" => "PU", "title" => "Order spares", "assignee" => "bea@x.org"))
     round(200); round(270)
@@ -2499,6 +2587,23 @@ end
             draw()
             @test TK.find_text(tb, "Notes") !== nothing && TK.find_text(tb, "in step") !== nothing && TK.find_text(tb, "Not sent") !== nothing && TK.find_text(tb, "Private") !== nothing
             @test TK.find_text(tb, "sent") !== nothing && TK.find_text(tb, "Tides.md") !== nothing
+            # c clears the activity: hidden at once, gone from the status at the syncer's next write, and
+            # what moves after shown.
+            TK.update!(m, TK.KeyEvent('c'))
+            @test isempty(m.status["activity"]) && TK.find_text(draw(), "Nothing moved yet.") !== nothing
+            K.write_status(s)
+            @test isempty(s.status["activity"]) && isempty(K.read_connect_status()["activity"])
+            write(joinpath(vault, "Waves.md"), "Swell.\n")
+            K.sync_pass!(s; remote)
+            @test [e["path"] for e in K.read_connect_status()["activity"]] == ["Waves.md"]
+            K.clear_activity!()
+            @test isempty(K.read_connect_status()["activity"])
+            rm(joinpath(vault, "Waves.md"))
+            K.sync_pass!(s; remote)
+            @test paths() == ["Notes/Tides.md"]
+            # o opens the library's page: at the site, or where the knowledge base run here is opened.
+            @test K.library_page(site) == "$site/service/library" && K.library_page("") === nothing
+            @test K.library_page("local") === nothing                                      # not served here
             # Narrow, the table and the activity stay within their panes; the mouse resizes the panes.
             small = TK.TestBackend(50, 16)
             TK.view(m, TK.Frame(small.buf, TK.Rect(1, 1, 50, 16), TK.GraphicsRegion[], TK.PixelSnapshot[]))
@@ -2584,6 +2689,9 @@ end
             @test timedwait(() -> here() == ["Notes/Tides.md"], 20) == :ok
             st = K.read_connect_status()
             @test st["by"] == K.LOCAL_SYNCER && st["pid"] == getpid() && only(st["folders"])["state"] in ("in step", "syncing")
+            # The library's page says so.
+            machine() = K.library_overview(kb, K.local_caller())["this_machine"]
+            @test machine()["by"] == K.LOCAL_SYNCER && only(machine()["folders"])["name"] == "Notes" && !machine()["paused"]
             # A pass asked for is made at once.
             write(joinpath(vault, "Currents.md"), "Rip currents.\n")
             K.request_pass()
@@ -2591,13 +2699,14 @@ end
             # Stopped, it lets go of the syncing and ends, which the app or a pass can take up.
             @test K.connect_cli(["--stop"]) == 0 && !K.synced_by_local()
             @test K.JSON.parse(String(follow().body))["syncing"] == false && istaskdone(t)
-            @test K.syncing_pid() === nothing && K.read_connect_status()["by"] == ""
+            @test K.syncing_pid() === nothing && K.read_connect_status()["by"] == "" && machine()["by"] == ""
             # Turned on from the command line, and taken up when the knowledge base is told.
             @test K.connect_cli(["--background"]) == 0 && K.follow_connect!(kb) isa Task
             K.set_background!(false); follow()
             # Folders kept with a knowledge base elsewhere are not its to sync.
             c = K.load_connect_config(); c["site"] = "https://kb.example.org"; K.save_connect_config!(c)
             @test_throws "not the knowledge base run here" K.set_background!(true)
+            @test machine() === nothing
             # Only the person running it can tell it.
             @test K.handle(kb, K.HTTP.Request("POST", "/api/connect/follow"), K.ANONYMOUS).status in (401, 403)
         end

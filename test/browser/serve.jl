@@ -83,7 +83,7 @@ function seed_figures!(kb)
     K.cut_paper_figures!(kb, id)
     pid = K.paper_id(kb, id)
     # Its second page as a section, whose text and PDF its page offers.
-    K.execute!(kb, "INSERT INTO sections VALUES (?, 1, 1, '1', 'Results', 'Results', 2, 2)", (pid,))
+    K.execute!(kb, "INSERT OR REPLACE INTO sections VALUES (?, 1, 1, '1', 'Results', 'Results', 2, 2)", (pid,))
     K.execute!(kb, "UPDATE blocks SET section = 1 WHERE paper_id = ? AND page = 2", (pid,))
     K.execute!(kb, "INSERT INTO summaries VALUES (?, ?, ?, 'm', 'v1', 'x', ?, NULL, NULL, ?, NULL)",
                (pid, "p:$id", kb.config.summarizer, "Two boxes, as Fig. 2 shows, and a table.\nTopics: boxes", K.now_iso()))

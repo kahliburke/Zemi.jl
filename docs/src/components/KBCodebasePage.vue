@@ -68,7 +68,7 @@ async function choose(to: Access) {
 
     <template v-if="c.summary">
       <h2 id="summary">Summary</h2>
-      <div v-html="render(c.summary)"></div>
+      <div data-share-text v-html="render(c.summary)"></div>
     </template>
     <p v-if="c.topics.length"><strong>Topics:</strong> {{ c.topics.join(' · ') }}</p>
 

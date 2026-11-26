@@ -42,7 +42,7 @@ const ofKind = ref<Recent[] | null>(null)
 let asked = 0
 watch(searchKind, async k => {
   const n = ++asked
-  if (!props.recent || !k || k === 'finding') { ofKind.value = null; return }
+  if (!props.recent || !k || k === 'finding' || k === 'task') { ofKind.value = null; return }
   try {
     const got = await getJSON(`/api/recent?kind=${encodeURIComponent(k)}&limit=${props.recent}`) as Recent[]
     if (n === asked) ofKind.value = got

@@ -7,75 +7,44 @@
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
+import KBIcon from './KBIcon.vue'
+import KBShare from './KBShare.vue'
+import KBExploreCard from './KBExploreCard.vue'
+import KBExploreCrumbs from './KBExploreCrumbs.vue'
+import KBExploreHits from './KBExploreHits.vue'
+import KBExplorePairs from './KBExplorePairs.vue'
+import KBExplorePanel from './KBExplorePanel.vue'
+import KBExploreTrail from './KBExploreTrail.vue'
 import { ref, shallowRef, triggerRef, computed, watch, nextTick } from 'vue'
 import { useData } from 'vitepress'
-import { getJSON, post, can, onLive } from './kbApi'
-import { exploreHref } from './kbLinks'
+import { can, getJSON, post, onLive } from './kbApi'
+import { exploreHref, kbPage } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
+import { BRAND, CLUSTER_COLOURS, DIMMED, KIND_COLOURS, LINK_COLOURS, NODE_KINDS, TRAIL, WHOSE, WHOSE_COLOURS, esc, kindName, mix, own,
+         provideSettings, shortTitle, useExploreSettings, whose,
+         type Detail, type Graph, type LegendRow, type Linked, type Near, type Node, type Pair, type Step } from './kbExplore'
+import { cameraMover, type View } from './exploreCamera'
+import { SCALE_2D, SCALE_3D, capHeight, clusterCentres, discTexture, pixelSize, placeTheRest, spacing,
+         type GLink, type GNode } from './exploreLayout'
 
-type Node = { id: string; kind: string; title: string; year?: string; page: string; links: number; status?: string; project?: string
-              access?: 'open' | 'projects' | 'private'; mine?: boolean; read?: boolean
-              x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]; px?: [number, number]; pp?: [number, number, number]
-              cluster?: number
-              central?: number; rating?: number }
-type Cluster = { id: number; name: string; description: string; size: number }
-type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean, boolean][]; clusters: Cluster[];
-               built_at: string | null; job: string | null; abstracts: boolean; abstract_only: number }
-type Near = { node: Node; similarity: number; linked: boolean }
-type Pair = { a: Node; b: Node; similarity: number; score: number; at: number }
 
 const { isDark } = useData()
 
-const LINK_KINDS = [['cites', 'Citations'], ['refers', 'References'], ['related', 'Related'], ['evidence', 'Evidence'], ['task', 'Tasks']] as const
-const NODE_KINDS = [['paper', 'Papers'], ['record', 'Notes and records'], ['code', 'Codebases'], ['resource', 'Resources'],
-                    ['finding', 'Findings'], ['task', 'Tasks']] as const
-const KIND_COLOURS: Record<string, string> = { paper: '#5b8def', record: '#3dd68c', code: '#f0a35e', resource: '#c58af9',
-                                               finding: '#f6d55c', task: '#ef6f6c' }
-const CLUSTER_COLOURS = ['#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f', '#edc948', '#b07aa1', '#ff9da7',
-                         '#9c755f', '#bab0ac', '#86bcb6', '#d37295', '#8cd17d', '#b6992d', '#499894', '#fabfd2']
-// Whose a document is: held for the reader, shared with projects' members, everyone's.
-const WHOSE = [['mine', 'Yours'], ['projects', 'Projects\u2019'], ['open', 'Everyone\u2019s']] as const
-const WHOSE_COLOURS: Record<string, string> = { mine: '#ff7ab6', projects: '#f0a35e', open: '#5b8def' }
-const whose = (n: Node) => (n.mine || n.access === 'private' ? 'mine' : n.access === 'projects' ? 'projects' : 'open')
-// A reader's own: what is held for them, and notes and records (on a knowledge base of one, held for no one).
-const own = (n: Node) => !!n.mine || n.access === 'private' || n.kind === 'record'
-const LINK_COLOURS: Record<string, string> = { cites: '#8ab4f8', refers: '#3dd68c', related: '#c58af9', evidence: '#f6d55c', task: '#ef6f6c' }
-const SCALE_2D = 700, SCALE_3D = 360
-
-// What is drawn, kept between visits.
-const stored = <T,>(key: string, fallback: T): T => {
-  try { const v = localStorage.getItem(`kb-explore-${key}`); return v === null ? fallback : JSON.parse(v) } catch { return fallback }
-}
-const keep = (key: string, v: unknown) => { try { localStorage.setItem(`kb-explore-${key}`, JSON.stringify(v)) } catch { /* private mode */ } }
-const view = ref<'2d' | '3d'>(stored('view', '2d'))
+// How the map is drawn, as the reader set it, kept between visits; the panel takes it up.
+const settings = useExploreSettings()
+provideSettings(settings)
+const { view, layout, colourBy, shadeBy, shownLinks, shownKinds, showUnlinked, threshold, abstracts, driftEvery, scope,
+        panelOpen, settingsOpen } = settings
 const fly = ref(false)
-// Where documents are placed: by t-SNE (close neighbourhoods kept) or UMAP (more of how groups lie to each other).
-const layout = ref<'tsne' | 'umap' | 'pacmap'>(stored('layout', 'tsne'))
-watch(layout, v => keep('layout', v))
-const colourBy = ref<'cluster' | 'kind' | 'whose'>(stored('colour', 'cluster'))
-const shownLinks = ref<string[]>(stored('links', ['cites', 'refers', 'related', 'evidence']))
-const shownKinds = ref<string[]>(stored('kinds', ['paper', 'record', 'code', 'resource', 'finding']))
-const threshold = ref<number>(stored('threshold', 0.8))
-// Pairs close in meaning across the whole map: off at first, the selected document's own being drawn from it.
-const showUnlinked = ref<boolean>(stored('pairs', false))
-// The papers known only by their abstract (the watch's, and those recorded but not yet read): left out
-// unless asked for, the map then being of every document.
-const abstracts = ref<boolean>(stored('abstracts', false))
-watch(abstracts, v => { keep('abstracts', v); if (data.value && data.value.abstracts !== v) load() })
-watch(view, v => keep('view', v)); watch(colourBy, v => keep('colour', v)); watch(shownLinks, v => keep('links', v), { deep: true })
-watch(shownKinds, v => keep('kinds', v), { deep: true }); watch(threshold, v => keep('threshold', v)); watch(showUnlinked, v => keep('pairs', v))
+watch(abstracts, v => { if (data.value && data.value.abstracts !== v) load() })
 
 const data = shallowRef<Graph | null>(null)
 const selected = ref<Node | null>(null)
 // What the card says of the document selected, asked for once each (see /api/graph/node).
-type Detail = { id: string; title: string; authors: string[]; published: string; venue: string; abstract: string; summary: string;
-                topics: string[]; read: boolean }
 const detail = ref<Detail | null>(null)
 const details = new Map<string, Detail>()
-const more = ref(false)
 const render = shallowRef<Render>(escapeText)
 watch(selected, async n => {
-  more.value = false
   if (!n || n.kind === 'finding' || n.kind === 'task') { detail.value = null; return }
   detail.value = details.get(n.id) ?? null
   if (detail.value) return
@@ -86,13 +55,31 @@ watch(selected, async n => {
   } catch { /* the card stays as the map has it */ }
   render.value = await loadMarkdown()
 })
-const byline = (d: Detail) => [d.authors.length > 3 ? `${d.authors.slice(0, 3).join(', ')} et al.` : d.authors.join(', '),
-                               d.venue || d.published.slice(0, 10)].filter(Boolean).join(' · ')
 const error = ref('')
 const building = ref('')
+const buildShare = ref<number | null>(null)          // how much of the map's making is done, where its job says
 const loading = ref(true)
 const box = ref<HTMLDivElement | null>(null)
 let graph: any = null
+// The view as the camera mover takes it (see exploreCamera.ts): the map's centre and log zoom, or the
+// space's camera and the point it looks at.
+function readView(): View | null {
+  if (!graph) return null
+  if (drawnView === '2d') { const c = graph.centerAt(); return [c.x, c.y, Math.log(graph.zoom())] }
+  // The point turned about is the controls' target; the camera's own look-at answer is only a point
+  // ahead of it, far off.
+  const c = graph.camera().position, t = graph.controls()?.target ?? graph.cameraPosition().lookAt
+  return [c.x, c.y, c.z, t.x, t.y, t.z]
+}
+function applyView(v: View) {
+  if (!graph) return
+  if (drawnView === '2d') { graph.zoom(Math.exp(v[2]), 0); graph.centerAt(v[0], v[1], 0) }
+  else graph.cameraPosition({ x: v[0], y: v[1], z: v[2] }, { x: v[3], y: v[4], z: v[5] }, 0)
+}
+const camera = cameraMover(readView, applyView)
+// The view the graph was drawn as, which a redraw in the same view starts from, and what was drawn in it.
+let drawnView: '2d' | '3d' | null = null
+let drawnShape = ''
 
 // ── The graph's data ───────────────────────────────────────────────────────────────────────────────
 
@@ -112,7 +99,7 @@ const nearOf = computed(() => {
   return out
 })
 const linksOf = computed(() => {
-  const out = new Map<string, { node: Node; kind: string; out: boolean }[]>()
+  const out = new Map<string, Linked[]>()
   const g = data.value
   if (!g) return out
   for (const [i, j, kind] of g.links) {
@@ -127,8 +114,6 @@ const clusterName = (id?: number) => data.value?.clusters.find(c => c.id === id)
 // Pairs near in meaning that no link joins and no one judged unrelated: the strongest first, those across
 // clusters or kinds a little ahead. By default those where one side is the reader's own work (a note, a
 // record, a finding) and the other is not: what they might cite or rest on.
-const scope = ref<'all' | 'cluster' | 'own'>(stored('scope', 'own'))
-watch(scope, v => keep('scope', v))
 const work = (n: Node) => own(n) || n.kind === 'finding'
 // Notes and papers are written differently and are less alike as text than two papers: the reader's own
 // work is shown beside its nearest down to this, a few each, whatever the threshold.
@@ -154,22 +139,39 @@ const pairs = computed<Pair[]>(() => {
   return out.filter(p => (each.set(p.a.id, (each.get(p.a.id) ?? 0) + 1).get(p.a.id)! <= OWN_EACH)).slice(0, 40)
 })
 
+// The subset mapped (see `explore_set` in src/explore_sets.jl), as the address names it, and how many a
+// search's subset takes.
+const subset = ref('')
+let arrivedAt: string | null = null              // the address's document, once gone to
+const setSize = ref(100)
+
 async function load() {
   loading.value = true
   error.value = ''
   const q = new URLSearchParams({ links: 'cites,refers,related,evidence,task', kinds: 'paper,record,code,resource,finding,task',
-                                  ...(abstracts.value ? { abstracts: '1' } : {}) })
+                                  ...(abstracts.value ? { abstracts: '1' } : {}),
+                                  ...(subset.value ? { set: subset.value, n: String(setSize.value) } : {}) })
   try {
     const g: Graph = await getJSON(`/api/graph?${q}`)
     data.value = g
-    building.value = g.job ? 'Placing what is new here…' : ''
+    building.value = g.job ? (g.set ? `Mapping ${g.set.count.toLocaleString()} documents…` : 'Updating the map…') : ''
+    buildShare.value = null
     if (g.job) watchJob(g.job)
   } catch (e: any) { error.value = `The map could not be loaded: ${e.message ?? e}` }
   loading.value = false
   await nextTick()
   draw()
+  // A drift's map opened from its address draws the drift's path through the documents it names.
+  const s = data.value?.set
+  if (s?.kind === 'docs' && !driftTrail.value.length && data.value?.nodes.length) {
+    driftTrail.value = s.spec.slice(5).split(',').map(id => byId.value.get(id)).filter((n): n is Node => !!n).map(node => ({ node }))
+    restyle()
+  }
+  // The document the address names, gone to once on arriving: not again each time the data is refreshed.
   const center = new URLSearchParams(location.search).get('center')
+  if (center === arrivedAt) return
   if (center && !byId.value.has(center) && !abstracts.value && data.value?.abstract_only) { abstracts.value = true; return }
+  arrivedAt = center
   if (center) {
     const node = byId.value.get(center)
     if (node) {
@@ -179,16 +181,44 @@ async function load() {
   }
 }
 
+// Map subset `spec` by itself, or with none the full map again, keeping in the address where one is.
+// A drift's own map keeps the drift's path; another starts afresh.
+function mapSet(spec: string, center = '') {
+  stopDrift()
+  if (!spec.startsWith('docs:')) driftTrail.value = []
+  selected.value = null
+  litRow.value = null
+  subset.value = spec
+  const u = new URL(location.href)
+  spec ? u.searchParams.set('set', spec) : u.searchParams.delete('set')
+  center ? u.searchParams.set('center', center) : u.searchParams.delete('center')
+  history.pushState({}, '', u)
+  load()
+}
+// Back to the full map, the document selected here selected there.
+const leaveSet = () => mapSet('', selected.value?.id ?? '')
+const mapDrift = () => mapSet('docs:' + driftTrail.value.map(t => t.node.id).join(','))
+function fromAddress() {
+  subset.value = new URLSearchParams(location.search).get('set') ?? ''
+  load()
+}
+// The projects whose libraries can be mapped, asked for once Show opens.
+const projectList = ref<{ key: string; name: string }[] | null>(null)
+async function loadProjects() {
+  if (projectList.value || !can('tasks.view')) return
+  try { projectList.value = (await getJSON('/api/projects')).projects } catch { projectList.value = [] }
+}
+
 let jobTimer: ReturnType<typeof setTimeout> | undefined
 function watchJob(id: string) {
   clearTimeout(jobTimer)
   jobTimer = setTimeout(async () => {
     try {
       const j = await getJSON(`/api/jobs/${id}`)
-      if (j.status === 'running') { building.value = j.message || building.value; watchJob(id); return }
-      building.value = ''
+      if (j.status === 'running') { building.value = j.message || building.value; buildShare.value = j.share ?? null; watchJob(id); return }
+      building.value = ''; buildShare.value = null
       if (j.status === 'done') await load()
-    } catch { building.value = '' }
+    } catch { building.value = ''; buildShare.value = null }
   }, 2000)
 }
 
@@ -205,7 +235,7 @@ function colour(n: Node) {
   return CLUSTER_COLOURS[(n.cluster - 1) % CLUSTER_COLOURS.length]
 }
 // What each colour stands for as the map is coloured, among the documents shown, with how many of them.
-const legend = computed(() => {
+const legend = computed<LegendRow[]>(() => {
   const g = data.value
   if (!g) return []
   const counts = new Map<string, number>()
@@ -233,31 +263,82 @@ function goToRow(key: string) {
   stopDrift()                                    // or it selects the next document a moment later
   selected.value = null
   litRow.value = key
-  const ns: GNode[] = (graph?.graphData().nodes ?? []).filter((n: GNode) => legendKey(n) === key && n.x !== undefined)
-  if (!ns.length) return
-  const mid = ['x', 'y', 'z'].map(a => ns.reduce((t, n) => t + ((n as any)[a] ?? 0), 0) / ns.length)
-  const apart = (n: GNode) => Math.hypot(n.x - mid[0], n.y - mid[1], (n.z ?? 0) - mid[2])
-  const core = new Set(ns.slice().sort((a, b) => apart(a) - apart(b)).slice(0, Math.max(3, Math.ceil(ns.length * 0.7))).map(n => n.id))
-  if (view.value === '2d') { graph.zoomToFit(900, 20, (n: GNode) => core.has(n.id)); return }
-  // The space's own fitting aims at the origin; this looks at the middle, from where the camera is.
-  const r = Math.max(20, ...ns.filter(n => core.has(n.id)).map(apart))
+  frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => legendKey(n) === key && placed(n)), 0.7)
+}
+// The view framing nodes `ns`: the share `most` of them nearest their middle, so outliers do not hold it far out.
+// The part of the map nothing is drawn over, in pixels from its corner: right of the card (or a search's
+// matches, or the suggested links) on the left, left of the panel on the right, below the top row.
+function uncovered() {
+  const el = frame.value!, at = el.getBoundingClientRect()
+  const edge = (sel: string, side: 'left' | 'right') => {
+    const r = el.querySelector(sel)?.getBoundingClientRect()
+    return r ? (side === 'left' ? r.right - at.left + 12 : r.left - at.left - 12) : null
+  }
+  const lefts = ['.kbx-card', '.kbx-pairs'].map(sel => edge(sel, 'left')).filter((x): x is number => x !== null)
+  const left = Math.max(0, ...lefts), right = edge('.kbx-panel', 'right') ?? at.width
+  // Too little left beside them: the whole of the map, as on a narrow screen.
+  const narrow = right - left < at.width / 3
+  return { left: narrow ? 0 : left, right: narrow ? at.width : right, top: barBottom.value, bottom: at.height, width: at.width, height: at.height }
+}
+// Where a node is fixed (every node is, see `graphData`): known as soon as it is drawn, before the graph's
+// first tick gives it `x` and `y`, so a move just after a redraw finds it.
+const placed = (n: GNode) => n.fx !== undefined
+// The whole map, as the view first shows it: every document with a place by meaning, not those set on
+// the ring around it.
+const frameAll = (ms?: number) => {
+  const ns: GNode[] = (graph?.graphData().nodes ?? []).filter(placed)
+  const mapped = ns.filter(n => n.cluster !== undefined)
+  frameNodes(mapped.length >= 3 ? mapped : ns, 1, ms)
+}
+const spot = (n: GNode): [number, number, number] => [n.fx!, n.fy!, n.fz ?? 0]
+function frameNodes(ns: GNode[], most: number, ms = 1100) {
+  if (!ns.length || !graph) return
+  const mid = [0, 1, 2].map(a => ns.reduce((t, n) => t + spot(n)[a], 0) / ns.length)
+  const apart = (n: GNode) => Math.hypot(...spot(n).map((v, a) => v - mid[a]))
+  const core = ns.slice().sort((a, b) => apart(a) - apart(b)).slice(0, Math.max(3, Math.ceil(ns.length * most)))
+  const open = uncovered()
+  if (drawnView === '2d') {
+    // Into the part of the map no card or panel covers.
+    const xs = core.map(n => spot(n)[0]), ys = core.map(n => spot(n)[1]), pad = 30
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+    const k = Math.min((open.right - open.left) / (x1 - x0 + 2 * pad), (open.bottom - open.top) / (y1 - y0 + 2 * pad), 8)
+    camera.to([(x0 + x1) / 2 - ((open.left + open.right) / 2 - open.width / 2) / k,
+               (y0 + y1) / 2 - ((open.top + open.bottom) / 2 - open.height / 2) / k, Math.log(k)], ms)
+    return
+  }
+  // From the side the camera is on: each document as the camera would see it, and the nearest distance
+  // at which every one lies within the uncovered part of the view, across and up; the point looked at
+  // then shifted so they sit in the middle of that part.
   const cam = graph.camera(), from = cam.position
-  const away = Math.hypot(from.x - mid[0], from.y - mid[1], from.z - mid[2]) || 1
-  const d = (r / Math.sin((cam.fov * Math.PI) / 360)) * 1.05
-  graph.cameraPosition({ x: mid[0] + (from.x - mid[0]) * d / away, y: mid[1] + (from.y - mid[1]) * d / away,
-                         z: mid[2] + (from.z - mid[2]) * d / away }, { x: mid[0], y: mid[1], z: mid[2] }, 1200)
+  const unit = (v: number[]) => { const l = Math.hypot(...v) || 1; return v.map(x => x / l) }
+  const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+  const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+  const back = unit([from.x - mid[0], from.y - mid[1], from.z - mid[2]])
+  const across = unit(cross([cam.up.x, cam.up.y, cam.up.z], back)), up = cross(back, across)
+  const tanUp = Math.tan((cam.fov * Math.PI) / 360), tanAcross = tanUp * open.width / open.height
+  const fitAcross = tanAcross * (open.right - open.left) / open.width, fitUp = tanUp * (open.bottom - open.top) / open.height
+  // Centred on the middle of their spread as the camera sees it, not their average, which one far side pulls.
+  const seen = core.map(n => { const p = spot(n).map((v, a) => v - mid[a]); return [dot(p, across), dot(p, up), dot(p, back)] })
+  const cx = (Math.min(...seen.map(q => q[0])) + Math.max(...seen.map(q => q[0]))) / 2
+  const cy = (Math.min(...seen.map(q => q[1])) + Math.max(...seen.map(q => q[1]))) / 2
+  let d = 30
+  for (const [x, y, z] of seen) d = Math.max(d, z + Math.abs(x - cx) / fitAcross, z + Math.abs(y - cy) / fitUp)
+  d *= 1.04
+  const shiftAcross = cx - (((open.left + open.right) / 2 - open.width / 2) / (open.width / 2)) * d * tanAcross
+  const shiftUp = cy + (((open.top + open.bottom) / 2 - open.height / 2) / (open.height / 2)) * d * tanUp
+  const look = [0, 1, 2].map(a => mid[a] + across[a] * shiftAcross + up[a] * shiftUp)
+  camera.to([look[0] + back[0] * d, look[1] + back[1] * d, look[2] + back[2] * d, look[0], look[1], look[2]], ms)
 }
 watch(selected, n => { if (n) litRow.value = null })
+// Back to the whole map in view, nothing lit; the selected document stays selected.
+function resetView() {
+  stopDrift()
+  litRow.value = null
+  frameAll()
+}
 // A legend row's documents shaded from faint to full by how much each stands out in it: its links among
 // the documents here (the cluster's middle deciding among the unlinked), how central it is in meaning,
 // or the rating the watch's judge gave it.
-type ShadeBy = 'off' | 'linked' | 'central' | 'rated'
-const SHADE_BY = [['off', 'Off', 'Every document in its full colour'],
-                  ['linked', 'Linked', 'Most cited and referred to among the documents here'],
-                  ['central', 'Central', 'Nearest in meaning to the middle of the cluster'],
-                  ['rated', 'Rated', 'How relevant the watch judged it, 0 to 3; unrated faintest']] as const
-const shadeBy = ref<ShadeBy>(stored('shade', 'linked'))
-watch(shadeBy, v => keep('shade', v))
 // Each lit document's standing, 0 to 1, by `shadeBy`.
 const standing = computed(() => {
   const out = new Map<string, number>()
@@ -276,14 +357,7 @@ const standing = computed(() => {
   }
   return out
 })
-// `a` towards `b` by `t`, both #rrggbb.
-function mix(a: string, b: string, t: number) {
-  const ch = (h: string, i: number) => parseInt(h.slice(1 + 2 * i, 3 + 2 * i), 16)
-  return '#' + [0, 1, 2].map(i => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t).toString(16).padStart(2, '0')).join('')
-}
-const legendOpen = ref<boolean>(stored('legend', true))
-watch(legendOpen, v => keep('legend', v))
-const settingsOpen = ref(false)
+watch(settingsOpen, open => { if (open) loadProjects() }, { immediate: true })
 function shade(n: Node) {
   const c = colour(n)
   if (hits.value.size) return hits.value.has(n.id) ? c : isDark.value ? '#3a3a44' : '#d8d8de'
@@ -300,24 +374,6 @@ const size = (n: Node) => (((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links
                            (hits.value.get(n.id) ?? 0) * 3) * (n.id === selected.value?.id ? 2.5 : 1) *
                          (0.7 + 0.8 * (standing.value.get(n.id) ?? 0.375))
 
-// How closely a layout packs its documents, as the median distance from one to its nearest, over a
-// sample of them.
-function spacing(points: number[][]) {
-  if (points.length < 2) return 0
-  const step = Math.max(1, Math.floor(points.length / 300)), d: number[] = []
-  for (let i = 0; i < points.length; i += step) {
-    let least = Infinity
-    for (let j = 0; j < points.length; j++) {
-      if (j === i) continue
-      let s = 0
-      for (let k = 0; k < points[i].length; k++) s += (points[i][k] - points[j][k]) ** 2
-      if (s < least) least = s
-    }
-    d.push(Math.sqrt(least))
-  }
-  d.sort((a, b) => a - b)
-  return d[d.length >> 1]
-}
 // Discs in proportion to how closely the layout packs documents, against t-SNE's spacing: UMAP and
 // PaCMAP draw clusters tighter in the same extent, where t-SNE's discs would cover each other.
 const packing = computed(() => {
@@ -332,8 +388,6 @@ const packing = computed(() => {
 })
 const flatSize = (n: Node) => size(n) * packing.value ** 2
 
-type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
-type GLink = { source: string; target: string; kind: string; similarity?: number }
 
 // The library's nodes and links: placed nodes fixed where the map puts them, the rest left to settle
 // among those they link to; the nearest by meaning hold the unplaced, and are drawn only when no link
@@ -365,39 +419,6 @@ function graphData() {
   return { nodes, links }
 }
 
-// The nodes with no place by meaning (findings, tasks, documents only linked to), fixed where they stand
-// among those linked to them, a little aside; those linked to none on a ring just outside the map.
-// Every node fixed, nothing drifts once drawn.
-function placeTheRest(nodes: GNode[], links: GLink[], deep: boolean) {
-  const at = new Map(nodes.map(n => [n.id, n]))
-  const neighbours = new Map<string, string[]>()
-  for (const l of links) {
-    if (l.kind === 'similar') continue
-    neighbours.set(l.source, [...(neighbours.get(l.source) ?? []), l.target])
-    neighbours.set(l.target, [...(neighbours.get(l.target) ?? []), l.source])
-  }
-  const loose = nodes.filter(n => n.fx === undefined)
-  const scale = deep ? SCALE_3D : SCALE_2D
-  for (let pass = 0; pass < 3; pass++) {                    // those linked only to the unplaced, once those are
-    for (const n of loose) {
-      if (n.fx !== undefined) continue
-      const placed = (neighbours.get(n.id) ?? []).map(id => at.get(id)!).filter(m => m && m.fx !== undefined)
-      if (!placed.length) continue
-      const mean = (k: 'fx' | 'fy' | 'fz') => placed.reduce((t, m) => t + (m[k] ?? 0), 0) / placed.length
-      const turn = hashTurn(n.id), aside = scale * 0.03
-      n.fx = mean('fx') + aside * Math.cos(turn); n.fy = mean('fy') + aside * Math.sin(turn)
-      if (deep) n.fz = mean('fz') + aside * Math.sin(2 * turn)
-    }
-  }
-  const rest = loose.filter(n => n.fx === undefined)
-  rest.forEach((n, i) => {
-    const turn = (2 * Math.PI * i) / Math.max(rest.length, 1)
-    n.fx = scale * 1.15 * Math.cos(turn); n.fy = scale * 1.15 * Math.sin(turn)
-    if (deep) n.fz = 0
-  })
-}
-// A steady angle from an id, so a node stands on the same side of its neighbours each time.
-const hashTurn = (id: string) => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) / 0xffffffff * 2 * Math.PI
 
 function linkColour(l: GLink) {
   if (l.kind === 'similar') return isDark.value ? 'rgba(200,200,255,0.45)' : 'rgba(60,60,140,0.4)'
@@ -407,22 +428,18 @@ function linkColour(l: GLink) {
 const endId = (e: any) => (typeof e === 'object' ? e.id : e) as string
 const touches = (l: any, id: string) => endId(l.source) === id || endId(l.target) === id
 
-// Each cluster's middle, from its placed nodes, for its label.
-function clusterCentres(nodes: GNode[]) {
-  const sums = new Map<number, { x: number; y: number; z: number; n: number }>()
-  for (const n of nodes) {
-    if (n.cluster === undefined || n.fx === undefined) continue
-    const s = sums.get(n.cluster) ?? { x: 0, y: 0, z: 0, n: 0 }
-    s.x += n.fx; s.y += n.fy!; s.z += n.fz ?? 0; s.n++
-    sums.set(n.cluster, s)
-  }
-  return [...sums].filter(([, s]) => s.n >= 3).map(([id, s]) => ({ id, name: clusterName(id), x: s.x / s.n, y: s.y / s.n, z: s.z / s.n }))
-}
 
 // The 2D map's cluster names, where they are drawn.
 let centres: ReturnType<typeof clusterCentres> = []
 async function draw() {
   if (!box.value || !data.value) return
+  // Another layout, map or theme in the same view carries on from where the view is.
+  const was = drawnView === view.value ? readView() : null
+  // The same map drawn again (its data refreshed, links or colours changed): the view stays as it is.
+  const shape = `${view.value} ${layout.value} ${subset.value} ${data.value.abstracts}`
+  const same = was !== null && shape === drawnShape
+  drawnShape = shape
+  if (!was) camera.stop()
   graph?._destructor?.()
   box.value.innerHTML = ''
   const el = box.value
@@ -431,7 +448,7 @@ async function draw() {
   const label = (n: Node) => `<div class="kbx-tip"><b>${esc(n.title)}</b><br>${esc([kindName(n.kind), n.year, clusterName(n.cluster)].filter(Boolean).join(' · '))}</div>`
   if (view.value === '2d') {
     const ForceGraph = (await import('force-graph')).default as any
-    centres = clusterCentres(nodes)
+    centres = clusterCentres(nodes, clusterName)
     graph = new ForceGraph(el)
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
@@ -455,17 +472,30 @@ async function draw() {
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
         ctx.font = `600 ${14 / scale}px system-ui, sans-serif`
         const rel = relevantClusters.value
-        for (const c of centres) {
-          if (!c.name) continue
+        // Placed in turn, those that matter here and the largest first: a name that would cover one placed
+        // already moves a step up or down, and is left out while no step clears it.
+        const placed: { x0: number; x1: number; y0: number; y1: number }[] = []
+        const order = centres.filter(c => c.name)
+          .sort((p, q) => Number(!!rel && rel.has(q.id)) - Number(!!rel && rel.has(p.id)) || q.size - p.size)
+        const h = 20 / scale
+        for (const c of order) {
           const a = rel ? (rel.has(c.id) ? 1 : DIMMED) : fade
-          ctx.fillStyle = isDark.value ? `rgba(235,235,245,${0.85 * a})` : `rgba(30,30,40,${0.8 * a})`
-          ctx.fillText(c.name, c.x, c.y)
+          const w = ctx.measureText(c.name).width + 12 / scale
+          const clear = (y: number) => placed.every(b => c.x + w / 2 < b.x0 || c.x - w / 2 > b.x1 || y + h / 2 < b.y0 || y - h / 2 > b.y1)
+          const y = [0, -1.1, 1.1, -2.2, 2.2].map(k => c.y + k * h).find(clear)
+          if (y === undefined) continue
+          placed.push({ x0: c.x - w / 2 - 2 / scale, x1: c.x + w / 2 + 2 / scale, y0: y - h / 2, y1: y + h / 2 })
+          // On a translucent backing, so the name reads over the discs and links beneath it.
+          ctx.fillStyle = isDark.value ? `rgba(17,17,22,${0.62 * a})` : `rgba(250,250,250,${0.72 * a})`
+          ctx.beginPath(); ctx.roundRect(c.x - w / 2, y - h / 2, w, h, 4 / scale); ctx.fill()
+          ctx.fillStyle = isDark.value ? `rgba(235,235,245,${0.9 * a})` : `rgba(30,30,40,${0.85 * a})`
+          ctx.fillText(c.name, c.x, y)
         }
         ctx.restore()
       })
     graph.d3Force('charge')?.strength(-12)
     graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
-    setTimeout(() => graph?.zoomToFit(600, 40), 300)
+    settle(was, same)
   } else {
     const ForceGraph3D = (await import('3d-force-graph')).default as any
     const SpriteText = (await import('three-spritetext')).default as any
@@ -503,11 +533,11 @@ async function draw() {
     // A little depth: a tenth faded across the space as first framed, a quarter beyond it.
     graph.scene().fog = new fog(isDark.value ? 0x111116 : 0xfafafa, 0.00035)
     clusterLabels.length = 0
-    for (const c of clusterCentres(nodes)) {
+    for (const c of clusterCentres(nodes, clusterName)) {
       if (!c.name) continue
       const s = new SpriteText(c.name, 6, isDark.value ? 'rgba(240,240,248,0.95)' : 'rgba(25,25,35,0.95)')
       s.fontWeight = '600'
-      s.backgroundColor = isDark.value ? 'rgba(17,17,22,0.6)' : 'rgba(250,250,250,0.7)'
+      s.backgroundColor = isDark.value ? 'rgba(17,17,22,0.72)' : 'rgba(250,250,250,0.8)'
       s.padding = [3, 1.5]
       s.borderRadius = 3
       // Over every node, whatever is nearer: drawn last, and not hidden by depth.
@@ -519,7 +549,7 @@ async function draw() {
       clusterLabels.push({ sprite: s, id: c.id })
       graph.scene().add(s)
     }
-    setTimeout(() => graph?.zoomToFit(800, 30), 300)
+    settle(was, same)
     three = THREE
     nearest3d = null
     ring3d = null
@@ -531,7 +561,6 @@ async function draw() {
 
 // The selected document's nearest in meaning, drawn from it: brighter and, on the map, wider the more
 // alike, with how alike beside each. Their nodes are the ones left lit (see `shade`).
-const BRAND = '#8b7cf6'
 function nearestShown() {
   const s = selected.value
   if (!s || !graph) return []
@@ -574,25 +603,9 @@ function drawNearestLabels2d(ctx: CanvasRenderingContext2D, scale: number) {
   }
   ctx.restore()
 }
-// A text sprite in the space kept between `least` and `most` pixels tall on screen: smaller with distance
-// within that, never too small to read nor growing past `most` as the camera nears it. Set as it is drawn,
-// from the camera's distance and the canvas's height.
-function capHeight(sprite: any, least: number, most: number) {
-  const base = sprite.scale.clone()
-  const at = new (sprite.position.constructor)()
-  sprite.onBeforeRender = (renderer: any, _scene: any, camera: any) => {
-    const d = camera.position.distanceTo(sprite.getWorldPosition(at))
-    const perPixel = 2 * d * Math.tan((camera.fov * Math.PI) / 360) / renderer.domElement.clientHeight
-    const px = Math.max(least, Math.min(most, base.y / perPixel))
-    sprite.scale.copy(base).multiplyScalar((px * perPixel) / base.y)
-    sprite.updateMatrixWorld()
-  }
-}
 // The selected document kept in sight in the space: its disc drawn over whatever is nearer (see `restyle`),
 // and the discs between it and the camera that overlap it on screen faded while they do. Where it lies on
 // screen is found once a frame, by the first disc drawn.
-const pixelSize = (d: number, renderer: any, camera: any) =>
-  2 * d * Math.tan((camera.fov * Math.PI) / 360) / renderer.domElement.clientHeight
 let focusFrame = -1
 let focus: { at: any; distance: number; radius: number } | null = null
 let scratch: any = null
@@ -626,7 +639,6 @@ function keepFocusInSight(sprite: any, n: GNode, renderer: any, camera: any) {
 // The clusters that matter to what one is looking at: a cluster gone to from the legend, or the selected
 // document's and those of its nearest. Null when nothing is in view in particular. The other clusters'
 // names are dimmed to `DIMMED`.
-const DIMMED = 0.4
 const relevantClusters = computed<Set<number> | null>(() => {
   if (litRow.value) return litRow.value.startsWith('c') ? new Set([Number(litRow.value.slice(1))]) : null
   const s = selected.value
@@ -635,16 +647,16 @@ const relevantClusters = computed<Set<number> | null>(() => {
 })
 // The space's cluster names, with their clusters.
 const clusterLabels: { sprite: any; id: number }[] = []
-// The selected document marked where it is: a ring in the brand colour around its node, and a wider faint one.
+// The selected document marked where it is: a thin ring in the brand colour around its node, and a faint wider one.
 function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
   const n: GNode | undefined = selected.value ? graph?.graphData().nodes.find((x: GNode) => x.id === selected.value!.id) : undefined
   if (!n || n.x === undefined) return
   const r = Math.sqrt(flatSize(n)) * 4
   ctx.save()
-  ctx.strokeStyle = BRAND; ctx.lineWidth = 2.5 / scale
-  ctx.beginPath(); ctx.arc(n.x, n.y, r + 4 / scale, 0, 2 * Math.PI); ctx.stroke()
-  ctx.strokeStyle = BRAND + '50'; ctx.lineWidth = 5 / scale
-  ctx.beginPath(); ctx.arc(n.x, n.y, r + 11 / scale, 0, 2 * Math.PI); ctx.stroke()
+  ctx.strokeStyle = BRAND + 'c0'; ctx.lineWidth = 1.5 / scale
+  ctx.beginPath(); ctx.arc(n.x, n.y, r + 3 / scale, 0, 2 * Math.PI); ctx.stroke()
+  ctx.strokeStyle = BRAND + '26'; ctx.lineWidth = 3 / scale
+  ctx.beginPath(); ctx.arc(n.x, n.y, r + 8 / scale, 0, 2 * Math.PI); ctx.stroke()
   // Its title above the ring, on a backing, a constant size on screen.
   const text = shortTitle(n.title)
   ctx.font = `600 ${13 / scale}px system-ui, sans-serif`
@@ -658,7 +670,6 @@ function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
   ctx.restore()
 }
 // A title short enough to label a node with.
-const shortTitle = (t: string) => (t.length > 70 ? t.slice(0, 68).trimEnd() + '…' : t)
 // In the space, the selected document's title, kept above its disc whichever way the camera turns.
 let SpriteTextOf: any = null
 let title3d: any = null
@@ -697,16 +708,16 @@ function showRing3d() {
     c.width = c.height = px
     const ctx = c.getContext('2d')!
     ctx.strokeStyle = '#ffffff'
-    ctx.lineWidth = 9; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 22, 0, 2 * Math.PI); ctx.stroke()
-    ctx.globalAlpha = 0.35; ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 6, 0, 2 * Math.PI); ctx.stroke()
+    ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 22, 0, 2 * Math.PI); ctx.stroke()
+    ctx.globalAlpha = 0.15; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 8, 0, 2 * Math.PI); ctx.stroke()
     const map = new three.CanvasTexture(c)
     map.colorSpace = three.SRGBColorSpace
-    ring3d = new three.Sprite(new three.SpriteMaterial({ map, color: BRAND, transparent: true, depthTest: false, depthWrite: false }))
+    ring3d = new three.Sprite(new three.SpriteMaterial({ map, color: BRAND, transparent: true, opacity: 0.75, depthTest: false, depthWrite: false }))
     ring3d.renderOrder = 998
     ring3d.onBeforeRender = () => {
       const f = selected.value && sprites.get(selected.value.id)
       if (!f) return
-      const k = f.sprite.scale.x * 2 * (1 + 0.08 * Math.sin(performance.now() / 400))
+      const k = f.sprite.scale.x * 1.8
       ring3d.position.copy(f.sprite.position)
       ring3d.scale.set(k, k, 1)
       ring3d.updateMatrixWorld()
@@ -747,38 +758,13 @@ async function showNearest3d() {
   nearest3d = group
   graph.scene().add(group)
 }
-const COLOUR_BY = [['cluster', 'Cluster'], ['kind', 'Kind'], ['whose', 'Whose']] as const
 // One of a list of shown kinds turned on or off.
-const toggle = (list: string[], k: string) => { const i = list.indexOf(k); i < 0 ? list.push(k) : list.splice(i, 1) }
-// Every one of a list's kinds on, or, all on already, none.
-const all = (list: string[], kinds: readonly (readonly [string, string])[]) =>
-  list.splice(0, list.length, ...(list.length === kinds.length ? [] : kinds.map(([k]) => k)))
 // The space's node discs, by id, with the nodes they draw.
 const sprites = new Map<string, { sprite: any; node: GNode }>()
 // A disc's width: a little smaller than the sphere 3d-force-graph would draw for the node (radius 4·∛val),
 // as closely as the layout packs them.
 const spriteSize = (n: GNode) => 5 * Math.cbrt(size(n)) * packing.value
-// A white disc, lighter at the centre and a little darker towards its antialiased rim, tinted per node.
-function discTexture(THREE: any) {
-  const px = 128, c = document.createElement('canvas')
-  c.width = c.height = px
-  const ctx = c.getContext('2d')!
-  const g = ctx.createRadialGradient(px * 0.4, px * 0.38, px * 0.04, px / 2, px / 2, px / 2)
-  g.addColorStop(0, '#ffffff'); g.addColorStop(0.7, '#d9d9d9'); g.addColorStop(1, '#b0b0b0')
-  ctx.fillStyle = g
-  ctx.beginPath(); ctx.arc(px / 2, px / 2, px / 2 - 2, 0, Math.PI * 2); ctx.fill()
-  const t = new THREE.CanvasTexture(c)
-  t.colorSpace = THREE.SRGBColorSpace
-  t.anisotropy = 4
-  return t
-}
-const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))
 // How a linked document stands to the one shown: what it does to this one, or this one to it.
-const RELATIONS: Record<string, [string, string]> = { cites: ['cites', 'cited by'], refers: ['refers to', 'referred to by'],
-                                                     related: ['related to', 'related to'],
-                                                     evidence: ['rests on', 'evidence for'], task: ['linked to', 'task on'] }
-const relation = (kind: string, out: boolean) => (RELATIONS[kind] ?? [kind, kind])[out ? 0 : 1]
-const kindName = (k: string) => ({ paper: 'paper', record: 'note or record', code: 'codebase', resource: 'resource', finding: 'finding', task: 'task' }[k] ?? k)
 
 // Redrawn as what is shown changes; recoloured as the selection, hits and colours do.
 watch([view, fly, layout, isDark], () => draw())
@@ -793,7 +779,7 @@ function refresh() {
   // From an empty map, drawn afresh, which frames what is now shown.
   if (!graph.graphData().nodes.length) return draw()
   const { nodes, links } = graphData()
-  if (view.value === '2d') centres = clusterCentres(nodes)
+  if (view.value === '2d') centres = clusterCentres(nodes, clusterName)
   graph.graphData({ nodes, links })
   restyle()
 }
@@ -828,13 +814,33 @@ function fullScreen() {
   else frame.value?.requestFullscreen?.()
 }
 const onFullScreen = () => { full.value = document.fullscreenElement === frame.value; nextTick(resize) }
+// Where the top row ends, however many lines it wraps to: the panels open below it.
+const bar = ref<HTMLElement | null>(null)
+const barBottom = ref(52)
 onLive(() => {
+  const measure = () => { if (bar.value) barBottom.value = bar.value.offsetTop + bar.value.offsetHeight + 8 }
+  const watcher = new ResizeObserver(measure)
+  if (bar.value) watcher.observe(bar.value)
+  measure()
+  return () => watcher.disconnect()
+})
+onLive(() => {
+  const hold = () => camera.stop()
+  box.value?.addEventListener('pointerdown', hold)
+  box.value?.addEventListener('wheel', hold, { passive: true })
+  return () => { box.value?.removeEventListener('pointerdown', hold); box.value?.removeEventListener('wheel', hold); camera.stop() }
+})
+onLive(() => {
+  document.documentElement.classList.add('kbx-takeover')
+  subset.value = new URLSearchParams(location.search).get('set') ?? ''
   load()
+  addEventListener('popstate', fromAddress)
   addEventListener('resize', resize)
   document.addEventListener('fullscreenchange', onFullScreen)
   addEventListener('keydown', key)
   return () => {
-    removeEventListener('resize', resize); removeEventListener('keydown', key)
+    removeEventListener('resize', resize); removeEventListener('keydown', key); removeEventListener('popstate', fromAddress)
+    document.documentElement.classList.remove('kbx-takeover')
     document.removeEventListener('fullscreenchange', onFullScreen)
     clearTimeout(jobTimer); stopDrift(); graph?._destructor?.()
   }
@@ -853,20 +859,41 @@ function clicked(n: GNode) {
 }
 
 /** Move the view to `n` and show its card, keeping where one came from. */
-function go(n: Node, remember = true) {
+// To document `n`: `remember`ed for Back; in the map, closer in where `zoomIn` asks (a person picking it).
+function go(n: Node, remember = true, zoomIn = true) {
   if (remember && selected.value && selected.value.id !== n.id) trail.push(selected.value)
   selected.value = n
   const g = graph?.graphData().nodes.find((x: GNode) => x.id === n.id)
-  if (!g || g.x === undefined) return
-  if (view.value === '2d') {
-    graph.centerAt(g.x, g.y, moveMs(900))
-    graph.zoom(Math.max(graph.zoom(), 3), moveMs(900))
-  } else {
-    const d = 90, r = Math.hypot(g.x, g.y, g.z) || 1
-    graph.cameraPosition({ x: g.x * (1 + d / r), y: g.y * (1 + d / r), z: g.z * (1 + d / r) }, g, moveMs(1400))
+  if (!g || !placed(g)) return
+  const [x, y, z] = spot(g)
+  if (drawnView === '2d') camera.to([x, y, Math.log(zoomIn ? Math.max(graph.zoom(), 3) : graph.zoom())], moveMs(900))
+  else {
+    // From the side the view is turned to now, at the distance it is (not farther than a document's
+    // neighbourhood needs): the view slides across and turns about the document, without swinging round.
+    const v = readView()!, back = [v[0] - v[3], v[1] - v[4], v[2] - v[5]]
+    const away = Math.hypot(...back) || 1, d = Math.min(Math.max(away, 60), 140)
+    camera.to([x + back[0] / away * d, y + back[1] / away * d, z + back[2] / away * d, x, y, z], moveMs(1400))
   }
 }
 function back() { const n = trail.pop(); if (n) go(n, false) }
+// A graph just drawn: shown first as the one before it was (`was`). The same map again stays there; another
+// moves to the selected document, at the zoom it has, or to the whole map.
+function settle(was: View | null, same = false) {
+  drawnView = view.value
+  if (was) applyView(was)
+  if (same) { keepSelected(false); return }
+  setTimeout(() => keepSelected() || frameAll(900), was ? 0 : 300)
+}
+// After the map is drawn again (another view, layout or theme), the selected document stays selected and
+// in view; false when there is none on this map to keep.
+function keepSelected(move = true) {
+  const n = selected.value && byId.value.get(selected.value.id)
+  if (!n || !graph?.graphData().nodes.some((x: GNode) => x.id === n.id && placed(x))) return false
+  selected.value = n
+  if (move) go(n, false, false)
+  restyle()
+  return true
+}
 const open = (n: Node) => window.open(n.page, '_blank', 'noopener')
 
 // Searching: Zemi's search, its hits lit where they lie; Enter goes to the best, Tab to the next.
@@ -885,9 +912,17 @@ watch(query, q => {
       hits.value = new Map(found.map((h: any) => [h.id, Math.max(0.25, h.score / top)]))
       order.value = found.map((h: any) => h.id)
       at = -1
+      // A new search shows its matches: the selected document set down, the view moving to take them in.
+      if (selected.value) selected.value = null
+      await nextTick()                                     // the matches' list drawn, so the view frames beside it
+      const shown = new Set(order.value.slice(0, 12))
+      frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => shown.has(n.id) && placed(n)), 0.9)
     } catch { /* left as it was */ }
   }, 350)
 })
+// A search's best matches, listed while none is selected.
+const topHits = computed(() => order.value.slice(0, 8).map(id => ({ node: byId.value.get(id)!, strength: hits.value.get(id) ?? 0 }))
+                                          .filter(h => h.node))
 function next(step = 1) {
   if (!order.value.length) return
   at = (at + step + order.value.length) % order.value.length
@@ -899,10 +934,9 @@ const drifting = ref(false)
 let driftTimer: ReturnType<typeof setInterval> | undefined
 const seen = new Set<string>()
 // Where a drift has been, in order, with how alike each step was to the one before.
-const driftTrail = ref<{ node: Node; similarity?: number }[]>([])
+const driftTrail = ref<Step[]>([])
 watch(() => driftTrail.value.length, () => showTrail3d())
 // The trail drawn where it went: a line through each document in turn, the earliest steps faintest.
-const TRAIL = '#ffb454'
 function trailNodes(): GNode[] {
   if (driftTrail.value.length < 2 || !graph) return []
   const at = new Map<string, GNode>(graph.graphData().nodes.map((n: GNode) => [n.id, n]))
@@ -957,10 +991,8 @@ function driftStep() {
   driftTrail.value.push({ node: nextOne.node, similarity: nextOne.similarity })
   go(nextOne.node)
 }
-// How long a drift stays at each document, in seconds; changed while drifting, from the next step.
-const driftEvery = ref<number>(stored('drift', 4.5))
+// How long a drift stays at each document, in seconds (a setting); changed while drifting, from the next step.
 watch(driftEvery, v => {
-  keep('drift', v)
   if (drifting.value) { clearInterval(driftTimer); driftTimer = setInterval(driftStep, v * 1000) }
 })
 // The view's move to a document: quicker when drifting fast, so it arrives before the next step.
@@ -1011,7 +1043,6 @@ async function addEvidence(finding: Node, doc: Node) {
   } catch (e: any) { said.value = `Not added: ${e.message ?? e}` }
 }
 // A pair judged: related, made a link of the reader's; or not, no longer suggested.
-const judgeable = (p: Pair) => can('paper.add') && ![p.a.kind, p.b.kind].some(k => k === 'finding' || k === 'task')
 async function judge(p: Pair, related: boolean) {
   const g = data.value
   if (!g) return
@@ -1050,22 +1081,30 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 
 <template>
   <KBNeedsService>
-    <div ref="frame" class="kbx" :class="{ dark: isDark, full }">
+    <div ref="frame" class="kbx" :class="{ dark: isDark, full }" :style="{ '--kbx-top': barBottom + 'px' }">
       <div ref="box" class="kbx-canvas"></div>
       <p v-if="loading" class="kbx-status">Loading the map…</p>
       <p v-else-if="error" class="kbx-status kb-error">{{ error }}</p>
+      <p v-else-if="data?.set?.few" class="kbx-status">
+        Only {{ data.set.count }} documents in {{ data.set.name }}: a map of its own needs at least {{ data.set.least }}.
+        <button class="kbx-btn" @click="leaveSet">Back to all documents</button>
+      </p>
       <p v-else-if="data && !data.nodes.length && !building" class="kbx-status">Nothing to map yet: documents appear here once they are embedded.</p>
       <p v-else-if="data && !data.nodes.some(visibleNode)" class="kbx-status">
         No documents of the kinds chosen in Show.
         <button class="kbx-btn" @click="shownKinds.splice(0, shownKinds.length, ...NODE_KINDS.map(([k]) => k))">Show all</button>
       </p>
 
-      <div class="kbx-bar">
+      <div ref="bar" class="kbx-bar">
+        <KBExploreCrumbs v-if="subset" v-model:size="setSize" :set="data?.set" @leave="leaveSet" @map="mapSet" @resize="load()" />
         <input v-model="query" type="search" class="kb-field kbx-search" placeholder="Search the map… (Enter to go, Tab for the next)" />
+        <button v-if="query.trim() && order.length" class="kbx-btn" title="Lay out the documents this search finds as a map of their own"
+                @click="mapSet('q:' + query.trim())">Map these</button>
         <div class="kbx-seg" role="group" aria-label="View">
           <button :class="{ on: view === '2d' }" @click="view = '2d'">Map</button>
           <button :class="{ on: view === '3d' }" @click="view = '3d'">Space</button>
         </div>
+        <a class="kbx-btn" :href="kbPage('authors')">Explore authors</a>
         <button class="kbx-btn" :class="{ on: drifting }" title="Move from document to document along the nearest in meaning, one every few seconds" @click="drift">{{ drifting ? 'Stop' : 'Drift' }}</button>
         <label v-if="drifting" class="kbx-speed" title="Seconds at each document">
           <input v-model.number="driftEvery" type="range" min="0.1" max="10" step="0.1" aria-label="Seconds at each document">
@@ -1074,301 +1113,47 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <button class="kbx-btn" :class="{ on: showPairs }" title="Pairs of documents close in meaning that nothing links yet" @click="showPairs = !showPairs">Suggested links</button>
         <button v-if="data?.abstract_only" class="kbx-btn" :class="{ on: abstracts }" :title="`${data.abstract_only} papers not read in full, placed by their title and abstract`"
                 @click="abstracts = !abstracts">Include abstract only</button>
+        <button class="kbx-btn kbx-icon" aria-label="Show the whole map" title="Show the whole map" @click="resetView">
+          <KBIcon name="focus" :size="17" />
+        </button>
+        <button class="kbx-btn kbx-icon" :class="{ on: panelOpen }" aria-controls="kbx-panel" :aria-expanded="panelOpen"
+                aria-label="The map's legend and settings" title="Legend, layout and what the map shows" @click="panelOpen = !panelOpen">
+          <KBIcon name="tune" :size="17" />
+        </button>
+        <KBShare v-if="full && frame" :dialog-target="frame" />
         <button class="kbx-btn kbx-full" :title="full ? 'Leave full screen (Esc)' : 'Full screen'" :aria-label="full ? 'Leave full screen' : 'Full screen'"
                 @click="fullScreen">{{ full ? '⤡' : '⤢' }}</button>
       </div>
 
-      <details class="kbx-settings" @toggle="settingsOpen = ($event.target as HTMLDetailsElement).open">
-        <summary>Show</summary>
-        <div class="kbx-grid">
-          <template v-if="data?.nodes.some(n => n.ux)">
-            <span class="kbx-label">Layout</span>
-            <div class="kbx-seg kbx-seg-small kbx-wide" role="group" aria-label="Layout">
-              <button :class="{ on: layout === 'tsne' }" title="Keeps each document's close neighbourhood" @click="layout = 'tsne'">t-SNE</button>
-              <button :class="{ on: layout === 'umap' }" title="Keeps more of how the groups lie to each other" @click="layout = 'umap'">UMAP</button>
-              <button v-if="data?.nodes.some(n => n.px)" :class="{ on: layout === 'pacmap' }"
-                      title="Keeps the neighbourhoods and how the groups lie to each other, the most evenly" @click="layout = 'pacmap'">PaCMAP</button>
-            </div>
-          </template>
-          <span class="kbx-label">Colour by</span>
-          <div class="kbx-wide">
-            <div class="kbx-seg kbx-seg-small" role="group" aria-label="Colour by">
-              <button v-for="[k, l] in COLOUR_BY" :key="k" :class="{ on: colourBy === k }" @click="colourBy = k">{{ l }}</button>
-            </div>
-          </div>
-          <span class="kbx-label">Links</span>
-          <button class="kbx-all" @click="all(shownLinks, LINK_KINDS)">{{ shownLinks.length === LINK_KINDS.length ? 'None' : 'All' }}</button>
-          <div class="kbx-chips">
-            <button v-for="[k, l] in LINK_KINDS" :key="k" class="kbx-chip" :class="{ on: shownLinks.includes(k) }" :aria-pressed="shownLinks.includes(k)"
-                    @click="toggle(shownLinks, k)"><i class="kbx-swatch" :style="{ background: LINK_COLOURS[k] }"></i>{{ l }}</button>
-          </div>
-          <span class="kbx-label">Documents</span>
-          <button class="kbx-all" @click="all(shownKinds, NODE_KINDS)">{{ shownKinds.length === NODE_KINDS.length ? 'None' : 'All' }}</button>
-          <div class="kbx-chips">
-            <button v-for="[k, l] in NODE_KINDS" :key="k" class="kbx-chip" :class="{ on: shownKinds.includes(k) }" :aria-pressed="shownKinds.includes(k)"
-                    @click="toggle(shownKinds, k)"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[k] }"></i>{{ l }}</button>
-          </div>
-          <span class="kbx-label">Unlinked pairs</span>
-          <div class="kbx-pairs-row kbx-wide">
-            <button class="kbx-chip" :class="{ on: showUnlinked }" :aria-pressed="showUnlinked" title="Draw the pairs close in meaning that no link joins"
-                    @click="showUnlinked = !showUnlinked">{{ showUnlinked ? 'Shown' : 'Hidden' }}</button>
-            <input v-model.number="threshold" type="range" min="0.5" max="0.98" step="0.01" :disabled="!showUnlinked" aria-label="How alike">
-            <span class="kbx-value">≥ {{ Math.round(threshold * 100) }}%</span>
-          </div>
-        </div>
-        <p v-if="view === '3d'" class="kbx-hint">Drag to turn, scroll to come closer. F flies: WASD to move, the mouse to steer.{{ fly ? ' Flying: F to stop.' : '' }}</p>
-      </details>
+      <KBExplorePanel v-if="panelOpen" :legend="legend" :lit-row="litRow" :subset="subset" :projects="projectList" :flying="fly"
+                      :layouts="{ umap: !!data?.nodes.some(n => n.ux), pacmap: !!data?.nodes.some(n => n.px) }"
+                      @go-to-row="goToRow" @map="mapSet" />
 
       <div v-if="building" class="kbx-building" role="status">
         <div class="kbx-building-card">
           <p><span class="kb-spinner"></span> {{ building }}</p>
-          <p class="kbx-building-then">The map redraws when this is done.</p>
+          <div v-if="buildShare !== null" class="kbx-meter" role="progressbar" :aria-valuenow="Math.round(buildShare * 100)"
+               aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${Math.round(buildShare * 100)}%` }"></span></div>
         </div>
       </div>
       <p v-if="said" class="kbx-said" @click="said = ''">{{ said }}</p>
 
-      <aside v-if="selected" class="kbx-card" :class="{ short: driftTrail.length > 1 }">
-        <button class="kbx-close" aria-label="Close" @click="selected = null">×</button>
-        <p class="kbx-meta"><i class="kbx-swatch" :style="{ background: colour(selected) }"></i>{{ kindName(selected.kind) }}<template
-          v-if="selected.year"> · {{ selected.year }}</template><template v-if="selected.read === false"> · abstract only</template></p>
-        <p v-if="clusterName(selected.cluster)" class="kbx-cluster" :title="clusterName(selected.cluster)">{{ clusterName(selected.cluster) }}</p>
-        <h3><a :href="selected.page" target="_blank" rel="noopener">{{ selected.title }}</a></h3>
-        <template v-if="detail && detail.id === selected.id">
-          <p v-if="byline(detail)" class="kbx-byline">{{ byline(detail) }}</p>
-          <div v-if="detail.summary || detail.abstract" class="kbx-summary" :class="{ open: more }">
-            <p class="kbx-sum-head">{{ detail.summary ? 'Summary' : 'Abstract' }}</p>
-            <div class="kbx-sum-text" v-html="render(detail.summary || detail.abstract)"></div>
-          </div>
-          <button v-if="(detail.summary || detail.abstract).length > 420" class="kbx-more" @click="more = !more">{{ more ? 'Less' : 'More' }}</button>
-          <div v-if="detail.topics.length" class="kbx-topics"><span v-for="t in detail.topics" :key="t">{{ t }}</span></div>
-        </template>
-        <div class="kbx-actions">
-          <button class="kbx-btn kbx-small" @click="open(selected)">Open</button>
-          <button v-if="selected.kind !== 'finding' && selected.kind !== 'task'" class="kbx-btn kbx-small" @click="copyCitation(selected)">Copy citation</button>
-          <a class="kbx-btn kbx-small" :href="exploreHref(selected.id)" @click.prevent="copyView(selected)">Copy link to this view</a>
-          <button v-if="trail.length" class="kbx-btn kbx-small" @click="back">Back</button>
-        </div>
-        <template v-if="linkedSelected.length">
-          <h4>Linked</h4>
-          <ul class="kbx-list">
-            <li v-for="l in linkedSelected" :key="l.node.id + l.kind">
-              <i class="kbx-swatch" :style="{ background: KIND_COLOURS[l.node.kind] ?? '#999' }"></i>
-              <a href="#" :title="l.node.title" @click.prevent="go(l.node)">{{ l.node.title }}</a>
-              <span class="kbx-aside">{{ relation(l.kind, l.out) }}</span>
-            </li>
-          </ul>
-        </template>
-        <template v-if="nearSelected.length">
-          <h4>Nearest in meaning</h4>
-          <ul class="kbx-list">
-            <li v-for="x in nearSelected" :key="x.node.id">
-              <i class="kbx-swatch" :style="{ background: KIND_COLOURS[x.node.kind] ?? '#999' }"></i>
-              <a href="#" :title="x.node.title" @click.prevent="go(x.node)">{{ x.node.title }}</a>
-              <span class="kbx-aside"><span v-if="x.linked" class="kbx-tag">linked</span><span class="kbx-bar-track"><span class="kbx-bar-fill"
-                :style="{ width: `${Math.max(4, Math.round(x.similarity * 100))}%` }"></span></span>{{ Math.round(x.similarity * 100) }}%</span>
-            </li>
-          </ul>
-        </template>
-      </aside>
+      <KBExploreCard v-if="selected" :node="selected" :detail="detail" :render="render" :colour="colour(selected)"
+                     :cluster="clusterName(selected.cluster)" :linked="linkedSelected" :nearest="nearSelected"
+                     :can-go-back="trail.length > 0" :short="driftTrail.length > 1"
+                     @close="selected = null" @back="back" @open="open(selected!)" @cite="copyCitation(selected!)" @copy-view="copyView(selected!)"
+                     @go="go" />
 
-      <details v-if="legend.length && !settingsOpen" class="kbx-key" :open="legendOpen"
-               @toggle="legendOpen = ($event.target as HTMLDetailsElement).open">
-        <summary>Colours</summary>
-        <div v-if="litRow" class="kbx-shade">
-          <span>Shade by</span>
-          <div class="kbx-seg kbx-seg-small" role="group" aria-label="Shade by">
-            <button v-for="[k, l, t] in SHADE_BY" :key="k" :class="{ on: shadeBy === k }" :title="t" @click="shadeBy = k">{{ l }}</button>
-          </div>
-        </div>
-        <ul>
-          <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="goToRow(r.key)">
-            <i class="kbx-swatch" :style="{ background: r.colour }"></i>
-            <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button></li>
-        </ul>
-      </details>
 
-      <aside v-if="driftTrail.length > 1" class="kbx-trail">
-        <button class="kbx-close" aria-label="Clear the trail" title="Clear the trail" @click="driftTrail = []">×</button>
-        <h4>Drift trail</h4>
-        <ol>
-          <li v-for="(t, i) in driftTrail" :key="t.node.id" :class="{ here: t.node.id === selected?.id }">
-            <a href="#" :title="t.node.title" @click.prevent="go(t.node)">{{ t.node.title }}</a>
-            <span v-if="i" class="kbx-key-count">{{ Math.round((t.similarity ?? 0) * 100) }}%</span>
-          </li>
-        </ol>
-        <button class="kbx-btn kbx-small" @click="copyTrail">Copy as text</button>
-      </aside>
+      <KBExploreHits v-if="!selected && query.trim() && topHits.length" :query="query.trim()" :hits="topHits" :total="order.length"
+                     :can-map="!subset" @go="go" @map="mapSet('q:' + query.trim())" />
+      <KBExploreTrail v-if="driftTrail.length > 1" :steps="driftTrail" :here="selected?.id" :can-map="!subset.startsWith('docs:')"
+                      @clear="driftTrail = []" @go="go" @copy="copyTrail" @map="mapDrift" />
 
-      <aside v-if="showPairs" class="kbx-pairs">
-        <button class="kbx-close" aria-label="Close" @click="showPairs = false">×</button>
-        <h4>Suggested links</h4>
-        <div class="kbx-seg kbx-seg-small kbx-scope" role="group" aria-label="Where">
-          <button :class="{ on: scope === 'own' }" title="Your notes, records and findings, beside what they do not link to yet"
-                  @click="scope = 'own'">Yours</button>
-          <button :class="{ on: scope === 'cluster' }" :disabled="!selected" :title="selected ? '' : 'Select a document first'"
-                  @click="scope = 'cluster'">This cluster</button>
-          <button :class="{ on: scope === 'all' }" @click="scope = 'all'">Everywhere</button>
-        </div>
-        <p class="kbx-pairs-hint">{{ scope === 'own' ? `Your notes, records and findings, each beside the library documents nearest it that it does not link to, ${Math.round(OWN_FLOOR * 100)}% alike or more.` :
-          `Documents close in meaning that nothing links, ${Math.round(threshold * 100)}% alike or more.` }}</p>
-        <p v-if="!pairs.length" class="kbx-pairs-hint">None.</p>
-        <ul class="kbx-list kbx-pair-list">
-          <li v-for="p in pairs" :key="p.a.id + p.b.id">
-            <div class="kbx-pair">
-              <div class="kbx-pair-doc"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[p.a.kind] ?? '#999' }"></i>
-                <a href="#" :title="p.a.title" @click.prevent="goPair(p)">{{ p.a.title }}</a></div>
-              <div class="kbx-pair-doc"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[p.b.kind] ?? '#999' }"></i>
-                <a href="#" :title="p.b.title" @click.prevent="go(p.b)">{{ p.b.title }}</a></div>
-              <p v-if="shared.get(pairKey(p))?.length" class="kbx-pair-why">Shared: {{ shared.get(pairKey(p))!.join(' · ') }}</p>
-              <div class="kbx-pair-act">
-                <a v-if="(p.a.kind === 'finding') !== (p.b.kind === 'finding') && can('tasks.edit')" href="#"
-                   @click.prevent="p.a.kind === 'finding' ? addEvidence(p.a, p.b) : addEvidence(p.b, p.a)">Add as evidence</a>
-                <template v-else-if="judgeable(p)">
-                  <a href="#" title="Link the two as related: a line on the map, and in both cards" @click.prevent="judge(p, true)">Link</a>
-                  <a href="#" title="Stop suggesting this pair" @click.prevent="judge(p, false)">Not related</a>
-                </template>
-                <a v-if="(p.a.kind === 'record' && p.b.kind === 'paper') || (p.b.kind === 'record' && p.a.kind === 'paper')" href="#"
-                   @click.prevent="copyCitation(p.a.kind === 'paper' ? p.a : p.b)">Copy the citation</a>
-              </div>
-            </div>
-            <span class="kbx-aside"><span class="kbx-bar-track"><span class="kbx-bar-fill"
-              :style="{ width: `${Math.max(4, Math.round(p.similarity * 100))}%` }"></span></span>{{ Math.round(p.similarity * 100) }}%</span>
-          </li>
-        </ul>
-      </aside>
+      <KBExplorePairs v-if="showPairs" :pairs="pairs" :shared="shared" :has-selection="!!selected" :own-floor="OWN_FLOOR"
+                      @close="showPairs = false" @go="go" @go-pair="goPair" @judge="judge" @evidence="addEvidence" @cite="copyCitation" />
     </div>
   </KBNeedsService>
 </template>
 
-<style scoped>
-:global(.kbx-page) { padding: 8px 12px !important; max-width: none !important; }
-.kbx { position: relative; height: calc(100vh - var(--vp-nav-height, 64px) - 16px); min-height: 480px; border-radius: 10px;
-       overflow: hidden; border: 1px solid var(--vp-c-divider); background: #fafafa; }
-.kbx.dark { background: #111116; }
-.kbx.full { height: 100vh; border-radius: 0; border: 0; }
-.kbx-full { margin-left: auto; font-size: 15px; line-height: 1; padding: 4px 9px; }
-.kbx-canvas { position: absolute; inset: 0; }
-.kbx-status { position: absolute; top: 45%; width: 100%; text-align: center; color: var(--vp-c-text-2); }
-.kbx-bar { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
-.kbx-bar > * { pointer-events: auto; }
-.kbx-search { flex: 1 1 18rem; max-width: 30rem; background: var(--vp-c-bg); }
-.kbx-seg { display: inline-flex; border: 1px solid var(--vp-c-divider); border-radius: 8px; overflow: hidden; background: var(--vp-c-bg); }
-.kbx-seg button { padding: 4px 12px; font-size: 13px; color: var(--vp-c-text-2); }
-.kbx-seg button.on { background: var(--vp-c-brand-soft); color: var(--vp-c-text-1); font-weight: 600; }
-.kbx-speed { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--vp-c-text-2); font-variant-numeric: tabular-nums; }
-.kbx-speed input { width: 6rem; accent-color: var(--vp-c-brand-1); }
-.kbx-speed span { min-width: 2.6rem; }
-.kbx-btn { padding: 4px 10px; font-size: 13px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg); color: var(--vp-c-text-1); }
-.kbx-btn.on { background: var(--vp-c-brand-soft); }
-.kbx-settings { position: absolute; top: 52px; right: 10px; max-width: 31rem; border: 1px solid var(--vp-c-divider);
-                background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-                border-radius: 8px; padding: 4px 10px; font-size: 12px; }
-.kbx-settings[open] { padding: 6px 14px 12px; }
-.kbx-settings summary { cursor: pointer; color: var(--vp-c-text-2); text-align: right; }
-.kbx-key { position: absolute; top: 92px; right: 10px; width: 15rem; max-height: calc(55% - 92px); overflow: auto;
-           border: 1px solid var(--vp-c-divider); border-radius: 8px; padding: 4px 10px; font-size: 12px;
-           background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
-.kbx-key:not([open]) { width: auto; }
-.kbx-key[open]:has(.kbx-shade) { width: 18rem; }
-.kbx-shade { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0 4px; color: var(--vp-c-text-2); }
-.kbx-shade .kbx-seg button { padding: 2px 7px; }
-.kbx-key summary { cursor: pointer; color: var(--vp-c-text-2); text-align: right; }
-.kbx-key ul { list-style: none; margin: 4px 0 2px; padding: 0; }
-.kbx-key li button { width: 100%; display: grid; grid-template-columns: 9px 1fr auto; align-items: center; column-gap: 7px;
-                     padding: 1px 4px; margin: 0 -4px; border-radius: 4px; text-align: left; }
-.kbx-key li button:hover { background: var(--vp-c-default-soft); }
-.kbx-key li button.on { background: var(--vp-c-brand-soft); }
-.kbx-key-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--vp-c-text-1); }
-.kbx-key-count { color: var(--vp-c-text-3); font-variant-numeric: tabular-nums; }
-.kbx-trail { position: absolute; left: 10px; bottom: 46px; width: min(20rem, 40%); max-height: 38%; overflow: auto; font-size: 12px;
-             border: 1px solid var(--vp-c-divider); border-radius: 10px; padding: 8px 12px 10px;
-             background: color-mix(in srgb, var(--vp-c-bg) 80%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
-.kbx-trail h4 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-2); }
-.kbx-trail ol { margin: 0 0 8px; padding-left: 1.4rem; }
-.kbx-trail li { margin: 2px 0; }
-.kbx-trail li > * { vertical-align: middle; }
-.kbx-trail li a { display: inline-block; max-width: calc(100% - 3rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-                  color: var(--vp-c-text-1); text-decoration: none; }
-.kbx-trail li.here a { color: var(--vp-c-brand-1); font-weight: 600; }
-.kbx-trail li .kbx-key-count { margin-left: 6px; }
-.kbx-card.short { max-height: calc(62% - 64px); }
-.kbx-grid { display: grid; grid-template-columns: auto 2.4rem 1fr; gap: 8px 8px; align-items: start; margin-top: 8px; font-size: 12px; }
-.kbx-wide { grid-column: 2 / -1; }
-.kbx-label { color: var(--vp-c-text-2); padding-top: 2px; white-space: nowrap; }
-.kbx-seg-small button { padding: 2px 10px; font-size: 12px; }
-.kbx-grid > .kbx-seg { justify-self: start; }
-.kbx-grid > .kbx-label { padding-right: 4px; }
-.kbx-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.kbx-chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; font-size: 11.5px; line-height: 1.6; border-radius: 999px;
-            border: 1px solid var(--vp-c-divider); color: var(--vp-c-text-3); background: transparent; transition: background 0.15s, color 0.15s; }
-.kbx-chip .kbx-swatch { opacity: 0.35; }
-.kbx-chip.on { color: var(--vp-c-text-1); background: var(--vp-c-default-soft); border-color: transparent; }
-.kbx-chip.on .kbx-swatch { opacity: 1; }
-.kbx-all { font-size: 11px; color: var(--vp-c-brand-1); padding: 2px 0; text-align: left; justify-self: start; }
-.kbx-pairs-row { display: flex; align-items: center; gap: 10px; }
-.kbx-pairs-row input[type=range] { flex: 1; min-width: 6rem; accent-color: var(--vp-c-brand-1); }
-.kbx-pairs-row input:disabled { opacity: 0.4; }
-.kbx-value { font-size: 12px; color: var(--vp-c-text-2); font-variant-numeric: tabular-nums; min-width: 3.2rem; }
-.kbx-hint { margin: 10px 0 0; font-size: 12px; color: var(--vp-c-text-3); }
-.kbx-row { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin: 6px 0; }
-.kbx-row > span { color: var(--vp-c-text-2); min-width: 5.5rem; }
-.kbx-row label { display: inline-flex; align-items: center; gap: 4px; }
-.kbx-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 2px; }
-.kbx-building { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
-                background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(2px); }
-.kbx-building-card { background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); border-radius: 12px; padding: 18px 26px;
-                     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25); text-align: center; max-width: min(32rem, 90%); }
-.kbx-building-card p { margin: 0; font-size: 15px; display: flex; gap: 10px; align-items: center; justify-content: center; }
-.kbx-building-card .kbx-building-then { margin-top: 6px; font-size: 13px; color: var(--vp-c-text-2); }
-.kbx-said { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); font-size: 13px; background: var(--vp-c-bg);
-            padding: 3px 12px; border-radius: 8px; border: 1px solid var(--vp-c-divider); cursor: pointer; }
-.kbx-card, .kbx-pairs { position: absolute; top: 52px; left: 10px; width: min(24rem, 45%); max-height: calc(100% - 64px); overflow: auto;
-                        background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); border-radius: 10px; padding: 10px 14px; font-size: 13px;
-                        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); }
-.kbx-pairs { left: auto; right: 10px; top: auto; bottom: 46px; max-height: 45%; }
-.kbx-card h3 { margin: 6px 0 10px; font-size: 16px; line-height: 1.35; padding-right: 1.2rem; }
-.kbx-card h3 a { color: var(--vp-c-text-1); text-decoration: none; }
-.kbx-card h3 a:hover { color: var(--vp-c-brand-1); }
-.kbx-meta { margin: 0; font-size: 12px; color: var(--vp-c-text-2); display: flex; align-items: center; gap: 6px; padding-right: 1.2rem; }
-.kbx-cluster { margin: 2px 0 0; font-size: 12px; color: var(--vp-c-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kbx-small { padding: 2px 9px; font-size: 12px; border-radius: 6px; }
-.kbx-list { list-style: none; padding: 0 !important; margin: 0; }
-.kbx-list li { display: grid; grid-template-columns: 9px 1fr auto; align-items: baseline; column-gap: 8px; margin: 0 !important;
-               padding: 4px 0; font-size: 13px; line-height: 1.35; border-bottom: 1px solid var(--vp-c-divider); }
-.kbx-list li:last-child { border-bottom: 0; }
-.kbx-list a { color: var(--vp-c-text-1); text-decoration: none; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.kbx-list a:hover { color: var(--vp-c-brand-1); }
-.kbx-byline { margin: -4px 0 8px; font-size: 12px; color: var(--vp-c-text-2); }
-.kbx-summary { position: relative; max-height: 9.5em; overflow: hidden; font-size: 13px; line-height: 1.5; }
-.kbx-summary:not(.open)::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2.5em;
-                                 background: linear-gradient(transparent, var(--vp-c-bg)); }
-.kbx-summary.open { max-height: none; }
-.kbx-sum-head { margin: 0 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-3); }
-.kbx-sum-text :deep(p) { margin: 0 0 6px; }
-.kbx-sum-text :deep(ul) { margin: 0 0 6px; padding-left: 1.1rem; }
-.kbx-more { font-size: 12px; color: var(--vp-c-brand-1); margin: 2px 0 6px; }
-.kbx-topics { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
-.kbx-topics span { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--vp-c-default-soft); color: var(--vp-c-text-2); }
-.kbx-bar-track { display: inline-block; width: 44px; height: 4px; margin-right: 6px; border-radius: 2px; vertical-align: middle;
-                 background: var(--vp-c-default-soft); overflow: hidden; }
-.kbx-bar-fill { display: block; height: 100%; border-radius: 2px; background: #8b7cf6; }
-.kbx-aside { font-size: 12px; color: var(--vp-c-text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.kbx-tag { margin-right: 6px; font-size: 10px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--vp-c-divider); color: var(--vp-c-text-3); }
-.kbx-card h4, .kbx-pairs h4 { margin: 14px 0 2px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-2); }
-.kbx-card ul, .kbx-pairs ul { padding-left: 1rem; margin: 0; }
-.kbx-card li, .kbx-pairs li { margin: 3px 0; }
-.kbx-scope { margin-top: 8px; }
-.kbx-scope button:disabled { opacity: 0.45; cursor: default; }
-.kbx-pairs-hint { margin: 8px 0 4px; font-size: 12px; color: var(--vp-c-text-3); }
-.kbx-pair-list li { grid-template-columns: 1fr auto; align-items: center; padding: 6px 0; }
-.kbx-pair { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.kbx-pair-doc { display: grid; grid-template-columns: 9px 1fr; align-items: baseline; column-gap: 8px; }
-.kbx-pair-doc a { -webkit-line-clamp: 1; }
-.kbx-pair-act { padding-left: 17px; font-size: 12px; display: flex; gap: 12px; }
-.kbx-pair-act:empty { display: none; }
-.kbx-pair-why { margin: 1px 0 0; padding-left: 17px; font-size: 11.5px; color: var(--vp-c-text-3); }
-.kbx-pair-act a { color: var(--vp-c-brand-1) !important; }
-.kbx-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
-.kbx-close { position: absolute; top: 4px; right: 8px; font-size: 18px; color: var(--vp-c-text-2); }
-:deep(.kbx-tip) { font: 12px system-ui, sans-serif; max-width: 22rem; }
-</style>
+<style src="./kbExplore.css"></style>

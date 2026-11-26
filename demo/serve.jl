@@ -73,8 +73,9 @@ const VAULT = [
         # Scoring turf
 
         Turf is scored apart from macroalgae on every quadrat photo: filaments under 1 cm, no upright
-        thallus. The crowding model (arXiv:2606.14955) needs coral, macroalgae and turf as three cover
-        classes, so a point on turf is never lumped with bare substrate.
+        thallus, as [@lindqvist2021surveys, ch. 4] scores it. The crowding model (arXiv:2606.14955) needs
+        coral, macroalgae and turf as three cover classes, so a point on turf is never lumped with bare
+        substrate.
         """,
     "Reading/Crowding model.md" => """
         ---
@@ -87,14 +88,59 @@ const VAULT = [
 ]
 
 """
-The demo's library, Zotero and jobs, seeded once in the shared service: Rowan's vault read into their
-library, a note of it shared with RB and one contributed, a machine syncing it, a Zotero group linked
-to RB as last read, and a backup run.
+Rowan's references, a `.bib` file beside the vault as JabRef keeps it: an arXiv paper, a book, a web
+page, and a report whose PDF is not synced.
+"""
+const REFERENCES = raw"""
+    @String{tide = {Tidewater Press}}
+
+    @Article{blackwood2026crowding,
+      author        = {Blackwood, Julie C. and Nik, Katerina and Nik, Simon},
+      title         = {Dynamics of Coral-Macroalgae Interactions under Crowding},
+      year          = {2026},
+      eprint        = {2606.14955},
+      archivePrefix = {arXiv},
+    }
+
+    @Book{lindqvist2021surveys,
+      author    = {Lindqvist, Bea and Hale, Rowan},
+      title     = {Reef Survey Methods: Transects, Quadrats and Photo Scoring},
+      publisher = tide,
+      edition   = {2},
+      year      = {2021},
+    }
+
+    @Online{coastal2026station,
+      author  = {{Coastal Data Service}},
+      title   = {Tide and Temperature Records, North Channel Station},
+      url     = {https://example.org/stations/north-channel},
+      date    = {2026},
+      urldate = {2026-11-02},
+    }
+
+    @TechReport{reefwatch2025bleaching,
+      author      = {{Reef Watch Network}},
+      title       = {Bleaching Survey of the Lagoon Sites, 2025},
+      institution = {Reef Watch Network},
+      year        = {2025},
+      file        = {:reports/bleaching-2025.pdf:PDF},
+    }
+
+    @Comment{jabref-meta: databaseType:biblatex;}
+    """
+
+"""
+The demo's library, Zotero and jobs, seeded once in the shared service: Rowan's vault and references
+read into their library, a note of it shared with RB and one contributed, a machine syncing it, a
+Zotero group linked to RB as last read, and a backup run.
 """
 function seed_shared!(kb, ids)
     rowan = ids["rowan@example.org"]
     space = "people/$rowan"
-    if isempty(K.library_files(kb, space))
+    fresh = isempty(K.library_files(kb, space))
+    bib = "References/references.bib"           # before the vault is read, so its notes cite by its keys
+    any(f -> f.path == bib, K.library_files(kb, space)) || K.put_library_file!(kb, space, bib, Vector{UInt8}(REFERENCES))
+    if fresh
         foreach(((p, t),) -> K.put_library_file!(kb, space, "Field notes/" * p, Vector{UInt8}(t)), VAULT)
         K.read_space!(kb, space)
         note(name) = String(K.scalar(kb, """SELECT p.doc_id FROM records r JOIN papers p ON p.id = r.paper_id

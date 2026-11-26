@@ -110,7 +110,7 @@ function export_document(kb::KB, doc_id::AbstractString)
     pid = p.id
     paper = Dict{String,Any}(k => getproperty(p, Symbol(k)) for k in
         ("doc_id", "version", "title", "abstract", "authors", "published", "updated", "primary_category", "categories",
-         "doi", "journal_ref", "metadata_at", "added_at", "kind"))
+         "doi", "journal_ref", "metadata_at", "added_at", "kind", "author_orcids"))
     parse = query(kb, "SELECT file_sha, parser_version, pages FROM parses WHERE paper_id = ?", (pid,))
     layers = ingest_layers(kb.config)
     # The summaries its pages show, and those its summary layers embed.
@@ -330,7 +330,7 @@ function fingerprints(kb::KB, ids; record::Bool = true)
     few = length(wanted) <= 200
     rows = query(kb, """
         SELECT p.doc_id AS id, p.version,
-               $(record ? "p.title, p.abstract, p.authors, p.published, p.updated, p.primary_category, p.categories, p.doi, p.journal_ref, p.metadata_at, p.kind," : "")
+               $(record ? "p.title, p.abstract, p.authors, p.author_orcids, p.published, p.updated, p.primary_category, p.categories, p.doi, p.journal_ref, p.metadata_at, p.kind," : "")
                (SELECT parser_version || ' ' || parsed_at FROM parses x WHERE x.paper_id = p.id) AS parse,
                (SELECT count(*) || ' ' || coalesce(max(posted_at), '') FROM mentions m WHERE m.paper_id = p.id) AS mentions,
                (SELECT count(*) || ' ' || coalesce(max(created_at), '') FROM summaries s
@@ -347,7 +347,8 @@ function fingerprints(kb::KB, ids; record::Bool = true)
     # Figures count only where they were cut here, by their cut and their files' names (so converting
     # them counts): an imported document's come with it, and leave its fingerprint as it was imported
     # (see `own_documents`).
-    print(r) = context * "|" * join((string(coalesce(getproperty(r, k), "")) for k in propertynames(r) if k != :figures), "|") *
+    print(r) = context * "|" * join((string(coalesce(getproperty(r, k), "")) for k in propertynames(r) if k ∉ (:figures, :author_orcids)), "|") *
+               (record && !ismissing(r.author_orcids) ? "|orcids " * r.author_orcids : "") *
                (ismissing(r.figures) ? "" : "|figures " * r.figures)
     return Dict(String(r.id) => bytes2hex(sha256(print(r))) for r in rows if r.id in wanted)
 end
@@ -785,6 +786,7 @@ function import_document!(kb::KB, doc::AbstractDict, vectors::AbstractVector{UIn
                 kind = excluded.kind""",
             Tuple(val(P[k]) for k in ("doc_id", "version", "title", "abstract", "authors", "published", "updated",
                                       "primary_category", "categories", "doi", "journal_ref", "metadata_at", "added_at", "kind")))
+        execute!(kb, "UPDATE papers SET author_orcids = ? WHERE doc_id = ?", (val(get(P, "author_orcids", nothing)), id))
         pid = paper_id(kb, id)
         execute!(kb, "DELETE FROM mentions WHERE paper_id = ?", (pid,))
         for x in doc["mentions"]

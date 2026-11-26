@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-const { day, shortDay, when, todayUtc, bytes, plural, byline } = await import('../../docs/src/components/kbFormat.ts')
+const { day, shortDay, when, editTime, todayUtc, bytes, plural, byline } = await import('../../docs/src/components/kbFormat.ts')
 const { escapeHtml, markedSnippet, plainLine, anchorOf, anchors, fenced, plainCopy } = await import('../../docs/src/components/kbUtils.ts')
 const { loadPapers, loadDays, FRESH } = await import('../../docs/src/components/kbData.ts')
 
@@ -17,6 +17,23 @@ test('days, a day as written being that day anywhere', () => {
   assert.equal(when(undefined, 'never'), 'never')
   assert.match(when('2026-10-08T10:30:00Z'), /2026/)
   assert.equal(todayUtc(new Date(Date.UTC(2026, 0, 1, 23, 30))), '2026-01-01')
+})
+
+test('an edit includes its date only when the local calendar day changed', () => {
+  const previous = process.env.TZ
+  process.env.TZ = 'Europe/Paris'
+  try {
+    // Different UTC days, both on November 26 in Paris.
+    const sameDay = '2026-11-26T06:57:00Z'
+    assert.equal(editTime('2026-11-25T23:15:00Z', sameDay),
+      new Date(sameDay).toLocaleTimeString(undefined, { timeStyle: 'short' }))
+    // Same UTC day, across local midnight.
+    const nextDay = '2026-11-26T23:06:00Z'
+    assert.equal(editTime(sameDay, nextDay), when(nextDay))
+  } finally {
+    if (previous === undefined) delete process.env.TZ
+    else process.env.TZ = previous
+  }
 })
 
 test('sizes, counts and authors', () => {

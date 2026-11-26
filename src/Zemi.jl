@@ -10,10 +10,12 @@ using Base64
 using CodecZlib
 using CodecZstd: ZstdCompressor, ZstdDecompressor, ZstdCompressorStream, ZstdDecompressorStream
 using Dates
-using LinearAlgebra: diagind, dot, norm, svd
+using LinearAlgebra: dot, norm, qr, svd
 import Random
 using SHA
 import Tar
+using PrecompileTools: @setup_workload, @compile_workload
+import TSne
 using Sockets
 using TOML
 using UUIDs
@@ -155,6 +157,7 @@ include("task_api.jl")
 include("publications.jl")
 include("publication_api.jl")
 include("explore.jl")
+include("explore_sets.jl")
 include("notify.jl")
 include("mcp.jl")
 include("confine.jl")
@@ -197,5 +200,23 @@ export project_map, read_project_map, remote_project_map, ProjectMap, Thread, th
 # The zemi app's entry, compiled into the package image so that a command starts at once rather than
 # compiling the commands it may run first.
 precompile(main, (Vector{String},))
+
+# The maps' layouts, run once on a little random data, so the first map made after a start does not wait
+# on compiling them: t-SNE exactly and by Barnes-Hut, the randomized SVD they start from, UMAP and
+# PaCMAP, in two and three dimensions. A few steps each is enough to compile every method they call.
+@setup_workload begin
+    rng = Random.MersenneTwister(1)
+    few = unit_columns(randn(rng, 16, 40))
+    many = unit_columns(randn(rng, 460, 460))
+    @compile_workload begin
+        for X in (few, many), dims in (2, 3)
+            tsne(X; dims, iterations = 3)
+        end
+        for dims in (2, 3)
+            umap(few; dims, epochs = 3)
+            pacmap(few; dims, iterations = 3)
+        end
+    end
+end
 
 end # module Zemi

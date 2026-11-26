@@ -113,6 +113,24 @@ out and clustered afresh.
 A paper's or record's page shows its neighbourhood in a small map, with **Explore from here**. The
 map is made with the landscape in a sync, and when the page is opened after documents changed.
 
+### Explore authors and co-publications
+
+Choose **Explore authors** on the document map, or follow an author from a paper. From their
+profile, **Explore co-publications** shows their direct coauthors. Select a line or its count for
+the shared publications, or a coauthor's name to centre the graph there. Each paper counts once.
+The live service uses the papers you can open. A static site's graph contains only open papers.
+
+An ORCID iD groups that individual's bylines across spellings. You can search for the name or
+the iD. Without an iD the index groups an exact byline, which can still refer to namesakes.
+Old surname-and-initial links offer a choice when they match multiple entries.
+
+Zemi keeps the ORCID supplied on an uploaded paper's OpenAlex authorship (`raw_orcid`).
+It validates the identifier's check digit. Entries supplied in a base set may carry an optional
+`orcids` array aligned with `authors`, with `null` for unknown entries.
+People with **Manage papers** permission can use **Edit ORCID** next to a publication on the
+author's profile to record a sourced iD, correct it or clear it. A change applies to that
+publication's byline. Readers can request corrections from the instance administrator.
+
 ## The config file
 
 `~/.config/zemi/config.toml`, or the path in `ZEMI_CONFIG`. Defaults are in `src/config.jl`. What the

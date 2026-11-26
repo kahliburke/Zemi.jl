@@ -1,5 +1,5 @@
 # A work has one project, a stable id and at most one draft following its published editions.
-migration!(31, [
+migration!(32, [
     """CREATE TABLE publications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -19,7 +19,7 @@ migration!(31, [
 ])
 
 # Editorial events belong to the work and point to the precise internal manuscript used.
-migration!(32, ["""CREATE TABLE publication_events (
+migration!(33, ["""CREATE TABLE publication_events (
     id INTEGER PRIMARY KEY, work INTEGER NOT NULL, version INTEGER NOT NULL,
     stage TEXT NOT NULL, venue TEXT NOT NULL, happened TEXT NOT NULL, url TEXT NOT NULL,
     recorded_by TEXT NOT NULL,

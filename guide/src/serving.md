@@ -28,11 +28,14 @@ tokens), Administration and Sign out, each for the roles that allow it. Open sou
 </figure>
 ```
 
-**Cmd-K** (Ctrl-K) anywhere on the site opens a palette while the service answers. Typing finds what
-the knowledge base has, each for whoever may see it: tasks, findings, papers and resources, records,
-notebooks and code. It also opens a project or a page, adds the paper an arXiv id, DOI or address
-names, switches the theme, syncs, or searches for the words on the Search page. With nothing typed it
-lists what was opened from it lately. A static copy keeps VitePress's own search on Cmd-K.
+Choose **Search Zemi** in the header, or press **Ctrl-K** (**Cmd-K** on macOS). Type a reference,
+title or words from a task note. The live palette shows matching items, including excerpts that open
+the matching note on its task. On a project board, **In project** narrows the search. Press Enter to
+open the full results, or select a suggestion with the arrow keys and press Enter to open it directly.
+The results page can be filtered by project and type. Its address keeps the query and filters.
+
+Enter **>** in the palette or press **F1** or **Ctrl-Shift-P** (**Cmd-Shift-P** on macOS) for commands and
+page navigation. A static copy uses the site's local page index for the header search.
 
 ```@raw html
 <figure class="shot">
@@ -81,6 +84,10 @@ On iPhone or iPad, use Safari’s Share menu and **Add to Home Screen**. Notific
 After the public demo has downloaded its reading files on the first visit, it can reopen offline,
 search papers by keyword, and display their summaries and sections. The personal and shared
 services need a connection to read the knowledge base or make changes.
+
+Choose **Share this page** in the navigation (in the menu on a phone). **Content and link**
+lets you review and edit the page text or a selected passage. **Link only** includes the
+current view and anchor. Use **Share…** to choose an app, or copy the result.
 
 ## Static copy
 
@@ -160,7 +167,9 @@ With `[shared] sign_up = "open"`, anyone may sign in, as `default_role` (`"Reade
 the roles and add others.
 
 The bibliography is at `/api/bib`: BibTeX of the papers, uploads and records the caller may see, or
-only those cited by the keys in `?keys=arXiv:2401.01234,rec-…`. A program reads it with an API token
+only those cited by the keys in `?keys=arXiv:2401.01234,rec-…`. A document the caller's own
+bibliographies key (see [Bibliographies](work.md#Bibliographies)) is in it under that key as well as
+its own, and `?keys=` takes either. A program reads it with an API token
 that has `read` (`Authorization: Bearer zemi_…`); the search page links it for download. A Slate
 notebook citing the knowledge base signs in instead: the notebook asks for the `read` scope by
 OAuth, and you approve it on the knowledge base's own page. That works run for one person too, where

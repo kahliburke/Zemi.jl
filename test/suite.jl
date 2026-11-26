@@ -355,7 +355,7 @@ end
         title == "Larval dispersal on fringing reefs" ? work("Larval Dispersal On Fringing Reefs") : nothing)
     # By the DOI on the first page, when the record's title is printed there too.
     r = K.lookup_upload(page((:title, "PHYSICA"), (:front, "Larval dispersal on fringing reefs"), (:footnote, "https://doi.org/10.1234/X.")); find)
-    @test r == (; title = "Larval dispersal on fringing reefs", authors = ["D. del-Monte-Hale"], year = "1996", journal = "Physica D",
+    @test r == (; title = "Larval dispersal on fringing reefs", authors = ["D. del-Monte-Hale"], orcids = [nothing], year = "1996", journal = "Physica D",
                 journal_ref = "Physica D 91, 1 (1996)", doi = "10.1234/x", abstract = "Larval dispersal")
     @test first(asked) == "10.1234/x"
     # A DOI whose record's title is not on the page is not taken; an exact title is found instead.
@@ -573,7 +573,60 @@ end
     @test co.papers == ["2609.00003", "2609.00002"] && Set(co.variants) == Set(["Cyrus Okafor", "C. Okafor"])   # a non-breaking space is a space
     listed = K.format_paper_list(kb, "", "", 30; author = "iles")
     @test occursin("2 paper(s)", listed) && !occursin("2609.00003", listed)
-    @test Dict("name" => "D. Iles", "key" => "iles|d") in K.paper_json(K.site_paper(kb, "2609.00002"; related = false))["authors"]
+    @test Dict("name" => "D. Iles", "key" => "name:D. Iles") in K.paper_json(K.site_paper(kb, "2609.00002"; related = false))["authors"]
+    close(kb)
+end
+
+@zset "author identities and co-publication visibility" begin
+    x = "https://orcid.org/0000-0002-1694-233X" # example from ORCID's checksum documentation
+    @test K.orcid_uri("0000-0002-1694-233x") == K.orcid_uri(replace(x, "https:" => "http:")) == x
+    @test all(isnothing ∘ K.orcid_uri, (nothing, "", "0000-0002-1694-2330", x * "?next=other", "https://elsewhere.test/0000-0002-1694-233X"))
+    name = "Example Author"
+    work = Dict("authorships" => [Dict("author" => Dict("display_name" => name, "orcid" => x)),
+                                   Dict("raw_author_name" => "E. Author", "raw_orcid" => x, "author" => Dict("display_name" => name))],
+                "primary_location" => nothing, "biblio" => nothing, "publication_year" => nothing, "title" => "Example",
+                "doi" => nothing, "abstract_inverted_index" => nothing)
+    rec = K.work_record(work)
+    @test rec.authors == [name, "E. Author"] && rec.orcids == [nothing, x]
+    stored = K.stored_orcids(rec.authors, rec.orcids)
+    @test K.byline_ids(rec.authors, stored) == [nothing, x]
+    @test all(isnothing, K.byline_ids(reverse(rec.authors), stored))
+    kb = open_kb(temp_config())
+    K.ensure_roles!(kb)
+    reader = K.add_test_account!(kb, "Graph Reader"; roles = ["Reader"])
+    curator = K.add_test_account!(kb, "Graph Curator"; roles = ["Curator"])
+    who(id) = K.account_caller(kb, id, :session)
+    ids = ["2609.00101", "2609.00102", "2609.00103"]
+    add_papers!(kb, ids)
+    for id in ids
+        K.execute!(kb, "UPDATE papers SET metadata_at = ?, authors = ?, author_orcids = ? WHERE doc_id = ?",
+                   (K.now_iso(), K.JSON.json(rec.authors), stored, id))
+    end
+    K.set_document_access!(kb, ids[2], "private"; holder = curator)
+    K.set_document_access!(kb, ids[3], "projects")
+    K.create_project!(kb, "Consortium"; key = "CO", owner = curator, by = K.person("Curator"))
+    K.link_document!(kb, ids[3], "CO")
+    @test [p.id for p in K.author_publications(kb)] == [ids[1]]
+    api(c) = K.handle(kb, K.HTTP.Request("GET", "/api/author-publications"), c)
+    read = api(who(reader))
+    @test read.status == 200 && K.HTTP.header(read, "Cache-Control") == "no-store"
+    @test [p["id"] for p in K.JSON.parse(String(read.body))] == [ids[1]]
+    @test Set(p.id for p in K.author_publications(kb, who(curator))) == Set(ids)
+    edit(id, value, old; caller = who(curator), signature = name) = K.handle(kb, K.HTTP.Request("POST", "/api/author-orcid",
+        ["Content-Type" => "application/json"], K.JSON.json(Dict("paper" => id, "position" => 1, "name" => signature,
+        "orcid" => value, "previous" => old))), caller)
+    @test edit(ids[1], x, nothing; caller = who(reader)).status == 403
+    K.set_roles!(kb, reader, ["Curator"])
+    @test edit(ids[2], x, nothing; caller = who(reader)).status == 404
+    @test edit(ids[1], x, nothing; signature = "Elsewhere").status == 409
+    @test edit(ids[1], "0000-0002-1694-2330", nothing).status == 400
+    @test edit(ids[1], x, nothing).status == 200
+    @test edit(ids[1], "", nothing).status == 409
+    @test only(K.author_publications(kb)).authors[1].orcid == x
+    @test edit(ids[1], "", x).status == 200
+    @test isnothing(only(K.author_publications(kb)).authors[1].orcid)
+    corrected = K.scalar(kb, "SELECT author_orcids FROM papers WHERE doc_id = ?", (ids[1],))
+    @test K.byline_ids(rec.authors, K.refreshed_orcids(rec.authors, [x, x], corrected)) == [nothing, x]
     close(kb)
 end
 
@@ -1997,6 +2050,8 @@ end
                    (K.paper_id(kb, id), at, who))
     end
     K.execute!(kb, "UPDATE papers SET title = 'T ' || doc_id, abstract = 'A', authors = '[\"X\"]', categories = '[]', metadata_at = 'x'")
+    uri = "https://orcid.org/0000-0002-1694-233X"
+    K.execute!(kb, "UPDATE papers SET author_orcids = ? WHERE doc_id = '2609.00001'", (K.stored_orcids(["X"], [uri]),))
     base = joinpath(mktempdir(), "base.json")
     @test export_base_set(kb, base; source = "seminar") == 2
     close(kb)
@@ -2006,6 +2061,7 @@ end
     @test K.scalar(fresh, "SELECT count(*) FROM papers") == 2
     @test [m.author for m in mentions(fresh, "2609.00001")] == ["Ada", "Alan"]
     @test K.paper_row(fresh, "2609.00002").title == "T 2609.00002"
+    @test K.byline_ids(["X"], K.paper_row(fresh, "2609.00001").author_orcids) == [uri]
     @test seed!(fresh, base) == 0
     close(fresh)
     @test K.scalar(open_kb(temp_config(base_set = "")), "SELECT count(*) FROM papers") == 0
@@ -3050,6 +3106,9 @@ end
     @test only(n for n in g["nodes"] if n["id"] == "2401.00006")["page"] == "https://arxiv.org/abs/2401.00006" &&
           !startswith(n1["page"], "https://arxiv.org")
     @test K.explore_node(kb, as(ada), "2401.00006")["page"] == "https://arxiv.org/abs/2401.00006"
+    # A note with no summary is shown by the opening of its text; a paper by its abstract.
+    card = K.explore_node(kb, as(ada), rec)
+    @test card["summary"] == "" && occursin("Untitled", card["excerpt"]) && K.explore_node(kb, as(ada), "2401.00002")["excerpt"] == ""
     # How central each is to its cluster, and the watch's rating where the watch judged it.
     @test n1["central"] == 0.8 && !haskey(n1, "rating") && only(n for n in g["nodes"] if n["id"] == "2401.00002")["rating"] == 2
     own = only(n for n in g["nodes"] if n["id"] == mine)
@@ -3127,6 +3186,22 @@ end
     wait(K.EXPLORE_JOB[].done)
     @test K.handle(kb, K.HTTP.Request("GET", "/api/graph?project=NONE"), as(bea)).status == 200
     close(kb)
+end
+
+@zset "groups a layout leaves far apart are brought in" begin
+    rng = K.Random.MersenneTwister(4)
+    a = randn(rng, 40, 2) .* 0.05
+    b = [50.0 0.0; 50.01 0.01]                                      # two documents far off on one side, together
+    Y = K.packed([a; b])
+    middle = vec(sum([a; b]; dims = 1) ./ 42)
+    radius = sort([sqrt(sum(abs2, r .- middle)) for r in eachrow([a; b])])[38]
+    gap = minimum(sqrt(sum(abs2, Y[i, :] .- Y[j, :])) for i in 1:40, j in 41:42)
+    @test isapprox(gap, 0.2 * radius; rtol = 0.01)                  # brought in, still apart
+    @test Y[1:40, :] == a && Y[41:42, :] .- Y[41, :]' ≈ b .- b[1, :]'   # each group as it was, the far one moved whole
+    @test Y[41, 1] > maximum(a[:, 1])                               # on the side it was
+    @test K.packed(a) == a                                          # one group: nothing moves
+    many = randn(rng, 12, 2) .* 0.05 .+ [50.0 0.0]                  # a whole topic far off keeps its place
+    @test K.packed([a; many]) == [a; many]
 end
 
 @zset "landscape" begin
@@ -3238,7 +3313,11 @@ end
               only(p for p in classified.data["papers"] if p["id"] == "2609.00011")["llm_relevance"] == 3
         d = classified.data
         @test K.keyword_label(["A coral study", "Coral polyps"], ["A kelp study", "A coral study", "Coral polyps"]) ==
-              "polyps · coral"
+              "coral · polyps"
+        # A word in every cluster's titles names none of them.
+        reefs = ["Learning coral reefs", "Coral learning", "Deep learning of coral", "Coral reefs"]
+        reef_label = K.keyword_label(reefs, [reefs; ["Learning kelp", "Kelp learning", "Learning tides"]])
+        @test !occursin("learning", reef_label) && startswith(reef_label, "coral")
         # A cluster of papers with no titles yet is left for later rather than named from its ids.
         untitled = K.name_clusters!(kb, [["2609.99901", "2609.99902"]], [String[]], ["2609.99901", "2609.99902"])
         @test asked[] == 1 && !only(untitled).named
@@ -3328,6 +3407,55 @@ end
         placed = Set(keys(views["read"]["docs"]))
         @test issubset(firsts, placed) && placed == intersect(fully, keys(views["all"]["docs"])) && length(placed) < length(views["all"]["docs"])
         @test all(n[1] in placed for d in values(views["read"]["docs"]) for n in d["near"])
+        # A subset mapped by itself: one of the full map's clusters, laid out and clustered alone.
+        least = K.SUBSET_LEAST[]
+        try
+            K.SUBSET_LEAST[] = 4
+            me = K.local_caller()
+            whole = views["all"]
+            cl = first(whole["clusters"])
+            members = sort([id for (id, d) in whole["docs"] if d["c"] == cl["id"]])
+            s = K.explore_set(kb, me, "cluster:$(cl["id"])"; abstracts = true)
+            @test s.ids == members && s.name == cl["name"]
+            g = K.explore_set_graph(kb, me, s.spec; abstracts = true)
+            @test isempty(g["nodes"]) && g["job"] !== nothing && g["set"]["count"] == length(members) && !g["set"]["few"]
+            job = K.JOBS[g["job"]]
+            wait(job.done)
+            @test job.status == :done && job.share !== nothing && 0.5 < job.share <= 1          # how far it had come, step by step
+            g = K.explore_set_graph(kb, me, s.spec; abstracts = true)
+            @test g["job"] === nothing && Set(n["id"] for n in g["nodes"]) == Set(members) && g["set"]["name"] == cl["name"]
+            @test all(n -> length(n["x"]) == 2 && length(n["px"]) == 2 && length(n["pp"]) == 3, g["nodes"]) && length(g["clusters"]) >= 2
+            # A level further in: a cluster of the subset's own map, found in that map once it is made.
+            inner = first(g["clusters"])
+            deeper = K.explore_set(kb, me, "cluster:$(inner["id"])@$(s.spec)"; abstracts = true)
+            @test deeper.needs === nothing && !isempty(deeper.ids) && issubset(deeper.ids, members) && length(deeper.ids) < length(members)
+            @test deeper.trail == [Dict("spec" => s.spec, "name" => cl["name"])] && deeper.name == inner["name"]
+            # Made again once the documents' vectors or titles change.
+            @test K.cached_subset(kb, members) !== nothing
+            K.execute!(kb, "UPDATE papers SET title = 'A coral study, retitled' WHERE doc_id = ?", (members[1],))
+            K.explore_map!(kb)
+            @test K.cached_subset(kb, members) === nothing
+            # Until the subset's map is made again, a cluster of it waits on it.
+            @test K.explore_set(kb, me, "cluster:$(inner["id"])@$(s.spec)"; abstracts = true).needs == K.explore_set(kb, me, s.spec; abstracts = true).ids
+            # A drift's documents with the nearest of each; a search's first; what one may not see left out.
+            d = K.explore_set(kb, me, "docs:$(members[1])")
+            @test members[1] in d.ids && length(d.ids) == 1 + K.SUBSET_DRIFT_NEAR
+            q = K.explore_set(kb, me, "q:kelp"; n = 4)
+            @test length(q.ids) == 4 && all(id -> topic_of[id] == "kelp", q.ids) && q.name == "“kelp”"
+            K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (members[2],))
+            uid = Int(K.scalar(kb, "INSERT INTO users (email, name, created_at) VALUES ('ada@x.org', 'Ada', ?) RETURNING id", (K.now_iso(),)))
+            ada = K.Caller(uid, "Ada", "ada@x.org", Set(["read", "library", "tasks.view"]), :session, nothing)
+            @test !(members[2] in K.explore_set(kb, ada, "cluster:$(cl["id"])"; abstracts = true).ids)
+            # Too few to lay out, or no such subset.
+            K.SUBSET_LEAST[] = 50
+            few = K.explore_set_graph(kb, me, s.spec; abstracts = true)
+            @test few["set"]["few"] && isempty(few["nodes"]) && few["job"] === nothing
+            @test_throws ErrorException K.explore_set(kb, me, "cluster:999")
+            @test_throws ErrorException K.explore_set(kb, me, "shelf:1")
+            @test_throws ErrorException K.explore_set(kb, ada, "project:NONE")
+        finally
+            K.SUBSET_LEAST[] = least
+        end
         close(kb); close(con)
     finally
         restore_qdrant!(saved)
@@ -6113,6 +6241,7 @@ end
     @test Set((l.kind, l.target, l.label) for l in K.task(kb, made).links) == Set([("task", "NE-1", ""), ("person", "Rowan", "")])
     # Editing a note: its author, or a person for an agent's; the earlier text kept, links and search following.
     note = K.note_task!(kb, "NE-2", "Checked the stochastic runs"; kind = "progress", by = bot)
+    K.execute!(kb, "UPDATE task_events SET at = ? WHERE id = ?", ("2026-01-07T23:55:04Z", note))
     @test K.edit_note!(kb, "NE-2", note, "Checked the deterministic runs against @arXiv:2501.00001"; by = bot) == note
     edited = only(e for e in K.task(kb, "NE-2").activity if e.id == note)
     @test edited.text == "Checked the deterministic runs against @arXiv:2501.00001" && !isempty(edited.edited_at) && edited.kind == "progress"
@@ -6129,7 +6258,8 @@ end
     @test_throws "agents working for them" K.edit_note!(kb, "NE-2", rowans, "Changed"; by = K.person("Bea"))
     @test_throws "agents working for them" K.edit_note!(kb, "NE-2", note, "Changed"; by = me)
     @test K.edit_note!(kb, "NE-2", rowans, "Ran the deterministic case, twice"; by = K.person("Bea"), maintainer = true) == rowans
-    @test occursin("[note $note, edited]: reported: Checked the deterministic runs", K.format_task(K.task(kb, "NE-2")))
+    latest_edit = last(K.note_history(kb, note)).at
+    @test occursin("$(edited.at) $(edited.who) (agent) [note $note, edited $latest_edit]: reported: Checked the deterministic runs", K.format_task(K.task(kb, "NE-2")))
     mine = K.note_task!(kb, "NE-2", "My own words"; by = me)
     @test_throws "An agent edits only its own" K.edit_note!(kb, "NE-2", mine, "Changed"; by = bot)
     @test_throws "their own notes" K.edit_note!(kb, "NE-2", mine, "Changed"; by = K.person("Bea"))
@@ -6546,7 +6676,8 @@ end
         @test occursin("Noted on DM-6 (note ", noted)
         n = parse(Int, match(r"note (\d+)", noted)[1])
         @test as_ada(() -> tools["task_note_edit"]("DM-6", n, "Looked at the arXiv listings")) == "Edited note $n on DM-6."
-        @test occursin("[note $n, edited]: reported: Looked at the arXiv listings", tools["task"]("DM-6"))
+        stamp = only(K.note_history(kb, n)).at
+        @test occursin("[note $n, edited $stamp]: reported: Looked at the arXiv listings", tools["task"]("DM-6"))
         @test occursin("DM: Demo · ", tools["projects"](; path = root)) && occursin("No project for", tools["projects"](; path = tempdir()))
         @test occursin("First · due 2026-11-01 · 0/1 done", tools["milestones"]("DM"))
         @test startswith(tools["task"]("DM-404"), "⛔ No task DM-404")
@@ -6661,10 +6792,17 @@ end
         csv = K.add_media!(kb, Vector{UInt8}("depth,temp\n1,12.5\n"), "readings.csv"; by = "Ada", project = "DM")
         svg = K.add_media!(kb, Vector{UInt8}("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'><rect width='40' height='20' fill='red'/></svg>"),
                            "box.svg"; by = "Ada", project = "DM")
+        # Reusing these bytes keeps the first upload time on the file and in both tool outputs.
+        first_upload = "2026-01-07T23:55:04Z"
+        K.execute!(kb, "UPDATE media SET added_at = ? WHERE hash = ?", (first_upload, csv.hash))
+        reused = K.add_media!(kb, Vector{UInt8}("depth,temp\n1,12.5\n"), "copy.csv"; by = "Rowan", project = "PL")
+        @test reused.hash == csv.hash
         tools["task_note"]("DM-11", "The readings: [scan]($(pdf.address)) and [table]($(csv.address))")
         listed = text_of(tools["task"]("DM-11"))
         @test occursin("## Files attached, not shown here", listed) && occursin("`$(pdf.address)`: a PDF", listed) &&
               occursin("media(\"$(pdf.address)\")", listed) && occursin("`$(csv.address)`: text", listed)
+        @test occursin("first uploaded $first_upload", only(filter(line -> startswith(line, "- `$(csv.address)`"), split(listed, '\n'))))
+        @test occursin("first uploaded $first_upload by Ada", tools["media"](reused.address))
         opened = tools["media"](pdf.address)
         @test occursin("Tide gauge readings.", text_of(opened)) && occursin("2 pages", text_of(opened)) && occursin("\"mimeType\":\"image/png\"", opened)
         second = tools["media"](pdf.address; page = 2)

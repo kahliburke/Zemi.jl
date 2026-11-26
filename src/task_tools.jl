@@ -150,7 +150,7 @@ function attachments_text(texts, shown)
         f === nothing && continue
         kind = f.type == "application/pdf" ? "a PDF" : startswith(f.type, "image/") ? "an image" : startswith(f.type, "video/") ? "a video" :
                startswith(f.type, "text/") || f.type == "application/json" ? "text" : "a file"
-        push!(lines, "- `$(r.address)`: $kind, $(format_bytes(f.size))" *
+        push!(lines, "- `$(r.address)`: $kind, $(format_bytes(f.size)), first uploaded $(f.added_at)" *
                      (startswith(f.type, "video/") || kind == "a file" ? "" : "; `media(\"$(r.address)\")` shows it"))
     end
     return isempty(lines) ? "" : "\n\n## Files attached, not shown here\n\n" * join(lines, "\n")
@@ -183,7 +183,7 @@ media_tool(address::String; page::Int = 0)::String = refusing() do
     hash = String(m[1])
     f = media_file(kb(), hash)
     (f === nothing || !media_visible(kb(), tool_caller(), hash)) && not_found("No file $address")
-    head = "$(f.name): $(f.type), $(format_bytes(f.size)), attached by $(f.added_by) on $(first(f.added_at, 10))."
+    head = "$(f.name): $(f.type), $(format_bytes(f.size)), first uploaded $(f.added_at) by $(f.added_by)."
     if f.type == "application/pdf"
         with_media_file(kb(), f) do pdf
             n = pdf_pages(kb().config, pdf)
@@ -902,8 +902,8 @@ function format_task(t)
         what = e.kind == "question" ? "asked $(e.to_label)" * (e.reply_to > 0 ? ", about note $(e.reply_to)" : "") *
                                       " ($(question_state_text(e))): " * plain_at_references(e.text) :
                event_text(e)
-        note = e.kind in SEARCHED_NOTES ? " [note $(e.id)$(isempty(e.edited_at) ? "" : ", edited")]" : ""
-        println(io, "- $(first(e.at, 16)) $(e.who)$(e.by_agent ? " (agent)" : "")$note: $what")
+        note = e.kind in SEARCHED_NOTES ? " [note $(e.id)$(isempty(e.edited_at) ? "" : ", edited $(e.edited_at)")]" : ""
+        println(io, "- $(e.at) $(e.who)$(e.by_agent ? " (agent)" : "")$note: $what")
     end
     return String(take!(io))
 end

@@ -1,13 +1,15 @@
 <!--
-  One's library on the account page (see library_overview in src/library_reading.jl): each folder kept
-  in step with it, what it holds and when it last changed, its bibliographies (the entries linking PDFs
-  that are not synced, and what could not be read), how much of the space it uses, and the
-  `zemi connect` sign-ins that reach it, each disconnected here. Sharing what it holds is on the
+  One's library, its page under the top bar's menu (see library_overview in src/library_reading.jl):
+  each folder kept in step with it, what it holds and when it last changed, its bibliographies (the
+  entries linking PDFs that are not synced, and what could not be read), how much of the space it
+  uses, and what keeps it in step: the `zemi connect` sign-ins that reach it, each disconnected here,
+  or, run for one person, how this machine's `zemi connect` stands. Sharing what it holds is on the
   Documents page.
 -->
 <script setup lang="ts">
+import KBNeedsService from './KBNeedsService.vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getJSON, post, api } from './kbApi'
+import { mode, connect, can, shared, getJSON, post, api } from './kbApi'
 import { kbPage } from './kbLinks'
 import { bytes, when } from './kbFormat'
 
@@ -15,7 +17,10 @@ import { bytes, when } from './kbFormat'
 type Bibliography = { path: string; entries: number; documents: number; missing: { key: string; files: string[] }[]; problems: string[] }
 type Folder = { name: string; files: number; bytes: number; vault: boolean; bibliographies: Bibliography[]; documents: number; changed: string }
 type Connection = { id: number; name: string; created_at: string; last_used: string }
-type Library = { folders: Folder[]; used: number; limit: number; reading: boolean; connections: Connection[] }
+// zemi connect on the machine that runs the knowledge base for one person: who syncs (the knowledge
+// base, zemi connect, or no one now), when it last looked, and each folder's state.
+type ThisMachine = { by: string; updated: string; paused: boolean; error: string; folders: { name: string; state: string; message: string }[] }
+type Library = { folders: Folder[]; used: number; limit: number; reading: boolean; connections: Connection[]; this_machine: ThisMachine | null }
 
 const lib = ref<Library | null>(null)
 const error = ref('')
@@ -27,6 +32,8 @@ async function load() {
 let timer: ReturnType<typeof setInterval> | undefined
 let ticks = 0
 onMounted(async () => {
+  await connect()
+  if (mode.value !== 'live' || !can('library')) return
   await load()
   timer = setInterval(() => { ticks++; if (lib.value?.reading || ticks % 6 === 0) load() }, 5000)
 })
@@ -45,74 +52,96 @@ const RUNNING_MS = 2 * 60 * 1000
 const syncing = (c: Connection) => !!c.last_used && Date.now() - new Date(c.last_used).getTime() < RUNNING_MS
 const bibliographies = computed(() => (lib.value?.folders ?? []).flatMap(f => f.bibliographies ?? []))
 const share = computed(() => lib.value && lib.value.limit ? Math.min(100, (100 * lib.value.used) / lib.value.limit) : 0)
-const command = computed(() => `zemi connect ${new URL(api.value || '/', location.href).origin} ~/Documents/Notes`)
+const command = computed(() => `zemi connect ${shared.value ? new URL(api.value || '/', location.href).origin : 'local'} ~/Documents/Notes`)
+// How this machine's zemi connect stands, run for one person: who syncs, and each folder not in step.
+const local = computed(() => lib.value?.this_machine ?? null)
+const SYNCERS: Record<string, string> = { 'the knowledge base': 'The knowledge base syncs them while it runs.',
+                                          'zemi connect': 'zemi connect syncs them while it runs.' }
+const unsettled = computed(() => (local.value?.folders ?? []).filter(f => f.state !== 'in step'))
 </script>
 
 <template>
-  <section class="kbl">
-    <h2>Your library</h2>
-    <p class="kb-dim">Notes and files synced from your machines, private until you share them on
-      <a :href="`${kbPage('manage')}?state=mine`">Documents</a>.</p>
-    <p v-if="error" class="kb-error">{{ error }}</p>
-    <template v-if="lib">
-      <div class="kbl-usage" :title="`${bytes(lib.used)} of ${bytes(lib.limit)}`">
-        <div class="kbl-bar"><div :style="{ width: `${share}%` }" /></div>
-        <span class="kb-dim">{{ bytes(lib.used) }} of {{ bytes(lib.limit) }}</span>
-        <span v-if="lib.reading" class="kbl-reading">reading changes…</span>
-      </div>
+  <KBNeedsService permission="library">
+    <section class="kbl">
+      <p class="kb-dim">Notes and files synced from your machines, private until you share them on
+        <a :href="`${kbPage('manage')}?state=mine`">Documents</a>.</p>
+      <p v-if="error" class="kb-error">{{ error }}</p>
+      <template v-if="lib">
+        <div class="kbl-usage" :title="`${bytes(lib.used)} of ${bytes(lib.limit)}`">
+          <div class="kbl-bar"><div :style="{ width: `${share}%` }" /></div>
+          <span class="kb-dim">{{ bytes(lib.used) }} of {{ bytes(lib.limit) }}</span>
+          <span v-if="lib.reading" class="kbl-reading">reading changes…</span>
+        </div>
 
-      <table v-if="lib.folders.length" class="kbl-table">
-        <thead><tr><th>Folder</th><th>Files</th><th>Documents</th><th>Last changed</th></tr></thead>
-        <tbody>
-          <tr v-for="f in lib.folders" :key="f.name">
-            <td><code>{{ f.name || '(top level)' }}</code><span v-if="f.vault" class="kbl-tag">Obsidian vault</span><span
-                v-if="f.bibliographies?.length" class="kbl-tag">BibTeX</span></td>
-            <td>{{ f.files }} · {{ bytes(f.bytes) }}</td>
-            <td>{{ f.documents }}</td>
-            <td>{{ when(f.changed, '—') }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="kb-dim">Empty.</p>
+        <table v-if="lib.folders.length" class="kbl-table">
+          <thead><tr><th>Folder</th><th>Files</th><th>Documents</th><th>Last changed</th></tr></thead>
+          <tbody>
+            <tr v-for="f in lib.folders" :key="f.name">
+              <td><code>{{ f.name || '(top level)' }}</code><span v-if="f.vault" class="kbl-tag">Obsidian vault</span><span
+                  v-if="f.bibliographies?.length" class="kbl-tag">BibTeX</span></td>
+              <td>{{ f.files }} · {{ bytes(f.bytes) }}</td>
+              <td>{{ f.documents }}</td>
+              <td>{{ when(f.changed, '—') }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="kb-dim">Empty.</p>
 
-      <template v-for="b in bibliographies" :key="b.path">
-        <h3><code>{{ b.path }}</code></h3>
-        <p class="kb-dim">{{ b.entries }} entries, {{ b.documents }} brought in as documents. Each is cited by its key in your notes
-          and notebooks.</p>
-        <details v-if="b.missing.length" class="kbl-missing">
-          <summary>{{ b.missing.length }} {{ b.missing.length === 1 ? 'entry links a PDF' : 'entries link PDFs' }} not in your library</summary>
-          <p class="kb-dim">Each came in by its DOI or arXiv id, or as a resource. To read the PDF, keep it in the folder you sync.</p>
-          <ul><li v-for="m in b.missing" :key="m.key"><code>{{ m.key }}</code> <span class="kb-dim">{{ m.files.join(', ') }}</span></li></ul>
-        </details>
-        <details v-if="b.problems.length" class="kbl-missing">
-          <summary>{{ b.problems.length }} could not be read</summary>
-          <ul><li v-for="p in b.problems" :key="p">{{ p }}</li></ul>
-        </details>
+        <template v-for="b in bibliographies" :key="b.path">
+          <h3><code>{{ b.path }}</code></h3>
+          <p class="kb-dim">{{ b.entries }} entries, {{ b.documents }} brought in as documents. Each is cited by its key in your notes
+            and notebooks.</p>
+          <details v-if="b.missing.length" class="kbl-missing">
+            <summary>{{ b.missing.length }} {{ b.missing.length === 1 ? 'entry links a PDF' : 'entries link PDFs' }} not in your library</summary>
+            <p class="kb-dim">Each came in by its DOI or arXiv id, or as a resource. To read the PDF, keep it in the folder you sync.</p>
+            <ul><li v-for="m in b.missing" :key="m.key"><code>{{ m.key }}</code> <span class="kb-dim">{{ m.files.join(', ') }}</span></li></ul>
+          </details>
+          <details v-if="b.problems.length" class="kbl-missing">
+            <summary>{{ b.problems.length }} could not be read</summary>
+            <ul><li v-for="p in b.problems" :key="p">{{ p }}</li></ul>
+          </details>
+        </template>
+
+        <template v-if="!shared">
+          <h3>This machine</h3>
+          <p v-if="!local" class="kb-dim">No folders synced by <code>zemi connect</code>.</p>
+          <template v-else>
+            <p><span :class="['kbl-state', { on: !!local.by && !local.paused }]">{{ local.paused ? 'paused' : local.by ? 'syncing' : 'not running' }}</span>
+              <span v-if="local.by" class="kb-dim"> · {{ SYNCERS[local.by] ?? '' }} Last looked {{ when(local.updated, 'never') }}.</span>
+              <span v-else class="kb-dim"> · <code>zemi connect --background</code> has the knowledge base sync them while it runs.</span></p>
+            <p v-if="local.error" class="kb-error">{{ local.error }}</p>
+            <ul v-if="unsettled.length" class="kbl-unsettled">
+              <li v-for="f in unsettled" :key="f.name"><code>{{ f.name }}</code> {{ f.state }}<span v-if="f.message" class="kb-dim"> · {{ f.message }}</span></li>
+            </ul>
+          </template>
+        </template>
+        <template v-else>
+          <h3>Machines</h3>
+          <p class="kb-dim">Each syncs while <code>zemi connect</code> runs on it.</p>
+          <table v-if="lib.connections.length" class="kbl-table">
+            <thead><tr><th>Machine</th><th>Now</th><th>Last synced</th><th>Signed in</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="c in lib.connections" :key="c.id">
+                <td>{{ machine(c) }}</td>
+                <td><span :class="['kbl-state', { on: syncing(c) }]">{{ syncing(c) ? 'syncing' : 'not running' }}</span></td>
+                <td>{{ when(c.last_used, 'never') }}</td>
+                <td>{{ when(c.created_at, '—') }}</td>
+                <td><button class="kb-link" :title="`Revoke ${machine(c)}'s sign-in`" @click="disconnect(c)">sign out</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="kb-dim">None signed in.</p>
+        </template>
+        <p class="kb-dim kbl-how">To sync a folder, such as an Obsidian vault or a folder with a <code>.bib</code> file and its PDFs:
+          <code>{{ command }}</code></p>
       </template>
-
-      <h3>Machines</h3>
-      <p class="kb-dim">Each syncs while <code>zemi connect</code> runs on it.</p>
-      <table v-if="lib.connections.length" class="kbl-table">
-        <thead><tr><th>Machine</th><th>Now</th><th>Last synced</th><th>Signed in</th><th></th></tr></thead>
-        <tbody>
-          <tr v-for="c in lib.connections" :key="c.id">
-            <td>{{ machine(c) }}</td>
-            <td><span :class="['kbl-state', { on: syncing(c) }]">{{ syncing(c) ? 'syncing' : 'not running' }}</span></td>
-            <td>{{ when(c.last_used, 'never') }}</td>
-            <td>{{ when(c.created_at, '—') }}</td>
-            <td><button class="kb-link" :title="`Revoke ${machine(c)}'s sign-in`" @click="disconnect(c)">sign out</button></td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="kb-dim">None signed in.</p>
-      <p class="kb-dim kbl-how">To sync a folder, such as an Obsidian vault or a folder with a <code>.bib</code> file and its PDFs:
-        <code>{{ command }}</code></p>
-    </template>
-  </section>
+    </section>
+  </KBNeedsService>
 </template>
 
 <style scoped>
-.kbl { margin-top: 1.5rem; }
+.kbl { margin-top: 1rem; }
+.kbl-unsettled { margin: 0.3rem 0 0; font-size: 0.88rem; }
 .kbl-usage { display: flex; align-items: center; gap: 0.8rem; margin: 0.6rem 0 0.8rem; font-size: 0.88rem; }
 .kbl-bar { width: 12rem; height: 6px; border-radius: 3px; background: var(--vp-c-bg-soft); overflow: hidden; }
 .kbl-bar > div { height: 100%; background: var(--vp-c-brand-1); }

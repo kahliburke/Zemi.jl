@@ -109,7 +109,7 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
       <KBChat :id="paper.id" :title="paper.title" />
 
       <template v-if="paper.summary">
-        <div class="tip custom-block"><p class="custom-block-title">Summary</p><div v-html="render(paper.summary)"></div></div>
+        <div class="tip custom-block"><p class="custom-block-title">Summary</p><div data-share-text v-html="render(paper.summary)"></div></div>
         <details v-if="paper.provenance">
           <summary>How this summary was produced</summary>
           <dl>
@@ -136,7 +136,7 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
 
       <template v-if="paper.abstract">
         <h2 :id="anchors.fixed['Abstract']">Abstract</h2>
-        <div v-html="render(paper.abstract)"></div>
+        <div data-share-text v-html="render(paper.abstract)"></div>
       </template>
 
       <template v-if="paper.figures + paper.tables > 0">
@@ -148,8 +148,8 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
         <h2 :id="anchors.fixed['Sections']">Sections</h2>
         <KBExpandAll />
         <template v-for="(s, i) in paper.sections" :key="s.ord">
-          <component :is="sectionTag(s.level)" :id="anchors.sections[i]" v-html="render(s.title, { inline: true })" />
-          <div v-if="s.summary" v-html="render(s.summary)"></div>
+          <component data-share-text :is="sectionTag(s.level)" :id="anchors.sections[i]" v-html="render(s.title, { inline: true })" />
+          <div data-share-text v-if="s.summary" v-html="render(s.summary)"></div>
           <template v-if="s.references">
             <p v-if="paper.here.length"><strong>Here:</strong>
               <template v-for="(h, j) in paper.here" :key="h.slug + j"><template v-if="j"> · </template>

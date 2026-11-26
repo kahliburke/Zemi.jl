@@ -117,10 +117,11 @@ const SHOTS = [
   ['configuration-group', '/service/configuration', '.kbcf h2', page => scrollTo(page, '.kbcf h2:text-is("The group")')],
   ['models', '/service/configuration', '#model input', page => scrollTo(page, '#model h2')],
   ['operations', '/service/operations', 'text=Jobs', undefined, 'h2:text-is("Jobs") + table'],
-  // A project's library with its Zotero group; Rowan's library on the account page and the Documents page.
+  // A project's library with its Zotero group; Rowan's library on its page and on the Documents page.
   ['zotero', '/projects#RB', '.kbz', async page => { await page.click('.kbp-view:has-text("Library")'); await page.mouse.move(0, 0) },
    async page => { const b = await page.locator('.kbl-box').boundingBox(); return { ...b, height: 420 } }],
-  ['library-account', '/service/account', '.kbl-table', undefined, 'section.kbl'],
+  ['library-account', '/service/library', '.kbl-table',
+   page => page.locator('.kbl-missing').first().evaluate(d => { d.open = true }), 'section.kbl'],
   ['documents-sharing', '/kb/manage?state=mine', '.kbm-intro', async page => {
     await page.waitForSelector('.kbm input[type=checkbox]', { timeout: 30_000 })
     await page.locator('.kbm tbody tr:has-text("Scoring turf") input[type=checkbox]').check()

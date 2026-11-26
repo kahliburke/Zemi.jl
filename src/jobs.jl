@@ -17,6 +17,7 @@ mutable struct Job
     cancel::Threads.Atomic{Bool}
     ids::Vector{String}
     done::Base.Event
+    share::Union{Float64,Nothing}           # how much of its work is done, 0 to 1, where it says
 end
 
 "Wait until `job` has ended, however it ends."
@@ -111,7 +112,7 @@ schedule that found nothing to do.
 function start_job(f, name::AbstractString; ids = String[], changes::Union{String,Nothing} = nothing, forget_idle::Bool = false)
     id = "j$(Threads.atomic_add!(JOB_COUNTER, 1) + 1)"
     job = Job(id, name, :running, "starting", now(UTC), nothing, nothing, nothing, Threads.Atomic{Bool}(false),
-              String.(ids), Base.Event())
+              String.(ids), Base.Event(), nothing)
     starter = get(task_local_storage(), :kb_caller, nothing)
     lock(JOBS_LOCK) do
         forget_old_jobs!()
@@ -163,7 +164,13 @@ const JOB_STARTERS = Dict{String,Union{Int,Nothing}}()
 job_visible(job::Job, caller) =
     caller.via == :local || can(caller, "jobs.view") || lock(() -> get(JOB_STARTERS, job.id, -1), JOBS_LOCK) == caller.user_id
 
-report!(job::Job, msg::AbstractString) = (job.message = msg; @info "[$(job.id)] $msg"; nothing)
+"Say what `job` is doing, `msg`, and, where it can tell, the `share` of its work done (0 to 1)."
+function report!(job::Job, msg::AbstractString; share::Union{Real,Nothing} = nothing)
+    job.message = msg
+    share === nothing || (job.share = clamp(Float64(share), 0.0, 1.0))
+    @info "[$(job.id)] $msg"
+    return nothing
+end
 cancelled(job::Job) = job.cancel[]
 cancel!(job::Job) = (job.cancel[] = true; job)
 

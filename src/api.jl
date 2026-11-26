@@ -243,15 +243,74 @@ route!("GET", "/api/search") do c
         isempty(l) ? kb.config.search_layers : l == "all" ? nothing : l == "none" ? String[] : split_list(l)
     end
     keyword = get(params, "keyword", kb.config.search_keyword ? "1" : "0") in ("1", "true")
-    want = search_kinds(get(params, "kinds", ""))
-    t = @elapsed hits = want.documents ? search(kb, q; limit, layers, keyword, want.kinds, except = unfound_documents(kb, c.caller)) : []
-    found = want.findings && can(c.caller, "tasks.view") ?
-        search_findings(kb, q; projects = visible_projects(kb, c.caller), limit = want.documents ? 5 : 3limit) : NamedTuple[]
+    kinds = get(params, "kinds", "")
+    want = search_kinds(kinds)
+    view = get(params, "view", "")
+    quick = view == "suggestions"
+    project = uppercase(named_project(c))
+    scope = isempty(project) ? nothing : union(library_papers(kb, project),
+        Set(id for (id, keys) in documents_projects(kb) if project in keys))
+    excluded = unfound_documents(kb, c.caller)
+    t = @elapsed hits = want.documents && kinds != "task" ? search(kb, q; limit, layers, keyword, want.kinds,
+        only = scope, except = excluded) : []
+    projects = !can(c.caller, "tasks.view") ? Set{String}() :
+               isempty(project) ? visible_projects(kb, c.caller) : Set([project])
+    no_meaning(kb, text) = Tuple{Int,String}[]
+    found = want.findings && !isempty(projects) ? search_findings(kb, q; projects, limit = want.documents ? 5 : 3limit,
+        meaning = quick ? no_meaning : finding_meaning_ranking) : NamedTuple[]
     page = site_link(kb.config, "kb/index")
-    Dict("query" => q, "seconds" => t, "k" => kb.config.rrf_k, "hits" => [hit_json(kb, h) for h in hits],
-         "link" => isempty(page) ? "" : page * "?q=" * HTTP.escapeuri(q),
-         "publications" => want.publications ? publication_list(kb, c.caller; q, limit) : [],
-         "findings" => Any[Dict(pairs(f)) for f in found])
+    link = isempty(page) ? "" : page * "?q=" * HTTP.escapeuri(q)
+    isempty(link) || isempty(project) || (link *= "&project=" * HTTP.escapeuri(project))
+    isempty(link) || isempty(kinds) || (link *= "&kind=" * HTTP.escapeuri(kinds))
+    result = Dict{String,Any}("query" => q, "seconds" => t, "k" => kb.config.rrf_k, "hits" => [hit_json(kb, h) for h in hits],
+                              "publications" => want.publications ? publication_list(kb, c.caller; q, project, limit) : [],
+                              "link" => link, "findings" => Any[Dict(pairs(f)) for f in found])
+    if view in ("suggestions", "results") && !isempty(projects) && (isempty(kinds) || "task" in split_list(kinds))
+        tasks = search_tasks(kb, q; project, projects, limit, me = my_name(c), meaning = quick ? no_meaning : task_meaning_ranking)
+        result["tasks"] = [(; t.ref, t.title, t.matches) for t in tasks]
+    end
+    if view in ("suggestions", "results") && can(c.caller, "tasks.view")
+        refs = at_reference_matches(kb, q; limit, project, c.caller, projects, only = scope, except = excluded)
+        selected = split_list(kinds)
+        function include_ref(r)
+            r.kind in ("person", "code") && return false
+            kind = r.kind == "paper" ? something(document_kind(r.target), PAPER).name : r.kind
+            return isempty(selected) || kind in selected
+        end
+        result["references"] = filter(include_ref, refs)
+    end
+    return result
+end
+
+route!(c -> live_data_response(author_publications(c.kb, c.caller)), "GET", "/api/author-publications")
+
+# A catalogue correction is scoped to one byline on one visible work.
+route!("POST", "/api/author-orcid"; need = "paper.manage") do c
+    d = json_body(c)
+    id = String(get(d, "paper", ""))
+    name = String(get(d, "name", ""))
+    slot = get(d, "position", 0)
+    input = get(d, "orcid", "")
+    input isa AbstractString || error("Enter an ORCID iD")
+    uri = orcid_uri(input)
+    isempty(strip(input)) || uri !== nothing || error("Check the ORCID spelling and final check digit")
+    transaction(c.kb) do
+        seen_document(c.kb, c.caller, id)
+        rows = query(c.kb, "SELECT authors, author_orcids FROM papers WHERE doc_id = ? AND $(literature_sql(closed = true))", (id,))
+        isempty(rows) && not_found("No such paper")
+        row = only(rows)
+        names = json_list(row.authors)
+        record = byline_record(names, row.author_orcids)
+        ids = record.ids
+        slot isa Int && 1 <= slot <= length(names) && byline_name(names[slot]) == name &&
+            haskey(d, "previous") && ids[slot] == d["previous"] || throw(Refusal(409, "The byline changed. Reload the authors page."))
+        ids[slot] = uri
+        execute!(c.kb, "UPDATE papers SET author_orcids = ? WHERE doc_id = ?", (stored_orcids(names, ids; curated = union(record.curated, [slot])), id))
+        audit!(c.kb, c.caller, "paper.author_orcid"; target = id, detail = Dict("position" => slot, "orcid" => uri))
+    end
+    note_changes!([id])
+    touch(changes_stamp(c.kb.config))
+    (; orcid = uri)
 end
 
 # One paper, as on its page.
@@ -588,7 +647,7 @@ function job_json(j::Job)
              j.result isa AbstractVector && !isempty(j.result) && first(j.result) isa NamedTuple && haskey(first(j.result), :ok) ?
                  format_ingest(j.result) : string(j.result)
     Dict("id" => j.id, "name" => j.name, "status" => string(j.status), "message" => j.message,
-         "started" => iso(j.started), "finished" => j.finished === nothing ? nothing : iso(j.finished), "elapsed" => elapsed(j), "ids" => j.ids, "result" => result, "error" => j.error === nothing ? nothing : first(j.error, 1500))
+         "started" => iso(j.started), "finished" => j.finished === nothing ? nothing : iso(j.finished), "elapsed" => elapsed(j), "share" => j.share, "ids" => j.ids, "result" => result, "error" => j.error === nothing ? nothing : first(j.error, 1500))
 end
 
 """
