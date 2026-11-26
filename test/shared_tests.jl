@@ -2829,3 +2829,21 @@ end
         close(kb)
     end
 end
+
+@zset "status identifies the instance" begin
+    c = temp_config(; shared = shared_config(base_url = "https://reef.example.org"), group = K.Group(; name = "Reef lab"))
+    kb = open_kb(c)
+    shared = K.SHARED_MODE[]
+    try
+        K.SHARED_MODE[] = true
+        status = K.format_status(kb)
+        @test occursin("Reef lab (Zemi $(pkgversion(K)))", status)
+        @test occursin("https://reef.example.org", status)
+        @test !occursin(K.db_path(c), status)
+        K.SHARED_MODE[] = false
+        @test occursin(K.db_path(c), K.format_status(kb))
+    finally
+        K.SHARED_MODE[] = shared
+        close(kb)
+    end
+end
