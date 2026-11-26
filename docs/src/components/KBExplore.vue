@@ -857,8 +857,11 @@ function go(n: Node, remember = true) {
   const [x, y, z] = spot(g)
   if (drawnView === '2d') camera.to([x, y, Math.log(Math.max(graph.zoom(), 3))], moveMs(900))
   else {
-    const d = 90, r = Math.hypot(x, y, z) || 1
-    camera.to([x * (1 + d / r), y * (1 + d / r), z * (1 + d / r), x, y, z], moveMs(1400))
+    // From the side the view is turned to now, at the distance it is (not farther than a document's
+    // neighbourhood needs): the view slides across and turns about the document, without swinging round.
+    const v = readView()!, back = [v[0] - v[3], v[1] - v[4], v[2] - v[5]]
+    const away = Math.hypot(...back) || 1, d = Math.min(Math.max(away, 60), 140)
+    camera.to([x + back[0] / away * d, y + back[1] / away * d, z + back[2] / away * d, x, y, z], moveMs(1400))
   }
 }
 function back() { const n = trail.pop(); if (n) go(n, false) }
