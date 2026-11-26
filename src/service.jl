@@ -124,6 +124,9 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             # What a phone installs the site as, which on an iPhone notifications need. To anyone,
             # like the icons it names: browsers ask for it without signing in.
             HTTP.Response(200, ["Content-Type" => "application/manifest+json"], JSON.json(web_manifest(kb.config)))
+        elseif shared && uri.path in ("/privacy", "/about")
+            page = uri.path == "/about" ? about_page : privacy_page
+            HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"], page(kb.config))
         elseif !isempty(DEV_URL[]) && !startswith(uri.path, "/kb-data/")
             # Under `zemi dev` the pages come from the development server, which sends here the
             # data it has no file for (a record's, say), answered below to those who may see it.
@@ -135,9 +138,6 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             HTTP.setheader(r, "Access-Control-Allow-Origin" => "*")
             HTTP.setheader(r, "Cross-Origin-Resource-Policy" => "cross-origin")
             r
-        elseif shared && uri.path == "/privacy"
-            # To anyone: sign-in providers link to it before anyone has signed in.
-            HTTP.Response(200, ["Content-Type" => "text/html; charset=utf-8"], privacy_page(kb.config))
         elseif shared && (caller = shared_caller(kb, req)).via == :anonymous
             redirect("/auth/sign-in?return_to=" * HTTP.escapeuri(req.target))
         elseif shared && !can(caller, "read")

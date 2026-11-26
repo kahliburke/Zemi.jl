@@ -93,7 +93,20 @@ function sign_in_page(shared::SharedConfig; return_to = "/", message = "")
         <p>Paste its full address:</p>
         <form method="post" action="/auth/paste"><textarea name="url" rows="3" required></textarea><button>Continue</button></form>
         </details>
-        <p style="font-size:.85rem"><a href="/privacy" style="color:#98989f">Privacy</a></p></main></body></html>"""
+        <p style="font-size:.85rem"><a href="/privacy" style="color:#98989f">Privacy</a> · <a href="/about" style="color:#98989f">About</a></p></main></body></html>"""
+end
+
+# Both public information pages work before login, without loading the built site.
+function public_info_page(c::Config, title, body)
+    return """
+        <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">$ICON_LINK
+        <title>$(html_escape(title)) · $(html_escape(site_title(c)))</title><style>
+        body{font:16px/1.6 system-ui,sans-serif;background:#1b1b1f;color:#dfdfd6;margin:0}main{max-width:40rem;margin:0 auto;padding:2rem}
+        h1{font-size:1.5rem}h2{font-size:1.05rem;margin-top:1.6rem}a{color:#3dd68c}.detail{white-space:pre-line;overflow-wrap:anywhere}
+        </style></head><body><main>
+        <h1>$(html_escape(title))</h1>
+        $body
+        </main></body></html>"""
 end
 
 """
@@ -108,13 +121,8 @@ function privacy_page(c::Config)
     providers = [p.name for p in c.shared.providers]
     by = isempty(providers) ? "the service you sign in with" : join(esc.(providers), ", ", " or ")
     ask = isempty(c.contact) ? "the group's admins" : "<a href=\"mailto:$(esc(c.contact))\">$(esc(c.contact))</a>"
-    return """
-        <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">$ICON_LINK
-        <title>Privacy · $(esc(site_title(c)))</title><style>
-        body{font:16px/1.6 system-ui,sans-serif;background:#1b1b1f;color:#dfdfd6;margin:0}main{max-width:40rem;margin:0 auto;padding:2rem}
-        h1{font-size:1.5rem}h2{font-size:1.05rem;margin-top:1.6rem}a{color:#3dd68c}
-        </style></head><body><main>
-        <h1>Privacy</h1>
+    models_link = isempty(about_models(c)) ? "" : " See the <a href=\"/about#models\">configured models and providers</a>."
+    return public_info_page(c, "Privacy", """
         <p>$(esc(site_title(c))) is a research group's knowledge base, run by the group for its members.</p>
         <h2>Signing in</h2>
         <p>Signing in with $by gives this service your email address, your name and the id of your account
@@ -122,13 +130,13 @@ function privacy_page(c::Config)
         <h2>Using it</h2>
         <p>What you add or change (documents, tasks, notes, findings) is kept under your name, with when
         you were last here and the browser each of your sessions began in. Text you send to the tutor or to
-        agents is processed by the AI models the group has chosen.</p>
+        agents is processed by the AI models the group has chosen.$models_link</p>
         <h2>What it is for</h2>
         <p>Signing you in, deciding what you may see and do, and showing the group who did what. Nothing is
         sold or shared outside the group, and the service runs no analytics or advertising.</p>
         <h2>Your account</h2>
         <p>To have your account closed, ask $ask. What you added stays in the group's work.</p>
-        </main></body></html>"""
+        """)
 end
 
 function auth_response(kb::KB, shared::SharedConfig, req::HTTP.Request, parts, params)

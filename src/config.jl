@@ -524,6 +524,31 @@ Base.@kwdef struct PluginConfig
     load::Vector{String} = String[]
 end
 
+"Optional public disclosures for the shared service's /about page."
+Base.@kwdef struct AboutConfig
+    operator::String = ""
+    contact::String = ""
+    hosting_provider::String = ""
+    data_region::String = ""
+    domain_holder::String = ""
+    funding::String = ""
+    note::String = ""
+    infer_models::Bool = false
+    models::Vector{String} = String[]
+end
+
+function about_config(t, c)
+    a = get(t, "about", Dict())
+    # A stock installation has model presets even when no one has selected a model.
+    selected = any(k -> haskey(t, k), ("summarizer", "summarizers", "code_summarizer", "record_summarizer",
+                                        "layers", "tutor", "notebooker", "analyst", "judge")) ||
+               haskey(get(t, "watch", Dict()), "judge") || (c.dataset.role != :none && isfile(profile_cache(c)))
+    return AboutConfig(; operator = get(a, "operator", ""), contact = get(a, "contact", ""),
+        hosting_provider = get(a, "hosting_provider", ""), data_region = get(a, "data_region", ""),
+        domain_holder = get(a, "domain_holder", ""), funding = get(a, "funding", ""), note = get(a, "note", ""),
+        infer_models = get(a, "infer_models", selected), models = get(a, "models", String[]))
+end
+
 "Where Qdrant is when neither the config nor Kaimon says."
 const DEFAULT_QDRANT = "http://localhost:6333"
 
@@ -591,6 +616,7 @@ Base.@kwdef struct Config
     collection_prefix::String = "zemi"
     mutool::String = ""
     contact::String = ""
+    about::AboutConfig = AboutConfig()
     summarizers::Vector{Summarizer} = default_summarizers()
     summarizer::String = "deepseek-v4.1-flash"
     code_summarizer::String = "deepseek-v4.1-flash"
@@ -805,7 +831,8 @@ function load_config(path::AbstractString = config_path())
         sources = Dict{String,Any}(String(k) => v for (k, v) in get(t, "sources", Dict()) if v isa AbstractDict),
         plugins = (p = get(t, "plugins", Dict());
                    PluginConfig(; env = (e = get(p, "env", ""); isempty(e) ? e : here(e)), load = String.(get(p, "load", String[])))))
-    return c.dataset.role == :none ? c : follow_profile(c)
+    c = c.dataset.role == :none ? c : follow_profile(c)
+    return with_config(c; about = about_config(t, c))
 end
 
 function dataset_config(t::AbstractDict; path = expand_home)

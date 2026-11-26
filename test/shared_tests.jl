@@ -2847,3 +2847,65 @@ end
         close(kb)
     end
 end
+
+@zset "public about page" begin
+    folder = mktempdir()
+    path = joinpath(folder, "config.toml")
+    write(path, "data_dir = 'data'\n")
+    kb = open_kb(K.load_config(path))
+    get_page(path) = K.respond_service(kb, K.HTTP.Request("GET", path); shared = true)
+    try
+        r = get_page("/about")
+        html = String(r.body)
+        @test r.status == 200 && startswith(K.HTTP.header(r, "Content-Type"), "text/html")
+        @test occursin(string(pkgversion(K)), html) && occursin("https://github.com/kahliburke/Zemi.jl", html) && occursin("Kahli Burke", html)
+        @test [m.captures[1] for m in eachmatch(r"<h2>(.*?)</h2>", html)] == ["Software"]
+        @test !occursin("id=\"models\"", html)
+        @test !occursin("/about#models", String(get_page("/privacy").body))
+        login = String(get_page("/auth/sign-in").body)
+        @test all(link -> occursin("href=\"/$link\"", login), ["privacy", "about"])
+        @test get_page("/projects").status == 302
+        @test K.respond_service(kb, K.HTTP.Request("POST", "/about"); shared = true).status == 405
+
+        # All instance names and disclosures in this fixture are fictional.
+        conf = Dict{String,Any}(
+            "data_dir" => "data", "contact" => "fallback@example.invalid",
+            "summarizer" => "example-writer", "code_summarizer" => "example-writer", "judge" => "example-writer",
+            "tutor" => "example-agent", "notebooker" => "example-writer", "analyst" => "example-writer",
+            "summarizers" => [Dict("name" => "example-writer", "model" => "example-writer-v1", "url" => K.OPENAI_URL),
+                              Dict("name" => "example-agent", "kind" => "agent", "model" => "acp:opencode:example/tutor"),
+                              Dict("name" => "unused", "model" => "unused-model", "url" => K.ZEN_URL)],
+            "layers" => [Dict("name" => "vectors", "unit" => "paper", "model" => "example-embed"),
+                         Dict("name" => "vectors2", "unit" => "section", "model" => "example-embed"),
+                         Dict("name" => "custom", "unit" => "chunk", "model" => "example-custom",
+                              "url" => "https://secret-host.example.invalid/private", "key" => "env:SECRET_SETTING")],
+            "about" => Dict{String,Any}("operator" => "Example <Lab>", "hosting_provider" => "Example & Co.",
+                        "data_region" => "Example region", "domain_holder" => "Example holder",
+                        "funding" => "Domain → Example sponsor\nHosting → Example lab", "models" => ["Example & Model"],
+                        "note" => "<script>fictional</script>"))
+        function reload()
+            open(io -> K.TOML.print(io, conf), path, "w")
+            kb.config = K.load_config(path)
+        end
+        reload()
+        html = String(get_page("/about").body)
+        @test all(occursin(s, html) for s in ("fallback@example.invalid", "Example &lt;Lab&gt;", "Example &amp; Co.",
+                    "Example region", "Example holder", "Domain → Example sponsor", "Hosting → Example lab",
+                    "Example &amp; Model", "&lt;script&gt;fictional&lt;/script&gt;"))
+        @test all(occursin(s, html) for s in ("example-writer-v1 (OpenAI)", "example/tutor (OpenCode)", "example-custom"))
+        @test count("example-embed (Ollama)", html) == 1
+        @test !any(occursin(s, html) for s in ("secret-host", "SECRET_SETTING", "unused-model", "<script>fictional"))
+        @test occursin("href=\"/about#models\"", String(get_page("/privacy").body))
+        conf["about"]["contact"] = "about@example.invalid"
+        conf["about"]["infer_models"] = false
+        reload()
+        html = String(get_page("/about").body)
+        @test occursin("about@example.invalid", html) && !occursin("fallback@example.invalid", html)
+        @test occursin("Example &amp; Model", html) && !occursin("example-writer-v1", html)
+        conf["about"]["models"] = ["  "]
+        reload()
+        @test !occursin("/about#models", String(get_page("/privacy").body))
+    finally
+        close(kb)
+    end
+end
