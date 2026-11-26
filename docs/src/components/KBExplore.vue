@@ -403,7 +403,7 @@ async function draw() {
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
       .enableNodeDrag(false)                                                     // placed by meaning, not by hand
       .cooldownTicks(1)
-      .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => drawNearest2d(ctx, scale))
+      .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => { drawTrail2d(ctx, scale); drawNearest2d(ctx, scale) })
       .onRenderFramePost((ctx: CanvasRenderingContext2D, scale: number) => {
         drawNearestLabels2d(ctx, scale)
         drawFocus2d(ctx, scale)                                              // its title over the rest
@@ -483,6 +483,7 @@ async function draw() {
     nearest3d = null
     ring3d = null
     title3d = null
+    trail3d = null
     restyle()
   }
 }
@@ -762,6 +763,7 @@ function restyle() {
   graph.linkColor(linkColour)
   showNearest3d()
   showRing3d()
+  showTrail3d()
   const rel = relevantClusters.value
   for (const { sprite, id } of clusterLabels) sprite.material.opacity = !rel || rel.has(id) ? 1 : DIMMED
   if (view.value === '2d') { graph.nodeColor(shade).nodeVal(size); return }
@@ -856,6 +858,45 @@ let driftTimer: ReturnType<typeof setInterval> | undefined
 const seen = new Set<string>()
 // Where a drift has been, in order, with how alike each step was to the one before.
 const driftTrail = ref<{ node: Node; similarity?: number }[]>([])
+watch(() => driftTrail.value.length, () => showTrail3d())
+// The trail drawn where it went: a line through each document in turn, the earliest steps faintest.
+const TRAIL = '#ffb454'
+function trailNodes(): GNode[] {
+  if (driftTrail.value.length < 2 || !graph) return []
+  const at = new Map<string, GNode>(graph.graphData().nodes.map((n: GNode) => [n.id, n]))
+  return driftTrail.value.map(t => at.get(t.node.id)).filter((n): n is GNode => !!n && n.x !== undefined)
+}
+function drawTrail2d(ctx: CanvasRenderingContext2D, scale: number) {
+  const ns = trailNodes()
+  if (ns.length < 2) return
+  ctx.save()
+  ctx.lineCap = 'round'; ctx.lineWidth = 2.5 / scale
+  for (let i = 1; i < ns.length; i++) {
+    ctx.strokeStyle = TRAIL + Math.round((0.25 + 0.75 * i / (ns.length - 1)) * 255).toString(16).padStart(2, '0')
+    ctx.beginPath(); ctx.moveTo(ns[i - 1].x, ns[i - 1].y); ctx.lineTo(ns[i].x, ns[i].y); ctx.stroke()
+  }
+  ctx.fillStyle = TRAIL
+  for (const n of ns) { ctx.beginPath(); ctx.arc(n.x, n.y, 2.5 / scale, 0, 2 * Math.PI); ctx.fill() }
+  ctx.restore()
+}
+let trail3d: any = null
+function showTrail3d() {
+  if (!graph || view.value !== '3d' || !three) return
+  if (trail3d) { graph.scene().remove(trail3d); trail3d.traverse((o: any) => { o.geometry?.dispose(); o.material?.dispose() }); trail3d = null }
+  const ps = driftTrail.value.map(t => sprites.get(t.node.id)?.sprite.position).filter(Boolean)
+  if (ps.length < 2) return
+  const bg = new three.Color(isDark.value ? 0x111116 : 0xfafafa), c = new three.Color(TRAIL)
+  const cols = ps.flatMap((_, i) => { const k = bg.clone().lerp(c, 0.3 + 0.7 * i / (ps.length - 1)); return [k.r, k.g, k.b] })
+  const geometry = new three.BufferGeometry().setFromPoints(ps)
+  geometry.setAttribute('color', new three.Float32BufferAttribute(cols, 3))
+  // A line a pixel wide is lost among the others: a dot at each step, a constant size on screen, marks it.
+  trail3d = new three.Group()
+  const line = new three.Line(geometry, new three.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, depthTest: false }))
+  const dots = new three.Points(geometry.clone(), new three.PointsMaterial({ vertexColors: true, size: 7, sizeAttenuation: false, depthTest: false }))
+  line.renderOrder = dots.renderOrder = 997
+  trail3d.add(line, dots)
+  graph.scene().add(trail3d)
+}
 function drift() {
   if (drifting.value) { stopDrift(); return }
   const start = selected.value ?? data.value?.nodes.find(n => n.x) ?? null
