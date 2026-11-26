@@ -574,7 +574,8 @@ end
 "The latest `limit` entries of the audit log, newest first."
 audit_log(kb::KB; limit::Integer = 200, before = nothing) =
     [(; id = r.id, at = r.at, who = r.who, action = r.action, target = r.target, detail = JSON.parse(r.detail))
-     for r in query(kb, "SELECT * FROM audit WHERE id < ? ORDER BY id DESC LIMIT ?", (something(before, typemax(Int)), limit))]
+     for r in query(kb, """SELECT * FROM audit WHERE id < ? AND action NOT IN ('ingest.started', 'ingest.stage')
+                           ORDER BY id DESC LIMIT ?""", (something(before, typemax(Int)), limit))]
 
 # ── Viewing the service as someone else ────────────────────────────────────────────────────────────
 

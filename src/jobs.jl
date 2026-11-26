@@ -120,7 +120,7 @@ function start_job(f, name::AbstractString; ids = String[], changes::Union{Strin
     end
     Threads.@spawn begin
         try
-            job.result = f(job)
+            job.result = task_local_storage(() -> f(job), :zemi_job_id, job.id)
             job.status = job.cancel[] ? :cancelled : :done
             note_failures!(job)
         catch e

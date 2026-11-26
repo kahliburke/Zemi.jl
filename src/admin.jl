@@ -538,6 +538,11 @@ end
 
 # ── Operations ────────────────────────────────────────────────────────────────────────────────────
 
+route!("GET", "/api/ops/ingestions"; need = "audit.view") do c
+    ingest_history(c.kb, c.caller; before = int_param(c.params, "before", typemax(Int)), doc_id = get(c.params, "document", ""),
+                   run = get(c.params, "run", ""), limit = int_param(c.params, "limit", 25, 1:100))
+end
+
 route!("GET", "/api/ops"; need = "server.view") do c
     a = activity()
     Dict("health" => health_json(c.kb), "metrics" => metrics_json(), "jobs" => [job_json(j) for j in list_jobs()],

@@ -39,6 +39,32 @@ const agentError = ref('')
 const error = ref('')
 // The job whose result or error is shown.
 const shownJob = ref('')
+type IngestEvent = { at: string; detail: { stage: string; model?: string; summarizer?: string; input?: number | null;
+  output?: number | null; layer?: string; vectors?: number; error?: string } }
+type Attempt = { cursor: number; attempt: string; run: string; job: string | null; document: string; at: string; events: IngestEvent[] }
+const ingestions = ref<Attempt[] | null>(null)
+const historyBusy = ref(false)
+const historyPageSize = 25
+const moreIngestions = ref(false)
+async function loadIngestions(older = false) {
+  historyBusy.value = true
+  try {
+    const before = older ? ingestions.value?.at(-1)?.cursor : null
+    const params = new URLSearchParams({ limit: String(historyPageSize) })
+    if (before) params.set('before', String(before))
+    const records: Attempt[] = await getJSON('/api/ops/ingestions?' + params)
+    ingestions.value = older ? [...(ingestions.value ?? []), ...records] : records
+    moreIngestions.value = records.length === historyPageSize
+  } catch (e: any) { error.value = e.message }
+  finally { historyBusy.value = false }
+}
+async function retryDocument(id: string) {
+  try {
+    const r = await post('/api/actions', JSON.stringify({ action: 'ingest', ids: [id] }))
+    note.value = `Ingesting ${id} as job ${r.job}.`
+    await load()
+  } catch (e: any) { error.value = e.message }
+}
 const note = ref('')
 const snapshots = ref<Snapshot[] | null>(null)
 async function listSnapshots() {
@@ -183,6 +209,24 @@ const tokens = (u: Record<string, number>) => {
           </tbody>
         </table>
         <p v-else class="kbo-dim">No jobs.</p>
+        <section v-if="can('audit.view')">
+          <h2>Ingestion history</h2>
+          <button class="kb-link" :disabled="historyBusy" @click="loadIngestions()">{{ ingestions ? 'Refresh' : 'Show history' }}</button>
+          <p v-if="ingestions && !ingestions.length">No recorded ingestions.</p>
+          <details v-for="a in ingestions" :key="a.attempt">
+            <summary>{{ a.document }} · {{ when(a.at) }} · {{ a.events.at(-1)?.detail.stage ?? 'started' }}</summary>
+            <p>Run <code>{{ a.run }}</code><template v-if="a.job"> · {{ a.job }}</template></p>
+            <ul><li v-for="(e, i) in a.events" :key="i">
+              {{ clock(e.at) }} · {{ e.detail.stage }}
+              <template v-if="e.detail.summarizer"> · {{ e.detail.summarizer }} ({{ e.detail.model }}) · recorded tokens {{ e.detail.input ?? '—' }} in / {{ e.detail.output ?? '—' }} out</template>
+              <template v-if="e.detail.layer"> · {{ e.detail.layer }} ({{ e.detail.model }}, {{ e.detail.vectors }} vectors)</template>
+              <template v-if="e.detail.error"> · {{ e.detail.error }}</template>
+            </li></ul>
+            <button v-if="can('paper.manage') && ['failed', 'warning', 'interrupted', 'cancelled'].includes(a.events.at(-1)?.detail.stage ?? '')"
+                    class="kb-link" @click="retryDocument(a.document)">Retry this document</button>
+          </details>
+          <button v-if="moreIngestions" class="kb-link" :disabled="historyBusy" @click="loadIngestions(true)">Older ingestions</button>
+        </section>
 
         <template v-if="can('agents.view')">
           <h2>Agents</h2>

@@ -7606,3 +7606,57 @@ end
     @test occursin("'kaimon --setup-defaults --embedding-model $(only(wanted))'", bat) &&
           occursin("\"\$kaimon\" --setup-defaults --embedding-model $(only(wanted))", sh)
 end
+
+@zset "persistent ingestion history" begin
+    c = temp_config(layers = Layer[])
+    kb = open_kb(c)
+    id = add_codebase!(kb, mktempdir(); name = "Reef")
+    caller = K.local_caller()
+    job = K.start_job("Read reef"; ids = [id]) do _
+        ingest!(kb, [id]; classify = false)
+    end
+    wait(job)
+    @test job.status == :done && only(job.result).ok
+    close(kb)
+    kb = open_kb(c)
+    try
+        a = only(K.ingest_history(kb, caller; doc_id = id))
+        @test a.document == id && a.job == job.id
+        @test [e.detail["stage"] for e in a.events] == ["read", "done"]
+        response = K.respond_local(kb, K.HTTP.Request("GET", "/api/ops/ingestions?run=$(a.run)"))
+        @test response.status == 200 && only(K.JSON.parse(String(response.body)))["attempt"] == a.attempt
+        previous = K._KB[]
+        try
+            K._KB[] = kb
+            @test only(K.JSON.parse(K.ingest_history_tool(; doc_id = id)))["attempt"] == a.attempt
+        finally
+            K._KB[] = previous
+        end
+        @test isempty(ingest!(kb, [id]; cancelled = () -> true, classify = false))
+        b = only(K.ingest_history(kb, caller; limit = 1))
+        @test b.run != a.run && only(b.events).detail["stage"] == "cancelled"
+        @test only(K.ingest_history(kb, caller; before = b.cursor)).attempt == a.attempt
+        @test only(K.ingest_history(kb, caller; run = a.run)).attempt == a.attempt
+        failed = only(ingest!(kb, [id]; classify = false, on_read = _ -> error("test callback failed")))
+        @test !failed.ok
+        failure = last(only(K.ingest_history(kb, caller; limit = 1)).events).detail
+        @test failure["stage"] == "failed" && occursin("test callback failed", failure["error"])
+
+        s = Summarizer(; name = "test-writer", model = "test-model")
+        marker = K.summary_usage_marker(kb, id, s)
+        K.save_summary!(kb, K.paper_id(kb, id), "p:$id", s, "first", "first", 20, 6)
+        counts = K.ingest_summary_usage(kb, id, s, marker)
+        @test (counts.input, counts.output, counts.summaries) == (20, 6, 1)
+        marker = K.summary_usage_marker(kb, id, s)
+        @test K.ingest_summary_usage(kb, id, s, marker).input === nothing
+        K.save_summary!(kb, K.paper_id(kb, id), "p:$id", s, "second", "second", 0, missing)
+        counts = K.ingest_summary_usage(kb, id, s, marker)
+        @test counts.input === 0 && counts.output === nothing
+
+        K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (id,))
+        viewer = K.Caller(nothing, "Viewer", "", Set(["audit.view"]), :token, nothing)
+        @test isempty(K.ingest_history(kb, viewer; doc_id = id))
+    finally
+        close(kb)
+    end
+end
