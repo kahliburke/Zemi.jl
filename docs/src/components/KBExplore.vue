@@ -323,10 +323,13 @@ function mix(a: string, b: string, t: number) {
   const ch = (h: string, i: number) => parseInt(h.slice(1 + 2 * i, 3 + 2 * i), 16)
   return '#' + [0, 1, 2].map(i => Math.round(ch(a, i) + (ch(b, i) - ch(a, i)) * t).toString(16).padStart(2, '0')).join('')
 }
-const legendOpen = ref<boolean>(stored('legend', true))
-watch(legendOpen, v => keep('legend', v))
-const settingsOpen = ref(false)
-watch(settingsOpen, open => { if (open) loadProjects() })
+// The panel on the right: the colours' legend, or what the map shows; open or folded away.
+const panelOpen = ref<boolean>(stored('legend', true))
+watch(panelOpen, v => keep('legend', v))
+const panel = ref<'colours' | 'show'>(stored('panel', 'colours'))
+watch(panel, v => keep('panel', v))
+const settingsOpen = computed(() => panelOpen.value && panel.value === 'show')
+watch(settingsOpen, open => { if (open) loadProjects() }, { immediate: true })
 function shade(n: Node) {
   const c = colour(n)
   if (hits.value.size) return hits.value.has(n.id) ? c : isDark.value ? '#3a3a44' : '#d8d8de'
@@ -1141,54 +1144,77 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
                 @click="fullScreen">{{ full ? '⤡' : '⤢' }}</button>
       </div>
 
-      <details class="kbx-settings" @toggle="settingsOpen = ($event.target as HTMLDetailsElement).open">
-        <summary>Show</summary>
-        <div class="kbx-grid">
-          <template v-if="data?.nodes.some(n => n.ux)">
-            <span class="kbx-label">Layout</span>
-            <div class="kbx-seg kbx-seg-small kbx-wide" role="group" aria-label="Layout">
-              <button :class="{ on: layout === 'tsne' }" title="Keeps each document's close neighbourhood" @click="layout = 'tsne'">t-SNE</button>
-              <button :class="{ on: layout === 'umap' }" title="Keeps more of how the groups lie to each other" @click="layout = 'umap'">UMAP</button>
-              <button v-if="data?.nodes.some(n => n.px)" :class="{ on: layout === 'pacmap' }"
-                      title="Keeps the neighbourhoods and how the groups lie to each other, the most evenly" @click="layout = 'pacmap'">PaCMAP</button>
-            </div>
-          </template>
-          <template v-if="can('tasks.view') && projectList?.length">
-            <span class="kbx-label">Map</span>
-            <select class="kb-field kbx-wide kbx-pick" aria-label="Map a project's library by itself"
-                    @change="e => { const k = (e.target as HTMLSelectElement).value; if (k) mapSet('project:' + k) }">
-              <option value="">A project's library…</option>
-              <option v-for="p in projectList" :key="p.key" :value="p.key">{{ p.name }} ({{ p.key }})</option>
-            </select>
-          </template>
-          <span class="kbx-label">Colour by</span>
-          <div class="kbx-wide">
+      <section class="kbx-panel" :class="{ open: panelOpen, wide: panelOpen && panel === 'show' }" aria-label="Colours and what the map shows">
+        <div class="kbx-panel-head">
+          <div v-if="panelOpen" class="kbx-seg kbx-seg-small" role="tablist" aria-label="Panel">
+            <button role="tab" :aria-selected="panel === 'colours'" :class="{ on: panel === 'colours' }" @click="panel = 'colours'">Colours</button>
+            <button role="tab" :aria-selected="panel === 'show'" :class="{ on: panel === 'show' }" @click="panel = 'show'">Show</button>
+          </div>
+          <button class="kbx-panel-toggle" :aria-expanded="panelOpen" @click="panelOpen = !panelOpen">{{ panelOpen ? 'Hide' : 'Colours · Show' }}</button>
+        </div>
+        <div v-if="panelOpen && panel === 'colours'" class="kbx-key" role="tabpanel">
+          <div class="kbx-shade">
+            <span>Colour by</span>
             <div class="kbx-seg kbx-seg-small" role="group" aria-label="Colour by">
               <button v-for="[k, l] in COLOUR_BY" :key="k" :class="{ on: colourBy === k }" @click="colourBy = k">{{ l }}</button>
             </div>
           </div>
-          <span class="kbx-label">Links</span>
-          <button class="kbx-all" @click="all(shownLinks, LINK_KINDS)">{{ shownLinks.length === LINK_KINDS.length ? 'None' : 'All' }}</button>
-          <div class="kbx-chips">
-            <button v-for="[k, l] in LINK_KINDS" :key="k" class="kbx-chip" :class="{ on: shownLinks.includes(k) }" :aria-pressed="shownLinks.includes(k)"
-                    @click="toggle(shownLinks, k)"><i class="kbx-swatch" :style="{ background: LINK_COLOURS[k] }"></i>{{ l }}</button>
+          <div v-if="litRow" class="kbx-shade">
+            <span>Shade by</span>
+            <div class="kbx-seg kbx-seg-small" role="group" aria-label="Shade by">
+              <button v-for="[k, l, t] in SHADE_BY" :key="k" :class="{ on: shadeBy === k }" :title="t" @click="shadeBy = k">{{ l }}</button>
+            </div>
           </div>
-          <span class="kbx-label">Documents</span>
-          <button class="kbx-all" @click="all(shownKinds, NODE_KINDS)">{{ shownKinds.length === NODE_KINDS.length ? 'None' : 'All' }}</button>
-          <div class="kbx-chips">
-            <button v-for="[k, l] in NODE_KINDS" :key="k" class="kbx-chip" :class="{ on: shownKinds.includes(k) }" :aria-pressed="shownKinds.includes(k)"
-                    @click="toggle(shownKinds, k)"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[k] }"></i>{{ l }}</button>
-          </div>
-          <span class="kbx-label">Unlinked pairs</span>
-          <div class="kbx-pairs-row kbx-wide">
-            <button class="kbx-chip" :class="{ on: showUnlinked }" :aria-pressed="showUnlinked" title="Draw the pairs close in meaning that no link joins"
-                    @click="showUnlinked = !showUnlinked">{{ showUnlinked ? 'Shown' : 'Hidden' }}</button>
-            <input v-model.number="threshold" type="range" min="0.5" max="0.98" step="0.01" :disabled="!showUnlinked" aria-label="How alike">
-            <span class="kbx-value">≥ {{ Math.round(threshold * 100) }}%</span>
-          </div>
+          <ul>
+            <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="goToRow(r.key)">
+              <i class="kbx-swatch" :style="{ background: r.colour }"></i>
+              <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button>
+              <button v-if="r.key[0] === 'c' && !subset" class="kbx-map-row" :title="`Map ${r.label} by itself`"
+                      :aria-label="`Map ${r.label} by itself`" @click="mapSet('cluster:' + r.key.slice(1))">⤢</button></li>
+          </ul>
         </div>
-        <p v-if="view === '3d'" class="kbx-hint">Drag to turn, scroll to come closer. F flies: WASD to move, the mouse to steer.{{ fly ? ' Flying: F to stop.' : '' }}</p>
-      </details>
+        <div v-if="panelOpen && panel === 'show'" role="tabpanel">
+          <div class="kbx-grid">
+            <template v-if="data?.nodes.some(n => n.ux)">
+              <span class="kbx-label">Layout</span>
+              <div class="kbx-seg kbx-seg-small kbx-wide" role="group" aria-label="Layout">
+                <button :class="{ on: layout === 'tsne' }" title="Keeps each document's close neighbourhood" @click="layout = 'tsne'">t-SNE</button>
+                <button :class="{ on: layout === 'umap' }" title="Keeps more of how the groups lie to each other" @click="layout = 'umap'">UMAP</button>
+                <button v-if="data?.nodes.some(n => n.px)" :class="{ on: layout === 'pacmap' }"
+                        title="Keeps the neighbourhoods and how the groups lie to each other, the most evenly" @click="layout = 'pacmap'">PaCMAP</button>
+              </div>
+            </template>
+            <template v-if="can('tasks.view') && projectList?.length">
+              <span class="kbx-label">Map</span>
+              <select class="kb-field kbx-wide kbx-pick" aria-label="Map a project's library by itself"
+                      @change="e => { const k = (e.target as HTMLSelectElement).value; if (k) mapSet('project:' + k) }">
+                <option value="">A project's library…</option>
+                <option v-for="p in projectList" :key="p.key" :value="p.key">{{ p.name }} ({{ p.key }})</option>
+              </select>
+            </template>
+            <span class="kbx-label">Links</span>
+            <button class="kbx-all" @click="all(shownLinks, LINK_KINDS)">{{ shownLinks.length === LINK_KINDS.length ? 'None' : 'All' }}</button>
+            <div class="kbx-chips">
+              <button v-for="[k, l] in LINK_KINDS" :key="k" class="kbx-chip" :class="{ on: shownLinks.includes(k) }" :aria-pressed="shownLinks.includes(k)"
+                      @click="toggle(shownLinks, k)"><i class="kbx-swatch" :style="{ background: LINK_COLOURS[k] }"></i>{{ l }}</button>
+            </div>
+            <span class="kbx-label">Documents</span>
+            <button class="kbx-all" @click="all(shownKinds, NODE_KINDS)">{{ shownKinds.length === NODE_KINDS.length ? 'None' : 'All' }}</button>
+            <div class="kbx-chips">
+              <button v-for="[k, l] in NODE_KINDS" :key="k" class="kbx-chip" :class="{ on: shownKinds.includes(k) }" :aria-pressed="shownKinds.includes(k)"
+                      @click="toggle(shownKinds, k)"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[k] }"></i>{{ l }}</button>
+            </div>
+            <span class="kbx-label">Unlinked pairs</span>
+            <div class="kbx-pairs-row kbx-wide">
+              <button class="kbx-chip" :class="{ on: showUnlinked }" :aria-pressed="showUnlinked" title="Draw the pairs close in meaning that no link joins"
+                      @click="showUnlinked = !showUnlinked">{{ showUnlinked ? 'Shown' : 'Hidden' }}</button>
+              <input v-model.number="threshold" type="range" min="0.5" max="0.98" step="0.01" :disabled="!showUnlinked" aria-label="How alike">
+              <span class="kbx-value">≥ {{ Math.round(threshold * 100) }}%</span>
+            </div>
+          </div>
+          <p v-if="view === '3d'" class="kbx-hint">Drag to turn, scroll to come closer. F flies: WASD to move, the mouse to steer.{{ fly ? ' Flying: F to stop.' : '' }}</p>
+        </div>
+      </section>
 
       <div v-if="building" class="kbx-building" role="status">
         <div class="kbx-building-card">
@@ -1242,23 +1268,6 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         </template>
       </aside>
 
-      <details v-if="legend.length && !settingsOpen" class="kbx-key" :open="legendOpen"
-               @toggle="legendOpen = ($event.target as HTMLDetailsElement).open">
-        <summary>Colours</summary>
-        <div v-if="litRow" class="kbx-shade">
-          <span>Shade by</span>
-          <div class="kbx-seg kbx-seg-small" role="group" aria-label="Shade by">
-            <button v-for="[k, l, t] in SHADE_BY" :key="k" :class="{ on: shadeBy === k }" :title="t" @click="shadeBy = k">{{ l }}</button>
-          </div>
-        </div>
-        <ul>
-          <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="goToRow(r.key)">
-            <i class="kbx-swatch" :style="{ background: r.colour }"></i>
-            <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button>
-            <button v-if="r.key[0] === 'c' && !subset" class="kbx-map-row" :title="`Map ${r.label} by itself`"
-                    :aria-label="`Map ${r.label} by itself`" @click="mapSet('cluster:' + r.key.slice(1))">⤢</button></li>
-        </ul>
-      </details>
 
       <aside v-if="driftTrail.length > 1" class="kbx-trail">
         <button class="kbx-close" aria-label="Clear the trail" title="Clear the trail" @click="driftTrail = []">×</button>
@@ -1346,19 +1355,17 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-speed span { min-width: 2.6rem; }
 .kbx-btn { padding: 4px 10px; font-size: 13px; border: 1px solid var(--vp-c-divider); border-radius: 8px; background: var(--vp-c-bg); color: var(--vp-c-text-1); }
 .kbx-btn.on { background: var(--vp-c-brand-soft); }
-.kbx-settings { position: absolute; top: 52px; right: 10px; max-width: 31rem; border: 1px solid var(--vp-c-divider);
-                background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-                border-radius: 8px; padding: 4px 10px; font-size: 12px; }
-.kbx-settings[open] { padding: 6px 14px 12px; }
-.kbx-settings summary { cursor: pointer; color: var(--vp-c-text-2); text-align: right; }
-.kbx-key { position: absolute; top: 92px; right: 10px; width: 15rem; max-height: calc(55% - 92px); overflow: auto;
-           border: 1px solid var(--vp-c-divider); border-radius: 8px; padding: 4px 10px; font-size: 12px;
-           background: color-mix(in srgb, var(--vp-c-bg) 70%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
-.kbx-key:not([open]) { width: auto; }
-.kbx-key[open]:has(.kbx-shade) { width: 18rem; }
+.kbx-panel { position: absolute; top: 52px; right: 10px; max-height: calc(100% - 64px); overflow: auto; border: 1px solid var(--vp-c-divider);
+              background: color-mix(in srgb, var(--vp-c-bg) 72%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+              border-radius: 8px; padding: 4px 10px; font-size: 12px; }
+.kbx-panel.open { width: 18rem; padding: 6px 12px 10px; }
+.kbx-panel.wide { width: min(31rem, calc(100% - 20px)); }
+.kbx-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kbx-panel-head .kbx-seg button { padding: 2px 10px; }
+.kbx-panel-toggle { color: var(--vp-c-text-2); margin-left: auto; }
+.kbx-panel-toggle:hover { color: var(--vp-c-text-1); }
 .kbx-shade { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0 4px; color: var(--vp-c-text-2); }
 .kbx-shade .kbx-seg button { padding: 2px 7px; }
-.kbx-key summary { cursor: pointer; color: var(--vp-c-text-2); text-align: right; }
 .kbx-key ul { list-style: none; margin: 4px 0 2px; padding: 0; }
 .kbx-key li { display: flex; align-items: center; }
 .kbx-key li button:not(.kbx-map-row) { flex: 1; min-width: 0; width: 100%; display: grid; grid-template-columns: 9px 1fr auto; align-items: center; column-gap: 7px;
