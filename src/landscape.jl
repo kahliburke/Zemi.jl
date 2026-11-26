@@ -308,16 +308,13 @@ end
 "The principal components t-SNE works on, of a layout's vectors: their fine structure, at a fraction of the cost."
 const TSNE_DIMS = 100
 
-"The most documents t-SNE lays out exactly; more are laid out by Barnes–Hut, whose cost grows with n log n."
-const TSNE_EXACT_MOST = 500
-
 """
     tsne(X; perplexity = 30, iterations = 1000, dims = 2) -> Matrix
 
 A layout in `dims` dimensions of the unit columns of `X` (one row per column) by t-SNE over their
 squared distances (two less twice their cosine similarity), starting from their principal components
 with a fixed seed, so the layout is the same for the same vectors and moves little as papers are added.
-Past `TSNE_EXACT_MOST` columns, by Barnes–Hut on their first `TSNE_DIMS` principal components.
+By Barnes–Hut, whose cost grows with n log n, on their first `TSNE_DIMS` principal components.
 """
 function tsne(X::AbstractMatrix; perplexity::Real = 30, iterations::Integer = 1000, dims::Integer = 2)
     n = size(X, 2)
@@ -327,7 +324,7 @@ function tsne(X::AbstractMatrix; perplexity::Real = 30, iterations::Integer = 10
     r = clamp(min(TSNE_DIMS, size(X, 1), n - 1), dims + 1, size(X, 1))
     Z = principal_start(X, r)
     return TSne.tsne(Z, dims, r, iterations, Float64(min(perplexity, (n - 1) / 3));
-                     method = n > TSNE_EXACT_MOST ? :barneshut : :exact, pca_init = true, progress = false,
+                     method = :barneshut, pca_init = true, progress = false,
                      rng = Random.MersenneTwister(1))
 end
 
