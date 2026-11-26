@@ -18,7 +18,7 @@ import KBExploreTrail from './KBExploreTrail.vue'
 import { ref, shallowRef, triggerRef, computed, watch, nextTick } from 'vue'
 import { useData } from 'vitepress'
 import { can, getJSON, post, onLive } from './kbApi'
-import { exploreHref } from './kbLinks'
+import { exploreHref, kbPage } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { BRAND, CLUSTER_COLOURS, DIMMED, KIND_COLOURS, LINK_COLOURS, NODE_KINDS, TRAIL, WHOSE, WHOSE_COLOURS, esc, kindName, mix, own,
          provideSettings, shortTitle, useExploreSettings, whose,
@@ -1104,6 +1104,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
           <button :class="{ on: view === '2d' }" @click="view = '2d'">Map</button>
           <button :class="{ on: view === '3d' }" @click="view = '3d'">Space</button>
         </div>
+        <a class="kbx-btn" :href="kbPage('authors')">Explore authors</a>
         <button class="kbx-btn" :class="{ on: drifting }" title="Move from document to document along the nearest in meaning, one every few seconds" @click="drift">{{ drifting ? 'Stop' : 'Drift' }}</button>
         <label v-if="drifting" class="kbx-speed" title="Seconds at each document">
           <input v-model.number="driftEvery" type="range" min="0.1" max="10" step="0.1" aria-label="Seconds at each document">

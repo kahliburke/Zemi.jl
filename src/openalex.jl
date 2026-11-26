@@ -52,8 +52,19 @@ end
 
 "An OpenAlex work as the fields a paper's record keeps."
 function work_record(w::AbstractDict)
-    authors = String[a["author"]["display_name"] for a in something(w["authorships"], [])
-                     if get(something(a["author"], Dict()), "display_name", nothing) !== nothing]
+    authors = String[]
+    orcids = Union{String,Nothing}[]
+    for entry in something(w["authorships"], [])
+        author = get(entry, "author", nothing)
+        name = get(something(author, Dict()), "display_name", nothing)
+        raw = get(entry, "raw_author_name", nothing)
+        name = raw isa String && !isempty(strip(raw)) ? raw : name
+        name === nothing && continue
+        push!(authors, name)
+        # The identifier recorded on this work. An OpenAlex author profile may instead
+        # have acquired an identifier by disambiguation across other works.
+        push!(orcids, orcid_uri(get(entry, "raw_orcid", nothing)))
+    end
     source = something(get(something(w["primary_location"], Dict()), "source", nothing), Dict())
     journal, b, year = get(source, "display_name", nothing), something(w["biblio"], Dict()), w["publication_year"]
     ref = journal === nothing ? nothing :
@@ -65,7 +76,7 @@ function work_record(w::AbstractDict)
     end
     abstract = isempty(words) ? nothing : join(last.(sort!(words; by = first)), " ")
     doi = w["doi"] === nothing ? nothing : normalize_doi(w["doi"])
-    return (; title = String(w["title"]), authors, year = year === nothing ? nothing : string(year), journal, journal_ref = ref, doi, abstract)
+    return (; title = String(w["title"]), authors, orcids, year = year === nothing ? nothing : string(year), journal, journal_ref = ref, doi, abstract)
 end
 
 """

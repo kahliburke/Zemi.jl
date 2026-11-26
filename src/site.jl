@@ -125,6 +125,7 @@ Base.@kwdef struct SitePaper
     doc_id::String
     title::String
     authors::Vector{String}
+    author_orcids::Union{String,Missing} = missing
     published::String
     category::String
     abstract::String
@@ -269,7 +270,7 @@ function site_paper(kb::KB, doc_id::AbstractString; summarizer = nothing, relate
                 for s in get(d.sections, pid, Any[])]
     processed = pid in d.parsed
     posts = [(; r.source, r.channel, posted = unix2datetime(r.posted_at), r.author, r.url, r.message) for r in get(d.mentions, pid, Any[])]
-    return SitePaper(; doc_id = String(doc_id), title = coalesce(p.title, doc_id), authors = json_list(p.authors),
+    return SitePaper(; doc_id = String(doc_id), title = coalesce(p.title, doc_id), authors = json_list(p.authors), author_orcids = p.author_orcids,
         published = coalesce(p.published, ""), category = coalesce(p.primary_category, ""),
         abstract = coalesce(p.abstract, ""), journal_ref = coalesce(p.journal_ref, nothing), doi = coalesce(p.doi, nothing),
         posts, summary, provenance, topics, sections,
@@ -414,7 +415,8 @@ function paper_json(sp::SitePaper; cited_by = [], notebooks = [], cite = nothing
     end
     return Dict{String,Any}(
         "id" => sp.doc_id, "slug" => page_slug(sp.doc_id), "title" => sp.title, "local" => !is_arxiv_id(sp.doc_id), "cite" => cite,
-        "version" => sp.version, "authors" => [Dict("name" => a, "key" => author_key(a)) for a in sp.authors],
+        "version" => sp.version, "authors" => [Dict("name" => a, "key" => id === nothing ? "name:" * byline_name(a) : "orcid:" * last(split(id, '/')))
+            for (a, id) in zip(sp.authors, byline_ids(sp.authors, sp.author_orcids))],
         "category" => isempty(sp.category) ? nothing :
                       Dict("id" => sp.category, "title" => category_title(sp.category), "slug" => page_slug(sp.category)),
         "published" => sp.published, "venue" => something(get(c, "venue", nothing), sp.journal_ref, Some(nothing)),
@@ -619,6 +621,7 @@ function write_site_lists!(kb::KB, dir::AbstractString, public::AbstractString, 
     end
     # Which documents the pages were written from, so a publish pairs the site with them (see site_publish.jl).
     write(joinpath(public, DOCUMENTS_FILE), documents_digest(kb))
+    write(joinpath(public, "author-publications.json"), JSON.json(author_publications(kb)))
     write(joinpath(public, "authors.json"), JSON.json(authors_json(kb)))
     write(joinpath(public, "watch.json"), JSON.json(Dict("checked" => coalesce(scalar(kb, "SELECT value FROM kv WHERE key = 'watch_checked_at'"), nothing),
         "categories" => kb.config.watch_categories, "days" => kb.config.watch_days, "papers" => watch_json(kb), "taken" => watch_taken_json(kb))))

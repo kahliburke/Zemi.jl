@@ -82,3 +82,73 @@ end
 authors_json(kb::KB) = [Dict("key" => a.key, "name" => a.name, "variants" => a.variants, "papers" => a.papers,
                              "coauthors" => [Dict("key" => c.key, "name" => c.name, "count" => c.count) for c in a.coauthors])
                         for a in authors(kb)]
+
+
+# ORCID assertions belong to a byline on one work. Save the names alongside the IDs so an edit
+# or a reordered author list cannot attach a stored ID to the new occupant of a position.
+migration!(31, ["ALTER TABLE papers ADD COLUMN author_orcids TEXT"])
+
+"Canonical HTTPS ORCID URI, or nothing for a missing, malformed or mistyped identifier."
+function orcid_uri(value)
+    value isa AbstractString || return nothing
+    m = match(r"^(?:https?://orcid\.org/)?([0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X])$"i, strip(value))
+    m === nothing && return nothing
+    id = uppercase(m[1])
+    digits = replace(id, "-" => "")
+    total = foldl((n, d) -> 2 * (n + Int(d - '0')), first(digits, 15); init = 0)
+    check = mod(12 - mod(total, 11), 11)
+    last(digits) == (check == 10 ? 'X' : '0' + check) || return nothing
+    return "https://orcid.org/" * id
+end
+
+function stored_orcids(names, ids; curated = Int[])
+    ids isa AbstractVector && length(ids) == length(names) || return missing
+    uris = orcid_uri.(ids)
+    all(isnothing, uris) && isempty(curated) && return missing
+    return JSON.json((; names, ids = uris, curated))
+end
+
+function byline_record(names, stored)
+    record = ismissing(stored) ? nothing : JSON.parse(stored)
+    if record isa AbstractDict && get(record, "names", nothing) == names
+        ids = get(record, "ids", nothing)
+        if ids isa AbstractVector && length(ids) == length(names)
+            curated = Int[i for i in get(record, "curated", []) if i isa Int && i in eachindex(names)]
+            return (; ids = Union{String,Nothing}[orcid_uri(id) for id in ids], curated)
+        end
+    end
+    return (; ids = Union{String,Nothing}[nothing for _ in names], curated = Int[])
+end
+byline_ids(names, stored) = byline_record(names, stored).ids
+byline_name(n) = squash(String(Base.Unicode.normalize(n, :NFC)))
+
+# An explicit catalogue correction, including the removal of an ID, survives subsequent
+# metadata lookups while the byline list still matches the one the curator reviewed.
+function refreshed_orcids(names, incoming, previous)
+    record = byline_record(names, previous)
+    ids = Union{String,Nothing}[incoming isa AbstractVector && length(incoming) == length(names) ?
+                               orcid_uri(incoming[i]) : nothing for i in eachindex(names)]
+    for i in record.curated
+        ids[i] = record.ids[i]
+    end
+    return stored_orcids(names, ids; record.curated)
+end
+
+# One row per accessible publication. Counts and author labels have the same visibility
+# as the publications that substantiate them.
+function author_publications(kb::KB, caller = nothing)
+    rows = transaction(kb) do
+        hidden = caller === nothing ? () : hidden_documents(kb, caller)
+        filter(r -> !(r.id in hidden), query(kb, """
+            SELECT doc_id AS id, title, published, authors, author_orcids FROM papers
+            WHERE metadata_at IS NOT NULL AND $(literature_sql(closed = caller !== nothing))
+            ORDER BY published DESC, doc_id"""))
+    end
+    return map(rows) do r
+        names = json_list(r.authors)
+        ids = byline_ids(names, r.author_orcids)
+        (; r.id, title = coalesce(r.title, r.id), published = coalesce(r.published, ""),
+           authors = [(; name = byline_name(n), key = author_key(n), orcid = ids[i], position = i)
+                      for (i, n) in enumerate(names) if !isempty(strip(n))])
+    end
+end

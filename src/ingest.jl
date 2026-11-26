@@ -490,12 +490,18 @@ function heal_upload!(kb::KB, id::AbstractString; parsed = nothing, force::Bool 
     file = scalar(kb, "SELECT message FROM mentions WHERE paper_id = ? AND source = 'upload'", (r.id,))
     read_title = coalesce(r.title, "") in (something(parsed_title(parsed), ""), ismissing(file) ? "" : splitext(file)[1], "") ||
                  is_journal_name(coalesce(r.title, ""), something(get(rec, :journal, nothing), ""))
-    execute!(kb, """
-        UPDATE papers SET title = ?, authors = ?, published = coalesce(?, published), journal_ref = coalesce(?, journal_ref),
-            doi = coalesce(?, doi), abstract = CASE WHEN coalesce(abstract, '') = '' THEN coalesce(?, abstract) ELSE abstract END
-        WHERE doc_id = ?""",
-        (read_title ? rec.title : r.title, isempty(rec.authors) ? r.authors : JSON.json(rec.authors), something(rec.year, missing),
-         something(rec.journal_ref, missing), something(rec.doi, missing), something(rec.abstract, missing), id))
+    transaction(kb) do
+        previous = scalar(kb, "SELECT author_orcids FROM papers WHERE doc_id = ?", (id,))
+        orcids = isempty(rec.authors) ? previous : refreshed_orcids(rec.authors, get(rec, :orcids, nothing), previous)
+        execute!(kb, """
+            UPDATE papers SET title = ?, authors = coalesce(?, authors), author_orcids = ?, published = coalesce(?, published),
+                journal_ref = coalesce(?, journal_ref), doi = coalesce(?, doi),
+                abstract = CASE WHEN coalesce(abstract, '') = '' THEN coalesce(?, abstract) ELSE abstract END
+            WHERE doc_id = ?""",
+            (read_title ? rec.title : r.title, isempty(rec.authors) ? missing : JSON.json(rec.authors), orcids,
+             something(rec.year, missing), something(rec.journal_ref, missing), something(rec.doi, missing),
+             something(rec.abstract, missing), id))
+    end
     return true
 end
 
