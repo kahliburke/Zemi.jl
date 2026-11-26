@@ -313,7 +313,7 @@ onBeforeUnmount(() => { following = false })
                 <a v-if="recheckTask" :href="taskHref(recheckTask)">{{ recheckTask }}</a>
               </div>
             </div>
-            <div v-if="f.body" class="kb-md kbf-body" v-html="render(f.body)"></div>
+            <div data-share-text v-if="f.body" class="kb-md kbf-body" v-html="render(f.body)"></div>
 
             <section class="kbf-activity" aria-label="Activity">
               <h2>Activity</h2>

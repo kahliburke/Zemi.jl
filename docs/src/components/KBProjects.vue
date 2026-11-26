@@ -1727,7 +1727,7 @@ function keepRecordsOpen(open: boolean) {
           <KBRefText :project="key" v-model="draftBody" multiline :rows="10" :draft="`task:${open.ref}:plan`" send="save" @submit="saveBody" />
           <button class="kb-primary kbp-button" @click="saveBody">Save</button> <button class="kb-primary kbp-button kbp-secondary" @click="editingBody = false">Cancel</button>
         </template>
-        <div v-else-if="open.body" class="kbp-body kb-md" v-html="render(open.body)"></div>
+        <div data-share-text v-else-if="open.body" class="kbp-body kb-md" v-html="render(open.body)"></div>
         <p v-else class="kb-dim kbp-dim">No plan written.</p>
 
         <template v-if="open.subtasks_list.length || editable">

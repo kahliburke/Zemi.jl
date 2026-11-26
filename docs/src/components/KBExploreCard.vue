@@ -19,7 +19,7 @@ const citable = computed(() => props.node.kind !== 'finding' && props.node.kind 
 </script>
 
 <template>
-  <aside class="kbx-card" :class="{ short }">
+  <aside :data-share-center="node.id" class="kbx-card" :class="{ short }">
     <button class="kbx-close" aria-label="Close" @click="$emit('close')">×</button>
     <p class="kbx-meta"><i class="kbx-swatch" :style="{ background: colour }"></i>{{ kindName(node.kind) }}<template
       v-if="node.year"> · {{ node.year }}</template><template v-if="node.read === false"> · abstract only</template></p>
@@ -27,7 +27,7 @@ const citable = computed(() => props.node.kind !== 'finding' && props.node.kind 
     <h3><a :href="node.page" target="_blank" rel="noopener">{{ node.title }}</a></h3>
     <template v-if="shown">
       <p v-if="byline(shown)" class="kbx-byline">{{ byline(shown) }}</p>
-      <KBClampText v-if="text" :head="head" :html="render(text)" />
+      <KBClampText data-share-text v-if="text" :head="head" :html="render(text)" />
       <div v-if="shown.topics.length" class="kbx-topics"><span v-for="t in shown.topics" :key="t">{{ t }}</span></div>
     </template>
     <div class="kbx-actions kbx-tools">

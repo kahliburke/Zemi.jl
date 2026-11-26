@@ -8,6 +8,7 @@
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
 import KBIcon from './KBIcon.vue'
+import KBShare from './KBShare.vue'
 import KBExploreCard from './KBExploreCard.vue'
 import KBExploreCrumbs from './KBExploreCrumbs.vue'
 import KBExploreHits from './KBExploreHits.vue'
@@ -1108,6 +1109,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
                 aria-label="The map's legend and settings" title="Legend, layout and what the map shows" @click="panelOpen = !panelOpen">
           <KBIcon name="tune" :size="17" />
         </button>
+        <KBShare v-if="full && frame" :dialog-target="frame" />
         <button class="kbx-btn kbx-full" :title="full ? 'Leave full screen (Esc)' : 'Full screen'" :aria-label="full ? 'Leave full screen' : 'Full screen'"
                 @click="fullScreen">{{ full ? '⤡' : '⤢' }}</button>
       </div>

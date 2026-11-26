@@ -82,6 +82,10 @@ After the public demo has downloaded its reading files on the first visit, it ca
 search papers by keyword, and display their summaries and sections. The personal and shared
 services need a connection to read the knowledge base or make changes.
 
+Choose **Share this page** in the navigation (in the menu on a phone). **Content and link**
+lets you review and edit the page text or a selected passage. **Link only** includes the
+current view and anchor. Use **Share…** to choose an app, or copy the result.
+
 ## Static copy
 
 Set `ZEMI_SITE_CLEAN_URLS=0` when building for a static host that requires literal

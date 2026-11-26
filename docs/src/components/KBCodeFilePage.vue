@@ -35,7 +35,7 @@ const anchors = computed(() => {
 
     <template v-if="file.summary">
       <h2 id="summary">Summary</h2>
-      <div v-html="render(file.summary)"></div>
+      <div data-share-text v-html="render(file.summary)"></div>
     </template>
     <KBFileWork :codebase="file.codebase.id" :path="file.path" />
 

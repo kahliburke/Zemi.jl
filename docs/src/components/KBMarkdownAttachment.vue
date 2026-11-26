@@ -49,8 +49,8 @@ onLive(() => {
         <summary>Metadata</summary>
         <dl><template v-for="[key, value] in file.metadata" :key="key"><dt>{{ key }}</dt><dd>{{ value }}</dd></template></dl>
       </details>
-      <pre v-if="file.unparsed">{{ file.unparsed }}</pre>
-      <div class="kb-md" v-html="render(file.body)"></div>
+      <pre data-share-text v-if="file.unparsed">{{ file.unparsed }}</pre>
+      <div data-share-text class="kb-md" v-html="render(file.body)"></div>
     </template>
     <p v-else>Loading attachment…</p>
   </KBNeedsService>
