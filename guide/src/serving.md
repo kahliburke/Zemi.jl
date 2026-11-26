@@ -28,6 +28,10 @@ tokens), Administration and Sign out, each for the roles that allow it. Open sou
 </figure>
 ```
 
+Choose **Commands** in the navigation menu, press **F1**, or use **Ctrl-Shift-P**
+(**Cmd-Shift-P** on macOS) to open the command palette. Type to filter actions and pages,
+use the arrow keys to select a result, then press Enter. Escape closes the palette.
+
 **Cmd-K** (Ctrl-K) anywhere on the site opens a palette while the service answers. Typing finds what
 the knowledge base has, each for whoever may see it: tasks, findings, papers and resources, records,
 notebooks and code. It also opens a project or a page, adds the paper an arXiv id, DOI or address

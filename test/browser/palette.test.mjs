@@ -47,3 +47,57 @@ test('it goes to pages and projects, searches the knowledge base, and switches t
   assert.deepEqual(errors, [])
   await close()
 })
+
+test('the command menu and editor shortcuts filter actions and pages without searching documents', async () => {
+  const { page, close } = await open('/projects#BR', '.kbp-card')
+  try {
+    const lookups = []
+    page.on('request', r => { if (r.url().includes('/api/tasks/references')) lookups.push(r.url()) })
+    const trigger = page.getByRole('button', { name: 'Commands', exact: true })
+    await trigger.click()
+    const input = page.getByRole('combobox', { name: 'Filter commands' })
+    await input.fill('reefs')
+    await page.getByText('No matching commands or pages.').waitFor()
+    await page.keyboard.press('Escape')
+    assert.ok(await trigger.evaluate(el => el === document.activeElement))
+    await page.keyboard.press('ControlOrMeta+Shift+p')
+    await input.fill('explore')
+    const option = page.getByRole('dialog', { name: 'Command palette' }).getByRole('option', { selected: true })
+    assert.match(await option.innerText(), /Explore/)
+    assert.equal(await option.getAttribute('id'), await input.getAttribute('aria-activedescendant'))
+    await page.keyboard.press('Enter')
+    await page.waitForURL(/\/kb\/explore(?:\.html)?$/)
+    await page.keyboard.press('F1')
+    await input.waitFor()
+    await page.keyboard.press('ArrowDown')
+    assert.equal(await input.getAttribute('aria-activedescendant'), 'kbpal-item-1')
+    await page.keyboard.press('ControlOrMeta+k')
+    await page.getByRole('combobox', { name: 'Go to or do' }).waitFor()
+    assert.deepEqual(lookups, [])
+  } finally { await close() }
+})
+
+test('the mobile navigation opens one command palette by touch', async () => {
+  const { page, close } = await open('/projects#BR', '.kbp-card', { width: 390, height: 844, touch: true })
+  try {
+    await page.locator('.VPNavBarHamburger').tap()
+    await page.getByRole('button', { name: 'Commands', exact: true }).tap()
+    await page.getByRole('combobox', { name: 'Filter commands' }).fill('theme')
+    assert.equal(await page.getByRole('dialog', { name: 'Command palette' }).count(), 1)
+    await page.getByRole('option', { name: /theme/i }).tap()
+    await page.getByRole('dialog', { name: 'Command palette' }).waitFor({ state: 'hidden' })
+  } finally { await close() }
+})
+
+test('a static copy leaves the site search shortcut available', async () => {
+  const { page, close } = await open('/', '.VPNavBar', {
+    prepare: page => page.route('**/api/status', r => r.fulfill({ status: 404 }))
+  })
+  try {
+    await page.locator('.VPNavBarSearch button').waitFor()
+    await page.keyboard.press('ControlOrMeta+k')
+    await page.locator('.VPLocalSearchBox').waitFor()
+    assert.equal(await page.getByRole('button', { name: 'Commands', exact: true }).count(), 0)
+    assert.equal(await page.locator('.kbpal-input').count(), 0)
+  } finally { await close() }
+})

@@ -16,7 +16,9 @@ import { href as refHref, type RefMatch } from './kbRefs'
 
 type Item = { key: string; label: string; detail: string; group: string; href?: string; run?: () => Promise<void> | void }
 
+const props = defineProps<{ screenMenu?: boolean }>()
 const open = ref(false)
+const commandsOnly = ref(false)
 const q = ref('')
 const chosen = ref(0)
 const found = ref<RefMatch[]>([])
@@ -37,7 +39,7 @@ const remember = (i: Item) => {
 
 // The pages: the knowledge base's, the projects and findings, and the service's pages one's roles open.
 const pages = computed(() => [
-  ['Search', kbPage('index')], ['Paper of the Day', kbPage('daily')], ['Landscape', kbPage('landscape')], ['Topics', kbPage('topics')],
+  ['Search', kbPage('index')], ['Paper of the Day', kbPage('daily')], ['Landscape', kbPage('landscape')], ['Explore', kbPage('explore')], ['Topics', kbPage('topics')],
   ['Authors', kbPage('authors')], ['Missing papers', kbPage('missing')], ['New on arXiv', kbPage('watch')], ['Timeline', kbPage('timeline')],
   ['Status', kbPage('status')], ['Documents', kbPage('manage')], ['Codebases', kbPage('code/')],
   ['Projects', pageLink('/projects')], ['Findings', pageLink('/findings')],
@@ -56,9 +58,9 @@ const matches = (label: string) => { const w = q.value.trim().toLowerCase(); ret
 const items = computed<Item[]>(() => {
   const w = q.value.trim()
   const out: Item[] = []
-  if (!w) out.push(...recent.value.map(r => ({ key: `r${r.href}`, label: r.label, detail: r.detail, group: 'Lately', href: r.href })))
+  if (!commandsOnly.value && !w) out.push(...recent.value.map(r => ({ key: `r${r.href}`, label: r.label, detail: r.detail, group: 'Lately', href: r.href })))
   // What the knowledge base has: shown by its title (a task's, a paper's), with its kind and id beside it.
-  out.push(...found.value.filter(r => r.kind !== 'person').map(r => {
+  if (!commandsOnly.value) out.push(...found.value.filter(r => r.kind !== 'person').map(r => {
     const href = r.kind === 'task' ? taskHref(r.target) : refHref(r.kind, r.target)
     const named = r.label === r.target && r.detail
     return { key: `f${r.kind}${r.target}`, label: named ? r.detail : r.label,
@@ -74,11 +76,11 @@ const items = computed<Item[]>(() => {
     detail: 'Switch the site\'s colors', group: 'Commands', run: () => { isDark.value = !isDark.value } })
   if (can('sync') && matches('sync now')) out.push({ key: 'sync', label: 'Sync now', detail: 'Bring the knowledge base up to date', group: 'Commands',
     run: async () => { followJobs((await post('/api/sync', '{}')).job); said.value = 'Syncing' } })
-  out.push(...projects.value.filter(p => matches(`${p.key} ${p.name}`))
+  if (!commandsOnly.value) out.push(...projects.value.filter(p => matches(`${p.key} ${p.name}`))
     .map(p => ({ key: `p${p.key}`, label: `${p.key} ${p.name}`, detail: 'Open the project', group: 'Projects', href: `${pageLink('/projects')}#${p.key}` })))
   out.push(...pages.value.filter(([label]) => matches(label)).map(([label, href]) => ({ key: `g${href}`, label, detail: 'Go to the page', group: 'Pages', href })))
   // Last, as what Enter does when nothing else matches: the words searched for on the Search page.
-  if (w) out.push({ key: 'search', label: `Search the knowledge base for “${w}”`, detail: 'Papers by meaning and words, and findings', group: 'Search',
+  if (!commandsOnly.value && w) out.push({ key: 'search', label: `Search the knowledge base for “${w}”`, detail: 'Papers by meaning and words, and findings', group: 'Search',
                     href: `${kbPage('index')}?q=${encodeURIComponent(w)}` })
   return out
 })
@@ -90,18 +92,21 @@ const groups = computed(() => {
 
 // What the knowledge base has of the words: the answer to the last asked.
 const asking = latest()
-watch(q, async w => {
+watch([q, commandsOnly, open], async ([w, commands, visible]) => {
   chosen.value = 0; said.value = ''
-  if (w.trim().length < 2 || !can('tasks.view')) { found.value = []; return }
+  asking.cancel()
+  found.value = []
+  if (!visible || commands || w.trim().length < 2 || !can('tasks.view')) return
   try { found.value = await asking(signal => getJSON(`/api/tasks/references?q=${encodeURIComponent(w.trim())}`, { signal })) }
   catch (e) { if (!isStale(e)) found.value = [] }
 })
 
-async function show() {
+async function show(commands: boolean) {
+  commandsOnly.value = commands
   open.value = true; q.value = ''; said.value = ''; chosen.value = 0
   try { recent.value = JSON.parse(localStorage.getItem(RECENT) ?? '[]') } catch { recent.value = [] }
   await nextTick(); input.value?.focus()
-  if (can('tasks.view')) try { projects.value = (await getJSON('/api/projects')).projects } catch { /* none listed */ }
+  if (!commands && can('tasks.view')) try { projects.value = (await getJSON('/api/projects')).projects } catch { /* none listed */ }
 }
 async function pick(i: Item | undefined) {
   if (!i) return
@@ -119,30 +124,53 @@ function key(e: KeyboardEvent) {
 }
 watch(chosen, async c => { await nextTick(); document.querySelector(`[data-palette="${c}"]`)?.scrollIntoView({ block: 'nearest' }) })
 
-// Cmd-K and Ctrl-K, taken before VitePress's search sees them while the service answers.
+// VitePress mounts another copy of each nav item inside the mobile menu. Both buttons
+// open the desktop nav's teleported dialog so each shortcut has a single listener.
+function showCommands() { show(true) }
+function requestCommands() { window.dispatchEvent(new Event('kb-command-palette')) }
 function onKey(e: KeyboardEvent) {
-  if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k' || e.altKey || e.shiftKey || mode.value !== 'live') return
+  if (mode.value !== 'live' || e.altKey || e.isComposing) return
+  const mod = e.metaKey || e.ctrlKey
+  const quick = mod && !e.shiftKey && e.key.toLowerCase() === 'k'
+  const commands = (mod && e.shiftKey && e.key.toLowerCase() === 'p') || (!mod && !e.shiftKey && e.key === 'F1')
+  if (!quick && !commands) return
   e.preventDefault(); e.stopImmediatePropagation()
-  open.value ? (open.value = false) : show()
+  if (e.repeat) return
+  if (open.value && commandsOnly.value === commands) open.value = false
+  else show(commands)
 }
-onMounted(() => { connect(); window.addEventListener('keydown', onKey, true) })
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
+onMounted(() => {
+  connect()
+  if (props.screenMenu) return
+  window.addEventListener('keydown', onKey, true)
+  window.addEventListener('kb-command-palette', showCommands)
+})
+onBeforeUnmount(() => {
+  asking.cancel()
+  window.removeEventListener('keydown', onKey, true)
+  window.removeEventListener('kb-command-palette', showCommands)
+})
 </script>
 
 <template>
-  <KBDialog v-if="open" label="Go to or do" width="min(42rem, 94vw)" top bare :shade="0.35" @close="open = false">
+  <button v-if="mode === 'live'" type="button" class="kbpal-trigger" :class="{ mobile: screenMenu }" aria-haspopup="dialog"
+          title="Command palette (F1)" aria-keyshortcuts="F1 Control+Shift+P Meta+Shift+P" @click="requestCommands">Commands</button>
+  <KBDialog v-if="open" :label="commandsOnly ? 'Command palette' : 'Go to or do'" width="min(42rem, 94vw)" top bare :shade="0.35" @close="open = false">
     <div class="kbpal">
-      <input ref="input" v-model="q" class="kbpal-input" placeholder="A task, finding, paper, page or command…" aria-label="Go to or do"
+      <h2 v-if="commandsOnly" class="kbpal-title">Command palette</h2>
+      <input ref="input" v-model="q" class="kbpal-input" :placeholder="commandsOnly ? 'Type a command or page name…' : 'A task, finding, paper, page or command…'"
+             :aria-label="commandsOnly ? 'Filter commands' : 'Go to or do'" role="combobox" aria-expanded="true" aria-autocomplete="list"
+             aria-controls="kbpal-results" :aria-activedescendant="items[chosen] ? 'kbpal-item-' + chosen : undefined"
              @keydown="key" />
-      <div class="kbpal-list" role="listbox">
+      <div id="kbpal-results" class="kbpal-list" role="listbox" aria-label="Results">
         <template v-for="g in groups" :key="g.name">
           <div class="kbpal-group">{{ g.name }}</div>
-          <button v-for="i in g.items" :key="i.key" type="button" role="option" class="kbpal-item" :class="{ on: i.n === chosen }"
+          <button v-for="i in g.items" :key="i.key" :id="'kbpal-item-' + i.n" type="button" role="option" tabindex="-1" class="kbpal-item" :class="{ on: i.n === chosen }"
                   :aria-selected="i.n === chosen" :data-palette="i.n" @mousemove="chosen = i.n" @click="pick(i)">
             <span class="kbpal-label">{{ i.label }}</span><span class="kbpal-detail">{{ i.detail }}</span>
           </button>
         </template>
-        <p v-if="!items.length" class="kbpal-none">Nothing matches.</p>
+        <p v-if="!items.length" class="kbpal-none">{{ commandsOnly ? 'No matching commands or pages.' : 'Nothing matches.' }}</p>
       </div>
       <div class="kbpal-foot"><span>{{ said }}</span><span class="kbpal-keys">↑↓ choose · Enter open · Esc close</span></div>
     </div>
@@ -150,6 +178,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
 </template>
 
 <style scoped>
+.kbpal-trigger { padding: 0 0.65rem; color: var(--vp-c-text-1); font-size: 0.88rem; font-weight: 500; cursor: pointer; }
+.kbpal-trigger:hover, .kbpal-trigger:focus-visible { color: var(--vp-c-brand-1); }
+.kbpal-trigger.mobile { min-height: 44px; text-align: left; }
+.kbpal-title { margin: 0; padding: 0.75rem 1.1rem 0; color: var(--vp-c-text-2); font-size: 0.8rem; font-weight: 600; }
 .kbpal { margin-top: 12vh; border-radius: 14px; background: var(--vp-c-bg); border: 1px solid var(--vp-c-divider); box-shadow: var(--vp-shadow-5);
   overflow: hidden; font-size: 0.9rem; }
 .kbpal-input { width: 100%; padding: 0.9rem 1.1rem; border: none; border-bottom: 1px solid var(--vp-c-divider); background: transparent;

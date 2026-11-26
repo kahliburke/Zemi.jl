@@ -272,7 +272,7 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     config = replace(config, opensource => ""; count = 1)
     marker = "...navTemp.nav,"
     occursin(marker, config) || (@warn "No `$marker` in the VitePress config; the search settings button is left out"; return config)
-    # The palette (Cmd-K) is in the top bar so that it is on every page; it shows nothing until opened.
+    # Commands opens the palette from the top bar or the mobile menu.
     return replace(config, marker => marker * "\n  { component: 'KBSettings' },\n  { component: 'KBAccount' },\n  { component: 'KBUpdate' },\n  { component: 'KBPalette' },"; count = 1)
 end
 
