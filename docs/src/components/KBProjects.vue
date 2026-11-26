@@ -18,6 +18,7 @@ import KBProjectReview from './KBProjectReview.vue'
 import KBMembers from './KBMembers.vue'
 import KBRecordUpload from './KBRecordUpload.vue'
 import KBLibrary from './KBLibrary.vue'
+import KBProjectCodebases, { type ProjectCodebase, type ProjectOrg } from './KBProjectCodebases.vue'
 import { sourceHref, onTaskRef, setCodebase, setPeople, plainRefs } from './kbRefs'
 import { findingHref, recordHref, kbPage, taskHref } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
@@ -25,7 +26,7 @@ import { plainLine } from './kbUtils'
 import { when, editTime } from './kbFormat'
 import { PRIORITIES } from './kbLabels'
 
-type Project = { key: string; name: string; description: string; codebase: string; root: string; tasks: number; open: number;
+type Project = { key: string; name: string; description: string; codebase: string; root: string; codebases: string[]; tasks: number; open: number;
                  active_milestone: string }
 type Status = { id: string; label: string }
 type Milestone = { name: string; description: string; start: string; due: string; closed: boolean; done: number; total: number; active: boolean }
@@ -44,7 +45,6 @@ type Full = Task & { body: string; project: string; links: { kind: string; targe
                      blocked_by: string[]; activity: TaskEvent[]; subtasks_list: Task[]; commits: Commit[];
                      mentions: { sha: string; at: string; author: string; subject: string; url: string }[];
                      findings: { ref: string; claim: string; status: string }[] }
-type Codebase = { id: string; title: string; rev: string; remote: string; page: string }
 // Who else has a board open, at the level each chose (src/people_activity.jl); what people did lately.
 type Viewer = { id: number; name: string; project: string; planning: boolean; open: string; draft_ref: string; draft: string;
                 following: number; view: string; at: string }
@@ -53,7 +53,7 @@ type Action = { event: number; who: string; kind: string; ref: string; title: st
 const list = ref<Project[]>([])
 const statuses = ref<Status[]>([])
 const key = ref('')
-const board = ref<{ project: Project; milestones: Milestone[]; tasks: Task[]; codebase: Codebase | null; access: string;
+const board = ref<{ project: Project; milestones: Milestone[]; tasks: Task[]; codebases: ProjectCodebase[]; orgs: ProjectOrg[]; access: string;
                     files?: { name: string; address: string }[]; manages_members: boolean; findings: number; records: { id: string; title: string; day: string }[];
                     agents: { tasks: { ref: string; agent: string; at: string; via: string }[]; waiting: { agent: string; since: string }[] };
                     people_did: Action[]; changed_by_others?: Record<string, { at: string; who: string }> } | null>(null)
@@ -190,29 +190,6 @@ const focused = computed(() => {
 const focusEmpty = computed(() => { const f = focused.value
   return !f.questions.length && !f.answered.length && !f.asked.length && !f.tasks.length && !f.approve.length && !f.review.length })
 const askedOf = (t: Asked) => t.to_whom === 'agents' ? 'the agents' : t.to_whom === 'anyone' ? 'anyone on the project' : personLabel(t.to_person ?? '')
-// The project's codebase: where its code is, which agents working there find it by, and whose
-// commits are recorded against its tasks. A person links it, or changes it.
-// One not yet in the knowledge base is given by its repository's address, or a folder on the
-// service's machine (in a shared service, by someone who may change its configuration).
-const codebases = ref<{ id: string; title: string }[] | null>(null)
-const codeDraft = ref<string | null>(null)
-const NEW_CODEBASE = '+new'
-const codeNew = ref('')
-const addsCodebase = computed(() => can('paper.add'))
-const codeNewHint = computed(() => !shared.value || can('config.edit')
-  ? 'https://github.com/owner/repo, or a folder: ~/code/project' : 'https://github.com/owner/repo')
-async function editCodebase() {
-  codeDraft.value = board.value?.codebase?.id ?? 'none'
-  codeNew.value = ''
-  if (!codebases.value) try { codebases.value = await getJSON('/api/tasks/codebases') } catch (e: any) { error.value = e.message }
-}
-async function saveCodebase() {
-  const codebase = codeDraft.value === NEW_CODEBASE ? codeNew.value.trim() : codeDraft.value
-  if (!codebase) return
-  try { await post(`/api/projects/${key.value}`, JSON.stringify({ codebase })); codeDraft.value = null; codebases.value = null; await loadBoard() }
-  catch (e: any) { error.value = e.message }
-}
-const remoteName = (u: string) => u.replace(/^https:\/\//, '')
 // A task's commits (those whose Tasks: trailer names it or a task under it), and their changes.
 const diffText = ref<string | null>(null)
 async function toggleDiff() {
@@ -756,7 +733,7 @@ const setHash = (h: string) => { if (location.hash.slice(1).toUpperCase() !== h)
 watch(key, k => { if (k) { setHash(k); localStorage.setItem(LAST_PROJECT, k) }; open.value = null; milestone.value = ''; reviewing.value = false; declined.value = null; library.value = false; loadBoard() })
 watch(() => open.value?.ref, ref => { if (key.value) setHash(ref ?? key.value) })
 watch(() => open.value?.ref, () => { diffText.value = null })
-watch(() => board.value?.codebase?.id ?? '', id => setCodebase(id), { immediate: true })
+watch(() => board.value?.codebases?.[0]?.id ?? '', id => setCodebase(id), { immediate: true })
 
 // Changes on their way to the service. Each is sent once: pressing its control again, or Enter in its
 // form, waits for the answer rather than sending another, and the control shows it is working. A
@@ -1408,29 +1385,8 @@ function keepRecordsOpen(open: boolean) {
           <div class="kbp-note kbp-context-text kb-md" :class="{ clipped: longContext && !contextOpen && !narrow }" v-html="render(board.project.description)"></div>
         </template>
         <button v-else-if="manages" class="kb-link kbp-link" @click="editContext">+ Context</button>
-        <div class="kbp-codebase">
-          <span class="kbp-waiting-label">Code</span>
-          <template v-if="codeDraft === null">
-            <template v-if="board.codebase">
-              <a :href="board.codebase.page">{{ board.codebase.title }}</a>
-              <code v-if="board.codebase.rev" class="kb-dim kbp-dim" :title="board.codebase.rev.endsWith('+') ? 'with changes not committed' : 'checked out'">{{ board.codebase.rev }}</code>
-              <a v-if="board.codebase.remote" :href="board.codebase.remote" target="_blank" rel="noopener" class="kb-dim kbp-dim">{{ remoteName(board.codebase.remote) }}</a>
-            </template>
-            <span v-else class="kb-dim kbp-dim">No codebase linked</span>
-            <button v-if="manages" class="kbp-icon" title="Link a codebase" aria-label="Link a codebase" @click="editCodebase"><KBIcon name="edit" :size="15" /></button>
-          </template>
-          <template v-else>
-            <select v-model="codeDraft" class="kbp-select" aria-label="Codebase">
-              <option value="none">None</option>
-              <option v-for="c in codebases ?? []" :key="c.id" :value="c.id">{{ c.title }}</option>
-              <option v-if="addsCodebase" :value="NEW_CODEBASE">Another: a repository or folder…</option>
-            </select>
-            <input v-if="codeDraft === NEW_CODEBASE" v-model="codeNew" class="kb-field kbp-code-new" aria-label="A repository's address or a folder"
-                   :placeholder="codeNewHint" @keydown.enter="saveCodebase" />
-            <button class="kbp-small" :disabled="codeDraft === NEW_CODEBASE && !codeNew.trim()" @click="saveCodebase">Save</button>
-            <button class="kbp-small" @click="codeDraft = null">Cancel</button>
-          </template>
-        </div>
+        <KBProjectCodebases :project="board.project.key" :codebases="board.codebases ?? []" :orgs="board.orgs ?? []" :manages="manages"
+                            @changed="loadBoard" />
         <details v-if="board.records?.length || addsRecords" class="kbp-records" :open="recordsOpen"
                  @toggle="keepRecordsOpen(($event.target as HTMLDetailsElement).open)">
           <summary class="kbp-records-head">
@@ -2200,9 +2156,6 @@ form.kbp-add { position: relative; }
 .kbp-activity li { padding: 0.35rem 0; border-bottom: 1px solid var(--vp-c-divider); }
 .kbp-activity li.comment, .kbp-activity li.progress { padding: 0.5rem 0; }
 .kbp-edited { font-size: 0.72rem; color: var(--vp-c-text-3); }
-.kbp-codebase { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; margin-top: 0.5rem; font-size: 0.85rem; }
-.kbp-codebase code { font-size: 0.75rem; }
-.kbp-code-new { min-width: 18rem; flex: 1; font-size: 0.85rem; }
 .kbp-records { margin-top: 0.5rem; font-size: 0.85rem; }
 .kbp-records-head { display: flex; gap: 0.5rem; align-items: baseline; cursor: pointer; list-style: none; width: fit-content; }
 .kbp-records-head::-webkit-details-marker { display: none; }

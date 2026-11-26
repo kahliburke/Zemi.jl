@@ -90,18 +90,26 @@ end
 
 """
     start_codebase_reading(kb, id) -> Union{Job,Nothing}
+    start_codebases_reading(kb, ids) -> Union{Job,Nothing}
 
-Read codebase `id` as a job, a clone of its repository fetched first: what follows adding one,
-wherever it is added. `nothing` where documents cannot be read here; the next sync reads it then.
+Read codebase `id` (or each of `ids`) as one job, a clone of its repository fetched first: what
+follows adding one, wherever it is added. `nothing` where documents cannot be read here; the next
+sync reads it then. Of several, one that cannot be fetched is left out of the reading.
 """
-function start_codebase_reading(kb::KB, id::AbstractString)
-    isempty(cannot_run(kb, "ingest", [id])) || return nothing
-    return start_job("ingest $id"; ids = [id], changes = changes_stamp(kb.config)) do job
-        if codebase_dir(kb, id) == clone_dir(kb.config, id)
+start_codebase_reading(kb::KB, id::AbstractString) = start_codebases_reading(kb, [id])
+
+function start_codebases_reading(kb::KB, ids::AbstractVector{<:AbstractString})
+    isempty(cannot_run(kb, "ingest", ids)) || return nothing
+    name = length(ids) == 1 ? "ingest $(only(ids))" : "ingest $(length(ids)) codebases"
+    return start_job(name; ids = collect(ids), changes = changes_stamp(kb.config)) do job
+        fetched = filter(ids) do id
+            codebase_dir(kb, id) == clone_dir(kb.config, id) || return true
             report!(job, "fetching $id from its repository")
-            fetch_codebase!(kb, id) || error("$id cannot be fetched: $(codebase_problem(kb, id))")
+            fetch_codebase!(kb, id) && return true
+            length(ids) == 1 && error("$id cannot be fetched: $(codebase_problem(kb, id))")
+            return false
         end
-        format_ingest(ingest!(kb, [id]; progress = m -> report!(job, m), cancelled = () -> cancelled(job)))
+        format_ingest(ingest!(kb, fetched; progress = m -> report!(job, m), cancelled = () -> cancelled(job)))
     end
 end
 
@@ -220,12 +228,13 @@ end
 
 """
 Fetch every codebase read from a clone of its repository (see [`fetch_codebase!`](@ref)): those
-added by its address, and in a shared service those whose folder is on another machine. Returns how
-many are up to date.
+added by its address, and in a shared service those whose folder is on another machine. One whose
+repository is archived is not fetched again (see project_codebases.jl). Returns how many are up to date.
 """
 function fetch_codebases!(kb::KB)
     record_remotes!(kb)
-    ids = [String(r.doc_id) for r in query(kb, "SELECT doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND remote IS NOT NULL")]
+    ids = [String(r.doc_id) for r in query(kb, """SELECT doc_id FROM papers WHERE $(kind_in(CODEBASE)) AND remote IS NOT NULL
+                                                  AND repository_archived_at IS NULL""")]
     return count(id -> fetch_codebase!(kb, id), filter(id -> codebase_dir(kb, id) == clone_dir(kb.config, id), ids))
 end
 

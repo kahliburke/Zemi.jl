@@ -3580,7 +3580,7 @@ end
     write(joinpath(root, "notebooks", "other.jl"), "#%% code id=run\nz = 2\n")
     code = K.add_codebase!(kb, root; name = "edge")
     K.parse_code!(kb, code)
-    K.update_project!(kb, "ED"; codebase = code, by = me)
+    K.project_codebase!(kb, "ED", code; by = me)
     withcode = K.read_project_map(K.JSON.parse(K.JSON.json(K.project_map(kb, "ED"))))
     @test [(f.path, f.definitions, f.work, f.used_by) for f in withcode.code] == [("edge.jl", 2, Dict{String,Int}(), ["notebooks/scan.jl"])]
     @test only(withcode.code).lines > 0
@@ -3620,7 +3620,7 @@ end
     @test x.tasks == [t] && x.findings == [f]
     # The project's codebase is always in it, first; agents read it all as text.
     code = K.add_codebase!(kb, mktempdir(); name = "edge")
-    K.update_project!(kb, "ED"; codebase = code, by = me)
+    K.project_codebase!(kb, "ED", code; by = me)
     @test (first(K.library(kb, "ED")).kind, first(K.library(kb, "ED")).id) == ("codebase", 0)
     text = K.format_library(kb, "ED")
     @test occursin("- paper arXiv:2609.00001: Its method. · cited by $t, $f", text) && occursin("- codebase $code", text)
@@ -3752,11 +3752,11 @@ end
         K.SHARED_MODE[] = true
         # A repository the knowledge base does not have is added only by someone who may add sources;
         # one it has may be linked by anyone who can change the project.
-        @test_throws "paper.add" K.update_project!(kb, "RP"; codebase = "file://$origin", add_codebase = false, by = me)
+        @test_throws "paper.add" K.project_codebase!(kb, "RP", "file://$origin"; add = false, by = me)
         @test_throws "paper.add" K.create_project!(kb, "Too"; key = "TO", codebase = "file://$origin", add_codebase = false, by = me)
         @test K.scalar(kb, "SELECT count(*) FROM papers WHERE kind = 'code'") == 0
-        K.update_project!(kb, "RP"; codebase = "file://$origin", by = me)
-        id = String(K.scalar(kb, "SELECT d.doc_id FROM projects p JOIN papers d ON d.id = p.codebase_id WHERE p.key = 'RP'"))
+        K.project_codebase!(kb, "RP", "file://$origin"; by = me)
+        id = K.project_codebase(kb, "RP")
         @test startswith(id, "code-") && K.codebase_dir(kb, id) == K.clone_dir(kb.config, id)
         # Added with the project, it is read at once: fetched, and read from the clone.
         reading = only(j for j in lock(() -> collect(values(K.JOBS)), K.JOBS_LOCK) if j.name == "ingest $id")
@@ -3807,14 +3807,14 @@ end
         folder = mktempdir()
         write(joinpath(folder, "c.jl"), "h() = 3\n")
         @test_throws "config.edit" K.add_codebase_from!(kb, folder; caller = curator)
-        @test_throws "config.edit" K.update_project!(kb, "RP"; codebase = folder, by = me, caller = curator)
+        @test_throws "config.edit" K.project_codebase!(kb, "RP", folder; by = me, caller = curator)
         folder_id = K.add_codebase_from!(kb, folder)
         page(cid) = K.codebase_page_json(kb, only(K.query(kb, "SELECT * FROM papers WHERE doc_id = ?", (cid,))))
         @test !K.codebase_read(kb, folder_id) && !page(folder_id)["read"]          # its page says so, not 0 files
         @test K.codebase_dir(kb, folder_id) == folder && K.parse_code!(kb, folder_id)
         @test K.codebase_read(kb, folder_id) && page(folder_id)["read"] && page(folder_id)["files"] == 1
         @test K.fetch_codebases!(kb) == 0                  # each is read from its folder (that one too, added from it since)
-        K.update_project!(kb, "OX"; codebase = folder * "/", by = me, caller = curator)   # known: linked by its path
+        K.project_codebase!(kb, "OX", folder * "/"; by = me, caller = curator)   # known: linked by its path
         @test only(p for p in K.projects(kb) if p.key == "OX").codebase == folder_id
         # One whose folder is on another machine is read from its repository's clone.
         @test K.codebase_dir(kb, local_id) == origin
@@ -3879,6 +3879,122 @@ end
         K.GITHUB_API[] = saved
         empty!(K.APP_TOKENS); K.APP_SLUG[] = ""
         close(server)
+    end
+end
+
+@zset "projects with several codebases" begin
+    # Repositories, each with a commit naming a task.
+    function repo(name, message = "Add $name")
+        dir = mktempdir()
+        g(args...) = run(pipeline(`git -C $dir -c user.name=Ada -c user.email=ada@x.org -c commit.gpgsign=false $args`; stdout = devnull, stderr = devnull))
+        g("init", "-q", "-b", "main")
+        write(joinpath(dir, "$name.jl"), "$name() = 1\n"); g("add", "."); g("commit", "-q", "-m", message)
+        return dir
+    end
+    kb = open_kb(temp_config(; layers = Layer[]))
+    me = K.person("Rowan")
+    a, b = repo("tides", "Add tides\n\nTasks: MC-1"), repo("shore", "Add shore\n\nTasks: MC-1")
+    ida, idb = K.add_codebase!(kb, a; name = "tides"), K.add_codebase!(kb, b; name = "shore")
+    K.create_project!(kb, "Many"; key = "MC", codebase = ida, by = me)
+    K.create_task!(kb, "MC", "Both"; by = me)
+    @test K.project_codebase!(kb, "MC", idb; by = me) == [idb]
+    @test K.project_codebase!(kb, "MC", idb; by = me) == [idb]                    # linked once
+    @test [(c.id, c.main) for c in K.project_codebases(kb, "MC")] == [(ida, true), (idb, false)]
+    @test only(K.projects(kb)).codebase == ida && only(K.projects(kb)).codebases == [ida, idb]
+    # An agent in either one's directory finds the project.
+    @test [p.key for p in K.projects(kb; path = joinpath(b, "src"))] == ["MC"] && [p.key for p in K.projects(kb; path = a)] == ["MC"]
+    # The commits of both are recorded against its tasks.
+    @test K.read_all_commits!(kb) == 2
+    @test sort([c.subject for c in K.task(kb, "MC-1").commits]) == ["Add shore", "Add tides"]
+    @test K.code_activity(kb, "MC")["totals"]["commits"] == 2
+    # `@code:` is in the main one; the picker names the others' files with their codebase.
+    K.parse_code!(kb, ida); K.parse_code!(kb, idb)
+    @test issubset(["tides.jl", "$idb:shore.jl"], [h.target for h in K.at_reference_matches(kb, "code:s"; project = "MC")])
+    K.link_at_references!(kb, "MC-1", "See @code:tides.jl"; by = me)
+    @test any(l -> l.kind == "code" && l.target == "$ida:tides.jl", K.task(kb, "MC-1").links)
+    # Another made main comes first; the map and the library have them all.
+    K.project_codebase!(kb, "MC", idb; main = true, by = me)
+    @test K.project_codebase(kb, "MC") == idb && only(K.projects(kb)).codebases == [idb, ida]
+    m = K.read_project_map(K.JSON.parse(K.JSON.json(K.project_map(kb, "MC"))))
+    @test Set((f.codebase, f.path) for f in m.code) == Set([(idb, "shore.jl"), (ida, "tides.jl")])
+    @test [x.target for x in K.library(kb, "MC") if x.id == 0] == [idb, ida]
+    @test K.library_holding(kb, "codebase", ida)["MC"].id == 0
+    # Unlinking the main one leaves the next main; one not linked is not added to unlink it.
+    @test_throws "not one of the project's codebases" K.project_codebase!(kb, "MC", "https://github.com/ada/elsewhere"; remove = true, by = me)
+    @test ismissing(K.scalar(kb, "SELECT 1 FROM papers WHERE remote LIKE '%elsewhere%'"))
+    @test K.project_codebase!(kb, "MC", b; remove = true, by = me) == [idb]                  # by its folder
+    @test [(c.id, c.main) for c in K.project_codebases(kb, "MC")] == [(ida, true)] && isempty(K.projects(kb; path = b))
+
+    # A knowledge base from before keeps each project's one codebase, as its main one.
+    foreach(t -> K.execute!(kb, "DROP TABLE $t"), ("project_codebases", "project_orgs"))
+    K.execute!(kb, "ALTER TABLE papers DROP COLUMN repository_archived_at")
+    K.execute!(kb, "ALTER TABLE projects ADD COLUMN codebase_id INTEGER REFERENCES papers(id) ON DELETE SET NULL")
+    K.execute!(kb, "UPDATE projects SET codebase_id = ? WHERE key = 'MC'", (K.paper_id(kb, idb),))
+    foreach(sql -> K.execute!(kb, sql), K.MIGRATIONS[32])
+    @test [(c.id, c.main) for c in K.project_codebases(kb, "MC")] == [(idb, true)]
+    @test !any(r -> r.name == "codebase_id", K.query(kb, "PRAGMA table_info(projects)"))
+
+    # An organization's repositories, listed by a stand-in for GitHub's API: forks and archived ones
+    # left out.
+    @test K.named_org("https://github.com/ada-lab") == K.named_org("github.com/ada-lab/") == K.named_org("org:ada-lab") == ("github.com", "ada-lab")
+    @test K.named_org("https://github.com/ada-lab/reef") === nothing && K.named_org("code-reef") === nothing
+    dirs = Dict(n => repo(n) for n in ("reef", "kelp", "old", "lagoon"))
+    entry(name; fork = false, archived = false) = Dict{String,Any}("name" => name, "clone_url" => "file://$(dirs[name])", "fork" => fork,
+                                                                   "archived" => archived, "owner" => Dict("login" => "ada-lab"))
+    listing = Any[entry("reef"), entry("kelp"; fork = true), entry("old"; archived = true)]
+    port = 19000 + rand(0:999)
+    server = K.HTTP.serve!("127.0.0.1", port) do req
+        startswith(req.target, "/orgs/ada-lab/repos?") && return K.HTTP.Response(200, K.JSON.json(listing))
+        startswith(req.target, "/orgs/ada-lab/installation") && return K.HTTP.Response(200, K.JSON.json(Dict("id" => 9)))
+        req.target == "/app/installations/9/access_tokens" &&
+            return K.HTTP.Response(201, K.JSON.json(Dict("token" => "tok", "expires_at" => "2099-01-01T00:00:00Z")))
+        startswith(req.target, "/installation/repositories?") && K.HTTP.header(req, "Authorization") == "Bearer tok" &&
+            return K.HTTP.Response(200, K.JSON.json(Dict("repositories" => [listing; Dict("name" => "x", "clone_url" => "file:///x",
+                                                                                         "owner" => Dict("login" => "elsewhere"))])))
+        K.HTTP.Response(404)
+    end
+    saved = K.GITHUB_API[]
+    try
+        K.GITHUB_API[] = "http://127.0.0.1:$port"
+        K.create_project!(kb, "Lab"; key = "LB", by = me)
+        @test_throws "paper.add" K.project_codebase!(kb, "LB", "github.com/ada-lab"; add = false, by = me)
+        reef = only(K.project_codebase!(kb, "LB", "github.com/ada-lab"; read = false, by = me))
+        @test [(c.id, c.org, c.main) for c in K.project_codebases(kb, "LB")] == [(reef, "ada-lab", true)]
+        o = only(K.project_orgs(kb, "LB"))
+        @test o.owner == "ada-lab" && !o.forks && !isempty(o.listed_at) && isempty(o.problem)
+        # Listed again a day later: a new repository is linked and read; one archived since is marked.
+        push!(listing, entry("lagoon")); listing[1]["archived"] = true
+        @test K.list_project_orgs!(kb) == 0                                      # not due yet
+        @test K.list_project_orgs!(kb; now = K.Dates.now(K.UTC) + K.Dates.Day(1)) == 1
+        lagoon = only(c.id for c in K.project_codebases(kb, "LB") if c.id != reef)
+        reading = only(j for j in lock(() -> collect(values(K.JOBS)), K.JOBS_LOCK) if j.name == "ingest $lagoon")
+        @test wait(reading).status == :done && K.codebase_read(kb, lagoon)
+        @test [(c.id, c.archived, c.gone) for c in K.project_codebases(kb, "LB")] == [(reef, true, false), (lagoon, false, false)]
+        @test !(reef in [String(r.doc_id) for r in K.query(kb, "SELECT doc_id FROM papers WHERE repository_archived_at IS NULL AND kind = 'code'")])
+        # One the organization no longer lists is marked gone, not unlinked.
+        filter!(r -> r["name"] != "reef", listing)
+        K.list_org!(kb, Int(K.scalar(kb, "SELECT id FROM project_orgs")); read = false)
+        @test [(c.id, c.gone) for c in K.project_codebases(kb, "LB")] == [(reef, true), (lagoon, false)]
+        # Unlinked with the codebases it brought; taken in again with forks.
+        @test sort(K.project_codebase!(kb, "LB", "org:ada-lab"; remove = true, by = me)) == sort([reef, lagoon])
+        @test isempty(K.project_codebases(kb, "LB")) && isempty(K.project_orgs(kb, "LB"))
+        @test length(K.project_codebase!(kb, "LB", "github.com/ada-lab"; forks = true, read = false, by = me)) == 2   # kelp and lagoon
+        @test only(K.project_orgs(kb, "LB")).forks
+        # A listing that fails is kept with the organization.
+        K.execute!(kb, "UPDATE project_orgs SET owner = 'nobody'")
+        @test_throws "No GitHub organization" K.list_org!(kb, Int(K.scalar(kb, "SELECT id FROM project_orgs")))
+        @test occursin("nobody", only(K.project_orgs(kb, "LB")).problem)
+        # As the GitHub App, where it is installed for the organization: the repositories of its installation that are the organization's.
+        dir = mktempdir()
+        key = joinpath(dir, "app.pem")
+        run(pipeline(`openssl genrsa -out $key 2048`; stderr = devnull))
+        c = temp_config(; shared = K.SharedConfig(; github_app = K.GitHubApp(; client_id = "Iv-test", private_key = key)))
+        @test [r.name for r in K.org_repositories(c, "ada-lab")] == ["kelp", "old", "lagoon"]
+    finally
+        K.GITHUB_API[] = saved
+        empty!(K.APP_TOKENS)
+        close(server)
+        close(kb)
     end
 end
 
@@ -5999,13 +6115,13 @@ end
     # An agent working in the codebase's directory, or below it, finds its project.
     @test [p.key for p in K.projects(kb; path = joinpath(root, "src"))] == ["DM"] && isempty(K.projects(kb; path = tempdir()))
     # Linked to a codebase later, or unlinked, by an agent too; only to a codebase.
-    K.update_project!(kb, "DM"; codebase = "none", by = bot)
+    K.project_codebase!(kb, "DM", id; remove = true, by = bot)
     @test isempty(K.projects(kb; path = root)) && only(K.projects(kb)).codebase == ""
-    @test_throws "No codebase" K.update_project!(kb, "DM"; codebase = "code-missing", by = bot)
+    @test_throws "No codebase" K.project_codebase!(kb, "DM", "code-missing"; by = bot)
     @test_throws "No codebase" K.create_project!(kb, "Paper"; key = "PP", codebase = "2402.00785", by = me)
-    K.update_project!(kb, "DM"; codebase = id, by = bot)
+    K.project_codebase!(kb, "DM", id; by = bot)
     @test [p.key for p in K.projects(kb; path = root)] == ["DM"]
-    @test_throws "Only a person" K.update_project!(kb, "DM"; name = "Mine", codebase = id, by = bot)
+    @test_throws "Only a person" K.update_project!(kb, "DM"; name = "Mine", by = bot)
     K.create_milestone!(kb, "DM", "First"; due = "2026-11-01")
     @test_throws ErrorException K.create_milestone!(kb, "DM", "Bad date"; due = "soon")
     # Changed after it is made: its date, description and name; what is not given stays.

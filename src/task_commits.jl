@@ -103,7 +103,7 @@ function read_commits!(kb::KB, codebase::AbstractString)
     n = 0
     # Only the tasks of projects linked to this codebase: a commit naming another project's task (one
     # its author may not even see, or of a key that happens to match) does nothing to it.
-    linked = Set(Int(r.id) for r in query(kb, "SELECT t.id FROM tasks t JOIN projects p ON p.id = t.project_id WHERE p.codebase_id = ?", (cid,)))
+    linked = Set(Int(r.id) for r in query(kb, "SELECT t.id FROM tasks t JOIN project_codebases pc ON pc.project_id = t.project_id WHERE pc.codebase_id = ?", (cid,)))
     incremental = current && !isempty(seen)
     finishing = Tuple{Int,String,String,String,String}[]    # (task, commit, its time, subject, author), to move to review
     transaction(kb) do
@@ -157,22 +157,25 @@ end
 "Read the commits of every codebase a project is linked to (see [`read_commits!`](@ref)); returns how many were recorded."
 read_all_commits!(kb::KB) =
     sum((read_commits!(kb, String(r.doc_id)) for r in query(kb,
-        "SELECT DISTINCT d.doc_id FROM projects p JOIN papers d ON d.id = p.codebase_id")); init = 0)
+        "SELECT DISTINCT d.doc_id FROM project_codebases pc JOIN papers d ON d.id = pc.codebase_id")); init = 0)
 
 """
     follow_commits(kb; every = 30)
 
 For a running service: read the linked codebases' commits now and every `every` seconds, for as long
 as the process runs, in shared mode fetching each codebase's repository first, and then mark the
-findings whose evidence changed (see [`check_findings!`](@ref)). In shared mode it then starts the
-nightly ingest when it is due (see [`nightly_ingest!`](@ref)), from the repositories just fetched. A
-failure is logged once and tried again next time.
+findings whose evidence changed (see [`check_findings!`](@ref)). It lists the projects'
+organizations again once a day, linking and reading their new repositories (see
+[`list_project_orgs!`](@ref)). In shared mode it then starts the nightly ingest when it is due (see
+[`nightly_ingest!`](@ref)), from the repositories just fetched. A failure is logged once and tried
+again next time.
 """
 function follow_commits(kb::KB; every::Real = 30)
     every!("Reading commits for tasks"; seconds = every) do
         fetch_codebases!(kb)               # the clones of the repositories codebases are read from, first
         read_all_commits!(kb)
         check_findings!(kb)                # with the code read, what changed under findings
+        list_project_orgs!(kb)
         SHARED_MODE[] && nightly_ingest!(kb)
     end
     return nothing
@@ -254,7 +257,7 @@ file_work(kb::KB, codebase::AbstractString, path::AbstractString) =
 """
     code_activity(kb, key; days = nothing, now = now(UTC)) -> Union{Dict,Nothing}
 
-What project `key`'s codebase has seen, as a code host shows it, or `nothing` without a codebase.
+What project `key`'s codebases have seen, together, as a code host shows it, or `nothing` without a codebase.
 Over the last `days` (all of its history when `nothing`):
 
 - `totals`: `commits`, lines `added` and `removed`, `files` changed, `contributors`, and `with_tasks`
@@ -266,11 +269,12 @@ and, whatever `days` is, `calendar`: the commits of each day of the last year th
 `commits`), with `today`.
 """
 function code_activity(kb::KB, key::AbstractString; days::Union{Integer,Nothing} = nothing, now::DateTime = Dates.now(UTC))
-    cid = scalar(kb, "SELECT codebase_id FROM projects WHERE key = ?", (uppercase(strip(key)),))
-    ismissing(cid) && return nothing
+    pid = project_id(kb, key)
+    ismissing(scalar(kb, "SELECT 1 FROM project_codebases WHERE project_id = ?", (pid,))) && return nothing
     rows = [(; at = parse_iso(String(r.at)), author = String(r.author), files = JSON.parse(r.files), tasked = r.tasked == 1)
             for r in query(kb, """SELECT c.at, c.author, c.files, EXISTS (SELECT 1 FROM task_commits tc WHERE tc.commit_id = c.id AND tc.relation != 'mentions') AS tasked
-                                  FROM commits c WHERE c.codebase_id = ? ORDER BY c.at""", (cid,))]
+                                  FROM commits c JOIN project_codebases pc ON pc.codebase_id = c.codebase_id
+                                  WHERE pc.project_id = ? ORDER BY c.at""", (pid,))]
     added(r) = sum(f -> f["added"], r.files; init = 0)
     removed(r) = sum(f -> f["removed"], r.files; init = 0)
     from = days === nothing ? (isempty(rows) ? now : first(rows).at) : now - Day(days)

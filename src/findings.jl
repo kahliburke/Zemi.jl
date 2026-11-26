@@ -1,6 +1,6 @@
 # Findings: what a project's work concludes, kept as knowledge. A finding is a claim in a sentence or
 # two, a write-up in Markdown, and its sources: papers and documents (a passage quoted, where it
-# rests on one), the group's records (see records.jl), notebooks, code in the project's codebase,
+# rests on one), the group's records (see records.jl), notebooks, code in the project's codebases,
 # computed results with where they came from, the tasks it came from, and other findings it builds on
 # or contradicts. Sources are those
 # added as evidence and those the write-up cites with @-references (see `finding_sources`). It belongs to its project (see project_access.jl) and is referred to as
@@ -304,7 +304,7 @@ function add_evidence!(kb::KB, ref::AbstractString; source::AbstractString = "",
         record_row(kb, target) === nothing && not_found("No record $target in the knowledge base")
     elseif kind == "code" && !occursin(':', target)
         codebase = project_codebase(kb, something(ref_project(ref), ""))
-        isempty(codebase) && error("$(ref_project(ref)) has no codebase: name one as codebase:path")
+        isempty(codebase) && error("$(ref_project(ref)) has no codebase: name one as codebase:path")   # its main one
         target = "$codebase:$target"
     elseif kind == "task"
         target = uppercase(target); task_ref(kb, target)
@@ -371,11 +371,6 @@ function archive_finding!(kb::KB, ref::AbstractString; restore::Bool = false, by
 end
 
 finding_ref(r) = "$(r.key)-F$(r.number)"
-
-"The codebase (its id) project `key` is linked to, or `\"\"`."
-project_codebase(kb::KB, key::AbstractString) =
-    String(coalesce(scalar(kb, "SELECT d.doc_id FROM projects p JOIN papers d ON d.id = p.codebase_id WHERE p.key = ?",
-                           (uppercase(strip(key)),)), ""))
 
 """
 What source `target` of `kind` is called: a paper's title, a record's with its date, a task's title,

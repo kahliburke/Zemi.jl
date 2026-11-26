@@ -250,7 +250,9 @@ function projects_tool(; path::String = "")::String
     ps = [p for p in projects(kb(); path) if tool_sees(p.key)]
     isempty(ps) && return isempty(path) ? "No projects yet: make one with `project_create`." :
                           "No project for $path. `projects` lists them all; `project_create` makes one (with `codebase`, for this directory)."
-    return join(("$(p.key): $(p.name) · $(p.open) open of $(p.tasks)" * (isempty(p.codebase) ? "" : " · codebase $(p.codebase)") *
+    code(p) = isempty(p.codebases) ? "" : length(p.codebases) == 1 ? " · codebase $(p.codebase)" :
+              " · codebases $(p.codebase) (main), $(join(p.codebases[2:end], ", "))"
+    return join(("$(p.key): $(p.name) · $(p.open) open of $(p.tasks)" * code(p) *
                  (isempty(p.active_milestone) ? "" : " · active milestone $(p.active_milestone)") *
                  (isempty(p.description) ? "" : "\n  $(p.description)") for p in ps), "\n")
 end
@@ -395,14 +397,15 @@ end
 tool!("next_task", next_task_tool; need = "tasks.edit")
 
 """
-How a commit in the codebase of task `ref`'s project names the task as its work (see
+How a commit in a codebase of task `ref`'s project names the task as its work (see
 [`commit_relations`](@ref)): nothing for a project without a codebase.
 """
 function commit_naming(ref::AbstractString)
     key = ref_project(ref)
-    any(p -> p.key == key && !isempty(p.codebase), projects(kb())) || return ""
+    n = sum((length(p.codebases) for p in projects(kb()) if p.key == key); init = 0)
+    n == 0 && return ""
     r = uppercase(strip(ref))
-    return "Commits in $key's codebase that do this task end with a trailer line, `Tasks: $r`, or say `Fixes $r` in the one " *
+    return "Commits in $key's $(n == 1 ? "codebase" : "codebases") that do this task end with a trailer line, `Tasks: $r`, or say `Fixes $r` in the one " *
            "that finishes it; a reference elsewhere in a message is only a mention, not the task's work.\n\n"
 end
 
@@ -621,24 +624,35 @@ project_create_tool(name::String, key::String; description::String = "", codebas
 tool!("project_create", project_create_tool; need = "tasks.edit")
 
 """
-    project_codebase(project::String, codebase::String) -> String
+    project_codebase(project::String, codebase::String; remove::Bool=false, main::Bool=false, forks::Bool=false) -> String
 
-Link project `project` to `codebase` (its id, `code-…`, as `papers` lists codebases, its
-repository's address, `https://github.com/owner/repo`, or a folder on the service's machine,
-`~/code/project`), so agents working in that codebase's directory find the project with
-`projects(path=…)`, and its commits are recorded against the project's tasks. Adding one the
-knowledge base doesn't have takes paper.add, and a folder, in a shared service, config.edit.
-`"none"` unlinks it.
+Link project `project` to a codebase: its id (`code-…`, as `papers` lists codebases), its
+repository's address (`https://github.com/owner/repo`), or a folder on the service's machine
+(`~/code/project`). Agents working in any of a project's codebases find it with `projects(path=…)`,
+and the commits in each are recorded against its tasks. The first linked is the project's main
+codebase, the one `@code:path` refers to; `main` makes this one main. A GitHub organization or
+account (`github.com/<owner>`) links each of its repositories, without forks unless `forks` and
+without archived ones, and the ones it gains are linked each night. `remove` unlinks the codebase,
+or the organization and the codebases it brought. Adding one the knowledge base doesn't have takes
+paper.add, and a folder, in a shared service, config.edit.
 """
-project_codebase_tool(project::String, codebase::String)::String = refusing() do
-    tool_needs(project, MAINTAIN)
-    key = update_project!(kb(), project; codebase, add_codebase = can(tool_caller(), "paper.add"), by = tool_actor(),
-                          caller = tool_caller())
-    lowercase(strip(codebase)) in ("", "none") && return "Project $key is linked to no codebase."
-    id = String(scalar(kb(), "SELECT d.doc_id FROM projects p JOIN papers d ON d.id = p.codebase_id WHERE p.key = ?", (key,)))
-    SHARED_MODE[] || return "Project $key is linked to codebase $id."
-    fetch_codebase!(kb(), id) || return "Project $key is linked to codebase $id, which can't be fetched yet: $(codebase_problem(kb(), id))."
-    return "Project $key is linked to codebase $id, fetched from its repository."
+function project_codebase_tool(project::String, codebase::String; remove::Bool = false, main::Bool = false,
+                               forks::Bool = false)::String
+    refusing() do
+        tool_needs(project, MAINTAIN)
+        key = uppercase(strip(project))
+        ids = project_codebase!(kb(), key, codebase; remove, main, forks, add = can(tool_caller(), "paper.add"),
+                                by = tool_actor(), caller = tool_caller())
+        org = named_org(codebase)
+        what = org === nothing ? "codebase $(only(ids))" : "$(join(org, '/')) ($(isempty(ids) ? "no new repositories" : join(ids, ", ")))"
+        remove && return "Project $key is no longer linked to $what."
+        codes = project_codebases(kb(), key)
+        listing = "Its codebases: " * join(("$(c.id)$(c.main ? " (main)" : "")" for c in codes), ", ") * "."
+        (org !== nothing || !SHARED_MODE[]) && return "Project $key is linked to $what. $listing"
+        id = only(ids)
+        fetch_codebase!(kb(), id) || return "Project $key is linked to codebase $id, which can't be fetched yet: $(codebase_problem(kb(), id)). $listing"
+        return "Project $key is linked to codebase $id, fetched from its repository. $listing"
+    end
 end
 tool!("project_codebase", project_codebase_tool; need = "tasks.edit")
 
@@ -829,7 +843,7 @@ function project_context(key::AbstractString)
         println(io)
     end
     kept = filter(x -> x.status == "kept", library(kb(), k; caller = tool_caller()))
-    if any(x -> x.id > 0, kept)                       # more than the project's own codebase
+    if any(x -> x.id > 0, kept)                       # more than the project's own codebases
         tally = Dict{String,Int}()
         foreach(x -> tally[library_noun(x)] = get(tally, library_noun(x), 0) + 1, kept)
         counts = sort!(collect(tally); by = c -> (-c[2], c[1]))

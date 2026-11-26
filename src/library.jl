@@ -101,19 +101,21 @@ function library(kb::KB, key::AbstractString; caller::Caller = local_caller())
     findings = citing("""SELECT DISTINCT e.kind, e.target, p.key || '-F' || f.number AS ref, f.number FROM finding_evidence e
                          JOIN findings f ON f.id = e.finding_id JOIN projects p ON p.id = f.project_id
                          WHERE f.project_id = ? AND f.archived_at IS NULL ORDER BY f.number""")
-    code = project_codebase(kb, key)
-    documents = unique([[String(r.target) for r in items if r.kind in ("paper", "codebase")]; isempty(code) ? String[] : [code]])
+    code = [c.id for c in project_codebases(kb, key)]
+    documents = unique([[String(r.target) for r in items if r.kind in ("paper", "codebase")]; code])
     titles = isempty(documents) ? Dict{String,String}() :
         Dict(String(r.doc_id) => String(coalesce(r.title, r.doc_id))
              for r in query(kb, "SELECT doc_id, title FROM papers WHERE doc_id IN ($(in_marks(length(documents))))", Tuple(documents)))
     label(kind, target) = kind in ("paper", "codebase") ? get(titles, target, target) : source_label(kb, kind, target)
     hidden = hidden_documents(kb, caller)
     out = NamedTuple[]
-    isempty(code) || push!(out, (; id = 0, kind = "codebase", target = code, label = label("codebase", code), why = "The project's codebase",
-                                  status = "kept", added_by = "", by_agent = false, added_at = "", tasks = String[], findings = String[]))
+    for c in code
+        push!(out, (; id = 0, kind = "codebase", target = c, label = label("codebase", c), why = "One of the project's codebases",
+                      status = "kept", added_by = "", by_agent = false, added_at = "", tasks = String[], findings = String[]))
+    end
     for r in items
         kind, target = String(r.kind), String(r.target)
-        kind == "codebase" && target == code && continue
+        kind == "codebase" && target in code && continue
         kind in ("paper", "codebase") && target in hidden && continue
         push!(out, (; id = Int(r.id), kind, target, label = label(kind, target),
                       why = String(r.why), status = String(r.status), added_by = String(r.added_by), by_agent = r.by_agent == 1,
@@ -127,12 +129,13 @@ end
     library_holding(kb, kind, target) -> Dict{String,NamedTuple}
 
 The libraries holding `kind` `target`, by project key, each its item `(; id, status, why)`. A
-project holds its own codebase as item 0.
+project holds its own codebases as item 0.
 """
 function library_holding(kb::KB, kind::AbstractString, target::AbstractString)
     out = Dict{String,NamedTuple}()
-    kind == "codebase" && for r in query(kb, "SELECT p.key FROM projects p JOIN papers c ON c.id = p.codebase_id WHERE c.doc_id = ?", (target,))
-        out[String(r.key)] = (; id = 0, status = "kept", why = "The project's codebase")
+    kind == "codebase" && for r in query(kb, """SELECT p.key FROM project_codebases pc JOIN projects p ON p.id = pc.project_id
+                                                JOIN papers c ON c.id = pc.codebase_id WHERE c.doc_id = ?""", (target,))
+        out[String(r.key)] = (; id = 0, status = "kept", why = "One of the project's codebases")
     end
     for r in query(kb, """SELECT p.key, l.id, l.status, l.why FROM library l JOIN projects p ON p.id = l.project_id
                           WHERE l.kind = ? AND l.target = ?""", (kind, target))

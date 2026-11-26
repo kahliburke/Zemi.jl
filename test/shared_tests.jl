@@ -651,8 +651,18 @@ end
         @test call(ada, "GET", "/api/tasks/file-work?codebase=$id&path=src/Tide.jl")[1] == 200
         @test call(bea, "GET", "/api/tasks/file-work?codebase=$id&path=src/Tide.jl")[1] == 404
         @test any(r -> r["kind"] == "code", call(ada, "GET", "/api/tasks/references?project=TD&q=code:src")[2])
+        # A codebase of a second project is seen by that project's members too.
+        shore = K.add_codebase!(kb, mktempdir(); name = "Shore")
+        K.create_project!(kb, "Two"; key = "TW", codebase = shore, owner = ada, by = K.person("Ada"))
+        @test call(ada, "POST", "/api/projects/TW/codebases", Dict("codebase" => id))[1] == 200
+        @test [(c["id"], c["main"]) for c in call(ada, "GET", "/api/projects/TW")[2]["codebases"]] == [(shore, true), (id, false)]
+        @test !K.document_visible(kb, as(bea), id)
+        K.set_member!(kb, "TW", "bea@x.org", "viewer"; by = "ada@x.org")
+        @test K.document_visible(kb, as(bea), id) && "TW" in K.document_projects(kb, id)
+        @test call(ada, "POST", "/api/projects/TW/codebases", Dict("codebase" => id, "remove" => true)) == (200, Dict("codebases" => [id]))
+        @test !K.document_visible(kb, as(bea), id)
         # Linking a project to it, or keeping it in a library, shows it to more people: it takes seeing it.
-        @test call(bea, "POST", "/api/projects/OT", Dict("codebase" => id))[1] == 404
+        @test call(bea, "POST", "/api/projects/OT/codebases", Dict("codebase" => id))[1] == 404
         @test call(bea, "POST", "/api/projects", Dict("name" => "Sneak", "key" => "SN", "codebase" => id))[1] == 404
         @test call(bea, "POST", "/api/projects/OT/library", Dict("source" => id))[1] == 404
         K.set_member!(kb, "OT", "ada@x.org", "contributor"; by = "bea@x.org")

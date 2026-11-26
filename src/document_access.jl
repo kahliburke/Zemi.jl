@@ -4,7 +4,7 @@
 # held for someone is theirs, shared or not (see sharing.jl); one held for no one is the group's. A
 # kind with access (see `DocumentKind`; a codebase, a record) is one whose access those who manage
 # documents set. A document is linked to projects in `document_projects`, and a codebase to the
-# projects it is the codebase of as well. Run for one person, every document is theirs. A document
+# projects it is a codebase of as well. Run for one person, every document is theirs. A document
 # someone may not see is, to them, none: it is answered as one that does not exist and left out of
 # lists. The site every reader is served is built without it (see site_code.jl), and the dataset does
 # not carry it.
@@ -14,7 +14,7 @@ const DOCUMENT_ACCESS = ("open", "projects", "private")
 
 migration!(2, ["ALTER TABLE papers ADD COLUMN access TEXT NOT NULL DEFAULT 'open' CHECK (access IN ('open', 'projects'))"])
 
-# The projects a document belongs to, beside a codebase's own (`projects.codebase_id`).
+# The projects a document belongs to, beside a codebase's own (`project_codebases`).
 migration!(3, ["""CREATE TABLE document_projects (
                       paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
                       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -79,10 +79,10 @@ end
     document_projects(kb, id) -> Vector{String}
 
 The keys of the projects document `id` is linked to, in order: those it is linked to (see
-[`link_document!`](@ref)), and those it is the codebase of.
+[`link_document!`](@ref)), and those it is a codebase of.
 """
 document_projects(kb::KB, id::AbstractString) = [String(r.key) for r in query(kb, """
-    SELECT p.key FROM projects p JOIN papers d ON d.id = p.codebase_id WHERE d.doc_id = ?
+    SELECT p.key FROM project_codebases pc JOIN projects p ON p.id = pc.project_id JOIN papers d ON d.id = pc.codebase_id WHERE d.doc_id = ?
     UNION SELECT p.key FROM document_projects l JOIN projects p ON p.id = l.project_id
           JOIN papers d ON d.id = l.paper_id WHERE d.doc_id = ?
     ORDER BY 1""", (id, id))]
@@ -91,7 +91,7 @@ document_projects(kb::KB, id::AbstractString) = [String(r.key) for r in query(kb
 function documents_projects(kb::KB)
     out = Dict{String,Vector{String}}()
     for r in query(kb, """
-            SELECT d.doc_id, p.key FROM projects p JOIN papers d ON d.id = p.codebase_id
+            SELECT d.doc_id, p.key FROM project_codebases pc JOIN projects p ON p.id = pc.project_id JOIN papers d ON d.id = pc.codebase_id
             UNION SELECT d.doc_id, p.key FROM document_projects l JOIN projects p ON p.id = l.project_id
                   JOIN papers d ON d.id = l.paper_id
             ORDER BY 1, 2""")

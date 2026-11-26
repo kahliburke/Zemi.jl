@@ -11,6 +11,9 @@
 
 ### Changes
 
+- **A project has several codebases**, the first its main one, and may take in a GitHub
+  organization's repositories, listed again each day for new ones. Schema 32 moves each project's
+  codebase into the new table. `update_project!` no longer links codebases: `project_codebase!` does.
 - Share the current page as a link or with editable text from the site navigation.
 
 - **Signing in to a knowledge base run for one person**: an OAuth client, such as a Slate notebook

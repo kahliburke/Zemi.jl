@@ -22,7 +22,7 @@ const CODE = /```[\s\S]*?```|`[^`\n]*`/g
 
 export type RefMatch = { kind: string; target: string; label: string; detail: string }
 
-// The codebase `@code:` references in the text shown are in: the open project's (see setCodebase).
+// The codebase `@code:` references in the text shown are in: the open project's main one (see setCodebase).
 let codebase = ''
 export const setCodebase = (id: string) => { codebase = id }
 
@@ -41,10 +41,14 @@ export const plainRefs = (text: string) => text.replace(FULL, (_, label, kind, t
   kind === 'person' ? `@${personName(target.trim(), label.trim())}` :
   kind === 'task' || kind === 'finding' ? `@${target.trim().toUpperCase()}` : `@${label.trim()}`)
 
-// A reference as the picker writes one: the short form where there is one. Code is named in the
-// project's codebase, so a target's codebase (`code-kb:path`) is left out.
+// A reference as the picker writes one: the short form where there is one. Code in the project's
+// main codebase is named by its path (`@code:path`); in another of its codebases, with that codebase
+// (`@[label](code:code-other:path)`).
 export function refFor(kind: string, target: string, label = target): string {
-  if (kind === 'code') return `@code:${splitCodeTarget(target)[1]}`
+  if (kind === 'code') {
+    const [named, rest] = splitCodeTarget(target)
+    return !named || named === codebase ? `@code:${rest}` : `@[${label}](code:${target})`
+  }
   return kind === 'task' || kind === 'finding' || kind === 'record' ? `@${target}` :
          kind === 'paper' ? `@${citedAs(target)}` : `@[${label}](${kind}:${target})`
 }

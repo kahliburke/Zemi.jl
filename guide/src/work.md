@@ -159,12 +159,20 @@ with the **pen** (the toolbar in the window's corner, or `P`); what they draw fa
 </figure>
 ```
 
-A project's codebase is linked from the code line under its context: one the knowledge base has, or
+A project's codebases are linked from the code line under its context: one the knowledge base has, or
 another by its repository's address or a folder's path. A folder is read where it is, on the
 machine the knowledge base runs on; in a shared service, only someone who may change its
-configuration adds one, since its readers see what is read from it.
+configuration adds one, since its readers see what is read from it. The first linked is the
+project's main codebase, the one `@code:path` refers to; the star makes another main. An agent
+working in any of them finds the project.
 
-When a project has a codebase, a commit naming a task is recorded on it: on a trailer line
+A GitHub organization or account (`github.com/<owner>`) links each of its repositories, without its
+forks unless asked and without archived ones. It is listed again each day: a repository added to it
+is linked and read; one archived since stays, marked, and is not fetched again; one it no longer
+lists is marked, not unlinked. With the GitHub App installed for the organization, its private
+repositories the App may read are listed too.
+
+When a project has codebases, a commit in any of them naming a task is recorded on it: on a trailer line
 (`Tasks: RB-12`, or `Task:`, `Refs:`) or after `Part of`, as its work; anywhere else, as a mention.
 A new commit that says `Fixes`, `Closes`, `Resolves` or `Implements RB-12` also moves the task to
 review, if it is in progress and has not moved since. The first reading of a repository only records.

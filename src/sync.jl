@@ -401,12 +401,12 @@ end
     changed_codebases(kb) -> Vector{String}
 
 The codebases linked to a project whose files, as they are here, differ from their last reading (or
-that were never read).
+that were never read), their repositories not archived.
 """
 function changed_codebases(kb::KB)
     rows = query(kb, """
-        SELECT DISTINCT d.doc_id AS id, x.file_sha FROM projects p JOIN papers d ON d.id = p.codebase_id
-        LEFT JOIN parses x ON x.paper_id = d.id ORDER BY d.doc_id""")
+        SELECT DISTINCT d.doc_id AS id, x.file_sha FROM project_codebases pc JOIN papers d ON d.id = pc.codebase_id
+        LEFT JOIN parses x ON x.paper_id = d.id WHERE d.repository_archived_at IS NULL ORDER BY d.doc_id""")
     return [String(r.id) for r in rows
             if (dir = codebase_dir(kb, r.id); !isempty(dir) && isdir(dir) && (ismissing(r.file_sha) || tree_sha(dir) != r.file_sha))]
 end

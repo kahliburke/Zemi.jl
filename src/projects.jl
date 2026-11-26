@@ -6,9 +6,10 @@
                     caller = local_caller()) -> String
 
 A project, with `key`, the short prefix of its tasks' references (`KB` for `KB-12`): letters and
-digits, made uppercase. `codebase` is a codebase the knowledge base has read (its id, `code-…`), for
-agents working in that codebase's directory to find it, or a repository's address (see
-[`codebase_id`](@ref), for `caller`, and `add_codebase`). `owner`, an account's id, owns the project:
+digits, made uppercase. `codebase` is its first codebase, its main one (see project_codebases.jl): a
+codebase the knowledge base has read (its id, `code-…`), for agents working in that codebase's
+directory to find it, or a repository's address (see [`codebase_id`](@ref), for `caller`, and
+`add_codebase`); more are linked with [`project_codebase!`](@ref). `owner`, an account's id, owns the project:
 its first maintainer, who decides with the admins who belongs to it (see project_access.jl). Returns
 the key; the same project asked for again by the same person moments later is the one made (see
 [`REPEAT_SECONDS`](@ref)).
@@ -24,8 +25,9 @@ function create_project!(kb::KB, name::AbstractString; key::AbstractString, desc
     cid = codebase_id(kb, codebase; add = add_codebase, caller)
     isempty(query(kb, "SELECT 1 FROM projects WHERE key = ?", (key,))) || error("A project's key is already $key")
     use_media!(kb, key, description; record = false)
-    execute!(kb, "INSERT INTO projects (key, name, description, codebase_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-             (key, strip(name), description, cid, by.name, now_iso()))
+    execute!(kb, "INSERT INTO projects (key, name, description, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+             (key, strip(name), description, by.name, now_iso()))
+    ismissing(cid) || link_codebase!(kb, project_id(kb, key), cid; by = by.name)
     use_media!(kb, key, description)
     if owner !== nothing
         execute!(kb, "UPDATE projects SET owner_id = ? WHERE key = ?", (owner, key))
@@ -75,23 +77,16 @@ function codebase_id(kb::KB, codebase::AbstractString; add::Bool = true, caller:
 end
 
 """
-    update_project!(kb, key; name = nothing, description = nothing, codebase = nothing, add_codebase = true, by,
-                    caller = local_caller())
+    update_project!(kb, key; name = nothing, description = nothing, by)
 
-Rename project `key`, give it a new `description` (what it is about and how to work in it, which
-agents read before they take its work, see `next_task`), or link it to a `codebase` (its id,
-`code-…`, or its repository's address, added with `add_codebase` as [`codebase_id`](@ref) says, for
-`caller`; `"none"` unlinks it), for agents working in that codebase's directory to find it. Only a
-person changes the name and description; an agent may link a codebase.
+Rename project `key`, or give it a new `description` (what it is about and how to work in it, which
+agents read before they take its work, see `next_task`). Only a person changes them. Its codebases
+are linked with [`project_codebase!`](@ref).
 """
-function update_project!(kb::KB, key::AbstractString; name = nothing, description = nothing, codebase = nothing,
-                         add_codebase::Bool = true, by::Actor, caller::Caller = local_caller())
+function update_project!(kb::KB, key::AbstractString; name = nothing, description = nothing, by::Actor)
     by.agent && (name !== nothing || description !== nothing) && error("Only a person changes a project's name or description")
     pid = project_id(kb, key)
     use_media!(kb, key, description)
-    codebase === nothing ||
-        execute!(kb, "UPDATE projects SET codebase_id = ? WHERE id = ?",
-                 (codebase_id(kb, codebase; add = add_codebase, caller), pid))
     name === nothing || (isempty(strip(name)) ? error("A project needs a name") :
                          execute!(kb, "UPDATE projects SET name = ? WHERE id = ?", (strip(name), pid)))
     description === nothing || execute!(kb, "UPDATE projects SET description = ? WHERE id = ?", (strip(description), pid))
@@ -125,24 +120,38 @@ end
 """
     projects(kb; path = "", archived = false) -> Vector{NamedTuple}
 
-The projects, each `(; key, name, description, codebase, root, tasks, open, active_milestone)`: its codebase's id and
-directory, if it has one, and how many tasks it has and how many are not done, subtasks not counted. With `path`, only
-those whose codebase holds that directory (an agent's working directory), the innermost first.
+The projects, each `(; key, name, description, codebase, root, codebases, tasks, open, active_milestone)`: its main
+codebase's id and directory, if it has one, the ids of all its codebases (the main one first, see
+[`project_codebases`](@ref)), and how many tasks it has and how many are not done, subtasks not counted. With
+`path`, only those with a codebase holding that directory (an agent's working directory), the innermost first.
 """
 function projects(kb::KB; path::AbstractString = "", archived::Bool = false)
     rows = query(kb, """
-        SELECT p.key, p.name, p.description, d.doc_id AS codebase, d.source_path AS root, am.name AS active_milestone,
+        SELECT p.key, p.name, p.description, am.name AS active_milestone,
                (SELECT count(*) FROM tasks t WHERE t.project_id = p.id AND t.parent_id IS NULL AND t.archived_at IS NULL) AS tasks,
                (SELECT count(*) FROM tasks t WHERE t.project_id = p.id AND t.parent_id IS NULL AND t.status != 'done') AS open
-        FROM projects p LEFT JOIN papers d ON d.id = p.codebase_id LEFT JOIN milestones am ON am.id = p.active_milestone_id
+        FROM projects p LEFT JOIN milestones am ON am.id = p.active_milestone_id
         WHERE p.archived = ? ORDER BY p.name""", (archived ? 1 : 0,))
-    list = [(; key = r.key, name = r.name, description = r.description, codebase = coalesce(r.codebase, ""),
-               root = coalesce(r.root, ""), tasks = Int(r.tasks), open = Int(r.open),
-               active_milestone = coalesce(r.active_milestone, "")) for r in rows]
+    # Each project's codebases, the main one first: (id, folder).
+    code = Dict{String,Vector{Tuple{String,String}}}()
+    for r in query(kb, """SELECT p.key, d.doc_id, d.source_path FROM project_codebases pc JOIN projects p ON p.id = pc.project_id
+                          JOIN papers d ON d.id = pc.codebase_id ORDER BY p.key, pc.position, pc.added_at, d.doc_id""")
+        push!(get!(Vector{Tuple{String,String}}, code, String(r.key)), (String(r.doc_id), String(coalesce(r.source_path, ""))))
+    end
+    function entry(r)
+        c = get(code, r.key, Tuple{String,String}[])
+        return (; key = r.key, name = r.name, description = r.description, codebase = isempty(c) ? "" : first(first(c)),
+                  root = isempty(c) ? "" : last(first(c)), codebases = String[first(x) for x in c],
+                  tasks = Int(r.tasks), open = Int(r.open), active_milestone = coalesce(r.active_milestone, ""))
+    end
+    list = [entry(r) for r in rows]
     isempty(path) && return list
     dir = full_folder(path)
-    holds(root) = !isempty(root) && within_dir(dir, root)
-    return sort!(filter(p -> holds(p.root), list); by = p -> -length(p.root))
+    # The innermost of a project's codebases holding `dir`, by its root's length; 0 for none.
+    depth(p) = maximum((length(root) for (_, root) in get(code, p.key, Tuple{String,String}[]) if !isempty(root) && within_dir(dir, root));
+                       init = 0)
+    held = [(p, depth(p)) for p in list]
+    return [p for (p, _) in sort!(filter(x -> last(x) > 0, held); by = x -> -last(x))]
 end
 
 function project_id(kb::KB, key::AbstractString)

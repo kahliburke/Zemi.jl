@@ -5,13 +5,15 @@
 
 task_json(t) = Dict(pairs(t))
 
-"A project's codebase as the board shows it: its id, title, revision, web page and repository's, or `nothing`."
-function codebase_json(kb::KB, id::AbstractString)
-    isempty(id) && return nothing
-    r = first(query(kb, "SELECT title FROM papers WHERE doc_id = ?", (id,)))
-    root = codebase_dir(kb, id)
-    return Dict("id" => id, "title" => coalesce(r.title, id), "rev" => isdir(root) ? git_rev(root) : "",
-                "remote" => remote_url(root), "page" => "/kb/code/$(page_slug(id))/")
+"""
+One of a project's codebases as the board shows it (see [`project_codebases`](@ref)): its id, title,
+revision, web page and repository's, whether it is the `main` one, the organization it came in
+through, whether that no longer lists it (`gone`), and whether its repository is archived.
+"""
+function codebase_json(kb::KB, c)
+    root = codebase_dir(kb, c.id)
+    return Dict("id" => c.id, "title" => c.title, "rev" => isdir(root) ? git_rev(root) : "", "remote" => remote_url(root),
+                "page" => "/kb/code/$(page_slug(c.id))/", "main" => c.main, "org" => c.org, "gone" => c.gone, "archived" => c.archived)
 end
 
 """
@@ -86,7 +88,7 @@ route!("POST", "/api/projects"; need = "tasks.edit") do c
                                   add_codebase = can(c.caller, "paper.add"), by = person_of(c), c.caller))
 end
 
-# A project's board: its tasks, milestones, codebase, the records linked to it that the caller sees,
+# A project's board: its tasks, milestones, codebases and organizations, the records linked to it that the caller sees,
 # agents at work, what people did lately (who is there is /api/presence), how far the caller reaches it, and
 # when others last changed each task.
 route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
@@ -94,7 +96,8 @@ route!("GET", "/api/projects/:key"; need = "tasks.view", project = VIEW) do c
     i = findfirst(x -> x.key == key, projects(kb))
     i === nothing && not_found("No project $key")
     p = projects(kb)[i]
-    Dict("project" => Dict(pairs(p)), "statuses" => STATUS_JSON, "codebase" => codebase_json(kb, p.codebase),
+    Dict("project" => Dict(pairs(p)), "statuses" => STATUS_JSON, "codebases" => Any[codebase_json(kb, x) for x in project_codebases(kb, key)],
+         "orgs" => Any[Dict(pairs(o)) for o in project_orgs(kb, key)],
          "access" => access_name(project_access(kb, c.caller, key)), "manages_members" => manages_members(kb, c.caller, key),
          "agents" => Dict(pairs(agents_at_work(kb, key))),
          "files" => project_files(kb, key),
@@ -126,9 +129,17 @@ end
 
 route!("POST", "/api/projects/:key"; need = "tasks.edit", project = MAINTAIN) do c
     d = json_body(c)
-    update_project!(c.kb, c[:key]; name = opt(d, "name"), description = opt(d, "description"), codebase = opt(d, "codebase"),
-                    add_codebase = can(c.caller, "paper.add"), by = person_of(c), c.caller)
+    update_project!(c.kb, c[:key]; name = opt(d, "name"), description = opt(d, "description"), by = person_of(c))
     Dict("project" => Dict(pairs(only(p for p in projects(c.kb) if p.key == uppercase(c[:key])))))
+end
+
+# Link a codebase or an organization to a project, unlink it (`remove`), or make one main (see project_codebase!).
+route!("POST", "/api/projects/:key/codebases"; need = "tasks.edit", project = MAINTAIN) do c
+    d = json_body(c)
+    ids = project_codebase!(c.kb, c[:key], String(get(d, "codebase", "")); remove = get(d, "remove", false) == true,
+                            main = get(d, "main", false) == true, forks = get(d, "forks", false) == true,
+                            add = can(c.caller, "paper.add"), by = person_of(c), c.caller)
+    Dict("codebases" => ids)
 end
 
 route!("POST", "/api/projects/:key/delete"; need = "tasks.edit", project = VIEW) do c

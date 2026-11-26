@@ -3,7 +3,7 @@
 # `@rec-notes-2026-10-02` (a record),
 # or `@[label](kind:target)` for any kind, which allows spaces in the
 # label: `@[Ada Lovelace](author:lovelace|a)`, `@[Rowan Hale](person:rowan@example.org)`,
-# `@code:src/tasks.jl#update_project!` (a file or a definition in the project's codebase), `@KB-F3` (a finding),
+# `@code:src/tasks.jl#update_project!` (a file or a definition in the project's main codebase), `@KB-F3` (a finding),
 # `@[Error scaling](notebook:notebooks/papers/2409-00785/scaling.jl)`. Each is also one of the
 # task's links. Code spans and blocks are left alone.
 
@@ -15,7 +15,7 @@ const AT_PAPER = Regex("(?<![\\w@/])@arXiv:$ARXIV_ID", "i")
 const AT_DOC = r"(?<![\w@/])@(doc-[0-9a-f]{10})\b"
 const AT_RESOURCE = r"(?<![\w@/])@(res-[a-z0-9]+(?:-[a-z0-9]+)*)"
 const AT_RECORD = r"(?<![\w@/])@(rec-[a-z0-9]+(?:-[a-z0-9]+)*)"
-# A file of the project's codebase, or a definition in it: a path ending in a letter or digit, then `#name`.
+# A file of the project's main codebase, or a definition in it: a path ending in a letter or digit, then `#name`.
 const AT_CODE_REF = r"(?<![\w@/])@code:([\w./-]*\w)(?:#([\w!?]+(?:\.[\w!?]+)*))?"
 const AT_FINDING = Regex("(?<![\\w@/])@($(FINDING_REF.pattern))\\b")
 const AT_CODE = r"```[\s\S]*?```|`[^`\n]*`"
@@ -73,8 +73,8 @@ end
 
 Make what `text` refers to (see [`at_references`](@ref)) links of task `ref`, those it does not
 have yet, without noting each in the activity, where the text shows them. A task that does not
-exist, or the task itself, is not linked. Code is linked as `<codebase>:<path>`, in the codebase of
-the task's project, and not linked when the project has none.
+exist, or the task itself, is not linked. Code is linked as `<codebase>:<path>`, in the main codebase
+of the task's project, and not linked when the project has none.
 """
 function link_at_references!(kb::KB, ref::AbstractString, text::AbstractString; by::Actor)
     id = task_ref(kb, ref)
@@ -99,9 +99,9 @@ function link_at_references!(kb::KB, ref::AbstractString, text::AbstractString; 
     end
 end
 
-"The codebase (its id) of task `id`'s project, or `\"\"`."
-task_codebase(kb::KB, id::Integer) = String(coalesce(scalar(kb, """SELECT d.doc_id FROM tasks t JOIN projects p ON p.id = t.project_id
-                                                                   JOIN papers d ON d.id = p.codebase_id WHERE t.id = ?""", (id,)), ""))
+"The main codebase (its id) of task `id`'s project, or `\"\"`."
+task_codebase(kb::KB, id::Integer) =
+    project_codebase(kb, String(scalar(kb, "SELECT p.key FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?", (id,))))
 
 task_id_or_nothing(kb::KB, ref::AbstractString) = try task_ref(kb, ref) catch e; reason(e) === nothing ? rethrow() : nothing end
 
@@ -178,22 +178,30 @@ function code_reference_matches(kb::KB, codebase::AbstractString, q::AbstractStr
             for n in first(hits, limit)]
 end
 
+"How many of a project's files and definitions the picker offers at most."
+const CODE_MATCHES = 12
+
 """
     at_reference_matches(kb, q; limit = 5, project = "", caller = local_caller()) -> Vector{NamedTuple}
 
 What a reference being typed as `@q` may mean, for the board's picker: tasks, papers, the records
 `caller` may see, authors, people and notebooks with a word beginning `q`, up to `limit` of each kind,
-as `(; kind, target, label, detail)`, and with a `project` that has a codebase `caller` may see, its files and definitions (see
-[`code_reference_matches`](@ref)). Those whose label `q` begins come first, then those with a word
-of the label beginning it.
+as `(; kind, target, label, detail)`, and with a `project`, the files and definitions of its codebases `caller` may see
+(see [`code_reference_matches`](@ref)), up to `CODE_MATCHES`: its main one's by their path, first, the others' as
+`<codebase>:<path>`. Those whose label `q` begins come first, then those with a word of the label beginning it.
 """
 function at_reference_matches(kb::KB, q::AbstractString; limit::Integer = 5, project::AbstractString = "",
                               caller::Caller = local_caller(), projects = visible_projects(kb, caller),
                               only = nothing, except = hidden_documents(kb, caller))
-    codebase = isempty(project) ? "" :
-        String(coalesce(scalar(kb, "SELECT d.doc_id FROM projects p JOIN papers d ON d.id = p.codebase_id WHERE p.key = ?",
-                               (uppercase(strip(project)),)), ""))
-    code = isempty(codebase) || !document_visible(kb, caller, codebase) ? NamedTuple[] : code_reference_matches(kb, codebase, q)
+    code = NamedTuple[]
+    for c in (isempty(project) ? NamedTuple[] : project_codebases(kb, project))
+        document_visible(kb, caller, c.id) || continue
+        for m in code_reference_matches(kb, c.id, q)
+            push!(code, c.main ? m : merge(m, (; target = "$(c.id):$(m.target)", detail = "$(c.title) · $(m.detail)")))
+        end
+        length(code) >= CODE_MATCHES && break
+    end
+    code = first(code, CODE_MATCHES)
     startswith(lowercase(strip(q)), "code:") && return code
     q = lowercase(strip(q))
     esc = replace(q, r"[%_\\]" => s"\\\0")

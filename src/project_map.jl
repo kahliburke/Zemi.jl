@@ -9,8 +9,8 @@
 Everything a map of project `key` is drawn from, as JSON: the `project`, its `milestones`, every task
 not declined (archived ones included), the tasks' `links`, their `activity` (notes and moves), the
 `commits` recorded against them, the project's `findings` with the tasks they rest on, the
-`questions` still open (`by_agent`: an agent's, waiting on people), and its codebase as the
-knowledge base has read it (see [`code_map`](@ref)). Read it with [`read_project_map`](@ref).
+`questions` still open (`by_agent`: an agent's, waiting on people), and its codebases as the
+knowledge base has read them, the main one first (see [`code_map`](@ref)). Read it with [`read_project_map`](@ref).
 """
 function project_map(kb::KB, key::AbstractString)
     key = uppercase(strip(key))
@@ -57,24 +57,21 @@ function project_map(kb::KB, key::AbstractString)
                 "milestones" => [Dict(String(k) => v for (k, v) in pairs(m) if k in (:name, :description, :start, :due, :closed, :closed_at, :created_at))
                                  for m in milestones(kb, key)],
                 "tasks" => tasks, "links" => links, "activity" => activity, "commits" => commits,
-                "findings" => findings, "questions" => questions, "code" => code_map(kb, key))
+                "findings" => findings, "questions" => questions,
+                "code" => Any[code_map(kb, key, c.id) for c in project_codebases(kb, key)])
 end
 
 """
-    code_map(kb, key) -> Union{Dict,Nothing}
+    code_map(kb, key, id) -> Dict
 
-Project `key`'s codebase as the knowledge base has read it, or `nothing` without one: its `id`, its
+Codebase `id` of project `key` as the knowledge base has read it: its `id`, its `title`, its
 `summary`, its `files`, each with its `path`, `lines`, `definitions`, its `summary`, `work` (the lines
 that each of the project's tasks changed in it, through the commits recorded against them) and
 `used_by` (the notebooks that call what it defines), and its `notebooks` (files under `notebooks/`),
 each with its `path`, `lines`, `summary`, `uses` (the files whose definitions it calls) and the
 project's `tasks` that link to it.
 """
-function code_map(kb::KB, key::AbstractString)
-    i = findfirst(p -> p.key == uppercase(strip(key)), projects(kb))
-    i === nothing && return nothing
-    id = projects(kb)[i].codebase
-    isempty(id) && return nothing
+function code_map(kb::KB, key::AbstractString, id::AbstractString)
     files = Dict{String,Any}[]
     walk(n) = n["kind"] == "file" ? push!(files, n) : foreach(walk, n["children"])
     walk(code_tree(kb, id))
@@ -97,7 +94,7 @@ function code_map(kb::KB, key::AbstractString)
         push!(get!(attached, String(r.target), String[]), String(r.ref))
     end
     entry(f) = Dict("path" => f["path"], "lines" => something(f["lines"], 0), "summary" => something(f["summary"], ""))
-    return Dict("id" => id, "summary" => coalesce(p.abstract, ""),
+    return Dict("id" => id, "title" => coalesce(p.title, id), "summary" => coalesce(p.abstract, ""),
                 "files" => [merge(entry(f), Dict("definitions" => something(f["definitions"], 0), "work" => get(work, f["path"], Dict{String,Int}()),
                                                  "used_by" => sort([n for (n, u) in uses if f["path"] in u])))
                             for f in files if !notebook(f)],
@@ -168,8 +165,8 @@ end
 """
 A project's map (see [`project_map`](@ref)): its tasks by ref, in board number order (`order`),
 milestones, links, dated activity (notes and moves, and commits; a move's column `to`), findings,
-open questions, and its codebase's files (`code`, with how many lines each task changed in each) and
-summary (`code_summary`).
+open questions, and its codebases' files (`code`, each with its `codebase`, and how many lines each
+task changed in it) and notebooks, and its main codebase's summary (`code_summary`).
 """
 struct ProjectMap
     key::String
@@ -184,16 +181,16 @@ struct ProjectMap
     activity::Vector{NamedTuple{(:task, :at, :kind, :to),Tuple{String,DateTime,String,String}}}
     findings::Vector{MapFinding}
     questions::Vector{NamedTuple{(:task, :text, :by_agent),Tuple{String,String,Bool}}}
-    code::Vector{NamedTuple{(:path, :lines, :definitions, :summary, :work, :used_by),Tuple{String,Int,Int,String,Dict{String,Int},Vector{String}}}}
+    code::Vector{NamedTuple{(:codebase, :path, :lines, :definitions, :summary, :work, :used_by),Tuple{String,String,Int,Int,String,Dict{String,Int},Vector{String}}}}
     code_summary::String
-    notebooks::Vector{NamedTuple{(:path, :lines, :summary, :uses, :tasks),Tuple{String,Int,String,Vector{String},Vector{String}}}}
+    notebooks::Vector{NamedTuple{(:codebase, :path, :lines, :summary, :uses, :tasks),Tuple{String,String,Int,String,Vector{String},Vector{String}}}}
 end
 
 "A [`ProjectMap`](@ref) from [`project_map`](@ref)'s document (as written, or parsed from JSON)."
 function read_project_map(d::AbstractDict)
     p = d["project"]
     s(x) = x === nothing ? "" : String(x)
-    code = get(d, "code", nothing)
+    code = something(get(d, "code", nothing), Any[])
     tasks = [MapTask(t["ref"], t["title"], t["status"], Int(t["priority"]), s(t["milestone"]), s(t["parent"]), s(t["assignee"]),
                      parse_iso(t["created_at"]), parse_iso(t["updated_at"]), isempty(s(t["archived_at"])) ? nothing : parse_iso(t["archived_at"]))
              for t in d["tasks"]]
@@ -208,14 +205,16 @@ function read_project_map(d::AbstractDict)
                       sort!([moves; worked]; by = a -> a.at),
                       [MapFinding(f["ref"], f["claim"], f["status"], parse_iso(f["created_at"]), String.(f["tasks"])) for f in d["findings"]],
                       [(; task = String(q["task"]), text = String(q["text"]), by_agent = Bool(q["by_agent"])) for q in d["questions"]],
-                      code === nothing ? NamedTuple{(:path, :lines, :definitions, :summary, :work, :used_by),Tuple{String,Int,Int,String,Dict{String,Int},Vector{String}}}[] :
-                          [(; path = String(f["path"]), lines = Int(f["lines"]), definitions = Int(f["definitions"]), summary = s(f["summary"]),
-                              work = Dict{String,Int}(String(k) => Int(v) for (k, v) in f["work"]), used_by = String.(get(f, "used_by", String[])))
-                           for f in code["files"]],
-                      code === nothing ? "" : s(code["summary"]),
-                      code === nothing ? NamedTuple{(:path, :lines, :summary, :uses, :tasks),Tuple{String,Int,String,Vector{String},Vector{String}}}[] :
-                          [(; path = String(n["path"]), lines = Int(n["lines"]), summary = s(n["summary"]), uses = String.(n["uses"]),
-                              tasks = String.(n["tasks"])) for n in get(code, "notebooks", Any[])])
+                      NamedTuple{(:codebase, :path, :lines, :definitions, :summary, :work, :used_by),Tuple{String,String,Int,Int,String,Dict{String,Int},Vector{String}}}[
+                          (; codebase = String(c["id"]), path = String(f["path"]), lines = Int(f["lines"]), definitions = Int(f["definitions"]),
+                             summary = s(f["summary"]), work = Dict{String,Int}(String(k) => Int(v) for (k, v) in f["work"]),
+                             used_by = String.(get(f, "used_by", String[])))
+                          for c in code for f in c["files"]],
+                      isempty(code) ? "" : s(first(code)["summary"]),
+                      NamedTuple{(:codebase, :path, :lines, :summary, :uses, :tasks),Tuple{String,String,Int,String,Vector{String},Vector{String}}}[
+                          (; codebase = String(c["id"]), path = String(n["path"]), lines = Int(n["lines"]), summary = s(n["summary"]),
+                             uses = String.(n["uses"]), tasks = String.(n["tasks"]))
+                          for c in code for n in get(c, "notebooks", Any[])])
 end
 read_project_map(kb::KB, key::AbstractString) = read_project_map(project_map(kb, key))
 

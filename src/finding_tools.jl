@@ -37,7 +37,7 @@ tool!("finding", finding_tool; need = "tasks.view")
 Record what work concluded as a finding in `project`: the `claim` in a sentence or two, and the
 write-up in `body` (Markdown, with math in `\$…\$`): what shows it, how it was found, its
 limits. Cite what it rests on in the text: `@arXiv:2401.00001`, `@doc-…`, `@rec-…` (a record: what was said),
-`@[label](notebook:path)`, `@code:path#name` (in the project's codebase), `@KB-12`, `@KB-F3`.
+`@[label](notebook:path)`, `@code:path#name` (in the project's main codebase; `@[label](code:code-other:path)` in another), `@KB-12`, `@KB-F3`.
 Give `task`, the task the work was done under, which becomes its first source; add passages and
 computed results with `finding_evidence`. It stays a draft until a person accepts it.
 """
@@ -92,7 +92,7 @@ Add a source to draft finding `ref`, where the text's citations do not say enoug
   passage itself, quoted, in `excerpt`
 - a record of the group's: `@rec-…`, what was said, quoted, in `excerpt`
 - a notebook: `@[label](notebook:notebooks/…/name.jl)`, the cell in `detail`
-- code: `@code:path` or `@code:path#name` in the project's codebase
+- code: `@code:path` or `@code:path#name` in the project's main codebase, `codebase:path` in another of its codebases
 - a task it came from: `@KB-12`
 - another finding: `@KB-F3`, which it builds on, or `relation="contradicts"`
 - something computed: `result:` and an attached file (`media/…`) or a value, with where it came
