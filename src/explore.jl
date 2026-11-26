@@ -110,6 +110,26 @@ migration!(26, [
         judged_at TEXT NOT NULL,
         PRIMARY KEY (a_id, b_id))"""])
 
+# The explore page's tables again, where missing: a database migrated while another migration was also
+# numbered 25 recorded 25 and 26 as applied without them.
+migration!(28, [
+    """CREATE TABLE IF NOT EXISTS document_links (
+        from_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        to_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        PRIMARY KEY (from_id, to_id, kind))""",
+    "CREATE INDEX IF NOT EXISTS document_links_to ON document_links (to_id)",
+    """CREATE TABLE IF NOT EXISTS document_links_read (
+        paper_id INTEGER PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+        version TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS document_pairs (
+        a_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        b_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        related INTEGER NOT NULL,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        judged_at TEXT NOT NULL,
+        PRIMARY KEY (a_id, b_id))"""])
+
 """
     judge_pair!(kb, caller, a, b, related)
 

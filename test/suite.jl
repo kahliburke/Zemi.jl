@@ -2977,6 +2977,20 @@ end
     @test due("2020-01-01", missing) && due(missing, "2026-01-01T00:00:00Z")
 end
 
+@zset "a database that missed the explore page's tables gets them" begin
+    c = temp_config(layers = Layer[])
+    kb = open_kb(c)
+    tables(kb) = Set(String(r.name) for r in K.query(kb, "SELECT name FROM sqlite_master WHERE type = 'table'"))
+    # As one migrated while another migration was also numbered 25: past 26 without the links' tables.
+    foreach(t -> K.execute!(kb, "DROP TABLE $t"), ("document_links", "document_links_read"))
+    K.execute!(kb, "UPDATE kv SET value = '27' WHERE key = 'schema_version'")
+    close(kb)
+    kb = open_kb(c)
+    @test issubset(["document_links", "document_links_read", "document_pairs", "cite_aliases"], tables(kb))
+    @test K.read_links!(kb) == 0
+    close(kb)
+end
+
 @zset "exploring the knowledge base" begin
     JSON = K.JSON
     kb = open_kb(temp_config(; layers = Layer[], qdrant_url = "http://127.0.0.1:1"))
