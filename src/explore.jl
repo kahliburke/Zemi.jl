@@ -432,7 +432,9 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     n = length(rows)
     label = strip("$n documents $what")
     progress("$label · nearest neighbours", 0.0)
-    near = nearest_columns(X, EXPLORE_NEIGHBOURS)
+    # Each one's nearest, found once: the map keeps the first few, UMAP and PaCMAP take more.
+    wide = nearest_columns(X, EXPLORE_NEIGHBOURS + 50)
+    near = [first(ns, EXPLORE_NEIGHBOURS) for ns in wide]
     library = nearest_library(X, [is_record(r.id) for r in rows], 5)
     # Laid out by t-SNE: all of them, or the most often near others where there are too many.
     laid = if n <= EXPLORE_LAYOUT_LIMIT
@@ -452,12 +454,15 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     deep = centred(packed(tsne(X[:, laid]; dims = 3); near = near_laid))
     cancelled() && return nothing
     # UMAP too, which keeps more of how the groups lie to each other: every document, its cost growing with their number.
-    progress("$label · UMAP", 0.45)
-    uflat, udeep = centred(packed(umap(X; dims = 2, min_dist = 0.4); near)), centred(packed(umap(X; dims = 3, min_dist = 0.4); near))
+    # And PaCMAP, which keeps the arrangement between groups better still. Each of these four on a thread
+    # of its own, from the nearest found above.
+    progress("$label · UMAP and PaCMAP", 0.45)
+    laid_out(f) = Threads.@spawn centred(packed(f(); near))
+    u2, u3 = laid_out(() -> umap(X; dims = 2, min_dist = 0.4, near = wide)), laid_out(() -> umap(X; dims = 3, min_dist = 0.4, near = wide))
+    p2, p3 = laid_out(() -> pacmap(X; dims = 2, near = wide)), laid_out(() -> pacmap(X; dims = 3, near = wide))
+    uflat, udeep, pflat, pdeep = fetch(u2), fetch(u3), fetch(p2), fetch(p3)
     cancelled() && return nothing
-    # And PaCMAP, which keeps the arrangement between groups better still.
-    progress("$label · PaCMAP", 0.75)
-    pflat, pdeep = centred(packed(pacmap(X; dims = 2); near)), centred(packed(pacmap(X; dims = 3); near))
+    progress("$label · clusters", 0.9)
     pos2, pos3 = zeros(n, 2), zeros(n, 3)
     pos2[laid, :], pos3[laid, :] = flat, deep
     # The rest among their nearest laid out, a little apart.

@@ -337,10 +337,11 @@ while sampled pairs are pushed apart, from the principal components. More of the
 groups is kept than by [`tsne`](@ref); seeded, so the layout is the same for the same vectors.
 """
 function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500, min_dist::Real = 0.1, dims::Integer = 2,
-              seed::Integer = 1)
+              seed::Integer = 1, near = nothing)
     n = size(X, 2)
     k = min(neighbours, n - 1)
-    near = nearest_columns(X, k)
+    # Each column's nearest, as `nearest_columns` gives them: found here unless given (at least `k` each).
+    near = near === nothing ? nearest_columns(X, k) : [first(ns, k) for ns in near]
     # Each column's neighbours, weighted so its own nearest is 1 and the weights sum to log2(k).
     I, J, W = Int[], Int[], Float64[]
     for i in 1:n
@@ -378,13 +379,25 @@ function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500
     every = maximum(weight) ./ weight                          # epochs between an edge's samplings
     next = copy(every)
     negatives = 5
+    umap_epochs!(Y, edges, every, next, a, b, epochs, rng)
+    return permutedims(Y)
+end
+
+# UMAP's optimization (see `umap`): each edge drawn together as often as its weight says, and a few random
+# pairs pushed apart for each; the step shrinking to nothing over the epochs. In place on `Y`, a column a point.
+function umap_epochs!(Y::Matrix{Float64}, edges, every, next, a::Float64, b::Float64, epochs::Integer, rng)
+    dims, n = size(Y)
+    negatives = 5
     clip(g) = clamp(g, -4.0, 4.0)
-    for epoch in 1:epochs
+    @inbounds for epoch in 1:epochs
         rate = 1 - (epoch - 1) / epochs
         for (e, (i, j)) in enumerate(edges)
             next[e] > epoch && continue
             next[e] += every[e]
-            d2 = sum(abs2, view(Y, :, i) .- view(Y, :, j))
+            d2 = 0.0
+            for c in 1:dims
+                d2 += (Y[c, i] - Y[c, j])^2
+            end
             if d2 > 0
                 g = -2a * b * d2^(b - 1) / (1 + a * d2^b)
                 for c in 1:dims
@@ -395,7 +408,10 @@ function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500
             for _ in 1:negatives
                 m = rand(rng, 1:n)
                 m == i && continue
-                d2 = sum(abs2, view(Y, :, i) .- view(Y, :, m))
+                d2 = 0.0
+                for c in 1:dims
+                    d2 += (Y[c, i] - Y[c, m])^2
+                end
                 g = 2b / ((0.001 + d2) * (1 + a * d2^b))
                 for c in 1:dims
                     Y[c, i] += (d2 > 0 ? clip(g * (Y[c, i] - Y[c, m])) : 4.0) * rate
@@ -403,7 +419,7 @@ function umap(X::AbstractMatrix; neighbours::Integer = 15, epochs::Integer = 500
             end
         end
     end
-    return permutedims(Y)
+    return Y
 end
 
 """
@@ -415,7 +431,7 @@ apart, weighted in three phases so the arrangement of groups forms first and nei
 Keeps neighbourhoods as [`umap`](@ref) does and more of the arrangement between groups; seeded.
 """
 function pacmap(X::AbstractMatrix; neighbours::Integer = 10, mid_ratio::Real = 0.5, far_ratio::Real = 2,
-                iterations::Integer = 450, dims::Integer = 2, seed::Integer = 1)
+                iterations::Integer = 450, dims::Integer = 2, seed::Integer = 1, near = nothing)
     n = size(X, 2)
     # A small collection has few true neighbours each: no more than a quarter of it.
     k = clamp(neighbours, 1, max(1, (n - 1) ÷ 4))
@@ -424,7 +440,7 @@ function pacmap(X::AbstractMatrix; neighbours::Integer = 10, mid_ratio::Real = 0
     d2(i, j) = max(2 - 2 * dot(view(X, :, i), view(X, :, j)), 0.0)
     # Near pairs: of each column's nearest, those nearest by distance scaled by both ends' local spread
     # (the mean distance to their 4th to 6th nearest), so dense and sparse places count alike.
-    candidates = nearest_columns(X, min(k + 50, n - 1))
+    candidates = near === nothing ? nearest_columns(X, min(k + 50, n - 1)) : [first(ns, min(k + 50, n - 1)) for ns in near]
     spread = map(candidates) do c
         ds = [distance(s) for (_, s) in c]
         max(length(ds) >= 6 ? sum(ds[4:6]) / 3 : ds[end], 1e-10)
