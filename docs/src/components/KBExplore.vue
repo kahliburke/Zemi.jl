@@ -75,11 +75,20 @@ type Detail = { id: string; title: string; authors: string[]; published: string;
 const detail = ref<Detail | null>(null)
 // What the card reads out: the summary, or a note's opening until it has one, or the abstract.
 const cardText = computed(() => detail.value ? detail.value.summary || detail.value.excerpt || detail.value.abstract : '')
-// Whether it runs past the card's few lines: only then is its end faded, with More to read the rest.
+// Whether it runs well past the card's few lines: only then is its end faded, with More to read the rest.
+// Two lines more or fewer are shown whole: More would hide no more than it takes.
 const sumBox = ref<HTMLElement | null>(null)
 const clipped = ref(false)
-const measureSummary = () => { const el = sumBox.value; clipped.value = !!el && el.scrollHeight > el.clientHeight + 2 }
-watch(cardText, () => nextTick(measureSummary))
+const whole = ref(false)
+function measureSummary() {
+  const el = sumBox.value
+  if (!el) return
+  const over = el.scrollHeight - el.clientHeight, line = parseFloat(getComputedStyle(el).lineHeight) || 20
+  if (over > 2.2 * line) clipped.value = true
+  else if (over > 1) whole.value = true
+}
+// Measured at the card's height, so a new text is first drawn clipped.
+watch(cardText, () => { whole.value = clipped.value = false; nextTick(measureSummary) })
 const details = new Map<string, Detail>()
 const more = ref(false)
 const render = shallowRef<Render>(escapeText)
@@ -1290,7 +1299,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <h3><a :href="selected.page" target="_blank" rel="noopener">{{ selected.title }}</a></h3>
         <template v-if="detail && detail.id === selected.id">
           <p v-if="byline(detail)" class="kbx-byline">{{ byline(detail) }}</p>
-          <div v-if="cardText" ref="sumBox" class="kbx-summary" :class="{ open: more, clipped }">
+          <div v-if="cardText" ref="sumBox" class="kbx-summary" :class="{ open: more || whole, clipped }">
             <p class="kbx-sum-head">{{ detail.summary ? 'Summary' : detail.excerpt ? 'From the note' : 'Abstract' }}</p>
             <div class="kbx-sum-text" v-html="render(cardText)"></div>
           </div>
