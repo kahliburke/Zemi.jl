@@ -21,6 +21,7 @@ const EDITABLE_SETTINGS = [
     (key = "analyst", kind = "summarizer?", label = "Paper of the day", help = "Writes the analysis of the paper of the day. Default: the summarizer."),
     (key = "search.layers", kind = "layers", label = "Search layers", help = "Searched unless a search picks others."),
     (key = "search.keyword", kind = "bool", label = "Keyword search", help = "Include BM25 keyword ranking by default."),
+    (key = "ingestion.history_days", kind = "int", label = "History retention (days)", help = "Days to keep completed ingestion attempts. Set to 0 to keep them indefinitely."),
     (key = "watch.categories", kind = "strings", label = "arXiv categories", help = "Watched for new papers, e.g. q-bio.PE."),
     (key = "watch.days", kind = "int", label = "Days kept", help = "Days of new papers the watch list shows."),
     (key = "watch.hours", kind = "float", label = "Check interval (h)", help = "Hours between arXiv checks."),
@@ -56,6 +57,7 @@ const EDITABLE_SETTINGS = [
 
 "A setting's value in configuration `c`."
 function current_setting(c::Config, key::AbstractString)
+    key == "ingestion.history_days" && return c.ingestion_history_days
     key == "search.layers" && return c.search_layers
     key == "search.keyword" && return c.search_keyword
     startswith(key, "watch.") && return getfield(c, Symbol("watch_", key[7:end]))
@@ -537,6 +539,11 @@ route!("GET", "/api/admin/audit"; need = "audit.view") do c
 end
 
 # ── Operations ────────────────────────────────────────────────────────────────────────────────────
+
+route!("GET", "/api/ops/ingestions"; need = "audit.view") do c
+    ingest_history(c.kb, c.caller; before = int_param(c.params, "before", typemax(Int)), doc_id = get(c.params, "document", ""),
+                   run = get(c.params, "run", ""), limit = int_param(c.params, "limit", 25, 1:100))
+end
 
 route!("GET", "/api/ops"; need = "server.view") do c
     a = activity()

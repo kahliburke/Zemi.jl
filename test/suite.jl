@@ -7630,3 +7630,105 @@ end
     @test occursin("'kaimon --setup-defaults --embedding-model $(only(wanted))'", bat) &&
           occursin("\"\$kaimon\" --setup-defaults --embedding-model $(only(wanted))", sh)
 end
+
+@zset "persistent ingestion history" begin
+    c = temp_config(layers = Layer[])
+    kb = open_kb(c)
+    id = add_codebase!(kb, mktempdir(); name = "Reef")
+    caller = K.local_caller()
+    job = K.start_job("Read reef"; ids = [id]) do _
+        ingest!(kb, [id]; classify = false)
+    end
+    wait(job)
+    @test job.status == :done && only(job.result).ok
+    close(kb)
+    kb = open_kb(c)
+    try
+        a = only(K.ingest_history(kb, caller; doc_id = id))
+        @test a.document == id && a.job == job.id
+        @test [e.detail["stage"] for e in a.events] == ["read", "done"]
+        response = K.respond_local(kb, K.HTTP.Request("GET", "/api/ops/ingestions?run=$(a.run)"))
+        @test response.status == 200 && only(K.JSON.parse(String(response.body)))["attempt"] == a.attempt
+        previous = K._KB[]
+        try
+            K._KB[] = kb
+            @test only(K.JSON.parse(K.ingest_history_tool(; doc_id = id)))["attempt"] == a.attempt
+        finally
+            K._KB[] = previous
+        end
+        @test isempty(ingest!(kb, [id]; cancelled = () -> true, classify = false))
+        b = only(K.ingest_history(kb, caller; limit = 1))
+        @test b.run != a.run && only(b.events).detail["stage"] == "cancelled"
+        @test only(K.ingest_history(kb, caller; before = b.cursor)).attempt == a.attempt
+        @test only(K.ingest_history(kb, caller; run = a.run)).attempt == a.attempt
+        failed = only(ingest!(kb, [id]; classify = false, on_read = _ -> error("test callback failed")))
+        @test !failed.ok
+        failure = last(only(K.ingest_history(kb, caller; limit = 1)).events).detail
+        @test failure["stage"] == "failed" && occursin("test callback failed", failure["error"])
+
+        s = Summarizer(; name = "test-writer", model = "test-model")
+        marker = K.summary_usage_marker(kb, id, s)
+        K.save_summary!(kb, K.paper_id(kb, id), "p:$id", s, "first", "first", 20, 6)
+        counts = K.ingest_summary_usage(kb, id, s, marker)
+        @test (counts.input, counts.output, counts.summaries) == (20, 6, 1)
+        marker = K.summary_usage_marker(kb, id, s)
+        @test K.ingest_summary_usage(kb, id, s, marker).input === nothing
+        K.save_summary!(kb, K.paper_id(kb, id), "p:$id", s, "second", "second", 0, missing)
+        counts = K.ingest_summary_usage(kb, id, s, marker)
+        @test counts.input === 0 && counts.output === nothing
+
+        K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (id,))
+        viewer = K.Caller(nothing, "Viewer", "", Set(["audit.view"]), :token, nothing)
+        @test isempty(K.ingest_history(kb, viewer; doc_id = id))
+    finally
+        close(kb)
+    end
+end
+
+@zset "ingestion history retention" begin
+    path = joinpath(mktempdir(), "config.toml")
+    @test K.load_config(path).ingestion_history_days == 90
+    write(path, "data_dir = 'data'\n[ingestion]\nhistory_days = 2\n")
+    kb = open_kb(K.load_config(path))
+    try
+        setting = only(s for s in K.settings_json(kb)["settings"] if s["key"] == "ingestion.history_days")
+        @test setting["value"] == 2
+        @test_throws "history_days" K.save_settings!(kb, Dict("ingestion.history_days" => -1); path)
+        @test K.load_config(path).ingestion_history_days == 2
+
+        at = K.parse_iso("2026-08-15T08:30:00Z")
+        expired = "2026-08-13T08:29:59Z"
+        boundary = "2026-08-13T08:30:00Z"
+        record(at, action, target, stage) = K.execute!(kb,
+            "INSERT INTO audit (at, who, action, target, detail) VALUES (?, 'test', ?, ?, ?)",
+            (at, action, target, K.JSON.json((; stage))))
+        stages = ["done", "warning", "failed", "interrupted", "cancelled"]
+        for stage in [stages; "active"; "recent"]
+            record(expired, "ingest.started", stage, "started")
+            record(expired, "ingest.stage", stage, "read")
+        end
+        for stage in stages
+            record(expired, "ingest.stage", stage, stage)
+        end
+        record(boundary, "ingest.stage", "recent", "done")
+        record(expired, "settings.change", "failed", "done")
+        rows() = K.query(kb, "SELECT target, action FROM audit ORDER BY id")
+        old = rows()
+        K.save_settings!(kb, Dict("ingestion.history_days" => 0); path)
+        K.prune_ingest_history!(kb; at)
+        @test rows() == old
+        K.save_settings!(kb, Dict("ingestion.history_days" => 2); path)
+        kept = filter(r -> r.target in ("active", "recent") || r.action == "settings.change", old)
+        K.prune_ingest_history!(kb; at)
+        @test rows() == kept
+        K.prune_ingest_history!(kb; at)
+        @test rows() == kept
+
+        record("2000-01-01T00:00:00Z", "ingest.stage", "old-failure", "failed")
+        id = add_codebase!(kb, mktempdir(); name = "Reef")
+        @test only(ingest!(kb, [id]; classify = false, layers = Layer[])).ok
+        @test !any(r -> r.target == "old-failure", rows())
+    finally
+        close(kb)
+    end
+end

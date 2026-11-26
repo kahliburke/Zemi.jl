@@ -407,7 +407,7 @@ function start_local(; port::Integer = local_port(kb().config), dev::Bool = fals
     r = Running(dev ? :dev : :local, dev ? DEV_URL[] : "http://localhost:$port", api, server, Any[], Function[], hosted)
     record_served!(db.config, r)
     dev || push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db))
-    push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db))
+    push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db), follow_ingest_history(db))
     load_plugins!(db.config)
     push!(r.tasks, follow_sources(db))
     follow_connect!(db)
@@ -470,7 +470,7 @@ function start_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool 
     r = Running(:shared, dev ? DEV_URL[] : db.config.shared.base_url, "http://127.0.0.1:$(db.config.shared.port)", server,
                 Any[], Function[], hosted)
     ensure_qdrant(db.config; patience = 30) || @warn "Qdrant is not answering at $(Qdrant.url()): searching by meaning and embedding will fail"
-    push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db))
+    push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db), follow_ingest_history(db))
     load_plugins!(db.config)
     start_figure_sweep(db)
     if which != :hosted

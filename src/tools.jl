@@ -429,6 +429,12 @@ end
 tool!("job_status", job_status_tool; need = "jobs.view")
 
 
+"Recorded stages, models, usage and errors for recent ingestions. Filter by document or run, or page with the oldest returned cursor."
+function ingest_history_tool(; doc_id::String = "", run::String = "", before::Int = typemax(Int), limit::Int = 25)::String
+    return JSON.json(ingest_history(kb(), tool_caller(); before, limit, doc_id, run), 2)
+end
+tool!("ingest_history", ingest_history_tool; need = "audit.view")
+
 split_list(s::AbstractString) = String.(filter(!isempty, split(s, r"[,\s]+")))
 
 "Document `doc_id` a tool is asked about, refused as none when its caller may not see it."

@@ -793,6 +793,16 @@ function ingest!(kb::KB, ids::AbstractVector{<:AbstractString};
                  layers::AbstractVector{Layer} = ingest_layers(kb.config), force_parse::Bool = false, classify::Bool = true,
                  progress = msg -> nothing, cancelled = () -> false, on_read = id -> nothing, source = "added")
     ids = add_papers!(kb, ids; source)
+    run = string(uuid4())
+    job = get(task_local_storage(), :zemi_job_id, nothing)
+    attempts = transaction(kb) do
+        prune_ingest_history!(kb)
+        map(ids) do id
+            attempt = string(uuid4())
+            ingest_event!(kb, attempt, "started", (; document = id, run, job))
+            return attempt
+        end
+    end
     progress("Fetching metadata for $(length(ids)) paper(s)")
     # arXiv not answering leaves each paper without its record to fail on its own, not the batch:
     # uploads and codebases need none.
@@ -805,11 +815,19 @@ function ingest!(kb::KB, ids::AbstractVector{<:AbstractString};
     classify = classify && isempty(cannot_run(kb, "classify", String[]))
     results = []
     for (i, id) in enumerate(ids)
-        cancelled() && break
+        if cancelled()
+            transaction(kb) do
+                for attempt in @view attempts[i:end]
+                    ingest_event!(kb, attempt, "stage", (; stage = "cancelled"))
+                end
+            end
+            break
+        end
         step(msg) = progress(length(ids) == 1 ? "$id: $msg" : "[$i/$(length(ids))] $id: $msg")
+        record(stage, details = (;)) = ingest_event!(kb, attempts[i], "stage", (; stage, details...))
         t0 = time()
         try
-            r = lock(() -> ingest_paper!(kb, id, layers; force_parse, step), paper_lock(id))
+            r = lock(() -> ingest_paper!(kb, id, layers; force_parse, step, record), paper_lock(id))
             classified, warning = false, r.error
             if classify && is_kind(k -> k.classified, id) && !isequal(scalar(kb, "SELECT classifier FROM classifications WHERE paper_id = ?", (paper_id(kb, id),)),
                                     kb.config.summarizer)
@@ -823,10 +841,15 @@ function ingest!(kb::KB, ids::AbstractVector{<:AbstractString};
                     warning = join(filter(!isnothing, [warning, "classifier: $(failure_message(e))"]), "; ")
                 end
             end
-            push!(results, (; id, ok = true, r..., classified, error = warning, seconds = time() - t0))
             on_read(id)
+            record(warning === nothing ? "done" : "warning", (; classified, error = warning, seconds = time() - t0))
+            push!(results, (; id, ok = true, r..., classified, error = warning, seconds = time() - t0))
         catch e
-            e isa InterruptException && rethrow()
+            if e isa InterruptException
+                record("interrupted")
+                rethrow()
+            end
+            record("failed", (; error = failure_message(e), seconds = time() - t0))
             @error "Ingest failed" id exception = (e, catch_backtrace())
             push!(results, (; id, ok = false, parsed = false, summarized = 0, embedded = Dict{String,Int}(), classified = false,
                 error = failure_message(e), seconds = time() - t0))
@@ -851,11 +874,12 @@ summaries written, the units embedded in each layer, and in `error` the summariz
 cost only the layers built on that summarizer, not the paper.
 """
 function ingest_paper!(kb::KB, id::AbstractString, layers::AbstractVector{Layer};
-                       force_parse::Bool = false, step = msg -> nothing)
+                       force_parse::Bool = false, step = msg -> nothing, record = (stage, details) -> nothing)
     kind = document_kind(id)
     kind === nothing && error("$id is not a kind of document the knowledge base reads")
     layers = document_layers(kb, id, layers)
     parsed = kind.read(kb, id; force = force_parse, step)
+    record("read", (; parsed))
     warnings = String[]
     # Its figures and tables, cut once from each reading of its PDF.
     if kind.pdf && !figures_cut(kb, id)
@@ -870,6 +894,7 @@ function ingest_paper!(kb::KB, id::AbstractString, layers::AbstractVector{Layer}
     failed = Set{String}()
     summarized = 0
     for s in unique(summarizer_for(kb.config, l, id) for l in layers if !isempty(l.source))
+        marker = summary_usage_marker(kb, id, s)
         try
             summarized += summarize_paper!(kb, s, id; progress = msg -> step("$(s.name): $msg"))
             note_summary!(s.name)
@@ -880,12 +905,14 @@ function ingest_paper!(kb::KB, id::AbstractString, layers::AbstractVector{Layer}
             push!(warnings, "summarizer $(s.name): $(failure_message(e))")
             @warn "Summarizing failed; skipping its layers" id summarizer = s.name exception = e
         end
+        record(s.name in failed ? "summary failed" : "summarized", ingest_summary_usage(kb, id, s, marker))
     end
     embedded = Dict{String,Int}()
     for l in layers
         !isempty(l.source) && summarizer_for(kb.config, l, id).name in failed && continue
         step("embedding ($(l.name))")
         embedded[l.name] = embed_paper!(kb, l, id)
+        record("embedded", (; layer = l.name, model = l.model, vectors = embedded[l.name]))
     end
     return (; parsed, summarized, embedded, error = isempty(warnings) ? nothing : join(warnings, "; "))
 end
