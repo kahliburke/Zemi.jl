@@ -300,6 +300,38 @@ const size = (n: Node) => (((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links
                            (hits.value.get(n.id) ?? 0) * 3) * (n.id === selected.value?.id ? 2.5 : 1) *
                          (0.7 + 0.8 * (standing.value.get(n.id) ?? 0.375))
 
+// How closely a layout packs its documents, as the median distance from one to its nearest, over a
+// sample of them.
+function spacing(points: number[][]) {
+  if (points.length < 2) return 0
+  const step = Math.max(1, Math.floor(points.length / 300)), d: number[] = []
+  for (let i = 0; i < points.length; i += step) {
+    let least = Infinity
+    for (let j = 0; j < points.length; j++) {
+      if (j === i) continue
+      let s = 0
+      for (let k = 0; k < points[i].length; k++) s += (points[i][k] - points[j][k]) ** 2
+      if (s < least) least = s
+    }
+    d.push(Math.sqrt(least))
+  }
+  d.sort((a, b) => a - b)
+  return d[d.length >> 1]
+}
+// Discs in proportion to how closely the layout packs documents, against t-SNE's spacing: UMAP and
+// PaCMAP draw clusters tighter in the same extent, where t-SNE's discs would cover each other.
+const packing = computed(() => {
+  const nodes = data.value?.nodes ?? []
+  if (layout.value === 'tsne' || !nodes.length) return 1
+  const deep = view.value === '3d'
+  const mine = nodes.map(n => (deep ? (layout.value === 'umap' ? n.up : n.pp) : (layout.value === 'umap' ? n.ux : n.px)))
+                    .filter(Boolean) as number[][]
+  const base = nodes.map(n => (deep ? n.p : n.x)).filter(Boolean) as number[][]
+  const a = spacing(mine), b = spacing(base)
+  return a > 0 && b > 0 ? Math.min(1, Math.max(0.35, a / b)) : 1
+})
+const flatSize = (n: Node) => size(n) * packing.value ** 2
+
 type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
 type GLink = { source: string; target: string; kind: string; similarity?: number }
 
@@ -403,7 +435,7 @@ async function draw() {
     graph = new ForceGraph(el)
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
-      .nodeVal(size).nodeColor(shade).nodeLabel(label)
+      .nodeVal(flatSize).nodeColor(shade).nodeLabel(label)
       .linkColor(linkColour)
       .linkWidth((l: GLink) => (l.kind === 'similar' ? 0.8 : 1.2))
       .linkLineDash((l: GLink) => (l.kind === 'similar' ? [2, 3] : null))
@@ -607,7 +639,7 @@ const clusterLabels: { sprite: any; id: number }[] = []
 function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
   const n: GNode | undefined = selected.value ? graph?.graphData().nodes.find((x: GNode) => x.id === selected.value!.id) : undefined
   if (!n || n.x === undefined) return
-  const r = Math.sqrt(size(n)) * 4
+  const r = Math.sqrt(flatSize(n)) * 4
   ctx.save()
   ctx.strokeStyle = BRAND; ctx.lineWidth = 2.5 / scale
   ctx.beginPath(); ctx.arc(n.x, n.y, r + 4 / scale, 0, 2 * Math.PI); ctx.stroke()
@@ -723,8 +755,9 @@ const all = (list: string[], kinds: readonly (readonly [string, string])[]) =>
   list.splice(0, list.length, ...(list.length === kinds.length ? [] : kinds.map(([k]) => k)))
 // The space's node discs, by id, with the nodes they draw.
 const sprites = new Map<string, { sprite: any; node: GNode }>()
-// A disc's width: a little smaller than the sphere 3d-force-graph would draw for the node (radius 4·∛val).
-const spriteSize = (n: GNode) => 5 * Math.cbrt(size(n))
+// A disc's width: a little smaller than the sphere 3d-force-graph would draw for the node (radius 4·∛val),
+// as closely as the layout packs them.
+const spriteSize = (n: GNode) => 5 * Math.cbrt(size(n)) * packing.value
 // A white disc, lighter at the centre and a little darker towards its antialiased rim, tinted per node.
 function discTexture(THREE: any) {
   const px = 128, c = document.createElement('canvas')
@@ -775,7 +808,7 @@ function restyle() {
   showTrail3d()
   const rel = relevantClusters.value
   for (const { sprite, id } of clusterLabels) sprite.material.opacity = !rel || rel.has(id) ? 1 : DIMMED
-  if (view.value === '2d') { graph.nodeColor(shade).nodeVal(size); return }
+  if (view.value === '2d') { graph.nodeColor(shade).nodeVal(flatSize); return }
   for (const { sprite, node } of sprites.values()) {
     sprite.material.color.set(shade(node))
     const d = spriteSize(node)
