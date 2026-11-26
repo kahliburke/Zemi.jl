@@ -3050,6 +3050,9 @@ end
     @test only(n for n in g["nodes"] if n["id"] == "2401.00006")["page"] == "https://arxiv.org/abs/2401.00006" &&
           !startswith(n1["page"], "https://arxiv.org")
     @test K.explore_node(kb, as(ada), "2401.00006")["page"] == "https://arxiv.org/abs/2401.00006"
+    # A note with no summary is shown by the opening of its text; a paper by its abstract.
+    card = K.explore_node(kb, as(ada), rec)
+    @test card["summary"] == "" && occursin("Untitled", card["excerpt"]) && K.explore_node(kb, as(ada), "2401.00002")["excerpt"] == ""
     # How central each is to its cluster, and the watch's rating where the watch judged it.
     @test n1["central"] == 0.8 && !haskey(n1, "rating") && only(n for n in g["nodes"] if n["id"] == "2401.00002")["rating"] == 2
     own = only(n for n in g["nodes"] if n["id"] == mine)

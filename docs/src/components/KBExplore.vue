@@ -70,9 +70,11 @@ watch(shownKinds, v => keep('kinds', v), { deep: true }); watch(threshold, v => 
 const data = shallowRef<Graph | null>(null)
 const selected = ref<Node | null>(null)
 // What the card says of the document selected, asked for once each (see /api/graph/node).
-type Detail = { id: string; title: string; authors: string[]; published: string; venue: string; abstract: string; summary: string;
+type Detail = { id: string; title: string; authors: string[]; published: string; venue: string; abstract: string; summary: string; excerpt?: string;
                 topics: string[]; read: boolean }
 const detail = ref<Detail | null>(null)
+// What the card reads out: the summary, or a note's opening until it has one, or the abstract.
+const cardText = computed(() => detail.value ? detail.value.summary || detail.value.excerpt || detail.value.abstract : '')
 const details = new Map<string, Detail>()
 const more = ref(false)
 const render = shallowRef<Render>(escapeText)
@@ -1283,11 +1285,11 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <h3><a :href="selected.page" target="_blank" rel="noopener">{{ selected.title }}</a></h3>
         <template v-if="detail && detail.id === selected.id">
           <p v-if="byline(detail)" class="kbx-byline">{{ byline(detail) }}</p>
-          <div v-if="detail.summary || detail.abstract" class="kbx-summary" :class="{ open: more }">
-            <p class="kbx-sum-head">{{ detail.summary ? 'Summary' : 'Abstract' }}</p>
-            <div class="kbx-sum-text" v-html="render(detail.summary || detail.abstract)"></div>
+          <div v-if="cardText" class="kbx-summary" :class="{ open: more }">
+            <p class="kbx-sum-head">{{ detail.summary ? 'Summary' : detail.excerpt ? 'From the note' : 'Abstract' }}</p>
+            <div class="kbx-sum-text" v-html="render(cardText)"></div>
           </div>
-          <button v-if="(detail.summary || detail.abstract).length > 420" class="kbx-more" @click="more = !more">{{ more ? 'Less' : 'More' }}</button>
+          <button v-if="cardText.length > 420" class="kbx-more" @click="more = !more">{{ more ? 'Less' : 'More' }}</button>
           <div v-if="detail.topics.length" class="kbx-topics"><span v-for="t in detail.topics" :key="t">{{ t }}</span></div>
         </template>
         <div class="kbx-actions">

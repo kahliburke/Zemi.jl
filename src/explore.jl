@@ -701,7 +701,8 @@ explore_page(c::Config, id::AbstractString, metadata_at) =
 
 What the explore page's card says of document `id`, as far as `caller` may see it: its title, authors,
 date, venue and abstract (the watch's where the document has none of its own yet), its summary and
-topics as the summarizer shown for its kind wrote them, and whether it was read in full.
+topics as the summarizer shown for its kind wrote them, and whether it was read in full. A record with
+no summary yet gives the opening of its text (`excerpt`): its abstract only says where it came from.
 """
 function explore_node(kb::KB, caller::Caller, id::AbstractString)
     seen_document(kb, caller, id)
@@ -719,10 +720,18 @@ function explore_node(kb::KB, caller::Caller, id::AbstractString)
     pick === nothing && !isempty(wrote) && (pick = 1)
     summary, topics = pick === nothing ? ("", String[]) : split_topics(String(wrote[pick].text))
     authors = try json_list(r.authors) catch; String[] end
-    return Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "authors" => authors,
+    excerpt = isempty(summary) && is_record(id) ? record_excerpt(kb, id) : ""
+    return Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "authors" => authors, "excerpt" => excerpt,
                             "published" => coalesce(r.published, ""), "venue" => coalesce(r.journal_ref, ""),
                             "abstract" => coalesce(r.abstract, ""), "summary" => summary, "topics" => topics,
                             "read" => Bool(r.read), "page" => explore_page(kb.config, id, r.metadata_at))
+end
+
+"The opening of record `id`'s text, its figures left out, for a card: at most `most` characters."
+function record_excerpt(kb::KB, id::AbstractString; most::Integer = 1200)
+    doc = try record_document(kb, id) catch; return "" end
+    text = strip(replace(join((strip(String(s["text"])) for s in doc["sections"]), "\n\n"), FIGURE_IMAGE => ""))
+    return length(text) > most ? rstrip(first(text, most)) * "…" : String(text)
 end
 
 # What the explore page's card says of one document (`?id=`, see `explore_node`).
