@@ -1190,7 +1190,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <div class="kbx-panel-head">
           <div class="kbx-seg kbx-seg-small" role="tablist" aria-label="Panel">
             <button role="tab" :aria-selected="panel === 'colours'" :class="{ on: panel === 'colours' }" @click="panel = 'colours'">Legend</button>
-            <button role="tab" :aria-selected="panel === 'show'" :class="{ on: panel === 'show' }" @click="panel = 'show'">Show</button>
+            <button role="tab" :aria-selected="panel === 'show'" :class="{ on: panel === 'show' }" @click="panel = 'show'">Settings</button>
           </div>
         </div>
         <div v-if="panel === 'colours'" class="kbx-key" role="tabpanel">
