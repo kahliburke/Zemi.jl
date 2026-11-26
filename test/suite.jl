@@ -3238,7 +3238,11 @@ end
               only(p for p in classified.data["papers"] if p["id"] == "2609.00011")["llm_relevance"] == 3
         d = classified.data
         @test K.keyword_label(["A coral study", "Coral polyps"], ["A kelp study", "A coral study", "Coral polyps"]) ==
-              "polyps · coral"
+              "coral · polyps"
+        # A word in every cluster's titles names none of them.
+        reefs = ["Learning coral reefs", "Coral learning", "Deep learning of coral", "Coral reefs"]
+        reef_label = K.keyword_label(reefs, [reefs; ["Learning kelp", "Kelp learning", "Learning tides"]])
+        @test !occursin("learning", reef_label) && startswith(reef_label, "coral")
         # A cluster of papers with no titles yet is left for later rather than named from its ids.
         untitled = K.name_clusters!(kb, [["2609.99901", "2609.99902"]], [String[]], ["2609.99901", "2609.99902"])
         @test asked[] == 1 && !only(untitled).named

@@ -215,7 +215,12 @@ end
 const LABEL_STOPWORDS = Set(split("""a an and are as at by for from in into is of on or the to with via using use based
     its their this that we our new study analysis towards toward under over between through than via""", r"\s+"))
 
-"A cluster's three most distinctive title words, against all titles."
+"""
+A cluster's three most distinctive title words, against all titles: those far more common in its
+titles than in all (each weighted by how common it is in the cluster), so a word every cluster shares
+names none, nor one no more common in it than in all. A word must be in two of the cluster's titles
+where it has more than three.
+"""
 function keyword_label(titles, all_titles)
     words(t) = unique(w for w in (lowercase(m.match) for m in eachmatch(r"[\p{L}][\p{L}\p{N}-]+", t))
                       if length(w) > 2 && !(w in LABEL_STOPWORDS))
@@ -223,8 +228,12 @@ function keyword_label(titles, all_titles)
     foreach(t -> foreach(w -> df[w] = get(df, w, 0) + 1, words(t)), all_titles)
     tf = Dict{String,Int}()
     foreach(t -> foreach(w -> tf[w] = get(tf, w, 0) + 1, words(t)), titles)
-    score(w) = tf[w] / length(titles) * log(length(all_titles) / df[w])
-    top = first(sort!(collect(keys(tf)); by = w -> (-score(w), w)), 3)
+    least = length(titles) > 3 ? 2 : 1
+    inside(w) = tf[w] / length(titles)
+    score(w) = inside(w) * log(inside(w) / (max(get(df, w, 0), tf[w]) / max(length(all_titles), 1)))
+    pool = [w for w in keys(tf) if tf[w] >= least && score(w) > 0]
+    isempty(pool) && (pool = collect(keys(tf)))
+    top = first(sort!(pool; by = w -> (-score(w), w)), 3)
     return isempty(top) ? "Unnamed" : join(top, " · ")
 end
 
