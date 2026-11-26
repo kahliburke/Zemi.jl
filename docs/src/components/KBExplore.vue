@@ -440,16 +440,19 @@ async function draw() {
       .nodeThreeObject((n: GNode) => {
         const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: disc, color: shade(n), transparent: true, depthWrite: false }))
         const d = spriteSize(n)
-        sprite.scale.set(d, d, 1)
-        sprite.onBeforeRender = (renderer: any, _scene: any, camera: any) => keepFocusInSight(sprite, n, renderer, camera)
+        sprite.userData.d = d; sprite.scale.set(d, d, 1)
+        sprite.onBeforeRender = (renderer: any, _scene: any, camera: any) => {
+          fitDisc(sprite, n, renderer, camera)
+          keepFocusInSight(sprite, n, renderer, camera)
+        }
         if (n.id === selected.value?.id) { sprite.material.depthTest = false; sprite.renderOrder = 999 }
         sprites.set(n.id, { sprite, node: n })
         return sprite
       })
       .linkColor(linkColour).linkOpacity(0.55)
-      .linkWidth((l: GLink) => (l.kind === 'similar' ? 0 : 0.6))           // 0: a plain line, the cheapest drawn
-      .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 2.5 : 0))
-      .linkDirectionalArrowRelPos(1)
+      // Plain lines, a pixel wide however near: tubes and arrowheads have a size in the space and swell up
+      // close. Which way a link goes is in the card.
+      .linkWidth(0)
       .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
       .enableNodeDrag(false)
       .cooldownTicks(1)
@@ -551,6 +554,14 @@ const pixelSize = (d: number, renderer: any, camera: any) =>
 let focusFrame = -1
 let focus: { at: any; distance: number; radius: number } | null = null
 let scratch: any = null
+// A disc no wider on screen than `DISC_MOST` pixels (the selected one twice that): up close the space
+// between documents keeps growing and the discs do not, so a tight group comes apart.
+const DISC_MOST = 34
+function fitDisc(sprite: any, n: GNode, renderer: any, camera: any) {
+  const most = DISC_MOST * (n.id === selected.value?.id ? 2 : 1) * pixelSize(camera.position.distanceTo(sprite.position), renderer, camera)
+  const k = Math.min(sprite.userData.d, most)
+  if (sprite.scale.x !== k) { sprite.scale.set(k, k, 1); sprite.updateMatrixWorld() }
+}
 function keepFocusInSight(sprite: any, n: GNode, renderer: any, camera: any) {
   if (renderer.info.render.frame !== focusFrame) {
     focusFrame = renderer.info.render.frame
@@ -757,7 +768,7 @@ function restyle() {
   for (const { sprite, node } of sprites.values()) {
     sprite.material.color.set(shade(node))
     const d = spriteSize(node)
-    sprite.scale.set(d, d, 1)
+    sprite.userData.d = d; sprite.scale.set(d, d, 1)
     const focused = node.id === selected.value?.id
     sprite.material.depthTest = !focused
     sprite.renderOrder = focused ? 999 : 0
@@ -968,7 +979,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         </div>
         <button class="kbx-btn" :class="{ on: drifting }" title="Move from document to document along the nearest in meaning, one every few seconds" @click="drift">{{ drifting ? 'Stop' : 'Drift' }}</button>
         <label v-if="drifting" class="kbx-speed" title="Seconds at each document">
-          <input v-model.number="driftEvery" type="range" min="1" max="10" step="0.5" aria-label="Seconds at each document">
+          <input v-model.number="driftEvery" type="range" min="0.1" max="10" step="0.1" aria-label="Seconds at each document">
           <span>{{ driftEvery }} s</span>
         </label>
         <button class="kbx-btn" :class="{ on: showPairs }" title="Pairs of documents close in meaning that nothing links yet" @click="showPairs = !showPairs">Suggested links</button>
