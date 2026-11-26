@@ -19,7 +19,7 @@ import KBMembers from './KBMembers.vue'
 import KBRecordUpload from './KBRecordUpload.vue'
 import KBLibrary from './KBLibrary.vue'
 import { sourceHref, onTaskRef, setCodebase, setPeople, plainRefs } from './kbRefs'
-import { pageLink, findingHref, recordHref, kbPage, taskHref } from './kbLinks'
+import { findingHref, recordHref, kbPage, taskHref } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { plainLine } from './kbUtils'
 import { when, editTime } from './kbFormat'
@@ -1298,7 +1298,6 @@ function keepRecordsOpen(open: boolean) {
           <button class="kbp-view" :class="{ on: focus }" :aria-pressed="focus" title="Only what waits on you in the project" @click="toggleFocus">
             <KBIcon name="focus" :size="16" />Focus</button>
           <button class="kbp-view" @click="reviewing = true"><KBIcon name="chart" :size="16" />Review</button>
-          <a class="kbp-view" :href="pageLink('/publications/') + '?project=' + encodeURIComponent(key)">Internal publications</a>
           <a class="kbp-view" :href="findingHref(key)"><KBIcon name="finding" :size="16" />Findings<span v-if="board.findings" class="kbp-view-n">{{ board.findings }}</span></a>
           <button class="kbp-view" @click="library = true"><KBIcon name="library" :size="16" />Library</button>
           <button v-if="!focus" class="kbp-view" :class="{ on: declined }" :aria-pressed="!!declined" @click="toggleDeclined"><KBIcon name="block" :size="16" />Declined</button>

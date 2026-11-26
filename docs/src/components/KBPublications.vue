@@ -5,13 +5,14 @@ import KBPublicationHistory from './KBPublicationHistory.vue'
 import KBNeedsService from './KBNeedsService.vue'
 import KBPublicationEditor from './KBPublicationEditor.vue'
 import { api, getJSON, onLive } from './kbApi'
-import { pageLink, projectHref, taskHref } from './kbLinks'
+import { findingHref, pageLink, taskHref } from './kbLinks'
 import { onTaskRef } from './kbRefs'
 import { escapeText, loadMarkdown } from './kbMarkdown'
 
+const props = defineProps<{ finding?: { ref: string; project: string; claim: string; body: string } }>()
 type Work = { id: number; version: number; title: string; authors: string; project: string }
 type History = InstanceType<typeof KBPublicationHistory>['$props']['entries']
-type Edition = Work & { history: History; latest: number; abstract: string; body: string; revision: string; changes: string; audience: string;
+type Edition = Work & { finding: string; history: History; latest: number; abstract: string; body: string; revision: string; changes: string; audience: string;
   prepared_by: string; published_by: string; published_at: string; has_draft: boolean; pdf_hash: string | null; date: string; access: string; url: string }
 const openTask = onTaskRef(ref => location.assign(taskHref(ref)))
 const route = useRoute()
@@ -33,7 +34,7 @@ async function load() {
   reader.value = undefined; draft.value = undefined; editing.value = false; loading.value = true
   copied.value = false; citationOpen.value = false; error.value = ''; files.value = []
   const match = location.pathname.match(/\/publications\/(\d+)\/(?:v(\d+)\/)?$/)
-  project.value = new URLSearchParams(location.search).get('project') ?? ''
+  project.value = props.finding?.project ?? new URLSearchParams(location.search).get('project') ?? ''
   try {
     render.value = await loadMarkdown()
     if (match) {
@@ -42,7 +43,9 @@ async function load() {
       reader.value = e; project.value = e.project; access.value = e.access
       document.title = `${e.title} · v${e.version}`
     } else {
-      const list = await getJSON('/api/publications?project=' + encodeURIComponent(project.value))
+      const params = new URLSearchParams({ project: project.value })
+      if (props.finding) params.set('finding', props.finding.ref)
+      const list = await getJSON('/api/publications?' + params)
       if (mine !== request) return
       works.value = list.works; drafts.value = list.drafts; access.value = list.access
     }
@@ -68,9 +71,10 @@ async function cite() {
   <KBNeedsService permission="read">
     <p v-if="loading">Loading internal publications…</p>
     <p v-if="error" role="alert">{{ error }}</p>
-    <KBPublicationEditor v-if="editing" :project="project" :edition="draft" :files="files" :maintainer="access === 'maintainer'" @close="load" />
+    <KBPublicationEditor v-if="editing" :project="project" :edition="draft" :finding="props.finding" :files="files" :maintainer="access === 'maintainer'" @close="load" />
     <article v-else-if="reader">
       <a :href="pageLink('/publications/')">Internal publications</a>
+      <a v-if="reader.finding" class="origin" :href="findingHref(reader.finding)">Finding {{ reader.finding }}</a>
       <h1>{{ reader.title }}</h1>
       <p>{{ reader.authors }}</p>
       <p v-if="reader.date">Manuscript dated {{ reader.date }}</p>
@@ -91,21 +95,25 @@ async function cite() {
       <button v-if="contributor && reader.version === reader.latest" @click="edit(reader.id, true)">{{ reader.has_draft ? 'Review draft' : 'Prepare next version' }}</button>
     </article>
     <template v-else-if="!loading && !error">
-      <h1>Internal publications</h1>
-      <p v-if="project"><a :href="projectHref(project)">{{ project }}</a></p>
-      <button v-if="contributor" @click="edit()">New internal publication</button>
+      <h1 v-if="!props.finding">Internal publications</h1>
+      <p v-if="project && !props.finding"><a :href="findingHref(project)">Findings in {{ project }}</a></p>
+      <button v-if="contributor" class="prepare" @click="edit()">{{ props.finding ? 'Prepare manuscript' : 'New internal publication' }}</button>
       <section v-if="drafts.length">
-        <h2>Project drafts</h2>
+        <h3>Draft manuscripts</h3>
         <ul><li v-for="d in drafts" :key="d.id"><button @click="edit(d.id)">{{ d.title }} · draft v{{ d.version }}</button></li></ul>
       </section>
-      <h2 v-if="drafts.length">Published</h2>
-      <ul v-if="works.length"><li v-for="w in works" :key="w.id"><a :href="href(w.id)">{{ w.title }}</a> · {{ w.authors }} · v{{ w.version }}</li></ul>
-      <p v-else>No internal publications yet.</p>
+      <h3 v-if="drafts.length && works.length">Published editions</h3>
+      <ul v-if="works.length" class="releases"><li v-for="w in works" :key="w.id"><a :href="href(w.id)">{{ w.title }}</a> · {{ w.authors }} · v{{ w.version }}</li></ul>
+      <p v-else-if="!props.finding || !contributor">No internal publications yet.</p>
     </template>
   </KBNeedsService>
 </template>
 <style scoped>
+.prepare { margin-bottom: .45rem; }
+h3 { margin: .65rem 0 .25rem; font-size: .9rem; font-weight: 600; }
+.releases a { color: var(--vp-c-brand-1); text-decoration: underline; }
 button { color: var(--vp-c-brand-1); text-decoration: underline; }
+.origin { margin-inline-start: 1rem; }
 .versions { display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
 [aria-current="page"] { font-weight: bold; }
 </style>

@@ -257,6 +257,13 @@ function migrate!(kb::KB)
     transaction(kb) do
         version = stored_schema(kb)
         version > latest && error("Database schema v$version is newer than this code (v$latest)")
+        # Early manuscript previews used 31/32 for publications and their history, before
+        # upstream assigned 31 to ORCID. Keep their editions and complete the missing migration.
+        if version in (31, 32) && !ismissing(scalar(kb, "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'publications'")) &&
+           ismissing(scalar(kb, "SELECT 1 FROM pragma_table_info('papers') WHERE name = 'author_orcids'"))
+            foreach(sql -> execute!(kb, sql), MIGRATIONS[31])
+            version += 1
+        end
         for v in version+1:latest
             foreach(sql -> execute!(kb, sql), MIGRATIONS[v])
         end

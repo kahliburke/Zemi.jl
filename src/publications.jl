@@ -26,6 +26,19 @@ migration!(33, ["""CREATE TABLE publication_events (
     FOREIGN KEY(work, version) REFERENCES publication_editions(work, version) ON DELETE CASCADE,
     UNIQUE(work, version, stage, venue, happened, url))"""])
 
+migration!(34, [
+    "ALTER TABLE publications ADD COLUMN finding_id INTEGER REFERENCES findings(id) ON DELETE SET NULL",
+    "CREATE INDEX publications_by_finding ON publications(finding_id)"
+])
+
+# Resolve within the authorized project before looking up any finding.
+function publication_finding_id(kb, caller, project, ref)
+    parts = finding_parts(ref)
+    (parts !== nothing && first(parts) == project) || not_found("No such finding in this project")
+    need_project!(kb, caller, project, VIEW)
+    return finding_id(kb, ref)
+end
+
 const PUBLICATION_STAGES = ("preprint", "submitted", "accepted", "published", "declined", "withdrawn")
 
 function publication_reference(reference)
@@ -79,8 +92,8 @@ function instance_reader(caller, project)
 end
 
 function publication_work(kb, caller, id; editing = false)
-    rows = query(kb, """SELECT w.*, p.key AS project FROM publications w
-                        JOIN projects p ON p.id = w.project_id WHERE w.id = ?""", (id,))
+    rows = query(kb, """SELECT w.*, p.key AS project, f.number AS finding_number FROM publications w
+                        JOIN projects p ON p.id = w.project_id LEFT JOIN findings f ON f.id = w.finding_id WHERE w.id = ?""", (id,))
     isempty(rows) && not_found("No such publication")
     w = only(rows)
     if editing
@@ -101,11 +114,13 @@ function publication_edition(kb, caller, id; version = 0, editing = false)
     isempty(rows) && not_found("No such edition")
     e = only(rows)
     !editing && isempty(e.published_at) && not_found("No such edition")
-    return (; id = w.id, w.project, w.audience, w.latest, e..., url = publication_url(id, e.version), history = publication_events(kb, w.id))
+    finding = !ismissing(w.finding_number) && can(caller, "tasks.view") && project_access(kb, caller, w.project) >= VIEW ?
+              "$(w.project)-F$(w.finding_number)" : ""
+    return (; id = w.id, w.project, finding, w.audience, w.latest, e..., url = publication_url(id, e.version), history = publication_events(kb, w.id))
 end
 
 # Search and discovery both select only the latest published edition, before ranking or limiting.
-function publication_list(kb, caller; project = "", q = "", limit = -1)
+function publication_list(kb, caller; project = "", q = "", limit = -1, finding_id = nothing)
     seen = collect(visible_projects(kb, caller))
     access = "p.key IN ($(in_marks(length(seen))))"
     args = Any[seen...]
@@ -119,6 +134,10 @@ function publication_list(kb, caller; project = "", q = "", limit = -1)
     if !isempty(project)
         extra *= " AND p.key = ?"
         push!(args, uppercase(strip(project)))
+    end
+    if finding_id !== nothing
+        extra *= " AND w.finding_id = ?"
+        push!(args, finding_id)
     end
     if !isempty(q)
         words = keyword_query(q)
@@ -159,25 +178,33 @@ end
 
 """Save the next edition as a project draft. A revision identifies exactly the text approved for editing or release."""
 function draft_publication!(kb, caller, by, project; id = 0, revision = "", title = "", authors = "",
-                            abstract = "", body = "", date = "", changes = "", source = "")
+                            abstract = "", body = nothing, date = "", changes = "", source = "", finding = "")
     key = need_project!(kb, caller, project, CONTRIBUTE)
     return transaction(kb) do
+        fid = isempty(finding) ? nothing : publication_finding_id(kb, caller, key, finding)
         pdf = missing
         if !isempty(source)
             s = publication_source(kb, caller, source)
             title = isempty(strip(title)) ? s.title : title
             date = isempty(strip(date)) ? s.date : date
-            body = isempty(body) ? s.body : body
+            body = isempty(something(body, "")) ? s.body : body
             pdf = s.pdf
             ismissing(pdf) || belongs!(kb, pdf, key)
         end
+        if id == 0 && fid !== nothing
+            origin = only(query(kb, "SELECT claim, body FROM findings WHERE id = ?", (fid,)))
+            isempty(strip(title)) && (title = origin.claim)
+            body === nothing && (body = origin.body)
+        end
+        body = something(body, "")
         isempty(strip(title)) && error("Give the publication a title")
         if id == 0
             isempty(revision) || publication_conflict()
-            id = insert_row!(kb, "INSERT INTO publications(project_id) VALUES (?)", (project_id(kb, key),))
+            id = insert_row!(kb, "INSERT INTO publications(project_id, finding_id) VALUES (?, ?)", (project_id(kb, key), something(fid, missing)))
         end
         w = publication_work(kb, caller, id; editing = true)
         w.project == key || not_found("No such publication in this project")
+        (fid === nothing || isequal(w.finding_id, fid)) || error("This manuscript belongs to a different finding")
         previous = query(kb, "SELECT version, revision FROM publication_editions WHERE work = ? ORDER BY version DESC LIMIT 1", (id,))
         revision == (isempty(previous) ? "" : only(previous).revision) || publication_conflict()
         use_media!(kb, key, body)

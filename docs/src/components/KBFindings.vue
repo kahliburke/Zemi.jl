@@ -14,7 +14,8 @@ import { getJSON, post, can, mediaUrl, me, latest, isStale, onLive } from './kbA
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { sourceHref as refSourceHref, refFor, onTaskRef, setCodebase } from './kbRefs'
 import { splitCodeTarget } from './kbKinds'
-import { projectHref, taskHref, findingHref } from './kbLinks'
+import KBPublications from './KBPublications.vue'
+import { pageLink, projectHref, taskHref, findingHref } from './kbLinks'
 import { day, when } from './kbFormat'
 import KBRefText from './KBRefText.vue'
 import KBIcon from './KBIcon.vue'
@@ -233,6 +234,7 @@ onBeforeUnmount(() => { following = false })
             <option v-for="p in projects" :key="p.key" :value="p.key">{{ p.key }} · {{ p.name }}</option>
           </select>
           <a class="kbf-small" :href="projectHref(key)">Board</a>
+          <a v-if="key" class="kbf-small" :href="pageLink('/publications/') + '?project=' + encodeURIComponent(key)">Internal publications</a>
           <span class="kbf-spacer"></span>
           <button v-if="editable && !creating" class="kbf-small" @click="go(`new/${key}`)"><KBIcon name="plus" :size="15" />Finding</button>
         </div>
@@ -315,6 +317,10 @@ onBeforeUnmount(() => { following = false })
             </div>
             <div data-share-text v-if="f.body" class="kb-md kbf-body" v-html="render(f.body)"></div>
 
+            <section v-if="can('read')" class="kbf-publications" aria-label="Internal publications">
+              <h2>Internal publications</h2>
+              <KBPublications :key="f.ref" :finding="f" />
+            </section>
             <section class="kbf-activity" aria-label="Activity">
               <h2>Activity</h2>
               <ol>
@@ -474,8 +480,8 @@ onBeforeUnmount(() => { following = false })
 .kbf-body { font-size: 0.97rem; line-height: 1.7; }
 .kbf-body :deep(> :first-child) { margin-top: 0; }
 .kbf-claim-field { display: block; width: 100%; box-sizing: border-box; margin: 0.5rem 0 0.6rem; font-size: 1.2rem; font-weight: 600; resize: vertical; }
-.kbf-activity { margin-top: 2rem; padding-top: 0.8rem; border-top: 1px solid var(--vp-c-divider); }
-.kbf-activity h2 { margin: 0 0 0.6rem; padding: 0; border: none; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase;
+.kbf-publications, .kbf-activity { margin-top: 2rem; padding-top: 0.8rem; border-top: 1px solid var(--vp-c-divider); }
+.kbf-publications > h2, .kbf-activity h2 { margin: 0 0 0.6rem; padding: 0; border: none; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase;
   color: var(--vp-c-text-2); }
 .kbf-activity ol { list-style: none; margin: 0 0 0.8rem; padding: 0 0 0 0.9rem; border-left: 2px solid var(--vp-c-divider); }
 .kbf-activity li { position: relative; padding: 0.3rem 0; }

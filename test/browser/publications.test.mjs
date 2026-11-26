@@ -5,9 +5,12 @@ import { open, api, closeBrowser, SITE } from './browser.mjs'
 after(closeBrowser)
 
 test('publish a Markdown manuscript, revise it and revisit the citation', async () => {
-  const { page, close, errors } = await open('/publications/?project=BR', 'button:text-is("New internal publication")')
+  const finding = await api('/api/findings', { project: 'BR', claim: 'Transect survey', body: 'Sampling along the reef.' })
+  const { page, close, errors } = await open('/findings#' + finding.ref, 'button:text-is("Prepare manuscript")')
   try {
-    await page.getByRole('button', { name: 'New internal publication' }).click()
+    await page.getByRole('button', { name: 'Prepare manuscript' }).click()
+    assert.equal(await page.getByLabel('Title', { exact: true }).inputValue(), finding.claim)
+    assert.equal(await page.getByLabel('Manuscript (Markdown)').inputValue(), finding.body)
     await page.getByLabel('Import manuscript').setInputFiles({
       name: 'survey.md', mimeType: 'text/markdown',
       buffer: Buffer.from('---\ntitle: Transect survey\ndate: 2026-04-12\n---\n## Results\nFirst measurement.')
@@ -21,6 +24,9 @@ test('publish a Markdown manuscript, revise it and revisit the citation', async 
     await page.getByRole('button', { name: 'Publish v1 in BR' }).click()
     await page.waitForURL(/\/publications\/\d+\/v1\/$/)
     const cited = page.url()
+    await page.getByRole('link', { name: 'Finding ' + finding.ref, exact: true }).click()
+    await page.getByRole('region', { name: 'Internal publications' }).getByRole('link', { name: 'Transect survey' }).click()
+    await page.getByRole('link', { name: 'v1', exact: true }).click()
     await page.getByRole('button', { name: 'Cite this version' }).click()
     assert.ok((await page.getByRole('status').allTextContents()).some(s => s.includes(cited)))
     await page.getByRole('button', { name: 'Prepare next version' }).click()
@@ -41,7 +47,7 @@ test('publish a Markdown manuscript, revise it and revisit the citation', async 
     const results = await api('/api/search?q=transects&kinds=publication')
     assert.ok(results.publications.some(w => w.id === id && w.version === 2))
     await page.goto(SITE + '/kb/?q=transects')
-    await page.getByRole('button', { name: 'internal publications', exact: true }).click()
+    await page.getByRole('combobox', { name: 'Result type' }).selectOption('publication')
     await page.locator('.kb-search').getByRole('link', { name: /Transect survey/ }).filter({ visible: true }).first().waitFor()
     await page.goto(SITE + '/publications/' + id + '/')
     await page.getByText('Second measurement.', { exact: true }).waitFor()

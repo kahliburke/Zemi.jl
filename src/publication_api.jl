@@ -2,10 +2,13 @@
 route!("GET", "/api/publications") do c
     project = get(c.params, "project", "")
     access = isempty(project) ? NO_ACCESS : project_access(c.kb, c.caller, project)
+    finding = get(c.params, "finding", "")
+    fid = isempty(finding) ? nothing : publication_finding_id(c.kb, c.caller, uppercase(strip(project)), finding)
     drafts = access < CONTRIBUTE ? [] : query(c.kb, """SELECT w.id, e.title, e.version FROM publications w
         JOIN projects p ON p.id = w.project_id JOIN publication_editions e ON e.work = w.id AND e.version > w.latest
-        WHERE p.key = ? ORDER BY w.id DESC""", (uppercase(project),))
-    (; works = publication_list(c.kb, c.caller; project), drafts, access = access_name(access))
+        WHERE p.key = ? AND (? IS NULL OR w.finding_id = ?) ORDER BY w.id DESC""",
+        (uppercase(project), something(fid, missing), something(fid, missing)))
+    (; works = publication_list(c.kb, c.caller; project, finding_id = fid), drafts, access = access_name(access))
 end
 
 route!("GET", "/api/publications/:id") do c
@@ -21,9 +24,9 @@ end
 
 route!("POST", "/api/projects/:key/publications"; need = "tasks.edit", project = CONTRIBUTE) do c
     d = json_body(c)
-    draft_publication!(c.kb, c.caller, person_of(c), c[:key]; id = get(d, "id", 0),
+    draft_publication!(c.kb, c.caller, person_of(c), c[:key]; id = get(d, "id", 0), body = get(d, "body", nothing),
         (Symbol(k) => String(get(d, k, "")) for k in
-            ("revision", "title", "authors", "abstract", "body", "date", "source", "changes"))...)
+            ("finding", "revision", "title", "authors", "abstract", "date", "source", "changes"))...)
 end
 
 route!("POST", "/api/publications/:id/publish"; need = "tasks.edit") do c
@@ -61,16 +64,17 @@ end
 publication_agent(c) = agent("Agent for " * caller_name(c); id = person_id(c))
 
 """Prepare a project manuscript with Markdown in body or an uploaded .md or .pdf media address in source.
+Give finding (e.g. FW-F1) to link a new manuscript to a project finding and start with its claim and write-up.
 Authors names the people and agents and their contributions. A Markdown file can supply title and date.
 Returns the draft and its revision. To edit or start the next version, supply id and the latest revision,
 all manuscript fields and, for a PDF, its source. Later editions need a changes note. Saving does not publish."""
 function publication_draft_tool(project::String; id::Int = 0, revision::String = "", title::String = "",
         authors::String = "", abstract::String = "", body::String = "", date::String = "", changes::String = "",
-        source::String = "")::String
+        source::String = "", finding::String = "")::String
     refusing() do
         caller = tool_caller()
         JSON.json(draft_publication!(kb(), caller, publication_agent(caller), project;
-            id, revision, title, authors, abstract, body, date, changes, source))
+            id, revision, title, authors, abstract, body = isempty(body) ? nothing : body, date, changes, source, finding))
     end
 end
 tool!("publication_draft", publication_draft_tool; need = "tasks.edit")

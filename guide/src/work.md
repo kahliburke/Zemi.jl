@@ -6,8 +6,14 @@
 
 ## Internal publications
 
-Open **Internal publications** on a project board. Contributors can start a manuscript from Markdown,
-a PDF or a file already on the project. Markdown frontmatter can supply its title and date.
+Open a finding and choose **Prepare manuscript** under **Internal publications**. The editor
+starts with the finding’s claim and write-up. Review the text and add authors before release.
+The finding lists its manuscripts and editions. Project readers can follow the link back from
+an edition to the finding and its evidence. Editing or accepting a finding preserves the text
+of each released edition.
+
+Use **Internal publications** in the Findings toolbar to browse all the project's manuscripts,
+including works prepared independently. Contributors can import Markdown, a PDF or a project file. Markdown frontmatter can supply its title and date.
 Name the authors and their contributions, including any agents, add an abstract, and cite
 findings, notes, code or data in the manuscript. **Save and preview** makes a project draft
 that another contributor can pick up. The preview shows the audience before release.
@@ -19,7 +25,7 @@ Earlier editions keep their text, authors, date and manuscript PDF.
 
 Project members can read the published work. A maintainer can choose all instance readers
 when releasing the first edition. Later editions keep that audience. Links to supporting
-documents retain those documents’ own access rules. The knowledge base search offers a
+documents retain those documents’ own access rules. The knowledge base search offers an
 **internal publications** filter and searches the latest published title, authors, abstract and Markdown.
 
 ### From an internal edition to an external publication
@@ -37,7 +43,7 @@ keeps the existing project or instance audience. The team handles submission wit
 
 Agents have the same workflow over MCP. For example, in the fictional project `FW`:
 
-1. Call `publication_draft(project="FW", title="Spring survey", authors="Rowan and Survey agent",
+1. Call `publication_draft(project="FW", finding="FW-F1", title="Spring survey", authors="Rowan and Survey agent",
    abstract="Measurements along three transects.", body="## Observations\n…")`. Alternatively,
    supply `source="media/<hash>/survey.md"` or a PDF attachment from `media_upload`.
 2. Read the returned draft or reopen it with `publication(id=…, draft=true)`. A project

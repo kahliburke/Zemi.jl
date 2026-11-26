@@ -20,7 +20,7 @@ tool!("findings", findings_tool; need = "tasks.view")
 
 Finding `ref` (`KB-F3`) in full: its claim, status, write-up and sources (its evidence and what
 the write-up cites), and the findings that build on or contradict it. The newest images in it and its
-comments are shown, and the other files attached are listed (see `media`).
+comments are shown, and the other files attached are listed (see `media`). Released manuscripts link to their editions.
 """
 finding_tool(ref::String)::String = refusing() do
     tool_needs(ref, VIEW)
@@ -145,6 +145,16 @@ function format_finding(ref::AbstractString)
             f.versions > 0 ? "; $(f.versions) earlier version$(f.versions == 1 ? "" : "s")" : "")
     isempty(f.body) || println(io, "\n", plain_at_references(f.body))
     isempty(f.recheck) || println(io, "\n## Its evidence changed since it was written\n\n", join(("- $r" for r in f.recheck), "\n"))
+    caller = tool_caller()
+    if can(caller, "read")
+        works = publication_list(kb(), caller; project = f.project, finding_id = finding_id(kb(), ref))
+        if !isempty(works)
+            println(io, "\n## Internal publications\n")
+            for w in works
+                println(io, "- $(w.title), v$(w.version) ", site_base(kb().config), publication_url(w.id, w.version))
+            end
+        end
+    end
     sources = [x for x in finding_sources(kb(), ref) if !hidden(x.kind, x.target)]
     if !isempty(sources)
         println(io, "\n## Sources\n")

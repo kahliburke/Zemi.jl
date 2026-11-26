@@ -7,11 +7,11 @@ import { pageLink } from './kbLinks'
 
 type Manuscript = { id: number; version: number; latest: number; revision: string; title: string; authors: string;
   abstract: string; date: string; body: string; changes: string; pdf_hash: string | null; audience: string; published_at: string }
-const props = defineProps<{ project: string; edition?: Manuscript; files: { name: string; address: string }[]; maintainer: boolean }>()
+const props = defineProps<{ project: string; edition?: Manuscript; finding?: { ref: string; claim: string; body: string }; files: { name: string; address: string }[]; maintainer: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 const initial = props.edition
-const form = ref({ id: initial?.id ?? 0, revision: initial?.revision ?? '', title: initial?.title ?? '', authors: initial?.authors ?? '',
-  abstract: initial?.abstract ?? '', date: initial?.date ?? '', body: initial?.body ?? '',
+const form = ref({ finding: props.finding?.ref ?? '', id: initial?.id ?? 0, revision: initial?.revision ?? '', title: initial?.title ?? props.finding?.claim ?? '', authors: initial?.authors ?? '',
+  abstract: initial?.abstract ?? '', date: initial?.date ?? '', body: initial?.body ?? props.finding?.body ?? '',
   changes: initial?.published_at ? '' : initial?.changes ?? '', source: initial?.pdf_hash ? `media/${initial.pdf_hash}/manuscript.pdf` : '' })
 const preview = ref(!!initial && !initial.published_at)
 const version = ref((initial?.latest ?? 0) + 1)
@@ -71,8 +71,8 @@ function publish() {
 }
 </script>
 <template>
-  <h1>{{ preview ? 'Review draft' : 'Prepare internal publication' }}</h1>
-  <p>{{ project }} · v{{ version }}</p>
+  <component :is="props.finding ? 'h3' : 'h1'">{{ preview ? 'Review draft' : 'Prepare internal publication' }}</component>
+  <p>{{ props.finding?.ref ?? project }} · v{{ version }}</p>
   <p v-if="error" role="alert">{{ error }}</p>
   <form v-if="!preview" @submit.prevent="save">
     <fieldset :disabled="busy">
@@ -108,7 +108,7 @@ function publish() {
       <button v-if="allowed" type="button" @click="publish">Publish v{{ version }} {{ audience === 'instance' ? 'to the instance' : 'in ' + project }}</button>
     </fieldset>
   </template>
-  <button type="button" :disabled="busy" @click="emit('close')">Back to internal publications</button>
+  <button type="button" :disabled="busy" @click="emit('close')">{{ props.finding ? 'Back to finding' : 'Back to internal publications' }}</button>
 </template>
 <style scoped>
 fieldset { border: 0; padding: 0; }
