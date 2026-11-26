@@ -275,11 +275,14 @@ function goToRow(key: string) {
   stopDrift()                                    // or it selects the next document a moment later
   selected.value = null
   litRow.value = key
-  const ns: GNode[] = (graph?.graphData().nodes ?? []).filter((n: GNode) => legendKey(n) === key && n.x !== undefined)
-  if (!ns.length) return
+  frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => legendKey(n) === key && n.x !== undefined), 0.7)
+}
+// The view framing nodes `ns`: the share `most` of them nearest their middle, so outliers do not hold it far out.
+function frameNodes(ns: GNode[], most: number) {
+  if (!ns.length || !graph) return
   const mid = ['x', 'y', 'z'].map(a => ns.reduce((t, n) => t + ((n as any)[a] ?? 0), 0) / ns.length)
   const apart = (n: GNode) => Math.hypot(n.x - mid[0], n.y - mid[1], (n.z ?? 0) - mid[2])
-  const core = new Set(ns.slice().sort((a, b) => apart(a) - apart(b)).slice(0, Math.max(3, Math.ceil(ns.length * 0.7))).map(n => n.id))
+  const core = new Set(ns.slice().sort((a, b) => apart(a) - apart(b)).slice(0, Math.max(3, Math.ceil(ns.length * most))).map(n => n.id))
   if (view.value === '2d') { graph.zoomToFit(900, 20, (n: GNode) => core.has(n.id)); return }
   // The space's own fitting aims at the origin; this looks at the middle, from where the camera is.
   const r = Math.max(20, ...ns.filter(n => core.has(n.id)).map(apart))
@@ -290,6 +293,12 @@ function goToRow(key: string) {
                          z: mid[2] + (from.z - mid[2]) * d / away }, { x: mid[0], y: mid[1], z: mid[2] }, 1200)
 }
 watch(selected, n => { if (n) litRow.value = null })
+// Back to the whole map in view, nothing lit; the selected document stays selected.
+function resetView() {
+  stopDrift()
+  litRow.value = null
+  frameNodes((graph?.graphData().nodes ?? []).filter((n: GNode) => n.x !== undefined), 1)
+}
 // A legend row's documents shaded from faint to full by how much each stands out in it: its links among
 // the documents here (the cluster's middle deciding among the unlinked), how central it is in meaning,
 // or the rating the watch's judge gave it.
@@ -1140,6 +1149,10 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
         <button class="kbx-btn" :class="{ on: showPairs }" title="Pairs of documents close in meaning that nothing links yet" @click="showPairs = !showPairs">Suggested links</button>
         <button v-if="data?.abstract_only" class="kbx-btn" :class="{ on: abstracts }" :title="`${data.abstract_only} papers not read in full, placed by their title and abstract`"
                 @click="abstracts = !abstracts">Include abstract only</button>
+        <button class="kbx-btn kbx-icon" aria-label="Show the whole map" title="Show the whole map" @click="resetView">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+               stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg>
+        </button>
         <button class="kbx-btn kbx-icon" :class="{ on: panelOpen }" aria-controls="kbx-panel" :aria-expanded="panelOpen"
                 aria-label="The map's legend and settings" title="Legend, layout and what the map shows" @click="panelOpen = !panelOpen">
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"
@@ -1367,7 +1380,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kbx-panel-head .kbx-seg button { padding: 2px 10px; }
 .kbx-icon { display: inline-flex; align-items: center; justify-content: center; padding: 5px 8px; margin-left: auto; }
-.kbx-icon + .kbx-full { margin-left: 0; }
+.kbx-icon + .kbx-icon, .kbx-icon + .kbx-full { margin-left: 0; }
 .kbx-shade { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0 4px; color: var(--vp-c-text-2); }
 .kbx-shade .kbx-seg button { padding: 2px 7px; }
 .kbx-key ul { list-style: none; margin: 4px 0 2px; padding: 0; }
