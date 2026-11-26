@@ -7,6 +7,11 @@
   :root { --vp-sidebar-width: 300px; }
 }
 
+/* The layout switch and spotlight act on the sidebar and wide pages, which a phone does not show. */
+@media (max-width: 959px) {
+  .VPNolebaseEnhancedReadabilitiesMenu { display: none !important; }
+}
+
 /* Let the home page title wrap; the default keeps it on one line and cuts it off at 600px. */
 .VPHero .clip {
   white-space: normal;
