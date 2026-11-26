@@ -111,14 +111,17 @@ blocking on one call, so a long turn (a long paper) is not cut off by the call's
 `partial`, given, is called with the reply as written so far at each poll, and `activity` with each
 tool call the agent makes, as a [`agent_step`](@ref).
 """
-function agent_turn(id::AbstractString, text::AbstractString; timeout::Real = 1800, poll::Real = 5, partial = nothing,
-                    activity = nothing)
+agent_turn(id::AbstractString, text::AbstractString; kwargs...) =
+    String(get(agent_turn_result(id, text; kwargs...), "text", ""))
+
+function agent_turn_result(id::AbstractString, text::AbstractString; timeout::Real = 1800, poll::Real = 5, partial = nothing,
+                           activity = nothing)
     seen = Ref(activity === nothing ? 0 : length(agent_events(id)))
     turn = kaimon_tool(:agent_send, Dict{String,Any}("agent_id" => id, "text" => text))["turn"]
     t0 = time()
     while true
         out = kaimon_tool(:agent_output, Dict{String,Any}("agent_id" => id, "turn" => turn, "max_chars" => 200_000))
-        get(out, "done", false) === true && return String(get(out, "text", ""))
+        get(out, "done", false) === true && return out
         partial === nothing || isempty(get(out, "text", "")) || partial(String(out["text"]))
         if activity !== nothing
             events = agent_events(id)
@@ -328,16 +331,29 @@ function agent_summarize_paper!(kb::KB, s::Summarizer, doc_id::AbstractString; p
         link_file(first(f).path, joinpath(dir, "paper.pdf"))
     end
     progress("$(s.model) agent reading the paper")
-    with_agent(s, dir; system = prompts.agent_system(kb.config)) do id
-        agent_turn(id, "Read BRIEF.md and follow it for the paper in task.md."; timeout = s.timeout)
-    end
+    tokens = summary_turn(s, dir, "Read BRIEF.md and follow it for the paper in task.md."; system = prompts.agent_system(kb.config))
     out = joinpath(dir, "summaries.json")
     isfile(out) || error("The $(s.name) agent wrote no summaries.json")
     d = reply_json(read(out, String), "The $(s.name) agent")
     written = Dict{Int,String}(parse(Int, string(k)) => String(v) for (k, v) in get(d, "sections", Dict()))
     missed = setdiff((t.ord for t in sections), keys(written))
     isempty(missed) || error("The $(s.name) agent left out sections $(sort!(collect(missed)))")
-    return import_summaries!(kb, s, doc_id; sections = written, paper = String(d["paper"]))
+    return import_summaries!(kb, s, doc_id; sections = written, paper = String(d["paper"]), tokens)
+end
+
+# A summary worker opens a fresh Kaimon session for a single turn. Its final session
+# counters therefore measure the complete batch, even if agent_output was polled many times.
+function summary_turn(s::Summarizer, dir, prompt; system)
+    out = with_agent(s, dir; system) do agent
+        agent_turn_result(agent, prompt; timeout = s.timeout)
+    end
+    usage = get(out, "usage", nothing)
+    usage isa AbstractDict || return (missing, missing)
+    function counter(k)
+        value = get(usage, k, nothing)
+        return value isa Integer && !(value isa Bool) && value >= 0 ? value : missing
+    end
+    return (counter("inputTokens"), counter("outputTokens"))
 end
 
 # ── Long documents ──────────────────────────────────────────────────────────────────────────────
@@ -414,14 +430,16 @@ function agent_summarize_long!(kb::KB, s::Summarizer, id::AbstractString, sectio
         write(joinpath(dir, "part-$k.txt"), join(("=== $(t.ord): $(t.path) ===\n$(t.text)\n" for t in batch), "\n"))
         write(joinpath(dir, "part-$k.md"), "Document: $title\n\nSection text: part-$k.txt. Write the result to part-$k.json.\n\n" *
             "Sections to summarize (ord: heading path):\n" * join(("- $(t.ord): $(t.path)\n" for t in batch)))
-        with_agent(s, dir; system = summary_prompts(id).agent_system(kb.config)) do agent
-            agent_turn(agent, "Read BRIEF-part.md and follow it for the sections in part-$k.md."; timeout = s.timeout)
-        end
+        batch_tokens = summary_turn(s, dir, "Read BRIEF-part.md and follow it for the sections in part-$k.md.";
+                                    system = summary_prompts(id).agent_system(kb.config))
         got = agent_json(dir, "part-$k.json", s)
-        for t in batch
-            text = get(got, string(t.ord), nothing)
-            text === nothing && error("The $(s.name) agent left out section $(t.ord), $(t.path)")
-            save_summary!(kb, p.id, key(t.ord), s, sha(t.text), strip(String(text)), missing, missing)
+        transaction(kb) do
+            for (i, t) in enumerate(batch)
+                text = get(got, string(t.ord), nothing)
+                text === nothing && error("The $(s.name) agent left out section $(t.ord), $(t.path)")
+                usage = i == 1 ? batch_tokens : (missing, missing)
+                save_summary!(kb, p.id, key(t.ord), s, sha(t.text), strip(String(text)), usage...)
+            end
         end
         progress("[$(Threads.atomic_add!(done, 1) + 1)/$(length(batches))] batches of sections summarized")
     end
@@ -430,11 +448,10 @@ function agent_summarize_long!(kb::KB, s::Summarizer, id::AbstractString, sectio
     write(joinpath(dir, "whole.md"), "Document: $title\n\nIts sections and their summaries, in order:\n\n" *
         join(("$(t.path): $(get(current, key(t.ord), "(no summary)"))\n\n" for t in sections)))
     progress("$(s.model) agent summarizing the whole document")
-    with_agent(s, dir; system = summary_prompts(id).agent_system(kb.config)) do agent
-        agent_turn(agent, "Read BRIEF-whole.md and follow it for the document in whole.md."; timeout = s.timeout)
-    end
+    tokens = summary_turn(s, dir, "Read BRIEF-whole.md and follow it for the document in whole.md.";
+                          system = summary_prompts(id).agent_system(kb.config))
     got = agent_json(dir, "whole.json", s)
-    save_summary!(kb, p.id, "p:$id", s, sha(paper_input(sections)), strip(String(got["paper"])), missing, missing)
+    save_summary!(kb, p.id, "p:$id", s, sha(paper_input(sections)), strip(String(got["paper"])), tokens...)
     return length(todo) + 1
 end
 
@@ -565,23 +582,29 @@ function agent_summarize_code!(kb::KB, s::Summarizer, id::AbstractString; batch_
         end
         progress("$(s.model) agents reading $(length(changed_files)) files in $(length(batches)) batch(es)")
         # A batch read by an agent: the summaries it wrote are kept, and the files it left out returned.
-        function read_batch(name, batch)
+        function read_batch(name, batch, carry = (missing, missing))
             write(joinpath(dir, "$name.md"), "Write the result to $name.json.\n\nFiles to summarize (ord: path under repo/):\n" *
                 join(("- $(f.ord): $(f.path)\n" for f in batch)))
-            with_agent(s, dir; system = CODE_AGENT_SYSTEM) do agent
-                agent_turn(agent, "Read BRIEF-files.md and follow it for the files in $name.md."; timeout = s.timeout)
-            end
+            reported = summary_turn(s, dir, "Read BRIEF-files.md and follow it for the files in $name.md."; system = CODE_AGENT_SYSTEM)
+            # A first attempt that wrote no files carries its usage into the retry.
+            add(a, b) = ismissing(a) ? b : ismissing(b) ? a : a + b
+            batch_tokens = map(add, reported, carry)
             got = agent_json(dir, "$name.json", s)
-            for f in batch
-                text = get(got, string(f.ord), nothing)
-                text === nothing || save_summary!(kb, p.id, key(f.ord), s, sha(f.text), strip(String(text)), missing, missing)
+            transaction(kb) do
+                for f in batch
+                    text = get(got, string(f.ord), nothing)
+                    text === nothing && continue
+                    save_summary!(kb, p.id, key(f.ord), s, sha(f.text), strip(String(text)), batch_tokens...)
+                    batch_tokens = (missing, missing)
+                end
             end
-            return [f for f in batch if !haskey(got, string(f.ord))]
+            return [f for f in batch if !haskey(got, string(f.ord))], batch_tokens
         end
         asyncmap(enumerate(batches); ntasks = 4) do (k, batch)
-            left = read_batch("files-$k", batch)
-            # An agent reading many files may pass over one: those it left out are asked for once more.
-            isempty(left) || (left = read_batch("files-$k-again", left))
+            left, carry = read_batch("files-$k", batch)
+            if !isempty(left)
+                left, _ = read_batch("files-$k-again", left, carry)
+            end
             isempty(left) || error("The $(s.name) agent left out $(join((f.path for f in left), ", "))")
         end
         n += length(changed_files)
@@ -592,9 +615,7 @@ function agent_summarize_code!(kb::KB, s::Summarizer, id::AbstractString; batch_
             join(("$(f.path): $(get(current, key(f.ord), "(no summary)"))\n\n" for f in files)) *
             "Directories to summarize (ord: path under repo/):\n" * join(("- $(d.ord): $(d.title)\n" for d in changed_dirs)))
         progress("$(s.model) agent summarizing $(length(changed_dirs)) directories and the codebase")
-        with_agent(s, dir; system = CODE_AGENT_SYSTEM) do agent
-            agent_turn(agent, "Read BRIEF-tree.md and follow it for the codebase in tree.md."; timeout = s.timeout)
-        end
+        tokens = summary_turn(s, dir, "Read BRIEF-tree.md and follow it for the codebase in tree.md."; system = CODE_AGENT_SYSTEM)
         got = agent_json(dir, "tree.json", s)
         written = get(got, "dirs", Dict())
         for d in changed_dirs
@@ -602,7 +623,7 @@ function agent_summarize_code!(kb::KB, s::Summarizer, id::AbstractString; batch_
             text === nothing && error("The $(s.name) agent left out directory $(d.title)")
             save_summary!(kb, p.id, key(d.ord), s, dir_sha(d), strip(String(text)), missing, missing)
         end
-        save_summary!(kb, p.id, "p:$id", s, whole, strip(String(got["codebase"])), missing, missing)
+        save_summary!(kb, p.id, "p:$id", s, whole, strip(String(got["codebase"])), tokens...)
         n += length(changed_dirs) + 1
     end
     # Summaries of files and directories that are gone, or too short to summarize now, go too.

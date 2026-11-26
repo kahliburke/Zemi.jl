@@ -12,14 +12,14 @@ type Contents = {
   at: string
   papers: { recorded: number; full: number; uploaded: number; sections: number; passages: number }
   layers: { name: string; embeds: string; model: string; papers: number; vectors: number }[]
-  summaries: { summarizer: string; model: string; papers: number; summaries: number; input: number; output: number }[]
+  summaries: { summarizer: string; model: string; papers: number; summaries: number; input: number | null; output: number | null }[]
   shared_by: { who: string; papers: number }[]
   years: { year: string; papers: number }[]
 }
 const route = useRoute()
 const c = ref<Contents | null>(null)
 const error = ref('')
-const num = (n: number) => n.toLocaleString('en-GB')
+const num = (n: number | null) => n == null ? 'Unknown' : n.toLocaleString('en-GB')
 
 onMounted(async () => {
   try {

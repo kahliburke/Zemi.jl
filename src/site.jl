@@ -1030,7 +1030,7 @@ function contents_json(kb::KB, records)
                       Dict("name" => l.name, "embeds" => ranking_label(kb.config, l.name), "model" => l.model,
                            "papers" => c.papers, "vectors" => c.n)) for l in kb.config.layers],
         "summaries" => [Dict("summarizer" => r.summarizer, "model" => r.model, "papers" => r.papers, "summaries" => r.n,
-                             "input" => coalesce(r.tin, 0), "output" => coalesce(r.tout, 0))
+                             "input" => coalesce(r.tin, nothing), "output" => coalesce(r.tout, nothing))
                         for r in query(kb, """SELECT summarizer, model, count(*) AS n, count(DISTINCT paper_id) AS papers,
                                               sum(input_tokens) AS tin, sum(output_tokens) AS tout FROM summaries GROUP BY summarizer""")],
         "shared_by" => [Dict("who" => r.who, "papers" => r.n)

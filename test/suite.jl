@@ -3989,7 +3989,8 @@ end
     elseif name == :agent_status
         K.JSON.json(Dict("status" => haskey(opened, args["agent_id"]) ? "idle" : "dead"))
     elseif name == :agent_output
-        K.JSON.json(Dict("done" => true, "status" => "idle", "text" => replies[args["agent_id"]]))
+        K.JSON.json(Dict("done" => true, "status" => "idle", "text" => replies[args["agent_id"]],
+                         "usage" => Dict("inputTokens" => 37, "outputTokens" => 11)))
     else
         "{}"
     end
@@ -4004,7 +4005,12 @@ end
         sections = [K.Section(1, 1, "1", "1. One", "1. One", 1, 1), K.Section(2, 1, "2", "2. Two", "2. Two", 1, 1)]
         K.store_parse!(kb, "2609.00001", K.ParsedPaper(1, [piece(:heading, "1. One", 1), piece(:paragraph, repeat("First words. ", 30), 1),
                                                           piece(:heading, "2. Two", 2), piece(:paragraph, repeat("Second words. ", 30), 2)], sections))
+        function total(summary, doc)
+            rs = summaries(kb, doc; summarizer = summary.name)
+            return (sum(skipmissing(r.input_tokens for r in rs)), sum(skipmissing(r.output_tokens for r in rs)))
+        end
         @test summarize_paper!(kb, s, "2609.00001") == 3                  # two sections and the paper
+        @test total(s, "2609.00001") == (37, 11)
         @test [x.text for x in summaries(kb, "2609.00001"; summarizer = "agent-t")] ==
               ["The paper.\nTopics: a, b", "Section 1, read whole.", "Section 2, read whole."]
         n = length(opened)
@@ -4027,6 +4033,7 @@ end
         n = length(opened)
         @test K.agent_summarize_long!(kb, s, "2609.00001", K.section_texts(kb, "2609.00001"); batch_chars = 10) == 2
         @test length(opened) == n + 2 && K.agent_summaries(kb, s, "2609.00001") == :current
+        @test total(s, "2609.00001") == (74, 22)
         @test [x.text for x in summaries(kb, "2609.00001"; summarizer = "agent-t")] ==
               ["The document.\nTopics: x", "Part section 1.", "Section 2, read whole."]
         # An agent that sees images but not a PDF is given the paper's figures, as cut from it, with their captions.
@@ -4052,6 +4059,17 @@ end
         K.execute!(kb, "UPDATE parses SET file_sha = 'pdf-1' WHERE paper_id = ?", (pid,))
         K.import_summaries!(kb, pdf, "2609.00001"; sections = Dict(1 => "One.", 2 => "Two."), paper = "Paper.\nTopics: a")
         @test K.agent_summaries(kb, pdf, "2609.00001") == :current
+        # External imports have no usage report. A PDF worker reports one total for the whole paper.
+        counts = only(r for r in K.contents_json(kb, [])["summaries"] if r["summarizer"] == pdf.name)
+        @test counts["input"] === counts["output"] === nothing
+        source = joinpath(mktempdir(), "source.pdf")
+        write(source, "%PDF-1.4")
+        K.execute!(kb, "INSERT INTO files VALUES (?, ?, 'pdf-1', 8, ?)", (pid, source, K.now_iso()))
+        K.execute!(kb, "DELETE FROM summaries WHERE summarizer = ?", (pdf.name,))
+        @test summarize_paper!(kb, pdf, "2609.00001") == 3
+        @test total(pdf, "2609.00001") == (37, 11)
+        @test summarize_paper!(kb, pdf, "2609.00001") == 0 && total(pdf, "2609.00001") == (37, 11)
+        @test occursin("Summaries by agent-pdf (opus): 3 for 1 paper(s), 37 input / 11 output tokens", K.format_status(kb))
         K.execute!(kb, "UPDATE blocks SET text = text || ' Read better.' WHERE paper_id = ? AND kind = 'paragraph'", (pid,))
         @test K.agent_summaries(kb, pdf, "2609.00001") == :current && K.agent_summaries(kb, s, "2609.00001") == :stale
         K.execute!(kb, "UPDATE parses SET file_sha = 'pdf-2' WHERE paper_id = ?", (pid,))
@@ -4143,7 +4161,10 @@ end
         write(joinpath(repo, "src", "More.jl"), join("more$i() = $i\n" for i in 1:40))
         code = add_codebase!(kb, repo; name = "Demo")
         K.parse_code!(kb, code)
+        before = length(opened)
         @test K.agent_summarize_code!(kb, s, code; batch_chars = 400) == 3 + 1 + 1   # 3 files, src/, the codebase
+        calls = length(opened) - before
+        @test total(s, code) == (37 * calls, 11 * calls)
         @test K.agent_summarize_code!(kb, s, code) == 0
         write(joinpath(repo, "src", "More.jl"), join("more$i() = $i + 1\n" for i in 1:40))
         K.parse_code!(kb, code)
