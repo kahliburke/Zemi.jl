@@ -226,10 +226,9 @@ const EXPLORE_VERSION = 8
 const EXPLORE_NEIGHBOURS = 10
 
 """
-The most documents laid out by t-SNE, whose cost grows with the square of their number: the rest are
-placed among their nearest documents.
+The most documents laid out by t-SNE (see [`tsne`](@ref)): the rest are placed among their nearest documents.
 """
-const EXPLORE_LAYOUT_LIMIT = 4000
+const EXPLORE_LAYOUT_LIMIT = 50_000
 
 explore_path(c::Config) = joinpath(c.data_dir, "explore.json")
 

@@ -290,58 +290,30 @@ function principal_start(X::AbstractMatrix, dims::Integer)
     return Y
 end
 
+"The principal components t-SNE works on, of a layout's vectors: their fine structure, at a fraction of the cost."
+const TSNE_DIMS = 100
+
+"The most documents t-SNE lays out exactly; more are laid out by Barnes–Hut, whose cost grows with n log n."
+const TSNE_EXACT_MOST = 500
+
 """
     tsne(X; perplexity = 30, iterations = 1000, dims = 2) -> Matrix
 
 A layout in `dims` dimensions of the unit columns of `X` (one row per column) by t-SNE over their
-cosine distances, starting from their principal components, so the layout is the same for the same
-vectors and moves little as papers are added.
+squared distances (two less twice their cosine similarity), starting from their principal components
+with a fixed seed, so the layout is the same for the same vectors and moves little as papers are added.
+Past `TSNE_EXACT_MOST` columns, by Barnes–Hut on their first `TSNE_DIMS` principal components.
 """
 function tsne(X::AbstractMatrix; perplexity::Real = 30, iterations::Integer = 1000, dims::Integer = 2)
     n = size(X, 2)
-    D = max.(2 .- 2 .* (X' * X), 0)                 # squared distances between unit vectors
-    P = zeros(n, n)
-    target = log(min(perplexity, (n - 1) / 3))
-    for i in 1:n
-        d = D[:, i]
-        nearest = minimum(d[j] for j in 1:n if j != i)    # (subtracted before exponentiating, for range)
-        lo, hi, beta = 0.0, Inf, 1.0
-        p = zeros(n)
-        for _ in 1:100
-            p .= exp.(-beta .* (d .- nearest))
-            p[i] = 0
-            s = sum(p)
-            H = log(s) + beta * (sum(d .* p) / s - nearest)     # the entropy of row i
-            abs(H - target) < 1e-5 && break
-            if H > target
-                lo = beta; beta = isinf(hi) ? 2beta : (beta + hi) / 2
-            else
-                hi = beta; beta = (beta + lo) / 2
-            end
-        end
-        P[:, i] = p ./ sum(p)
-    end
-    P = max.((P .+ P') ./ (2n), 1e-12)
-    # Start from the principal components, at a small scale.
-    Y = principal_start(X, dims)
-    Y .*= 1e-4 / max(sqrt(sum(abs2, Y[:, 1]) / n), eps())
-    gains, step = ones(n, dims), zeros(n, dims)
-    rate = max(n / 48, 50.0)
-    for it in 1:iterations
-        exaggeration, momentum = it <= 250 ? (12.0, 0.5) : (1.0, 0.8)
-        sq = sum(abs2, Y; dims = 2)
-        num = 1 ./ (1 .+ sq .+ sq' .- 2 .* (Y * Y'))
-        num[diagind(num)] .= 0
-        Q = max.(num ./ sum(num), 1e-12)
-        W = (exaggeration .* P .- Q) .* num
-        grad = 4 .* (vec(sum(W; dims = 2)) .* Y .- W * Y)
-        same = sign.(grad) .== sign.(step)
-        gains .= max.(ifelse.(same, gains .* 0.8, gains .+ 0.2), 0.01)
-        step .= momentum .* step .- rate .* gains .* grad
-        Y .+= step
-        Y .-= sum(Y; dims = 1) ./ n
-    end
-    return Y
+    # On principal components of our own, all of those asked for: TSne's PCA keeps only those needed for
+    # most of the variance, which for a few vectors can be fewer than the layout's dimensions. Given them
+    # at their full number, it starts from the first `dims` and reduces no further.
+    r = clamp(min(TSNE_DIMS, size(X, 1), n - 1), dims + 1, size(X, 1))
+    Z = principal_start(X, r)
+    return TSne.tsne(Z, dims, r, iterations, Float64(min(perplexity, (n - 1) / 3));
+                     method = n > TSNE_EXACT_MOST ? :barneshut : :exact, pca_init = true, progress = false,
+                     rng = Random.MersenneTwister(1))
 end
 
 """

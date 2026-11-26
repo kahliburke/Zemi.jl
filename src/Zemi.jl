@@ -10,10 +10,11 @@ using Base64
 using CodecZlib
 using CodecZstd: ZstdCompressor, ZstdDecompressor, ZstdCompressorStream, ZstdDecompressorStream
 using Dates
-using LinearAlgebra: diagind, dot, norm, svd
+using LinearAlgebra: dot, norm, svd
 import Random
 using SHA
 import Tar
+import TSne
 using Sockets
 using TOML
 using UUIDs
