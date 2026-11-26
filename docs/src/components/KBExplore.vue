@@ -1150,7 +1150,12 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
             <button role="tab" :aria-selected="panel === 'colours'" :class="{ on: panel === 'colours' }" @click="panel = 'colours'">Colours</button>
             <button role="tab" :aria-selected="panel === 'show'" :class="{ on: panel === 'show' }" @click="panel = 'show'">Show</button>
           </div>
-          <button class="kbx-panel-toggle" :aria-expanded="panelOpen" @click="panelOpen = !panelOpen">{{ panelOpen ? 'Hide' : 'Colours · Show' }}</button>
+          <button class="kbx-panel-toggle" :aria-expanded="panelOpen" :aria-label="panelOpen ? 'Close the map\'s settings' : 'The map\'s settings'"
+                  :title="panelOpen ? 'Close' : 'Colours, layout and what the map shows'" @click="panelOpen = !panelOpen">
+            <svg v-if="!panelOpen" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+            <span v-else aria-hidden="true">×</span>
+          </button>
         </div>
         <div v-if="panelOpen && panel === 'colours'" class="kbx-key" role="tabpanel">
           <div class="kbx-shade">
@@ -1362,7 +1367,9 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
 .kbx-panel.wide { width: min(31rem, calc(100% - 20px)); }
 .kbx-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kbx-panel-head .kbx-seg button { padding: 2px 10px; }
-.kbx-panel-toggle { color: var(--vp-c-text-2); margin-left: auto; }
+.kbx-panel-toggle { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; font-size: 16px;
+                     color: var(--vp-c-text-2); margin-left: auto; border-radius: 6px; }
+.kbx-panel:not(.open) { padding: 4px; }
 .kbx-panel-toggle:hover { color: var(--vp-c-text-1); }
 .kbx-shade { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 6px 0 4px; color: var(--vp-c-text-2); }
 .kbx-shade .kbx-seg button { padding: 2px 7px; }
