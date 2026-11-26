@@ -106,7 +106,7 @@ DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
     [(name = n, import_path = "@/$n.vue") for n in ("KBSearch", "KBSettings", "KBUpload", "KBManager", "KBCodeTree", "KBSync", "KBLandscape",
                                                       "KBDownload", "KBBibliography", "KBMissing", "KBWatch", "KBDaily", "KBInLibraries", "KBAuthors", "KBAccount",
                                                       "KBSources", "KBServices",
-                                                      "KBAccountPage", "KBLibraryStatus", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate", "KBPalette",
+                                                      "KBAccountPage", "KBLibraryStatus", "KBOperations", "KBConfiguration", "KBLayers", "KBAdmin", "KBUpdate", "KBPalette", "KBShare",
                                                       "KBProjects", "KBFindings", "KBMarkdownAttachment", "KBPaperPage", "KBPaperList", "KBTopics", "KBTopicPage",
                                                       "KBStatusTables", "KBCodeFilePage", "KBCodebasePage", "KBCodebases", "KBDayPage",
                                                       "KBRecordPage", "KBRecords", "KBResourcePage", "KBResources", "KBExplore",
@@ -273,7 +273,7 @@ function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, con
     marker = "...navTemp.nav,"
     occursin(marker, config) || (@warn "No `$marker` in the VitePress config; the search settings button is left out"; return config)
     # The palette (Cmd-K) is in the top bar so that it is on every page; it shows nothing until opened.
-    return replace(config, marker => marker * "\n  { component: 'KBSettings' },\n  { component: 'KBAccount' },\n  { component: 'KBUpdate' },\n  { component: 'KBPalette' },"; count = 1)
+    return replace(config, marker => marker * "\n  { component: 'KBShare' },\n  { component: 'KBSettings' },\n  { component: 'KBAccount' },\n  { component: 'KBUpdate' },\n  { component: 'KBPalette' },"; count = 1)
 end
 
 # The service's own pages (service/*.md) are built but not listed: the top bar's menu (KBAccount.vue)

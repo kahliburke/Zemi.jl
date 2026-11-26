@@ -50,7 +50,7 @@ async function upload(e: Event) {
       <p v-if="appeared" class="kbrs-appeared">{{ appeared }}</p>
       <div v-if="r.cite" class="kb-buttons"><KBCite :cite="r.cite" :title="r.title" /></div>
     </div>
-    <p v-if="r.note">{{ r.note }}</p>
+    <p data-share-text v-if="r.note">{{ r.note }}</p>
     <p class="kbrs-where">
       <a v-if="r.url" :href="r.url" target="_blank" rel="noopener">{{ r.url }}</a>
       <template v-if="r.url && r.doi"> · </template>

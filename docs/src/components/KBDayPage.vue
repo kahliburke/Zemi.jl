@@ -66,7 +66,7 @@ function anchorHeadings(root: HTMLElement) {
     <blockquote v-if="d.why"><p>{{ d.why }}</p></blockquote>
 
     <template v-for="(piece, i) in pieces" :key="i">
-      <div v-if="'text' in piece" v-html="render(piece.text)"></div>
+      <div data-share-text v-if="'text' in piece" v-html="render(piece.text)"></div>
       <template v-else>
         <KBFigureImage :dir="`/kb-data/figures/${d.slug}`" :file="piece.figure.file" :light="piece.figure.light" :dark="piece.figure.dark"
                        :width="piece.figure.width" :label="piece.figure.label" />

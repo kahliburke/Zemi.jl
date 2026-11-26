@@ -101,7 +101,7 @@ async function link(key: string, remove = false) {
 
     <template v-if="r.summary">
       <h2 id="summary">Summary</h2>
-      <div v-html="render(r.summary, { refs: true })"></div>
+      <div data-share-text v-html="render(r.summary, { refs: true })"></div>
       <p v-if="r.topics.length"><strong>Topics:</strong> {{ r.topics.join(' · ') }}</p>
     </template>
     <p v-else-if="!r.read" class="kb-dim">Not read yet.</p>
@@ -111,7 +111,7 @@ async function link(key: string, remove = false) {
 
     <template v-for="(s, i) in r.sections" :key="i">
       <h2 :id="`part-${i + 1}`">{{ s.heading }}</h2>
-      <div class="kbr-text" v-html="shown(s.text)"></div>
+      <div data-share-text class="kbr-text" v-html="shown(s.text)"></div>
     </template>
     <template v-if="unplaced.length">
       <h2 id="figures">Figures</h2>

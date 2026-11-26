@@ -11,6 +11,8 @@
 
 ### Changes
 
+- Share the current page as a link or with editable text from the site navigation.
+
 - **Signing in to a knowledge base run for one person**: an OAuth client, such as a Slate notebook
   citing from its bibliography, signs in with the owner's consent and reads what the owner sees.
   Configuration lists the clients connected and revokes them. A group's site signs a client in to a
