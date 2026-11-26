@@ -50,9 +50,11 @@ shared_config(; kw...) = K.SharedConfig(; base_url = "http://127.0.0.1:8800", ad
     recently = K.iso_in(K.Dates.Second(-30))
     K.execute!(kb, "UPDATE sessions SET last_seen = ?", (recently,))
     @test K.session_caller(kb, s).user_id == student && seen() == recently
-    K.execute!(kb, "UPDATE sessions SET last_seen = ?", (K.iso_in(K.Dates.Minute(-2)),))
+    stale = K.iso_in(K.Dates.Minute(-2))
+    K.execute!(kb, "UPDATE sessions SET last_seen = ?", (stale,))
+    K.execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (stale, student))
     K.session_caller(kb, s)
-    @test seen() > recently
+    @test K.scalar(kb, "SELECT last_seen FROM users WHERE id = ?", (student,)) == seen() > recently
     K.execute!(kb, "UPDATE sessions SET expires_at = '2000-01-01T00:00:00Z'")
     @test K.session_caller(kb, s) === K.ANONYMOUS
     @test K.scalar(kb, "SELECT count(*) FROM sessions") == 0                   # an expired session is removed
@@ -100,6 +102,54 @@ shared_config(; kw...) = K.SharedConfig(; base_url = "http://127.0.0.1:8800", ad
     K.audit!(kb, learner, "token.create"; target = "laptop", detail = Dict("permissions" => ["read"]))
     e = first(K.audit_log(kb))
     @test e.who == "student@example.org" && e.action == "token.create" && e.detail["permissions"] == ["read"]
+    close(kb)
+end
+
+@zset "last seen in administration" begin
+    kb = open_kb(temp_config())
+    K.ensure_roles!(kb)
+    sh = shared_config()
+    admin = K.sign_in!(kb, sh, "Campus", "boss"; email = "boss@example.org", verified = true)
+    member = K.add_test_account!(kb, "Member"; roles = ["Reader"])
+    last_seen(id) = K.scalar(kb, "SELECT last_seen FROM users WHERE id = ?", (id,))
+    # total_changes() belongs to the connection that performs the writes.
+    writes() = lock(() -> K.scalar(kb, "SELECT total_changes()"), kb.lock)
+    stale = K.iso_in(K.Dates.Minute(-5))
+    recent = K.iso_in(K.Dates.Second(-20))
+
+    @test ismissing(last_seen(admin))
+    session = K.start_session!(kb, admin, sh)
+    hash = K.secret_hash(session)
+    session_seen() = K.scalar(kb, "SELECT last_seen FROM sessions WHERE token_hash = ?", (hash,))
+    @test last_seen(admin) == session_seen() > recent
+
+    K.view_as!(kb, session, member; caller = K.session_caller(kb, session))
+    K.execute!(kb, "UPDATE sessions SET last_seen = ? WHERE token_hash = ?", (stale, hash))
+    K.execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (stale, admin))
+    viewing = K.session_caller(kb, session)
+    @test viewing.user_id == member && viewing.admin == admin
+    @test last_seen(admin) == session_seen() > stale
+    @test ismissing(last_seen(member))
+    before = writes()
+    K.session_caller(kb, session)
+    @test writes() == before
+
+    t = K.create_token!(kb, admin; name = "client")
+    token_seen() = K.scalar(kb, "SELECT last_used FROM api_tokens WHERE id = ?", (t.id,))
+    # First token use is recorded even when another credential recently updated the person.
+    K.execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (recent, admin))
+    @test ismissing(token_seen())
+    @test K.token_caller(kb, t.token).user_id == admin
+    @test token_seen() > recent && last_seen(admin) == recent
+
+    K.execute!(kb, "UPDATE api_tokens SET last_used = ? WHERE id = ?", (stale, t.id))
+    K.execute!(kb, "UPDATE users SET last_seen = ? WHERE id = ?", (stale, admin))
+    @test K.token_caller(kb, t.token; mcp = true).user_id == admin
+    @test last_seen(admin) == token_seen() > stale
+    before = writes()
+    K.token_caller(kb, t.token; mcp = true)
+    K.session_caller(kb, session)
+    @test writes() == before
     close(kb)
 end
 
