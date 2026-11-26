@@ -81,7 +81,7 @@ async function cite() {
       <p v-if="reader.pdf_hash"><a :href="`${api}/api/publications/${reader.id}/${reader.version}/pdf`" target="_blank" rel="noopener">Read manuscript PDF</a></p>
       <div class="kb-md" @click="openTask" @keydown.enter="openTask" v-html="render(reader.body, { refs: true })"></div>
       <h2>Versions</h2>
-      <p><a v-for="v in reader.latest" :key="v" :href="href(reader.id, v)" :aria-current="v === reader.version ? 'page' : undefined">v{{ v }} </a></p>
+      <nav class="versions" aria-label="Versions"><a v-for="v in reader.latest" :key="v" :href="href(reader.id, v)" :aria-current="v === reader.version ? 'page' : undefined">v{{ v }}</a></nav>
       <p v-if="reader.changes">{{ reader.changes }}</p>
       <button v-if="contributor && reader.version === reader.latest" @click="edit(reader.id, true)">{{ reader.has_draft ? 'Review draft' : 'Prepare next version' }}</button>
     </article>
@@ -101,5 +101,6 @@ async function cite() {
 </template>
 <style scoped>
 button { color: var(--vp-c-brand-1); text-decoration: underline; }
+.versions { display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
 [aria-current="page"] { font-weight: bold; }
 </style>
