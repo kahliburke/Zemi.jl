@@ -293,13 +293,12 @@ function send_offsite!(c::Config; store = offsite_store(c), snap = latest_snapsh
                 d["bytes_done"] += length(bytes)
                 note()
             end
-            # A file sent with an earlier copy, whose sealed hash this machine lacks: the store's.
+            # A file sent with an earlier copy, whose sealed hash this machine lacks: the store's, or, where the
+            # store keeps none (one that went up in parts), the file sent again whole.
             names = [offsite_file_name(key, r.hash) for r in rows]
-            missing_here = filter(n -> !haskey(sealed, n), names)
-            asyncmap(missing_here; ntasks = OFFSITE_PARALLEL) do n
+            asyncmap([(r, n) for (r, n) in zip(rows, names) if !haskey(sealed, n)]; ntasks = OFFSITE_PARALLEL) do (r, n)
                 h = object_sha256(store, n)
-                h === nothing && error("$n is in the store without the SHA-256 it was sent with: send the copy again")
-                sealed[n] = h
+                h === nothing ? put!(n, read(joinpath(snap, "files", r.path))) : (sealed[n] = h)
             end
             save_sealed_hashes!(c, sealed)
             meta = TOML.parsefile(joinpath(snap, "snapshot.toml"))
