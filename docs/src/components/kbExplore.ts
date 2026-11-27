@@ -66,6 +66,32 @@ export const SCALES: Partial<Record<ColourBy, { value: (n: Node) => number | und
   year: { value: n => (n.year ? Number(n.year) : undefined), low: 'earlier', high: 'later', about: 'When it was published.' },
   added: { value: n => (n.added ? Date.parse(n.added) : undefined), low: 'first', high: 'latest', about: 'When it came into the knowledge base.' },
 }
+/** What a document's size shows: how much of something, larger for more. Links as before (each link adds
+ * to the disc); the rest by rank among the documents shown, as the colour scales are. */
+export const SIZE_BY = [['links', 'Links'], ['attention', 'The group’s attention'], ['rated', 'The watch’s rating'],
+                        ['central', 'Central to its cluster'], ['recent', 'The field right now'], ['none', 'Same for all']] as const
+export type SizeBy = typeof SIZE_BY[number][0]
+export const SIZES: Record<SizeBy, { value?: (n: Node) => number | undefined; larger: string }> = {
+  links: { larger: 'cited, referred to and used more' },
+  attention: { value: n => SCALES.attention!.value(n), larger: 'nearer the group’s notes, and used in more findings and tasks' },
+  rated: { value: n => n.rating, larger: 'rated more relevant by the watch' },
+  central: { value: n => n.central, larger: 'nearer the middle of its cluster in meaning' },
+  recent: { value: n => n.recent, larger: 'more of what is nearest it published lately' },
+  none: { larger: '' },
+}
+/** Each of `pairs`' rank by its value, 0 to 1, those with equal values sharing one. */
+export function ranks(pairs: [string, number | undefined][]) {
+  const vals = pairs.filter((x): x is [string, number] => x[1] !== undefined && !Number.isNaN(x[1])).sort((a, b) => a[1] - b[1])
+  const out = new Map<string, number>()
+  for (let i = 0; i < vals.length;) {
+    let j = i
+    while (j + 1 < vals.length && vals[j + 1][1] === vals[i][1]) j++
+    const t = vals.length > 1 ? (i + j) / 2 / (vals.length - 1) : 0.5
+    for (let k = i; k <= j; k++) out.set(vals[k][0], t)
+    i = j + 1
+  }
+  return out
+}
 /** A colour from a scale's low end (0) to its high end (1): viridis, from where it reads on a dark ground. */
 const RAMP = ['#46337e', '#365c8d', '#277f8e', '#1fa187', '#4ac16d', '#9fda3a', '#fde725']
 export function ramp(t: number) {
@@ -126,6 +152,7 @@ export function useExploreSettings() {
     // Where documents are placed: t-SNE keeps close neighbourhoods, UMAP and PaCMAP more of how groups lie.
     layout: useStored<'tsne' | 'umap' | 'pacmap'>('layout', 'tsne'),
     colourBy: useStored<ColourBy>('colour', 'cluster'),
+    sizeBy: useStored<SizeBy>('size', 'links'),
     shadeBy: useStored<ShadeBy>('shade', 'linked'),
     shownLinks: useStored<string[]>('links', ['cites', 'refers', 'related', 'evidence']),
     shownKinds: useStored<string[]>('kinds', ['paper', 'record', 'code', 'resource', 'finding']),

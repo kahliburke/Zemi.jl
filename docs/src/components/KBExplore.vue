@@ -22,7 +22,7 @@ import { can, getJSON, post, onLive } from './kbApi'
 import { exploreHref, kbPage } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { BRAND, CLUSTER_COLOURS, DIMMED, KIND_COLOURS, LINK_COLOURS, NODE_KINDS, TRAIL, WHOSE, WHOSE_COLOURS, kindName, mix, own,
-         provideSettings, useExploreSettings, whose, READING, SCALES, ramp, reading,
+         provideSettings, useExploreSettings, whose, READING, SCALES, SIZES, ramp, ranks, reading,
          type Detail, type Graph, type LegendRow, type Linked, type Near, type Node, type Pair, type Step } from './kbExplore'
 import { cameraMover, type View } from './exploreCamera'
 import { SCALE_2D, SCALE_3D, capHeight, clusterCentres, discTexture, pixelSize, placeTheRest, spacing, measureRoom,
@@ -34,7 +34,7 @@ const { isDark } = useData()
 // How the map is drawn, as the reader set it, kept between visits; the panel takes it up.
 const settings = useExploreSettings()
 provideSettings(settings)
-const { view, layout, colourBy, shadeBy, shownLinks, shownKinds, showUnlinked, threshold, abstracts, driftEvery, scope,
+const { view, layout, colourBy, sizeBy, shadeBy, shownLinks, shownKinds, showUnlinked, threshold, abstracts, driftEvery, scope,
         panelOpen, settingsOpen } = settings
 const fly = ref(false)
 watch(abstracts, v => { if (data.value && data.value.abstracts !== v) load() })
@@ -239,18 +239,13 @@ const near = computed(() => new Set([...(nearOf.value.get(selected.value?.id ?? 
 
 // Coloured by a scale: each shown document's rank on it, 0 to 1, those with equal values sharing one.
 const scaleRank = computed(() => {
-  const s = SCALES[colourBy.value], out = new Map<string, number>()
-  if (!s || !data.value) return out
-  const vals = data.value.nodes.filter(visibleNode).map(n => [n.id, s.value(n)] as [string, number | undefined])
-    .filter((x): x is [string, number] => x[1] !== undefined && !Number.isNaN(x[1])).sort((a, b) => a[1] - b[1])
-  for (let i = 0; i < vals.length;) {
-    let j = i
-    while (j + 1 < vals.length && vals[j + 1][1] === vals[i][1]) j++
-    const t = vals.length > 1 ? (i + j) / 2 / (vals.length - 1) : 0.5
-    for (let k = i; k <= j; k++) out.set(vals[k][0], t)
-    i = j + 1
-  }
-  return out
+  const s = SCALES[colourBy.value]
+  return !s || !data.value ? new Map<string, number>() : ranks(data.value.nodes.filter(visibleNode).map(n => [n.id, s.value(n)]))
+})
+// Sized by a measure: each shown document's rank on it (see `size`).
+const sizeRank = computed(() => {
+  const v = SIZES[sizeBy.value].value
+  return !v || !data.value ? new Map<string, number>() : ranks(data.value.nodes.filter(visibleNode).map(n => [n.id, v(n)]))
 })
 // arXiv categories, the commonest among those shown first: those coloured, the rest one colour as others.
 const CATEGORIES_SHOWN = 10
@@ -415,8 +410,17 @@ function shade(n: Node) {
   if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return mix(isDark.value ? '#111116' : '#fafafa', c, 0.6)
   return c
 }
-const size = (n: Node) => (((n.kind === 'finding' ? 3 : 1.4) + Math.sqrt(n.links) * 1.2) * (n.read === false ? 0.6 : 1) +
-                           (hits.value.get(n.id) ?? 0) * 3) * (n.id === selected.value?.id ? 2.5 : 1) *
+// A document's size: from what Size by measures (its links, or its rank on another measure, 0.6 to 2.2
+// times the base, those with no value the smallest), larger for a search's hit, the selected document,
+// and in a lit cluster, those that stand out most by Shade by.
+function measured(n: Node) {
+  const base = n.kind === 'finding' ? 3 : 1.4
+  if (sizeBy.value === 'none') return base
+  if (sizeBy.value === 'links') return base + Math.sqrt(n.links) * 1.2
+  const t = sizeRank.value.get(n.id)
+  return base * (t === undefined ? 0.5 : 0.6 + 1.6 * t)
+}
+const size = (n: Node) => (measured(n) + (hits.value.get(n.id) ?? 0) * 3) * (n.id === selected.value?.id ? 2.5 : 1) *
                          (0.7 + 0.8 * (standing.value.get(n.id) ?? 0.375))
 
 // Discs in proportion to how closely the layout packs documents, against t-SNE's spacing: UMAP and
@@ -917,7 +921,72 @@ const spriteSize = (n: GNode) => 2 * roomy(2.5 * Math.cbrt(size(n)) * packing.va
 // How a linked document stands to the one shown: what it does to this one, or this one to it.
 
 // Redrawn as what is shown changes; recoloured as the selection, hits and colours do.
-watch([view, fly, layout, isDark], () => draw())
+watch([view, fly, isDark], () => draw())
+// Another layout of the map drawn: its documents move to their new places (see `morph`).
+watch(layout, () => (graph && drawnView === view.value && data.value ? morph() : draw()))
+
+// Another layout of the same map: each document moves from where it is to where the layout puts it, the
+// view left as it is, unless the new layout reaches past what is in view, when it widens to take it in.
+// The graph is kept drawing meanwhile by its engine, every document held where the move has it.
+let morphing = 0
+function morph() {
+  if (!graph || !data.value) return draw()
+  const deep = drawnView === '3d'
+  const { nodes: next } = graphData()
+  const target = new Map(next.map((n: GNode) => [n.id, n]))
+  const nodes: GNode[] = graph.graphData().nodes
+  const from = nodes.map(n => [n.fx ?? n.x ?? 0, n.fy ?? n.y ?? 0, n.fz ?? n.z ?? 0])
+  const goal = nodes.map((n, i) => {
+    const t = target.get(n.id)
+    return t ? [t.fx ?? t.x ?? from[i][0], t.fy ?? t.y ?? from[i][1], t.fz ?? t.z ?? from[i][2]] : null
+  })
+  cancelAnimationFrame(morphing)
+  graph.cooldownTicks(Infinity).d3ReheatSimulation()
+  const start = performance.now(), ms = moveMs(1100)
+  const step = (now: number) => {
+    const t = Math.min(1, (now - start) / ms), e = t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2
+    nodes.forEach((n, i) => {
+      const g = goal[i], f = from[i]
+      if (!g) return
+      n.fx = n.x = f[0] + (g[0] - f[0]) * e
+      n.fy = n.y = f[1] + (g[1] - f[1]) * e
+      if (deep) n.fz = n.z = f[2] + (g[2] - f[2]) * e
+    })
+    if (!deep) centres = clusterCentres(nodes, clusterName)
+    else for (const { sprite, node } of sprites.values()) sprite.position.set(node.x, node.y, node.z)
+    if (t < 1) { morphing = requestAnimationFrame(step); return }
+    morphing = 0
+    graph.cooldownTicks(1)
+    drawnShape = `${view.value} ${layout.value} ${subset.value} ${data.value?.abstracts}`
+    measureRoom(nodes, deep)
+    if (deep) {
+      const at = new Map(clusterCentres(nodes, clusterName).map(c => [c.id, c]))
+      for (const { sprite, id } of clusterLabels) { const c = at.get(id); if (c) sprite.position.set(c.x, c.y, c.z) }
+    }
+    restyle()
+    if (outOfView(nodes) > 0.05) frameAll(900)
+  }
+  morphing = requestAnimationFrame(step)
+}
+// The share of the placed documents that lie outside what the card and the panel leave open.
+function outOfView(nodes: GNode[]) {
+  if (!graph || !nodes.length) return 0
+  const open = uncovered()
+  const camera = drawnView === '3d' ? graph.camera() : null
+  let out = 0, all = 0
+  for (const n of nodes) {
+    if (!placed(n)) continue
+    all++
+    let x: number, y: number
+    if (camera) {
+      const p = new three.Vector3(n.x, n.y, n.z).project(camera)
+      if (p.z > 1) { out++; continue }
+      x = (p.x + 1) / 2 * open.width; y = (1 - p.y) / 2 * open.height
+    } else ({ x, y } = graph.graph2ScreenCoords(n.x, n.y))
+    if (x < open.left || x > open.right || y < open.top || y > open.bottom) out++
+  }
+  return all ? out / all : 0
+}
 // What is shown changing leaves the view where it is: only the data is given again, once a change settles.
 let refreshTimer: ReturnType<typeof setTimeout> | undefined
 watch([shownLinks, shownKinds, threshold, showUnlinked], () => {
@@ -933,7 +1002,7 @@ function refresh() {
   graph.graphData({ nodes, links })
   restyle()
 }
-watch([selected, peek, hits, colourBy, litRow, standing], restyle)
+watch([selected, peek, hits, colourBy, sizeBy, litRow, standing], restyle)
 watch(colourBy, () => { litRow.value = null })
 // Recoloured and resized in place: the space's discs directly, the map's through its accessors.
 function restyle() {

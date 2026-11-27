@@ -131,13 +131,17 @@ The panel at the top right has two tabs:
   - **Loners**: how unlike even its nearest it is;
   - **Year published** and **Date added**.
 
+  **Size by** makes a document's disc larger for more of something: its links, the group's attention,
+  the watch's rating, how central it is to its cluster, or the field right now; or the same for all.
+
   A row goes to its group and lights it; **Shade by** then shades a cluster's documents by how often
   they are cited and referred to, how central they are to the cluster, or how relevant the watch rated
   them.
 - **Settings**: the layout, which documents and which kinds of link are drawn, and the pairs close in
   meaning that no link joins, with a slider for how alike they must be. Of the layouts, **t-SNE**
   keeps each document's close neighbourhood, **UMAP** more of how the groups lie to each other, and
-  **PaCMAP** both, the most evenly. Either way, close together means alike.
+  **PaCMAP** both, the most evenly. Either way, close together means alike. Choosing another, each
+  document moves to its new place while the view stays, widening only to take in all of them.
 
 **A map of its own.** A part of the knowledge base laid out by itself uses the whole map, and its
 clusters are found again at a finer grain, so one cluster of the full map comes apart into its

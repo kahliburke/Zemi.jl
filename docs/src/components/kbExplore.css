@@ -162,3 +162,4 @@ html.kbx-takeover .VPFooter { display: none; }
                padding: 2px 7px; border: 1px solid var(--kbx-brand, #8b7cf6); border-radius: 4px; white-space: nowrap; overflow: hidden;
                text-overflow: ellipsis; font: 600 13px/1.35 system-ui, sans-serif; color: var(--vp-c-text-1);
                background: color-mix(in srgb, var(--vp-c-bg) 88%, transparent); }
+.kbx-size-hint { margin: 2px 0 6px; }

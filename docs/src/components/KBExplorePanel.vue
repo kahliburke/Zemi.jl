@@ -5,13 +5,13 @@
 import { computed } from 'vue'
 import { can } from './kbApi'
 import KBIcon from './KBIcon.vue'
-import { COLOUR_BY, RAMP_CSS, SCALES, KIND_COLOURS, LINK_COLOURS, LINK_KINDS, NODE_KINDS, SHADE_BY, all, toggle, useSettings,
+import { COLOUR_BY, RAMP_CSS, SCALES, SIZE_BY, SIZES, KIND_COLOURS, LINK_COLOURS, LINK_KINDS, NODE_KINDS, SHADE_BY, all, toggle, useSettings,
          type LegendRow } from './kbExplore'
 
 const props = defineProps<{ legend: LegendRow[]; litRow: string | null; hereRow: string | null; subset: string; projects: { key: string; name: string }[] | null
                             layouts: { umap: boolean; pacmap: boolean }; flying: boolean; least: number }>()
 const emit = defineEmits<{ goToRow: [key: string]; map: [spec: string] }>()
-const { panel, colourBy, shadeBy, layout, shownLinks, shownKinds, showUnlinked, threshold, view } = useSettings()
+const { panel, colourBy, sizeBy, shadeBy, layout, shownLinks, shownKinds, showUnlinked, threshold, view } = useSettings()
 const scale = computed(() => SCALES[colourBy.value])
 const alt = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌥' : 'Alt'
 // A cluster with too few documents for a map of its own: its lens is greyed, and its tip says why.
@@ -44,6 +44,13 @@ function mapRow(r: LegendRow) {
         <div class="kbx-scale-ends"><span>{{ scale.low }}</span><span>{{ scale.high }}</span></div>
         <p class="kbx-hint">{{ scale.about }} Coloured by rank; grey has no value.</p>
       </div>
+      <div class="kbx-shade">
+        <span>Size by</span>
+        <select v-model="sizeBy" class="kb-field kbx-pick kbx-colour-by" aria-label="Size by">
+          <option v-for="[k, l] in SIZE_BY" :key="k" :value="k">{{ l }}</option>
+        </select>
+      </div>
+      <p v-if="SIZES[sizeBy].larger" class="kbx-hint kbx-size-hint">Larger: {{ SIZES[sizeBy].larger }}.</p>
       <div v-if="litRow" class="kbx-shade">
         <span>Shade by</span>
         <div class="kbx-seg kbx-seg-small" role="group" aria-label="Shade by">
