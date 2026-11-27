@@ -57,6 +57,8 @@ html.kbx-takeover .VPFooter { display: none; }
                      padding: 1px 4px; margin: 0 -4px; border-radius: 4px; text-align: left; }
 .kbx-key li button:not(.kbx-map-row):hover { background: var(--vp-c-default-soft); }
 .kbx-key li button:not(.kbx-map-row).on { background: var(--vp-c-brand-soft); }
+/* The row the selected document is in: marked at its edge, a little tinted, beneath a row gone to. */
+.kbx-key li button:not(.kbx-map-row).here:not(.on) { box-shadow: inset 2px 0 0 var(--vp-c-brand-1); background: color-mix(in srgb, var(--vp-c-brand-soft) 45%, transparent); }
 .kbx-key-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--vp-c-text-1); }
 .kbx-key-count { color: var(--vp-c-text-3); font-variant-numeric: tabular-nums; }
 .kbx-trail { position: absolute; left: 10px; bottom: 46px; width: min(20rem, 40%); max-height: 38%; overflow: auto; font-size: 12px;

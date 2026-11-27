@@ -1207,7 +1207,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
       </div>
 
       <KBExplorePanel v-if="panelOpen" :legend="legend" :lit-row="litRow" :subset="subset" :projects="projectList" :flying="fly"
-                      :least="data?.least ?? 0"
+                      :least="data?.least ?? 0" :here-row="selected ? legendKey(selected) : null"
                       :layouts="{ umap: !!data?.nodes.some(n => n.ux), pacmap: !!data?.nodes.some(n => n.px) }"
                       @go-to-row="goToRow" @map="mapSet" />
 

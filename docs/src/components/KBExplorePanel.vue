@@ -7,7 +7,7 @@ import KBIcon from './KBIcon.vue'
 import { COLOUR_BY, KIND_COLOURS, LINK_COLOURS, LINK_KINDS, NODE_KINDS, SHADE_BY, all, toggle, useSettings,
          type LegendRow } from './kbExplore'
 
-const props = defineProps<{ legend: LegendRow[]; litRow: string | null; subset: string; projects: { key: string; name: string }[] | null
+const props = defineProps<{ legend: LegendRow[]; litRow: string | null; hereRow: string | null; subset: string; projects: { key: string; name: string }[] | null
                             layouts: { umap: boolean; pacmap: boolean }; flying: boolean; least: number }>()
 const emit = defineEmits<{ goToRow: [key: string]; map: [spec: string] }>()
 const { panel, colourBy, shadeBy, layout, shownLinks, shownKinds, showUnlinked, threshold, view } = useSettings()
@@ -44,7 +44,7 @@ function mapRow(r: LegendRow) {
         </div>
       </div>
       <ul>
-        <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="$emit('goToRow', r.key)">
+        <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key, here: hereRow === r.key }" :title="`Go to ${r.label}`" @click="$emit('goToRow', r.key)">
           <i class="kbx-swatch" :style="{ background: r.colour }"></i>
           <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button>
           <button v-if="r.key[0] === 'c'" class="kbx-map-row" :class="{ few: few(r) }" :data-tip="mapTip(r)"
