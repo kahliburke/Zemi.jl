@@ -235,7 +235,8 @@ const peek = shallowRef<Node | null>(null)
 const pointed = shallowRef<Node | null>(null)
 const lit = computed(() => peek.value ?? selected.value)
 const near = computed(() => new Set([...(nearOf.value.get(selected.value?.id ?? '') ?? []).map(x => x.node.id),
-                                     ...(linksOf.value.get(selected.value?.id ?? '') ?? []).map(x => x.node.id)]))
+                                     ...(linksOf.value.get(selected.value?.id ?? '') ?? []).map(x => x.node.id),
+                                     ...nearInRange(selected.value?.id ?? '').map(x => x.node.id)]))
 
 // Coloured by a scale: each shown document's rank on it, 0 to 1, those with equal values sharing one.
 const scaleRank = computed(() => {
@@ -255,6 +256,50 @@ function ablated(n: Node | undefined) {
   const t = scaleRank.value.get(n.id)
   return t === undefined || t < span.value[0] - 1e-9 || t > span.value[1] + 1e-9
 }
+// Each document's deeper list of nearest (as many as the map kept), asked for one at a time while part of a
+// colour scale is shown: a document's nearest within that part are those of its list in it, so a part
+// with nothing near a document shows none for it. Kept for the map drawn.
+const deepOf = shallowRef(new Map<string, Near[]>())
+const deepAsking = new Map<string, Promise<Near[]>>()
+const deepKept = new Map<string, number>()                  // how many the map kept, drawn here or not
+watch(data, () => { deepOf.value = new Map(); deepAsking.clear(); deepKept.clear() })
+function askDeep(id: string): Promise<Near[]> {
+  const g = data.value
+  if (!g || !id) return Promise.resolve([])
+  let asked = deepAsking.get(id)
+  if (!asked) {
+    const q = new URLSearchParams({ id, ...(g.abstracts ? { abstracts: '1' } : {}),
+                                    ...(subset.value ? { set: subset.value, n: String(setSize.value) } : {}) })
+    asked = getJSON(`/api/graph/near?${q}`).then((got: [string, number][]) => {
+      const linked = new Set((linksOf.value.get(id) ?? []).map(l => l.node.id))
+      deepKept.set(id, got.length)
+      const list = got.flatMap(([b, s]) => { const node = byId.value.get(b); return node ? [{ node, similarity: s, linked: linked.has(b) }] : [] })
+      if (data.value === g) deepOf.value = new Map(deepOf.value).set(id, list)
+      return list
+    }).catch(() => { deepAsking.delete(id); return [] as Near[] })
+    deepAsking.set(id, asked)
+  }
+  return asked
+}
+// A document's nearest drawn while part of a colour scale is shown: those of its deeper list within the part
+// (its ten nearest until the list comes).
+function nearInRange(id: string) {
+  if (!narrowed.value || !id) return []
+  return (deepOf.value.get(id) ?? nearOf.value.get(id) ?? []).filter(x => !ablated(x.node) && visibleNode(x.node)).slice(0, 8)
+}
+// How many of the selected document's deeper list are in the part shown, for its card.
+const inRangeNote = computed(() => {
+  const id = selected.value?.id, list = id && narrowed.value ? deepOf.value.get(id) : undefined
+  if (!id || !list) return ''
+  const k = list.filter(x => !ablated(x.node) && visibleNode(x.node)).length
+  return `${k} of its ${deepKept.get(id) ?? list.length} nearest ${k === 1 ? 'is' : 'are'} in this range.`
+})
+watch([lit, selected, narrowed], () => {
+  if (!narrowed.value) return
+  if (lit.value) askDeep(lit.value.id)
+  if (selected.value) askDeep(selected.value.id)
+})
+watch(deepOf, () => { if (narrowed.value) restyle() })
 // The value at a rank on the colour scale, for the panel to name the ends of the part shown: the scale's
 // own (a year, a date) where it has a form for it, else the rank.
 const scaleAt = computed(() => {
@@ -1380,9 +1425,13 @@ function drift() {
   go(start)
   driftTimer = setInterval(driftStep, driftEvery.value * 1000)
 }
-function driftStep() {
+async function driftStep() {
   const here = selected.value
-  const nextOne = (nearOf.value.get(here?.id ?? '') ?? []).find(x => !seen.has(x.node.id) && visibleNode(x.node) && !ablated(x.node))
+  if (!here) { stopDrift(); return }
+  // Within part of a colour scale, from its deeper list (see `askDeep`).
+  const pool = narrowed.value ? await askDeep(here.id) : nearOf.value.get(here.id) ?? []
+  if (!drifting.value || selected.value?.id !== here.id) return
+  const nextOne = pool.find(x => !seen.has(x.node.id) && visibleNode(x.node) && !ablated(x.node))
   if (!nextOne) { stopDrift(); return }
   seen.add(nextOne.node.id)
   driftTrail.value.push({ node: nextOne.node, similarity: nextOne.similarity })
@@ -1474,7 +1523,7 @@ watch([pairs, showPairs], () => {
 function goPair(p: Pair) { go(p.a); setTimeout(() => { selected.value = p.a }, 50) }
 const nearSelected = computed(() => (nearOf.value.get(selected.value?.id ?? '') ?? []).slice(0, 8))
 // The lit document's nearest in meaning drawn on the map: those within the part of the colour scale shown.
-const nearLit = computed(() => (nearOf.value.get(lit.value?.id ?? '') ?? []).filter(x => !ablated(x.node)).slice(0, 8))
+const nearLit = computed(() => narrowed.value ? nearInRange(lit.value?.id ?? '') : (nearOf.value.get(lit.value?.id ?? '') ?? []).slice(0, 8))
 const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? '') ?? [])
 </script>
 
@@ -1545,7 +1594,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
       <p v-if="said" class="kbx-said" @click="said = ''">{{ said }}</p>
 
       <KBExploreCard v-if="selected" :node="selected" :detail="detail" :render="render" :colour="colour(selected)"
-                     :cluster="clusterName(selected.cluster)" :linked="linkedSelected" :nearest="nearSelected"
+                     :cluster="clusterName(selected.cluster)" :linked="linkedSelected" :nearest="nearSelected" :in-range="inRangeNote"
                      :can-go-back="trail.length > 0" :short="driftTrail.length > 1"
                      @close="selected = null" @back="back" @open="open(selected!)" @cite="copyCitation(selected!)" @copy-view="copyView(selected!)"
                      @go="go" />

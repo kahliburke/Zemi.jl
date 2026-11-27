@@ -10,7 +10,7 @@ import type { Render } from './kbMarkdown'
 import { KIND_COLOURS, byline, kindName, relation, type Detail, type Linked, type Near, type Node } from './kbExplore'
 
 const props = defineProps<{ node: Node; detail: Detail | null; render: Render; colour: string; cluster: string
-                            linked: Linked[]; nearest: Near[]; canGoBack: boolean; short: boolean }>()
+                            linked: Linked[]; nearest: Near[]; canGoBack: boolean; short: boolean; inRange?: string }>()
 defineEmits<{ close: []; back: []; open: []; cite: []; copyView: []; go: [node: Node] }>()
 
 const shown = computed(() => (props.detail?.id === props.node.id ? props.detail : null))
@@ -52,6 +52,7 @@ const citable = computed(() => props.node.kind !== 'finding' && props.node.kind 
     </template>
     <template v-if="nearest.length">
       <h4>Nearest in meaning</h4>
+      <p v-if="inRange" class="kbx-hint kbx-in-range">{{ inRange }}</p>
       <ul class="kbx-list">
         <li v-for="x in nearest" :key="x.node.id">
           <i class="kbx-swatch" :style="{ background: KIND_COLOURS[x.node.kind] ?? '#999' }"></i>

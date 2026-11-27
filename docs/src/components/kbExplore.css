@@ -179,6 +179,7 @@ html.kbx-takeover .VPFooter { display: none; }
 .kbx-scale-span button { margin-left: 4px; color: var(--vp-c-brand-1); font-size: 11px; }
 .kbx-scale-ends { display: flex; justify-content: space-between; margin-top: 3px; font-size: 11px; color: var(--vp-c-text-2); }
 .kbx-scale .kbx-hint { margin: 4px 0 0; }
+.kbx-hint.kbx-in-range { margin: 0 0 6px; }
 /* The selected document's title, a callout set over the map (see `showTitle`), its maths set. */
 .kbx-callout { position: absolute; left: 0; top: 0; z-index: 4; visibility: hidden; pointer-events: none; max-width: 28rem;
                padding: 2px 7px; border: 1px solid var(--kbx-brand, #8b7cf6); border-radius: 4px; white-space: nowrap; overflow: hidden;

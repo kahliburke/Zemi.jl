@@ -24,13 +24,16 @@ migration!(25, [
     link_versions(kb) -> Dict{Int,String}
 
 What each document's links are read from, as it is now, by its row: a record's content, a paper's
-parse (empty for a paper not read yet). A document whose version changes has its links read again.
+parse, else its fetched reference list (empty for a paper with neither). A document whose version
+changes has its links read again.
 """
 link_versions(kb::KB) = Dict(Int(r.id) => String(r.v) for r in query(kb, """
     SELECT p.id, CASE WHEN x.paper_id IS NOT NULL THEN 'r:' || x.content_sha
                       WHEN s.paper_id IS NOT NULL THEN 'p:' || s.file_sha || ':' || s.parser_version
+                      WHEN f.paper_id IS NOT NULL THEN 'f:' || f.fetched_at
                       ELSE '' END AS v
-    FROM papers p LEFT JOIN records x ON x.paper_id = p.id LEFT JOIN parses s ON s.paper_id = p.id"""))
+    FROM papers p LEFT JOIN records x ON x.paper_id = p.id LEFT JOIN parses s ON s.paper_id = p.id
+                  LEFT JOIN references_fetched f ON f.paper_id = p.id"""))
 
 "The document kinds an `@` reference names that are documents here."
 const LINKED_KINDS = ("paper", "record", "code", "resource")
@@ -220,10 +223,16 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 13
+const EXPLORE_VERSION = 14
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
+
+"""
+How many of its nearest documents are kept for each (`nd`), asked for one document at a time (see
+[`explore_near`](@ref)): where the page shows only some documents, their nearest are found among these.
+"""
+const EXPLORE_DEEP = 50
 
 """
 The most documents laid out by t-SNE (see [`tsne`](@ref)): the rest are placed among their nearest documents.
@@ -544,7 +553,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     label = strip("$n documents $what")
     progress("$label · nearest neighbours", 0.0)
     # Each one's nearest, found once: the map keeps the first few, UMAP and PaCMAP take more.
-    wide = nearest_columns(X, EXPLORE_NEIGHBOURS + 50)
+    wide = nearest_columns(X, max(EXPLORE_NEIGHBOURS + 50, EXPLORE_DEEP))
     near = [first(ns, EXPLORE_NEIGHBOURS) for ns in wide]
     library = nearest_library(X, [is_record(r.id) for r in rows], 5)
     # Laid out by t-SNE: all of them, or the most often near others where there are too many.
@@ -624,6 +633,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     docs = Dict(r.id => Dict("x" => r4.(pos2[i, :]), "p" => r4.(pos3[i, :]), "ux" => r4.(uflat[i, :]), "up" => r4.(udeep[i, :]),
                              "px" => r4.(pflat[i, :]), "pp" => r4.(pdeep[i, :]), "c" => assign[i],
                              "k" => r4(central[i]), "near" => [[rows[m].id, r4(s)] for (m, s) in near[i]],
+                             "nd" => [[rows[m].id, r4(s)] for (m, s) in first(wide[i], EXPLORE_DEEP)],
                              "lib" => [[rows[m].id, r4(s)] for (m, s) in get(library, i, ())],
                              "b" => r4(sig.bridge[i]), "lo" => r4(sig.alone[i]),
                              (isempty(sig.notes[i]) ? () : ("nr" => [[rows[m].id, r4(s)] for (m, s) in sig.notes[i]],))...,
@@ -893,6 +903,36 @@ route!("GET", "/api/graph") do c
     g["job"] = job === nothing ? nothing : job.id
     g["least"] = SUBSET_LEAST[]
     return g
+end
+
+"""
+    explore_near(kb, caller, id; abstracts = false, set = "", n) -> Vector
+
+Document `id`'s nearest by meaning on the map the page draws (the full map, of every document with
+`abstracts`, or subset `set`'s), as many as were kept ([`EXPLORE_DEEP`](@ref)), nearest first: each
+`[id, similarity]`, of those `caller` may see. None for a document they may not see, or not on the map.
+"""
+function explore_near(kb::KB, caller::Caller, id::AbstractString; abstracts::Bool = false, set::AbstractString = "",
+                      n::Integer = SUBSET_SEARCH.default)
+    hidden = unfound_documents(kb, caller)
+    if isempty(set)
+        m = read_explore(kb.config)
+        v = m === nothing ? nothing : get(get(m, "views", Dict()), abstracts ? "all" : "read", nothing)
+        only = nothing
+    else
+        s = explore_set(kb, caller, set; abstracts, n)
+        v, only = s.needs === nothing ? cached_subset(kb, s.ids) : nothing, Set(s.ids)
+    end
+    v === nothing && return Any[]
+    seen(d) = !(d in hidden) && (only === nothing || d in only) && haskey(v["docs"], d)
+    seen(id) || return Any[]
+    return Any[p for p in get(v["docs"][id], "nd", Any[]) if seen(String(p[1]))]
+end
+
+route!("GET", "/api/graph/near") do c
+    p = c.params
+    return explore_near(c.kb, c.caller, normalize_id(get(p, "id", "")); abstracts = get(p, "abstracts", "") in ("1", "true"),
+                        set = get(p, "set", ""), n = int_param(p, "n", SUBSET_SEARCH.default, 1:SUBSET_SEARCH.most))
 end
 
 """

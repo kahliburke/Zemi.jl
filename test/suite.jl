@@ -3138,7 +3138,9 @@ end
     reefs = [Dict("id" => 1, "name" => "Reefs", "description" => "")]
     write(K.explore_path(kb.config), JSON.json(Dict("version" => 3, "input_sha" => "", "built_at" => "then", "layer" => "l", "views" => Dict(
         "all" => Dict("clusters" => [reefs; Dict("id" => 2, "name" => "", "description" => "", "closed_name" => "diary")],
-                      "docs" => Dict("2401.00001" => place([["2401.00002", 0.9], [rec, 0.6]]), "2401.00002" => place([["2401.00001", 0.9], [mine, 0.7]]),
+                      "docs" => Dict("2401.00001" => place([["2401.00002", 0.9], [rec, 0.6]]),
+                                     "2401.00002" => merge(place([["2401.00001", 0.9], [mine, 0.7]]),
+                                                           Dict("nd" => [["2401.00001", 0.9], [mine, 0.7], ["2401.00005", 0.5]])),
                                      rec => merge(place([["2401.00005", 0.8]]), Dict("lib" => [["2401.00002", 0.55]])), mine => merge(place([["2401.00002", 0.7]]), Dict("c" => 2)))),
         "read" => Dict("clusters" => reefs, "docs" => Dict("2401.00001" => place([])))))))
     K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, area, area_score, nearest, found_at, relevance)
@@ -3152,6 +3154,11 @@ end
     # Nearest by meaning, once a pair, saying whether a link joins them already.
     near = Dict(Tuple(sort([g["nodes"][e[1]+1]["id"], g["nodes"][e[2]+1]["id"]])) => (e[3], e[4]) for e in g["similar"])
     @test near[("2401.00001", "2401.00002")] == (0.9, false) && near[Tuple(sort(["2401.00005", rec]))] == (0.8, true)
+    # A document's deeper list of nearest, asked for alone: of what the caller sees, on the map drawn.
+    deep(who, id; abstracts = true) = [p[1] for p in K.explore_near(kb, who, id; abstracts)]
+    @test deep(as(ada), "2401.00002") == ["2401.00001", mine, "2401.00005"]
+    @test deep(as(bea), "2401.00002") == ["2401.00001", "2401.00005"]                 # another's private paper left out
+    @test isempty(deep(as(bea), mine)) && isempty(deep(as(ada), "2401.00002"; abstracts = false))  # unseen; not on that map
     @test near[Tuple(sort(["2401.00002", rec]))] == (0.55, false)                   # a note's nearest in the library
     @test pairs(g, "links") == Set([("2401.00001", "2401.00005"), ("2401.00001", "2401.00006"), Tuple(sort([rec, "2401.00005"]))])
     n1 = only(n for n in g["nodes"] if n["id"] == "2401.00001")
@@ -3313,6 +3320,7 @@ end
         @test length(m["docs"]) == 18 && sort([cl["name"] for cl in m["clusters"]]) == sort([cl["name"] for cl in d["clusters"]])
         for (id, doc) in m["docs"]
             @test length(doc["near"]) == K.EXPLORE_NEIGHBOURS && all(topic_of[n[1]] == topic_of[id] for n in doc["near"][1:5])
+            @test length(doc["nd"]) == 17 && doc["nd"][1:K.EXPLORE_NEIGHBOURS] == doc["near"]     # every other, nearest first
             @test length(doc["x"]) == 2 && length(doc["p"]) == 3 && all(v -> -1.3 <= v <= 1.3, [doc["x"]; doc["p"]])
             @test 0 < doc["k"] <= 1.0001
         end
