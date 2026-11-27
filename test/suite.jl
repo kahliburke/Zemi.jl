@@ -7983,13 +7983,19 @@ end
             fetched = String[]
             @test K.check_offsite(c; full = true, progress = m -> push!(fetched, m)).stamp == basename(s2) && K.check_offsite(c).files == 2
             @test !isempty(fetched) && all(m -> startswith(m, "Fetching $(basename(s2)):"), fetched)
-            # Without full, every file is found at its size and a sample fetched; one gone, or changed, fails it.
-            @test K.check_offsite(c; sample = 1).fetched == 1
+            # Without full, the store's own hashes of every object give the copy's digest; nothing is downloaded
+            # but a sample. One object changed, or gone, fails it.
+            quick = K.check_offsite(c; sample = 1)
+            @test quick.fetched == 1 && length(quick.digest) == 64 && quick.digest == K.TOML.parse(String(K.unseal(K.offsite_data_key(c, store),
+                      "snapshots/$(basename(s2))/done", K.read_object(store, "snapshots/$(basename(s2))/done"))))["digest"]
             one = first(k for k in K.list_objects(store, "files/"))
             saved = K.read_object(store, one)
             K.write_object!(store, one, saved[1:end-1])
-            @test_throws "missing from the store or the wrong size" K.check_offsite(c)
+            @test_throws "not what was sent" K.check_offsite(c)
+            K.delete_object!(store, one)
+            @test_throws "missing from the store" K.check_offsite(c)
             K.write_object!(store, one, saved)
+            @test K.check_offsite(c).stamp == basename(s2)
             # A recovery passphrase opens the copies too; another passphrase or another key opens nothing.
             @test !K.has_offsite_recovery(store)
             @test_throws "no recovery passphrase" K.check_offsite(c; passphrase = "tidal flats at dawn")

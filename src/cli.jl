@@ -53,9 +53,9 @@ const CLI_HELP = """
     zemi backup --offsite-recovery       set the recovery passphrase, which opens the copies without the key
     zemi backups [--offsite [--check [--full]] [--recovery]]
                                          the snapshots, the latest first; with --offsite those in the store,
-                                         and with --check, proof in seconds that the latest restores (its
-                                         database checked, its files found, a sample fetched; every file
-                                         with --full), with the passphrase given --recovery
+                                         and with --check, proof in seconds that the latest restores (the
+                                         store holds every object as sent, by the copy's digest; every file
+                                         fetched with --full), with the passphrase given --recovery
     zemi restore SNAPSHOT [--config] [--include] [--force]
     zemi restore --offsite COPY [--recovery] [--config] [--include] [--force]
                                          put a snapshot back, with the service stopped: the database, content,
@@ -264,8 +264,9 @@ function cli(args::AbstractVector{<:AbstractString})
                 done()
                 mb = round(r.bytes / 1e6; digits = 1)
                 println(full ? "$(r.stamp) restores: every part fetched, unsealed and checked, $(r.files) file(s), $mb MB, the database intact." :
-                        "$(r.stamp) restores: it opens, its database is intact, all $(r.files) of its files ($mb MB) are in the store " *
-                        "at their sizes, and $(r.fetched) fetched at random unseal and match. --full fetches every file.")
+                        "$(r.stamp) restores: it opens with the key at hand, and the store holds exactly what was sent, every object " *
+                        "by its SHA-256, the copy's digest $(first(r.digest, 16))…; $(r.files) file(s), $mb MB, $(r.fetched) opened at random. " *
+                        "--full fetches and checks every file.")
             else
                 store = offsite_store(c)
                 copies = offsite_copies(c; store)

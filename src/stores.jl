@@ -23,11 +23,12 @@ function list_objects(s::DirStore, prefix::AbstractString; modified::Bool = fals
             if !endswith(f, ".part") && !hidden(d, f)]
     return modified ? [k => unix2datetime(mtime(joinpath(s.dir, k))) for k in keys] : keys
 end
-"The sizes of the objects under `prefix`, by key."
-object_sizes(s::DirStore, prefix::AbstractString) = Dict(k => filesize(joinpath(s.dir, k)) for k in list_objects(s, prefix))
+"The SHA-256 of object `key` (hexadecimal), read from the folder; `nothing` when there is none."
+object_sha256(s::DirStore, key::AbstractString) = (f = joinpath(s.dir, key); isfile(f) ? bytes2hex(open(sha256, f)) : nothing)
+
 delete_object!(s::DirStore, key::AbstractString) = rm(joinpath(s.dir, key); force = true)
 function write_object!(s::DirStore, key::AbstractString, bytes::AbstractVector{UInt8}; content_type = "",
-                       progress = (sent, total) -> nothing)
+                       progress = (sent, total) -> nothing, whole::Bool = false)
     f = joinpath(s.dir, key)
     mkpath(dirname(f))
     part = "$f.$(rand(UInt32)).part"                 # its own, as two writes of one key may overlap

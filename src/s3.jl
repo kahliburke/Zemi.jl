@@ -118,23 +118,19 @@ function list_objects(s::S3Store, prefix::AbstractString; modified::Bool = false
         (s3_text(listing, "IsTruncated") == "true" && token !== nothing) || return modified ? keys .=> times : keys
     end
 end
-"The sizes of the objects under `prefix`, by key, from the same listing as [`list_objects`](@ref)."
-function object_sizes(s::S3Store, prefix::AbstractString)
-    full = isempty(s.prefix) ? prefix : s.prefix * "/" * prefix
-    out, token = Dict{String,Int}(), nothing
-    while true
-        params = ["list-type" => "2", "prefix" => full]
-        token === nothing || push!(params, "continuation-token" => token)
-        r = s3_request(s, "GET", nothing; query = s3_query(params...))
-        listing = r.status == 200 ? s3_xml(r) : nothing
-        listing === nothing && http_failure("S3 list $prefix", r)
-        for c in s3_elements(listing, "Contents")
-            out[chopprefix(something(s3_text(c, "Key"), ""), isempty(s.prefix) ? "" : s.prefix * "/")] =
-                parse(Int, something(s3_text(c, "Size"), "-1"))
-        end
-        token = s3_text(listing, "NextContinuationToken")
-        (s3_text(listing, "IsTruncated") == "true" && token !== nothing) || return out
-    end
+"""
+    object_sha256(store, key) -> Union{String,Nothing}
+
+The SHA-256 the store keeps of object `key` (hexadecimal): the one an upload in one request was checked
+against on arrival (see [`write_object!`](@ref)). `nothing` when the object is not there, or the store
+keeps none for it (one uploaded in parts).
+"""
+function object_sha256(s::S3Store, key::AbstractString)
+    r = s3_request(s, "HEAD", key; extra = Dict("x-amz-checksum-mode" => "ENABLED"))
+    r.status == 404 && return nothing
+    r.status == 200 || http_failure("S3 HEAD $key", r)
+    v = HTTP.header(r, "x-amz-checksum-sha256")
+    return isempty(v) ? nothing : bytes2hex(base64decode(v))
 end
 
 function delete_object!(s::S3Store, key::AbstractString)
@@ -143,14 +139,17 @@ function delete_object!(s::S3Store, key::AbstractString)
     return nothing
 end
 """
-    write_object!(store, key, bytes; content_type, progress = (sent, total) -> nothing)
+    write_object!(store, key, bytes; content_type, progress = (sent, total) -> nothing, whole = false)
 
 Upload `bytes` as `key`. One past `MULTIPART_BYTES` goes up in parts of `PART_BYTES`, a few at a
-time, each tried again on its own, with `progress` told the bytes sent as each part is.
+time, each tried again on its own, with `progress` told the bytes sent as each part is; with `whole`,
+in one request whatever its size (up to S3's 5 GiB), so the store keeps the SHA-256 it was checked
+against (see [`object_sha256`](@ref)).
 """
 function write_object!(s::S3Store, key::AbstractString, bytes::AbstractVector{UInt8}; content_type = "application/octet-stream",
-                       progress = (sent, total) -> nothing)
-    length(bytes) > MULTIPART_BYTES && return write_parts!(s, key, bytes; content_type, progress)
+                       progress = (sent, total) -> nothing, whole::Bool = false)
+    whole && length(bytes) > 5 * 1024^3 && error("$key is past the 5 GiB one request takes")
+    !whole && length(bytes) > MULTIPART_BYTES && return write_parts!(s, key, bytes; content_type, progress)
     # The store checks the upload against its SHA-256 and refuses it if anything was lost on the way.
     r = s3_request(s, "PUT", key; body = bytes, content_type,
                    extra = Dict("x-amz-checksum-sha256" => base64encode(sha256(bytes))))

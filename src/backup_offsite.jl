@@ -196,6 +196,31 @@ function sending_offsite(c::Config)
     return d
 end
 
+"""
+    copy_digest(sealed) -> String
+
+One SHA-256 over a copy's objects: each object's name and the SHA-256 of its sealed bytes, sorted by
+name, a line each. The same objects as the store holds them give the same digest; any object missing,
+added or changed gives another.
+"""
+copy_digest(sealed::AbstractDict) = bytes2hex(sha256(join(("$n\t$(sealed[n])\n" for n in sort!(collect(keys(sealed)))))))
+
+"""
+Where the SHA-256 of each object sent is kept, by its name, for the digests of later copies: one file
+for each store, since one file sealed for two stores is two different objects.
+"""
+function sealed_hashes_file(c::Config)
+    s = c.backup.offsite.store
+    return joinpath(backup_dir(c), "offsite-sealed-$(first(bytes2hex(sha256(join([s.store, s.endpoint, s.bucket, s.prefix], '\n'))), 12)).tsv")
+end
+
+"The sealed objects' SHA-256 kept here (see [`sealed_hashes_file`](@ref)), by name."
+sealed_hashes(c::Config) =
+    (f = sealed_hashes_file(c); Dict{String,String}(isfile(f) ? (String(a) => String(b) for (a, b) in (split(l, '\t') for l in eachline(f)) ) : ()))
+
+save_sealed_hashes!(c::Config, sealed::AbstractDict) =
+    write_atomic(sealed_hashes_file(c), join(("$n\t$(sealed[n])\n" for n in sort!(collect(keys(sealed))))))
+
 "How many files a copy sends or fetches at once: each is a request of its own, and one at a time the requests' latency, not the bandwidth, sets the pace."
 const OFFSITE_PARALLEL = 16
 
@@ -251,25 +276,47 @@ function send_offsite!(c::Config; store = offsite_store(c), snap = latest_snapsh
         end
         try
             note(; now = true)
+            # Each object goes up whole, so the store keeps the SHA-256 it checked it against on arrival, and
+            # its sealed bytes' hash is kept here for the copy's digest (see `sealed_hashes`).
+            sealed = sealed_hashes(c)
+            function put!(name, bytes)
+                s = seal(key, name, bytes)
+                write_object!(store, name, s; whole = true)
+                sealed[name] = bytes2hex(sha256(s))
+            end
             asyncmap(todo; ntasks = OFFSITE_PARALLEL) do r
                 name = offsite_file_name(key, r.hash)
                 bytes = read(joinpath(snap, "files", r.path))
                 bytes2hex(sha256(bytes)) == r.hash || error("$(r.path) changed while it was being copied")
-                write_object!(store, name, seal(key, name, bytes))
+                put!(name, bytes)
                 d["files_done"] += 1
                 d["bytes_done"] += length(bytes)
                 note()
             end
+            # A file sent with an earlier copy, whose sealed hash this machine lacks: the store's.
+            names = [offsite_file_name(key, r.hash) for r in rows]
+            missing_here = filter(n -> !haskey(sealed, n), names)
+            asyncmap(missing_here; ntasks = OFFSITE_PARALLEL) do n
+                h = object_sha256(store, n)
+                h === nothing && error("$n is in the store without the SHA-256 it was sent with: send the copy again")
+                sealed[n] = h
+            end
+            save_sealed_hashes!(c, sealed)
             meta = TOML.parsefile(joinpath(snap, "snapshot.toml"))
             # Without its files, a copy restores none, rather than emptying the folders the snapshot had.
             c.backup.offsite.files || (meta["files"] = String[])
-            put(part, bytes) = (name = "snapshots/$stamp/$part"; write_object!(store, name, seal(key, name, bytes)))
             d["phase"] = "state"
             note(; now = true)
-            put("state", read(state))
+            put!("snapshots/$stamp/state", read(state))
             d["bytes_done"] += filesize(state)
-            put("files", Vector{UInt8}(join(("$(r.path)\t$(r.size)\t$(r.mtime)\t$(r.hash)\n" for r in rows))))
-            put("done", Vector{UInt8}(sprint(TOML.print, meta)))
+            put!("snapshots/$stamp/files", Vector{UInt8}(join(("$(r.path)\t$(r.size)\t$(r.mtime)\t$(r.hash)\t$(sealed[n])\n"
+                                                                for (r, n) in zip(rows, names)))))
+            # The copy's digest: one hash over every object it is made of, each as the store holds it.
+            parts = ["snapshots/$stamp/state", "snapshots/$stamp/files"]
+            meta["sealed"] = Dict(p => sealed[p] for p in parts)
+            meta["digest"] = copy_digest(Dict(n => sealed[n] for n in [names; parts]))
+            put!("snapshots/$stamp/done", Vector{UInt8}(sprint(TOML.print, meta)))
+            save_sealed_hashes!(c, sealed)
             note(; now = true)
             return (; stamp, sent = length(todo))
         finally
@@ -324,7 +371,7 @@ function thin_offsite!(c::Config; store = offsite_store(c), at::DateTime = now(U
             bytes === nothing && continue
             for l in eachline(IOBuffer(unseal(key, name, bytes)))
                 p = split(l, '\t')
-                length(p) == 4 && push!(named, offsite_file_name(key, p[4]))
+                length(p) >= 4 && push!(named, offsite_file_name(key, p[4]))
             end
         end
         for (k, t) in list_objects(store, "files/"; modified = true)
@@ -404,7 +451,7 @@ function fetch_offsite!(c::Config, stamp::AbstractString, dest::AbstractString; 
     rm(part; force = true, recursive = true)
     mkpath(joinpath(part, "files"))
     try
-        rows = [p for p in (split(l, '\t') for l in eachline(IOBuffer(fetch("snapshots/$stamp/files")))) if length(p) == 4]
+        rows = [p for p in (split(l, '\t') for l in eachline(IOBuffer(fetch("snapshots/$stamp/files")))) if length(p) >= 4]
         d = Dict{String,Any}("doing" => "Fetching $stamp", "stamp" => stamp, "started" => time(), "phase" => "state",
                              "files_done" => 0, "files_total" => length(rows), "bytes_done" => 0,
                              "bytes_total" => sum(p -> parse(Int, p[2]), rows; init = 0))
@@ -457,18 +504,21 @@ function restore_offsite!(c::Config, stamp::AbstractString; passphrase::Union{Ab
 end
 
 """
-    check_offsite(config; stamp = the latest complete copy, passphrase = nothing, full = false, sample = 16,
+    check_offsite(config; stamp = the latest complete copy, passphrase = nothing, full = false, sample = 8,
                   progress = nothing) -> NamedTuple
 
 Prove a copy can be restored with the key at hand (the server's, or the recovery `passphrase`),
-changing nothing here. It opens the copy, fetches its packed state and checks the database's
-integrity, finds every file the copy names in the store at the size its sealing gives it, and fetches
-`sample` of them at random whole, unsealed and checked against their hashes: in seconds, what a
-restore would need, short of downloading every file. With `full`, every file is fetched and checked,
-as a restore fetches them (see [`fetch_offsite!`](@ref)). Returns `(; stamp, files, bytes, fetched)`.
+changing nothing here. The copy's list of its objects, opened with the key, must give the digest it
+was sent with (see [`copy_digest`](@ref)), and every object the store holds must have the SHA-256
+that list names, as the store checked it on arrival: so the store holds exactly what was sent, every
+file and the packed state, whose database was checked when its snapshot was taken. `sample` files
+are fetched at random whole, opened and checked against their hashes. That takes seconds and no
+download of the copy. With `full`, every file is fetched and checked and the database unpacked and
+checked, as a restore would (see [`fetch_offsite!`](@ref)). Returns `(; stamp, files, bytes, fetched,
+digest)`.
 """
 function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing, passphrase::Union{AbstractString,Nothing} = nothing,
-                       full::Bool = false, sample::Integer = 16, progress = nothing)
+                       full::Bool = false, sample::Integer = 8, progress = nothing)
     store = offsite_store(c)
     store === nothing && error("[backup.offsite] names no store")
     if stamp === nothing
@@ -476,6 +526,11 @@ function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing
         i === nothing && error("The store has no complete copy")
         stamp = offsite_copies(c; store)[i].stamp
     end
+    key = offsite_data_key(c, store; passphrase)
+    fetch(name) = (b = read_object(store, name); b === nothing ? not_found("The store has no $name") : unseal(key, name, b))
+    meta = TOML.parse(String(fetch("snapshots/$stamp/done")))
+    digest = String(get(meta, "digest", ""))
+    isempty(digest) && error("$stamp was sent before copies carried a digest: send a new copy (zemi backup --offsite)")
     work = mktempdir()
     try
         if full
@@ -483,30 +538,31 @@ function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing
             database_intact(joinpath(dest, "state.tar.zst"), joinpath(work, "state"))
             files = countlines(joinpath(dest, "files.tsv"))
             bytes = sum(filesize(joinpath(d, f)) for (d, _, fs) in walkdir(dest) for f in fs; init = 0)
-            return (; stamp = String(stamp), files, bytes, fetched = files)
+            return (; stamp = String(stamp), files, bytes, fetched = files, digest)
         end
-        key = offsite_data_key(c, store; passphrase)
-        fetch(name) = (b = read_object(store, name); b === nothing ? not_found("The store has no $name") : unseal(key, name, b))
-        say(m) = progress === nothing || progress(m)
-        say("Checking $stamp: opening it and fetching its packed state")
-        fetch("snapshots/$stamp/done")
-        state = fetch("snapshots/$stamp/state")
-        write(joinpath(work, "state.tar.zst"), state)
-        database_intact(joinpath(work, "state.tar.zst"), joinpath(work, "state"))
-        rows = [p for p in (split(l, '\t') for l in eachline(IOBuffer(fetch("snapshots/$stamp/files")))) if length(p) == 4]
-        say("Checking $stamp: finding its $(length(rows)) files in the store")
-        sizes = object_sizes(store, "files/")
-        overhead = length(seal(zeros(UInt8, 32), "x", UInt8[]))
-        wrong = [p[1] for p in rows if get(sizes, offsite_file_name(key, p[4]), -1) != parse(Int, p[2]) + overhead]
-        isempty(wrong) || error("$(length(wrong)) of the copy's files are missing from the store or the wrong size, " *
+        rows = [p for p in (split(l, '\t') for l in eachline(IOBuffer(fetch("snapshots/$stamp/files")))) if length(p) == 5]
+        sealed = Dict{String,String}(offsite_file_name(key, p[4]) => String(p[5]) for p in rows)
+        merge!(sealed, Dict{String,String}(String(k) => String(v) for (k, v) in get(meta, "sealed", Dict())))
+        copy_digest(sealed) == digest || error("$stamp's list of its objects does not give the digest it was sent with")
+        # What the store holds, by the SHA-256 it keeps of each object.
+        names = sort!(collect(keys(sealed)))
+        checked, wrong = Ref(0), String[]
+        said = Ref(0.0)
+        say(m; now = false) = progress === nothing || !(now || time() - said[] >= 1) || (said[] = time(); progress(m))
+        asyncmap(names; ntasks = 4 * OFFSITE_PARALLEL) do n
+            object_sha256(store, n) == sealed[n] || push!(wrong, n)
+            checked[] += 1
+            say("Checking $stamp: $(checked[]) of $(length(names)) objects as the store holds them")
+        end
+        isempty(wrong) || error("$(length(wrong)) of $stamp's $(length(names)) objects are missing from the store or not what was sent, " *
                                 "$(first(wrong)) among them")
         picked = rows[Random.randperm(length(rows))[1:min(sample, length(rows))]]
-        say("Checking $stamp: fetching $(length(picked)) of its files whole")
+        say("Checking $stamp: opening $(length(picked)) of its files"; now = true)
         asyncmap(picked; ntasks = OFFSITE_PARALLEL) do p
             bytes2hex(sha256(fetch(offsite_file_name(key, p[4])))) == p[4] || error("$(p[1]) in the store is not the file its copy names")
         end
-        bytes = length(state) + sum(p -> parse(Int, p[2]), rows; init = 0)
-        return (; stamp = String(stamp), files = length(rows), bytes, fetched = length(picked))
+        return (; stamp = String(stamp), files = length(rows), bytes = sum(p -> parse(Int, p[2]), rows; init = 0),
+                  fetched = length(picked), digest)
     finally
         rm(work; force = true, recursive = true)
     end

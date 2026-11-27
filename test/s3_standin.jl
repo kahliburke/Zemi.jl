@@ -26,6 +26,7 @@ function standin_s3(secrets::AbstractDict; region = "auto", allow = (id, method,
                     port::Integer = 19000 + rand(0:999), dir = nothing)
     HTTP, SHA, Dates = K.HTTP, K.SHA, K.Dates
     objects = dir === nothing ? Dict{String,Vector{UInt8}}() : FolderObjects(mkpath(dir))   # "bucket/key" => bytes
+    sums = Dict{String,String}()          # "bucket/key" => the SHA-256 an upload in one request was checked against
     uploads = Dict{String,Dict{Int,Vector{UInt8}}}()   # upload id => part number => bytes
     stamps = Dict{String,Dates.DateTime}()             # "bucket/key" => when it was written
     requests = Dict{String,Int}()
@@ -90,6 +91,7 @@ function standin_s3(secrets::AbstractDict; region = "auto", allow = (id, method,
                 named = [parse(Int, m[1]) for m in eachmatch(r"<PartNumber>(\d+)</PartNumber>", String(Vector{UInt8}(req.body)))]
                 named == sort!(collect(keys(got))) || return s3_error(400, "InvalidPart")
                 objects[full] = reduce(vcat, (got[n] for n in sort!(collect(keys(got)))); init = UInt8[])
+                delete!(sums, full)                       # parts carry none: the store keeps no SHA-256 of the whole
                 stamps[full] = Dates.now(Dates.UTC)
                 return xml(200, "<CompleteMultipartUploadResult></CompleteMultipartUploadResult>")
             elseif req.method == "DELETE" && haskey(params, "uploadId")
@@ -101,13 +103,15 @@ function standin_s3(secrets::AbstractDict; region = "auto", allow = (id, method,
                 isempty(sum) || sum == K.base64encode(SHA.sha256(body)) || return s3_error(400, "BadDigest")
                 HTTP.header(req, "If-None-Match", "") == "*" && haskey(objects, full) && return s3_error(412, "PreconditionFailed")
                 objects[full] = body
+                isempty(sum) ? delete!(sums, full) : (sums[full] = sum)
                 stamps[full] = Dates.now(Dates.UTC)
                 return HTTP.Response(200, ["ETag" => "\"$(bytes2hex(SHA.sha256(body)))\""], "")
             elseif req.method == "GET"
                 haskey(objects, full) || return s3_error(404, "NoSuchKey")
                 return HTTP.Response(200, objects[full])
             elseif req.method == "HEAD"
-                return HTTP.Response(haskey(objects, full) ? 200 : 404)
+                haskey(objects, full) || return HTTP.Response(404)
+                return HTTP.Response(200, haskey(sums, full) ? ["x-amz-checksum-sha256" => sums[full]] : Pair{String,String}[])
             elseif req.method == "DELETE"
                 delete!(objects, full)
                 return HTTP.Response(204)
