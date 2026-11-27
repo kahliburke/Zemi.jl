@@ -524,7 +524,7 @@ async function draw() {
       .linkLineDash((l: GLink) => (l.kind === 'similar' ? [2, 3] : null))
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 3 : 0))
       .linkDirectionalArrowRelPos(1)
-      .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
+      .enablePointerInteraction(true)                                            // hover and the cursor; clicks are the page's (see `released`)
       .enableNodeDrag(false)                                                     // placed by meaning, not by hand
       .cooldownTicks(1)
       .onRenderFramePre((ctx: CanvasRenderingContext2D, scale: number) => { drawTrail2d(ctx, scale); drawNearest2d(ctx, scale) })
@@ -590,7 +590,7 @@ async function draw() {
       // Plain lines, a pixel wide however near: tubes and arrowheads have a size in the space and swell up
       // close. Which way a link goes is in the card.
       .linkWidth(0)
-      .onNodeClick(clicked).onNodeHover(hovered).onBackgroundClick(() => { selected.value = null; litRow.value = null })
+      .onNodeHover(hovered)                                                      // clicks are the page's (see `released`)
       .enableNodeDrag(false)
       .cooldownTicks(1)
     graph.d3Force('charge')?.strength(-10)
@@ -820,12 +820,17 @@ function showTitle3d() {
   const leaderGeometry = new three.BufferGeometry()
   leaderGeometry.setAttribute('position', new three.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3))
   const leader = new three.Line(leaderGeometry, new three.LineBasicMaterial({ color: BRAND, transparent: true, opacity: 0.7, depthTest: false }))
-  leader.renderOrder = 1001
+  leader.renderOrder = 1003                                  // after the label, which moves it each frame
   leader.frustumCulled = false
   t.userData.leader = leader
   const sized = t.onBeforeRender
   const up = new three.Vector3(), right = new three.Vector3(), dir = new three.Vector3(), from = new three.Vector3(), to = new three.Vector3()
+  // Sized for the screen from where it is, so first set at the disc: from anywhere else, its first frame
+  // would be sized for another distance.
+  t.position.copy(f.sprite.position)
   t.onBeforeRender = (renderer: any, scene: any, camera: any) => {
+    t.position.copy(f.sprite.position)
+    t.updateMatrixWorld()
     sized(renderer, scene, camera)
     up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
     right.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
@@ -979,8 +984,14 @@ onLive(() => {
 onLive(() => {
   const hold = () => camera.stop()
   box.value?.addEventListener('pointerdown', hold)
+  box.value?.addEventListener('pointerdown', pressed)
+  box.value?.addEventListener('pointerup', released)
   box.value?.addEventListener('wheel', hold, { passive: true })
-  return () => { box.value?.removeEventListener('pointerdown', hold); box.value?.removeEventListener('wheel', hold); camera.stop() }
+  return () => {
+    box.value?.removeEventListener('pointerdown', hold); box.value?.removeEventListener('wheel', hold)
+    box.value?.removeEventListener('pointerdown', pressed); box.value?.removeEventListener('pointerup', released)
+    camera.stop()
+  }
 })
 onLive(() => {
   document.documentElement.classList.add('kbx-takeover')
@@ -1032,11 +1043,44 @@ function peekNow() {
 }
 function hovered(n: GNode | null) {
   const d = n ? byId.value.get(n.id) ?? n : null
+  // A pointer over a document, which a click picks (see `released`).
+  const canvas = box.value?.querySelector('canvas') as HTMLCanvasElement | null
+  if (canvas) canvas.style.cursor = d ? 'pointer' : ''
   if (d?.id !== pointed.value?.id) pointed.value = d
   peekNow()
 }
 // The map's document under the pointer, by where each is drawn and how large: force-graph's own hover
 // reads a copy of the canvas it redraws at most every 800 ms, which misses for a moment after a zoom or pan.
+// Clicks, the page's own: a press let go within a few pixels of where it began picks the document under it,
+// found at that moment from where each is drawn, or lets the selection go on empty space. A press that
+// moves further is a drag, which moves the view. (The graphs' own clicks go by what was under the pointer
+// a frame or more before, and drop a click that moved a pixel, so one could miss while the view moved.)
+let pressedAt: { x: number; y: number } | null = null
+const pressed = (e: PointerEvent) => { pressedAt = e.button === 0 ? { x: e.clientX, y: e.clientY } : null }
+function released(e: PointerEvent) {
+  const from = pressedAt
+  pressedAt = null
+  if (!from || e.button !== 0 || Math.hypot(e.clientX - from.x, e.clientY - from.y) > 6) return
+  const n = drawnView === '2d' ? nodeAt(e) : discAt(e)
+  if (n) clicked(n, e)
+  else { selected.value = null; litRow.value = null }
+}
+// The space's disc under the pointer: the nearest the camera of those whose disc covers it on screen.
+function discAt(e: PointerEvent): GNode | null {
+  if (!graph || !box.value) return null
+  const r = box.value.getBoundingClientRect(), camera = graph.camera(), renderer = graph.renderer()
+  const x = e.clientX - r.left, y = e.clientY - r.top
+  let best: GNode | null = null, depth = Infinity
+  for (const { sprite, node } of sprites.values()) {
+    if (!sprite.visible) continue
+    const p = sprite.position.clone().project(camera)
+    if (p.z < -1 || p.z > 1) continue                              // behind the camera, or past the far plane
+    const sx = (p.x + 1) / 2 * r.width, sy = (1 - p.y) / 2 * r.height
+    const radius = sprite.scale.x / 2 / pixelSize(camera.position.distanceTo(sprite.position), renderer, camera)
+    if (Math.hypot(sx - x, sy - y) <= radius + 2 && p.z < depth) { best = node; depth = p.z }
+  }
+  return best
+}
 function nodeAt(e: PointerEvent): GNode | null {
   if (!graph || !box.value) return null
   const r = box.value.getBoundingClientRect()
