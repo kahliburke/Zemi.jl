@@ -410,18 +410,55 @@ function shade(n: Node) {
   if (selected.value && selected.value.id !== n.id && !near.value.has(n.id)) return mix(isDark.value ? '#111116' : '#fafafa', c, 0.6)
   return c
 }
-// A document's size: from what Size by measures (its links, or its rank on another measure, 0.6 to 2.2
+// A document's size: from what Size by measures (its links, or its rank on another measure, 0.4 to 2.8
 // times the base, those with no value the smallest), larger for a search's hit, the selected document,
 // and in a lit cluster, those that stand out most by Shade by.
+const plain = (n: Node) => (n.kind === 'finding' ? 3 : 1.4)
 function measured(n: Node) {
-  const base = n.kind === 'finding' ? 3 : 1.4
+  const base = plain(n)
   if (sizeBy.value === 'none') return base
   if (sizeBy.value === 'links') return base + Math.sqrt(n.links) * 1.2
   const t = sizeRank.value.get(n.id)
-  return base * (t === undefined ? 0.5 : 0.6 + 1.6 * t)
+  return base * (t === undefined ? 0.3 : 0.4 + 2.4 * t)
 }
 const size = (n: Node) => (measured(n) + (hits.value.get(n.id) ?? 0) * 3) * (n.id === selected.value?.id ? 2.5 : 1) *
                          (0.7 + 0.8 * (standing.value.get(n.id) ?? 0.375))
+// How much wider than a plain document of its kind a document's disc is, by area. The discs' limits (their
+// room, and the most a disc is on screen in the space) hold the plain disc, and this scales it after, so
+// the sizes keep their proportions wherever a document stands.
+const grow = (n: Node) => Math.sqrt(size(n) / plain(n))
+
+// A change of Colour by or Size by eased in: each document's colour and size moved from where they were
+// last drawn (`look`) to where they now are.
+const LOOK_MS = 700
+const HEX = /^#[0-9a-f]{6}$/i
+let look = new Map<string, { c: string; g: number }>()
+let lookFrom: typeof look | null = null, lookE = 1, lookFrame = 0
+function shownColour(n: Node) {
+  const c = shade(n), f = lookFrom?.get(n.id)
+  return f && lookE < 1 && HEX.test(f.c) && HEX.test(c) ? mix(f.c, c, lookE) : c
+}
+function shownGrow(n: Node) {
+  const g = grow(n), f = lookFrom?.get(n.id)
+  return f && lookE < 1 ? f.g + (g - f.g) * lookE : g
+}
+function easeLook() {
+  if (!graph) return
+  cancelAnimationFrame(lookFrame)
+  lookFrom = new Map(look); lookE = 0
+  if (drawnView === '2d') graph.autoPauseRedraw(false)
+  const start = performance.now(), ms = moveMs(LOOK_MS)
+  const step = (now: number) => {
+    const t = Math.min(1, (now - start) / ms)
+    lookE = 1 - (1 - t) ** 3
+    if (drawnView === '3d') for (const { sprite, node } of sprites.values()) dressDisc(sprite, node)
+    if (t < 1) { lookFrame = requestAnimationFrame(step); return }
+    lookFrame = 0; lookFrom = null
+    if (drawnView === '2d') graph?.autoPauseRedraw(true)
+    restyle()
+  }
+  lookFrame = requestAnimationFrame(step)
+}
 
 // Discs in proportion to how closely the layout packs documents, against t-SNE's spacing: UMAP and
 // PaCMAP draw clusters tighter in the same extent, where t-SNE's discs would cover each other.
@@ -435,7 +472,6 @@ const packing = computed(() => {
   const a = spacing(mine), b = spacing(base)
   return a > 0 && b > 0 ? Math.min(1, Math.max(0.35, a / b)) : 1
 })
-const flatSize = (n: Node) => size(n) * packing.value ** 2
 // On the map, a disc's radius in the map's units: `√size × flatRel`, which grows with the zoom until a typical
 // disc is `FLAT_MOST` pixels across on screen, and is held there, so close in, the space between
 // documents keeps growing and the discs do not: a tight group comes apart (as `DISC_MOST` does in the space).
@@ -445,7 +481,7 @@ let flatRel = 4
 // close together are drawn smaller rather than over each other.
 const ROOM_FILL = 0.45, ROOM_LEAST = 0.25
 const roomy = (r: number, n: Node) => Math.min(r, Math.max(ROOM_FILL * ((n as GNode).room ?? Infinity), ROOM_LEAST * r))
-const flatRadius = (n: Node) => roomy(Math.sqrt(Math.max(0, flatSize(n))) * flatRel, n)
+const flatRadius = (n: Node) => roomy(Math.sqrt(plain(n)) * packing.value * flatRel, n) * shownGrow(n)
 const flatVal = (n: Node) => (flatRadius(n) / flatRel) ** 2
 function fitFlatDiscs(k: number) {
   const typical = Math.sqrt(1.4) * packing.value * 4                  // a document's radius at nodeRelSize 4
@@ -522,7 +558,7 @@ async function draw() {
     graph = new ForceGraph(el)
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
-      .nodeVal(flatVal).nodeRelSize(flatRel).nodeColor(shade).nodeLabel(() => "")
+      .nodeVal(flatVal).nodeRelSize(flatRel).nodeColor(shownColour).nodeLabel(() => "")
       .onZoom(({ k }: { k: number }) => fitFlatDiscs(k))
       .linkColor(linkColour)
       .linkWidth(linkWidth2d)
@@ -567,6 +603,7 @@ async function draw() {
     graph.d3Force('charge')?.strength(-12)
     graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? (l.similarity ?? 0) * 0.3 : 0.1))
     settle(was, same)
+    restyle()
   } else {
     const ForceGraph3D = (await import('3d-force-graph')).default as any
     const SpriteText = (await import('three-spritetext')).default as any
@@ -579,9 +616,8 @@ async function draw() {
       .nodeVal(size).nodeLabel(() => "")
       // Each node a disc facing the camera, shaded to read as a sphere: smooth at any distance, and cheap.
       .nodeThreeObject((n: GNode) => {
-        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: disc, color: shade(n), transparent: true, depthWrite: false }))
-        const d = spriteSize(n)
-        sprite.userData.d = d; sprite.scale.set(d, d, 1)
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: disc, transparent: true, depthWrite: false }))
+        dressDisc(sprite, n)
         sprite.onBeforeRender = (renderer: any, _scene: any, camera: any) => {
           fitDisc(sprite, n, renderer, camera)
           keepFocusInSight(sprite, n, renderer, camera)
@@ -685,11 +721,11 @@ function drawNearestLabels2d(ctx: CanvasRenderingContext2D, scale: number) {
 let focusFrame = -1
 let focus: { at: any; distance: number; radius: number } | null = null
 let scratch: any = null
-// A disc no wider on screen than `DISC_MOST` pixels (the selected one twice that): up close the space
-// between documents keeps growing and the discs do not, so a tight group comes apart.
-const DISC_MOST = 34
+// A plain disc no wider on screen than `DISC_MOST` pixels, the others in proportion (see `grow`): up close
+// the space between documents keeps growing and the discs do not, so a tight group comes apart.
+const DISC_MOST = 30
 function fitDisc(sprite: any, n: GNode, renderer: any, camera: any) {
-  const most = DISC_MOST * (n.id === selected.value?.id ? 2 : 1) * pixelSize(camera.position.distanceTo(sprite.position), renderer, camera)
+  const most = DISC_MOST * sprite.userData.g * pixelSize(camera.position.distanceTo(sprite.position), renderer, camera)
   const k = Math.min(sprite.userData.d, most)
   if (sprite.scale.x !== k) { sprite.scale.set(k, k, 1); sprite.updateMatrixWorld() }
 }
@@ -923,7 +959,13 @@ function showNearest3d() {
 const sprites = new Map<string, { sprite: any; node: GNode }>()
 // A disc's width: a little smaller than the sphere 3d-force-graph would draw for the node (radius 4·∛val),
 // as closely as the layout packs them.
-const spriteSize = (n: GNode) => 2 * roomy(2.5 * Math.cbrt(size(n)) * packing.value, n)
+const spriteSize = (n: GNode, g: number) => 2 * roomy(2.5 * Math.cbrt(plain(n)) * packing.value, n) * g
+// A disc's colour and size as now shown.
+function dressDisc(sprite: any, n: GNode) {
+  sprite.material.color.set(shownColour(n))
+  const g = shownGrow(n), d = spriteSize(n, g)
+  sprite.userData.d = d; sprite.userData.g = g; sprite.scale.set(d, d, 1)
+}
 // How a linked document stands to the one shown: what it does to this one, or this one to it.
 
 // Redrawn as what is shown changes; recoloured as the selection, hits and colours do.
@@ -1009,7 +1051,8 @@ function refresh() {
   graph.graphData({ nodes, links })
   restyle()
 }
-watch([selected, peek, hits, colourBy, sizeBy, litRow, standing], restyle)
+watch([selected, peek, hits, litRow, standing], restyle)
+watch([colourBy, sizeBy], () => { easeLook(); restyle() })
 watch(colourBy, () => { litRow.value = null })
 // Recoloured and resized in place: the space's discs directly, the map's through its accessors.
 function restyle() {
@@ -1021,11 +1064,11 @@ function restyle() {
   showTrail3d()
   const rel = relevantClusters.value
   for (const { sprite, id } of clusterLabels) sprite.material.opacity = !rel || rel.has(id) ? 1 : DIMMED
-  if (view.value === '2d') { graph.nodeColor(shade).nodeVal(flatVal); return }
+  const nodes: GNode[] = graph.graphData().nodes
+  look = new Map(nodes.map(n => [n.id, { c: shownColour(n), g: shownGrow(n) }]))
+  if (view.value === '2d') { graph.nodeColor(shownColour).nodeVal(flatVal); return }
   for (const { sprite, node } of sprites.values()) {
-    sprite.material.color.set(shade(node))
-    const d = spriteSize(node)
-    sprite.userData.d = d; sprite.scale.set(d, d, 1)
+    dressDisc(sprite, node)
     const focused = node.id === selected.value?.id
     sprite.material.depthTest = !focused
     sprite.renderOrder = focused ? 999 : 0

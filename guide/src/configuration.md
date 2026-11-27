@@ -133,6 +133,8 @@ The panel at the top right has two tabs:
 
   **Size by** makes a document's disc larger for more of something: its links, the group's attention,
   the watch's rating, how central it is to its cluster, or the field right now; or the same for all.
+  Where documents crowd, every disc is drawn smaller and the sizes keep their proportions. A change of
+  either eases each document from its old colour and size to its new one.
 
   A row goes to its group and lights it; **Shade by** then shades a cluster's documents by how often
   they are cited and referred to, how central they are to the cluster, or how relevant the watch rated
