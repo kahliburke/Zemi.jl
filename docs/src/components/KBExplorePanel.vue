@@ -7,10 +7,18 @@ import KBIcon from './KBIcon.vue'
 import { COLOUR_BY, KIND_COLOURS, LINK_COLOURS, LINK_KINDS, NODE_KINDS, SHADE_BY, all, toggle, useSettings,
          type LegendRow } from './kbExplore'
 
-defineProps<{ legend: LegendRow[]; litRow: string | null; subset: string; projects: { key: string; name: string }[] | null
-              layouts: { umap: boolean; pacmap: boolean }; flying: boolean }>()
-defineEmits<{ goToRow: [key: string]; map: [spec: string] }>()
+const props = defineProps<{ legend: LegendRow[]; litRow: string | null; subset: string; projects: { key: string; name: string }[] | null
+                            layouts: { umap: boolean; pacmap: boolean }; flying: boolean; least: number }>()
+const emit = defineEmits<{ goToRow: [key: string]; map: [spec: string] }>()
 const { panel, colourBy, shadeBy, layout, shownLinks, shownKinds, showUnlinked, threshold, view } = useSettings()
+// A cluster with too few documents for a map of its own: its lens is greyed, and its tip says why.
+const few = (r: LegendRow) => (r.size ?? r.count) < props.least
+const mapTip = (r: LegendRow) => few(r)
+  ? `Too few to map by itself: ${r.size ?? r.count} documents, and a map of its own needs at least ${props.least}`
+  : `Map ${r.label} by itself, into its subtopics`
+function mapRow(r: LegendRow) {
+  if (!few(r)) emit('map', 'cluster:' + r.key.slice(1) + (props.subset ? '@' + props.subset : ''))
+}
 </script>
 
 <template>
@@ -38,9 +46,9 @@ const { panel, colourBy, shadeBy, layout, shownLinks, shownKinds, showUnlinked, 
         <li v-for="r in legend" :key="r.key"><button :class="{ on: litRow === r.key }" :title="`Go to ${r.label}`" @click="$emit('goToRow', r.key)">
           <i class="kbx-swatch" :style="{ background: r.colour }"></i>
           <span class="kbx-key-label">{{ r.label }}</span><span class="kbx-key-count">{{ r.count }}</span></button>
-          <button v-if="r.key[0] === 'c'" class="kbx-map-row" :data-tip="`Map ${r.label} by itself, into its subtopics`"
-                  :aria-label="`Map ${r.label} by itself`"
-                  @click="$emit('map', 'cluster:' + r.key.slice(1) + (subset ? '@' + subset : ''))"><KBIcon name="zoom_in" :size="15" /></button></li>
+          <button v-if="r.key[0] === 'c'" class="kbx-map-row" :class="{ few: few(r) }" :data-tip="mapTip(r)"
+                  :aria-label="`Map ${r.label} by itself`" :aria-disabled="few(r) || undefined" :aria-description="few(r) ? mapTip(r) : undefined"
+                  @click="mapRow(r)"><KBIcon name="zoom_in" :size="15" /></button></li>
       </ul>
     </div>
     <div v-if="panel === 'show'" role="tabpanel">

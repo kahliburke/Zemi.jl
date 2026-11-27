@@ -735,15 +735,19 @@ end
 # `?depth=1|2|3`, `?links=cites,refers,evidence,task`, `?kinds=paper,record,…`, `?project=KEY`,
 # `?limit=`, `?abstracts=1` with the documents known only by their abstract, `?set=` a subset mapped by
 # itself (see `explore_set`, with `?n=` a search's documents). Asking starts bringing the map up to date
-# where it is behind (`job`, while it runs), or making the subset's.
+# where it is behind (`job`, while it runs), or making the subset's. `least` is the fewest documents a
+# cluster is mapped by itself with.
 route!("GET", "/api/graph") do c
     p = c.params
     list(k, default) = isempty(get(p, k, "")) ? default : Tuple(String.(strip.(split(p[k], ','))))
     links, kinds = list("links", GRAPH_LINKS), list("kinds", ("paper", "record", "code", "resource", "finding"))
     abstracts = get(p, "abstracts", "") in ("1", "true")
-    isempty(get(p, "set", "")) ||
-        return explore_set_graph(c.kb, c.caller, p["set"]; abstracts, links, kinds,
-                                 n = int_param(p, "n", SUBSET_SEARCH.default, 1:SUBSET_SEARCH.most))
+    if !isempty(get(p, "set", ""))
+        g = explore_set_graph(c.kb, c.caller, p["set"]; abstracts, links, kinds,
+                              n = int_param(p, "n", SUBSET_SEARCH.default, 1:SUBSET_SEARCH.most))
+        g["least"] = SUBSET_LEAST[]
+        return g
+    end
     g = explore_graph(c.kb, c.caller; center = get(p, "center", ""), depth = int_param(p, "depth", 1, 1:3), links, kinds,
                       project = get(p, "project", ""), limit = int_param(p, "limit", 3000, 1:20000), abstracts)
     job = try explore_soon!(c.kb) catch e
@@ -751,6 +755,7 @@ route!("GET", "/api/graph") do c
         nothing
     end
     g["job"] = job === nothing ? nothing : job.id
+    g["least"] = SUBSET_LEAST[]
     return g
 end
 

@@ -238,14 +238,15 @@ function colour(n: Node) {
 const legend = computed<LegendRow[]>(() => {
   const g = data.value
   if (!g) return []
-  const counts = new Map<string, number>()
+  const counts = new Map<string, number>(), sizes = new Map<string, number>()
   for (const n of g.nodes.filter(visibleNode)) counts.set(legendKey(n), (counts.get(legendKey(n)) ?? 0) + 1)
+  for (const n of g.nodes) if (n.cluster !== undefined) sizes.set(`c${n.cluster}`, (sizes.get(`c${n.cluster}`) ?? 0) + 1)
   const rows = [
     ...g.clusters.map(c => ({ key: `c${c.id}`, colour: CLUSTER_COLOURS[(c.id - 1) % CLUSTER_COLOURS.length], label: c.name || 'Unnamed' })),
     ...WHOSE.map(([k, l]) => ({ key: `w${k}`, colour: WHOSE_COLOURS[k], label: l })),
     ...NODE_KINDS.map(([k, l]) => ({ key: `k${k}`, colour: KIND_COLOURS[k] ?? '#999', label: l })),
   ]
-  return rows.filter(r => counts.has(r.key)).map(r => ({ ...r, count: counts.get(r.key)! }))
+  return rows.filter(r => counts.has(r.key)).map(r => ({ ...r, count: counts.get(r.key)!, size: sizes.get(r.key) }))
     .sort((a, b) => (a.key[0] === 'c' && b.key[0] === 'c' ? b.count - a.count : 0))
 })
 // The legend's row a node falls in, as it is coloured.
@@ -1126,6 +1127,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
       </div>
 
       <KBExplorePanel v-if="panelOpen" :legend="legend" :lit-row="litRow" :subset="subset" :projects="projectList" :flying="fly"
+                      :least="data?.least ?? 0"
                       :layouts="{ umap: !!data?.nodes.some(n => n.ux), pacmap: !!data?.nodes.some(n => n.px) }"
                       @go-to-row="goToRow" @map="mapSet" />
 

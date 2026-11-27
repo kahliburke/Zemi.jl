@@ -21,6 +21,10 @@ html.kbx-takeover .VPFooter { display: none; }
 .kbx-top input { width: 4rem; padding: 0 4px; border: 1px solid var(--vp-c-divider); border-radius: 4px; background: var(--vp-c-bg); }
 .kbx-map-row { display: inline-flex; align-items: center; margin-left: 5px; padding: 1px 4px; color: var(--vp-c-text-3); border-radius: 4px; }
 .kbx-map-row:hover, .kbx-map-row:focus-visible { color: var(--vp-c-brand-1); background: var(--vp-c-default-soft); }
+/* Too few documents to map: greyed, with no hover colour, its tip saying why. */
+.kbx-map-row.few { cursor: default; }
+.kbx-map-row.few svg { opacity: 0.35; }
+.kbx-map-row.few:hover, .kbx-map-row.few:focus-visible { color: var(--vp-c-text-3); background: none; }
 /* Its tip, above the row and inside the panel, which scrolls and would cut off anything outside it. */
 .kbx-map-row:hover::after, .kbx-map-row:focus-visible::after {
   content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 3px); z-index: 2; max-width: 100%; width: max-content;

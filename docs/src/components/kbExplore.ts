@@ -16,6 +16,8 @@ export type SetInfo = { spec: string; kind: string; name: string; count: number;
 export type Graph = {
   nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean, boolean][]; clusters: Cluster[]
   built_at: string | null; job: string | null; abstracts: boolean; abstract_only: number; set?: SetInfo
+  /** The fewest documents a cluster is mapped by itself with. */
+  least?: number
 }
 /** What the card says of a document (see `explore_node`). */
 export type Detail = { id: string; title: string; authors: string[]; published: string; venue: string; abstract: string; summary: string
@@ -24,7 +26,8 @@ export type Near = { node: Node; similarity: number; linked: boolean }
 export type Linked = { node: Node; kind: string; out: boolean }
 export type Pair = { a: Node; b: Node; similarity: number; score: number; at: number }
 export type Step = { node: Node; similarity?: number }
-export type LegendRow = { key: string; colour: string; label: string; count: number }
+/** A row of the legend: `count` the documents shown, `size` a cluster's whole, whatever kinds are shown. */
+export type LegendRow = { key: string; colour: string; label: string; count: number; size?: number }
 
 export const LINK_KINDS = [['cites', 'Citations'], ['refers', 'References'], ['related', 'Related'], ['evidence', 'Evidence'], ['task', 'Tasks']] as const
 export const NODE_KINDS = [['paper', 'Papers'], ['record', 'Notes and records'], ['code', 'Codebases'], ['resource', 'Resources'],

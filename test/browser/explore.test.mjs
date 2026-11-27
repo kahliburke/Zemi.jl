@@ -22,7 +22,7 @@ const graph = (set = undefined) => ({
   links: [[0, 1, 'cites']], similar: [[0, 2, 0.9, false, false], [1, 3, 0.8, false, false]],
   clusters: set ? [{ id: 1, name: 'Reef surveys', description: '', size: 6 }, { id: 2, name: 'Reef models', description: '', size: 7 }]
                : [{ id: 1, name: 'Reefs', description: '', size: 13 }, { id: 2, name: 'Tides', description: '', size: 12 }],
-  built_at: 'now', job: null, abstracts: false, abstract_only: 0,
+  built_at: 'now', job: null, abstracts: false, abstract_only: 0, least: set ? 6 : 13,     // Tides, 12, too few to map
   ...(set ? { set: { spec: set, kind: 'cluster', name: 'Reefs', count: 13, least: 20, few: false, trail: [] } } : {}) })
 const detail = id => ({ id, title: id, authors: ['Ada Lovelace'], published: '2025-01-01', venue: '', topics: ['reefs'], read: true,
   abstract: '', page: '', summary: id === 'rec-reef-notes' ? '' : LONG,
@@ -74,6 +74,13 @@ test('the panel shows the legend or the settings, and a cluster is mapped by its
   await page.getByRole('tab', { name: 'Settings' }).click()
   assert.match(await page.locator('.kbx-panel').innerText(), /Layout[\s\S]*Links[\s\S]*Documents/)
   await page.getByRole('tab', { name: 'Legend' }).click()
+  // A cluster with too few documents for a map of its own: its lens greyed, saying why, and doing nothing.
+  const tides = page.getByRole('button', { name: 'Map Tides by itself' })
+  assert.equal(await tides.getAttribute('aria-disabled'), 'true')
+  assert.match(await tides.getAttribute('data-tip'), /Too few to map by itself: 12 documents.*at least 13/)
+  await tides.click({ force: true })
+  await page.waitForTimeout(300)
+  assert.equal(new URL(page.url()).searchParams.get('set'), null)
   // Mapped by itself: named in the address, with a way back to all documents.
   await page.getByRole('button', { name: 'Map Reefs by itself' }).click()
   await page.locator('.kbx-crumbs', { hasText: '13' }).waitFor()

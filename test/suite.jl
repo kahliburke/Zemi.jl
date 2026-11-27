@@ -3174,7 +3174,7 @@ end
     @test K.links_behind(kb) && !K.can_map(kb)
     r = K.handle(kb, K.HTTP.Request("GET", "/api/graph?center=2401.00005&links=cites,refers"), as(ada))
     got = JSON.parse(String(r.body))
-    @test r.status == 200 && length(got["nodes"]) == 3 && got["job"] !== nothing
+    @test r.status == 200 && length(got["nodes"]) == 3 && got["job"] !== nothing && got["least"] == K.SUBSET_LEAST[]
     wait(K.EXPLORE_JOB[].done)
     @test !K.links_behind(kb) && K.explore_soon!(kb) === nothing
     # With no map yet, and a job to say so.
