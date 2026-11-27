@@ -3448,12 +3448,19 @@ end
             @test job.status == :done && job.share !== nothing && 0.5 < job.share <= 1          # how far it had come, step by step
             g = K.explore_set_graph(kb, me, s.spec; abstracts = true)
             @test g["job"] === nothing && Set(n["id"] for n in g["nodes"]) == Set(members) && g["set"]["name"] == cl["name"]
-            @test all(n -> length(n["x"]) == 2 && length(n["px"]) == 2 && length(n["pp"]) == 3, g["nodes"]) && length(g["clusters"]) >= 2
-            # A level further in: a cluster of the subset's own map, found in that map once it is made.
+            # One topic with nothing within it to tell apart: one cluster, as it is.
+            @test all(n -> length(n["x"]) == 2 && length(n["px"]) == 2 && length(n["pp"]) == 3, g["nodes"]) && length(g["clusters"]) >= 1
             inner = first(g["clusters"])
-            deeper = K.explore_set(kb, me, "cluster:$(inner["id"])@$(s.spec)"; abstracts = true)
-            @test deeper.needs === nothing && !isempty(deeper.ids) && issubset(deeper.ids, members) && length(deeper.ids) < length(members)
-            @test deeper.trail == [Dict("spec" => s.spec, "name" => cl["name"])] && deeper.name == inner["name"]
+            # A level further in: a cluster of a subset's own map, found in that map once it is made. A drift
+            # across two topics is mapped as two clusters, and either holds some of its documents.
+            other = first(id for (id, d) in whole["docs"] if d["c"] != cl["id"])
+            two = K.explore_set(kb, me, "docs:$(members[1]),$other"; abstracts = true)
+            wait(K.JOBS[K.explore_set_graph(kb, me, two.spec; abstracts = true)["job"]].done)
+            g2 = K.explore_set_graph(kb, me, two.spec; abstracts = true)
+            @test length(g2["clusters"]) >= 2
+            deeper = K.explore_set(kb, me, "cluster:$(first(g2["clusters"])["id"])@$(two.spec)"; abstracts = true)
+            @test deeper.needs === nothing && !isempty(deeper.ids) && issubset(deeper.ids, two.ids) && length(deeper.ids) < length(two.ids)
+            @test deeper.trail == [Dict("spec" => two.spec, "name" => two.name)] && deeper.name == first(g2["clusters"])["name"]
             # Made again once the documents' vectors or titles change.
             @test K.cached_subset(kb, members) !== nothing
             K.execute!(kb, "UPDATE papers SET title = 'A coral study, retitled' WHERE doc_id = ?", (members[1],))
