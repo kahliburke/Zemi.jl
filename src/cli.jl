@@ -262,11 +262,18 @@ function cli(args::AbstractVector{<:AbstractString})
                 full = "--full" in rest
                 r = check_offsite(c; passphrase, full, progress = meter)
                 done()
-                mb = round(r.bytes / 1e6; digits = 1)
-                println(full ? "$(r.stamp) restores: every part fetched, unsealed and checked, $(r.files) file(s), $mb MB, the database intact." :
-                        "$(r.stamp) restores: it opens with the key at hand, and the store holds exactly what was sent, every object " *
-                        "by its SHA-256, the copy's digest $(first(r.digest, 16))…; $(r.files) file(s), $mb MB, $(r.fetched) opened at random. " *
-                        "--full fetches and checks every file.")
+                println("Copy $(r.stamp): restorable", full ? " (full check)" : "")
+                println("  key       opened with the ", passphrase === nothing ? "key file" : "recovery passphrase")
+                if full
+                    println("  files     $(r.files) fetched and decrypted, every hash matching, $(round(r.bytes / 1e6; digits = 1)) MB")
+                    println("  database  integrity check passed")
+                else
+                    println("  objects   $(r.objects) in the store ($(r.distinct) distinct files, the packed state, the file list), ",
+                            "each matching the SHA-256 it was sent with")
+                    println("  digest    $(r.digest)")
+                    println("  files     $(r.files), $(round(r.bytes / 1e6; digits = 1)) MB; $(r.fetched) fetched and decrypted as a sample")
+                    println("  full      zemi backups --offsite --check --full fetches every file")
+                end
             else
                 store = offsite_store(c)
                 copies = offsite_copies(c; store)

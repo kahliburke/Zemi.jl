@@ -514,7 +514,7 @@ file and the packed state, whose database was checked when its snapshot was take
 are fetched at random whole, opened and checked against their hashes. That takes seconds and no
 download of the copy. With `full`, every file is fetched and checked and the database unpacked and
 checked, as a restore would (see [`fetch_offsite!`](@ref)). Returns `(; stamp, files, bytes, fetched,
-digest)`.
+digest, objects, distinct)`, `distinct` the files of different content, each one object.
 """
 function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing, passphrase::Union{AbstractString,Nothing} = nothing,
                        full::Bool = false, sample::Integer = 8, progress = nothing)
@@ -537,7 +537,7 @@ function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing
             database_intact(joinpath(dest, "state.tar.zst"), joinpath(work, "state"))
             files = countlines(joinpath(dest, "files.tsv"))
             bytes = sum(filesize(joinpath(d, f)) for (d, _, fs) in walkdir(dest) for f in fs; init = 0)
-            return (; stamp = String(stamp), files, bytes, fetched = files, digest)
+            return (; stamp = String(stamp), files, bytes, fetched = files, digest, objects = files + 3, distinct = files)
         end
         rows = [p for p in (split(l, '\t') for l in eachline(IOBuffer(fetch("snapshots/$stamp/files")))) if length(p) == 5]
         sealed = Dict{String,String}(offsite_file_name(key, p[4]) => String(p[5]) for p in rows)
@@ -551,17 +551,17 @@ function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing
         asyncmap(names; ntasks = 4 * OFFSITE_PARALLEL) do n
             object_sha256(store, n) == sealed[n] || push!(wrong, n)
             checked[] += 1
-            say("Checking $stamp: $(checked[]) of $(length(names)) objects as the store holds them")
+            say("Checking $stamp: $(checked[])/$(length(names)) objects")
         end
         isempty(wrong) || error("$(length(wrong)) of $stamp's $(length(names)) objects are missing from the store or not what was sent, " *
                                 "$(first(wrong)) among them")
         picked = rows[Random.randperm(length(rows))[1:min(sample, length(rows))]]
-        say("Checking $stamp: opening $(length(picked)) of its files"; now = true)
+        say("Checking $stamp: decrypting $(length(picked)) sample files"; now = true)
         asyncmap(picked; ntasks = OFFSITE_PARALLEL) do p
             bytes2hex(sha256(fetch(offsite_file_name(key, p[4])))) == p[4] || error("$(p[1]) in the store is not the file its copy names")
         end
         return (; stamp = String(stamp), files = length(rows), bytes = sum(p -> parse(Int, p[2]), rows; init = 0),
-                  fetched = length(picked), digest)
+                  fetched = length(picked), digest, objects = length(names), distinct = length(Set(p[4] for p in rows)))
     finally
         rm(work; force = true, recursive = true)
     end
