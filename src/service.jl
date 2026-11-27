@@ -210,10 +210,10 @@ function serve_shared(; kb::KB = kb(), build = default_site_build, host::Abstrac
         watch_site!(c; build)
     end
     @info "Shared knowledge base at $(c.shared.base_url) (listening on $host:$(c.shared.port))"
-    server = HTTP.serve!(host, c.shared.port) do req
+    server = HTTP.listen!(service_handler(kb, function (req)
         revise_code()
         on_workers(() -> Base.invokelatest(respond_shared, kb, req))
-    end
+    end), host, c.shared.port)
     Threads.@spawn warm_up(kb; shared = true)
     return server
 end
@@ -287,10 +287,10 @@ function serve_local(; kb::KB = kb(), port::Integer = parse(Int, get(ENV, "ZEMI_
         current_site(c) === nothing ? @info("Not set up yet: Setup opens in the browser once the site is built, in a few minutes") :
                                       announce_setup()
     end
-    return HTTP.serve!("127.0.0.1", port) do req
+    return HTTP.listen!(service_handler(kb, function (req)
         revise_code()
         on_workers(() -> Base.invokelatest(respond_service, kb, req; shared = false))
-    end
+    end), "127.0.0.1", port)
 end
 
 """

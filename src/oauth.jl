@@ -47,13 +47,14 @@ migration!(23, [
 
 """
 What a client may ask for: the tools at /mcp, one's library through the API, reading the knowledge
-base through the API (its pages' data, search, the bibliography), as a notebook citing it does, or
-seeing the projects' tasks and findings, as notes showing them do.
+base through the API (its pages' data, search, the bibliography), as a notebook citing it does,
+seeing the projects' tasks and findings, as notes showing them do, or changing the projects' work,
+as a notebook written together with others in a project does (see collab.jl).
 """
-const OAUTH_SCOPES = ("mcp", "library", "read", "tasks.view")
+const OAUTH_SCOPES = ("mcp", "library", "read", "tasks.view", "tasks.edit")
 
 "The scopes whose tokens act at the API, each with the one permission of its name."
-const API_SCOPES = ("library", "read", "tasks.view")
+const API_SCOPES = ("library", "read", "tasks.view", "tasks.edit")
 
 "The scopes a knowledge base run for one person offers: it has no /mcp."
 const OWNER_SCOPES = API_SCOPES
@@ -287,9 +288,13 @@ function scope_text(scope::AbstractString, who::AbstractString)
     seen = String[]
     "read" in names && push!(seen, "its documents, search and bibliography")
     "tasks.view" in names && push!(seen, "the tasks and findings of your projects")
+    changes = String[]
+    "library" in names && push!(changes, "read and write your library's files")
+    "tasks.edit" in names && push!(changes, "change your projects' work and write their documents with others")
+    isempty(seen) && return "It would, as $who, " * join(changes, ", and ") * ". It changes nothing else."
     what = "It would read this knowledge base as $who: " * join(seen, "; ")
-    "library" in names || return what * ". It changes nothing."
-    return what * "; and read and write your library's files. It changes nothing else."
+    isempty(changes) && return what * ". It changes nothing."
+    return what * "; and " * join(changes, ", and ") * ". It changes nothing else."
 end
 
 """

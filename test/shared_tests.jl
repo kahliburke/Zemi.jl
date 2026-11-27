@@ -2363,7 +2363,7 @@ end
     owner = ["Cookie" => "$(K.local_cookie())=$(K.local_key(kb.config))"]
     formed = ["Content-Type" => "application/x-www-form-urlencoded"]
     # What a client asks before the owner approves it needs no key: it has none yet.
-    @test js(serve("GET", "/.well-known/oauth-authorization-server"))["scopes_supported"] == ["library", "read", "tasks.view"]   # no /mcp here
+    @test js(serve("GET", "/.well-known/oauth-authorization-server"))["scopes_supported"] == ["library", "read", "tasks.view", "tasks.edit"]   # no /mcp here
     # Its addresses are where the owner opens it, whose browser holds its key: the development server's,
     # though the server passes the request on naming the service's own host.
     try
@@ -3073,6 +3073,78 @@ end
         reload()
         @test !occursin("/about#models", String(get_page("/privacy").body))
     finally
+        close(kb)
+    end
+end
+
+@zset "writing a document together" begin
+    sh = shared_config(sign_up = :open, default_role = "Reader")
+    kb = open_kb(temp_config(shared = sh, layers = Layer[]))
+    K.ensure_roles!(kb)
+    account(email) = (uid = K.sign_in!(kb, sh, "Campus", email; email, verified = true); K.set_roles!(kb, uid, ["Learner"]); uid)
+    as(uid) = K.session_caller(kb, K.start_session!(kb, uid, sh))
+    ada, bea, cy = account("ada@x.org"), account("bea@x.org"), account("cy@x.org")
+    K.create_project!(kb, "Reefs"; key = "RF", owner = ada, by = K.person("Ada"))
+    K.create_project!(kb, "Other"; key = "OT", owner = cy, by = K.person("Cy"))
+    K.set_member!(kb, "RF", bea, "contributor")
+    ticket(uid, doc = "doc-1") = K.collab_ticket!(kb, as(uid), "rf", doc)
+    t = ticket(ada)
+    @test t.room == "RF/doc-1" && t.path == "/api/collab" && length(t.ticket) == 48
+    @test_throws "No project RF" ticket(cy)
+    @test_throws "A document's id" ticket(ada, "../x")
+    r = K.handle(kb, K.HTTP.Request("POST", "/api/projects/RF/collab/ticket", [], K.JSON.json(Dict("document" => "doc-2"))), as(bea))
+    @test r.status == 200 && K.JSON.parse(String(r.body))["room"] == "RF/doc-2"
+
+    server = K.HTTP.listen!(K.service_handler(kb, req -> K.HTTP.Response(200, "plain")), "127.0.0.1", 0)
+    port = K.HTTP.port(server)
+    url(tk) = "ws://127.0.0.1:$port/api/collab?ticket=$tk"
+    # A browser of the room: its socket and what it receives.
+    function peer(tk)
+        inbox, ready = Channel{Any}(100), Channel{Any}(1)
+        task = @async K.HTTP.WebSockets.open(url(tk)) do ws
+            put!(ready, ws)
+            for m in ws
+                put!(inbox, K.JSON.parse(String(m)))
+            end
+        end
+        bind(ready, task)
+        return take!(ready), inbox
+    end
+    say(ws, d) = K.HTTP.WebSockets.send(ws, K.JSON.json(d))
+    next(inbox) = timedwait(() -> isready(inbox), 5.0) == :ok ? take!(inbox) : nothing
+    try
+        @test String(K.HTTP.get("http://127.0.0.1:$port/").body) == "plain"
+        @test_throws Exception peer("nonsense")
+        a, a_in = peer(t.ticket)
+        b, b_in = peer(ticket(bea).ticket)
+        for ws in (a, b)
+            say(ws, Dict("type" => "subscribe", "topics" => ["RF/doc-1", "RF/doc-1#relay", "OT/x", "RF/doc-10"]))
+        end
+        say(a, Dict("type" => "ping"))
+        @test next(a_in) == Dict("type" => "pong")
+        say(a, Dict("type" => "publish", "topic" => "RF/doc-1", "data" => Dict("type" => "announce", "from" => "a")))
+        got = next(b_in)
+        @test got["data"]["from"] == "a" && got["clients"] == 2
+        say(b, Dict("type" => "publish", "topic" => "RF/doc-1#relay", "data" => "update"))
+        @test next(a_in)["data"] == "update"
+        # Only the ticket's room: another project's topic, or another document's, is not joined.
+        say(a, Dict("type" => "publish", "topic" => "OT/x", "data" => "stray"))
+        say(a, Dict("type" => "publish", "topic" => "RF/doc-10", "data" => "stray"))
+        say(a, Dict("type" => "ping"))
+        @test next(a_in) == Dict("type" => "pong") && !isready(b_in) && !isready(a_in)
+        rooms = K.collab_rooms("RF")
+        @test only(rooms).document == "doc-1" && [p.name for p in only(rooms).people] == [K.caller_name(as(ada)), K.caller_name(as(bea))]
+        @test isempty(K.collab_rooms("OT"))
+        # Taken off the project, a ticket of theirs no longer admits them.
+        kept = ticket(bea).ticket
+        @test K.collab_admit(kb, kept) !== nothing
+        K.set_member!(kb, "RF", bea, "")
+        @test K.collab_admit(kb, kept) === nothing
+        @test_throws Exception peer(kept)
+        close(a); close(b)
+        @test timedwait(() -> isempty(K.collab_rooms("RF")), 5.0) == :ok
+    finally
+        close(server)
         close(kb)
     end
 end
