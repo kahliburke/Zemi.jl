@@ -258,7 +258,8 @@ function cli(args::AbstractVector{<:AbstractString})
             c = validate(load_config())
             passphrase = "--recovery" in rest ? passphrase_prompt() : nothing
             if "--check" in rest
-                r = check_offsite(c; passphrase)
+                r = check_offsite(c; passphrase, progress = meter)
+                done()
                 println("$(r.stamp) restores: every part unsealed and checked, $(r.files) file(s), $(round(r.bytes / 1e6; digits = 1)) MB, the database intact.")
             else
                 store = offsite_store(c)
@@ -291,10 +292,12 @@ function cli(args::AbstractVector{<:AbstractString})
             name = something(option(rest, "--offsite"), rest[1])
             before = if "--offsite" in rest
                 option(rest, "--offsite") === nothing && error("say which copy: zemi restore --offsite COPY (zemi backups --offsite lists them)")
-                restore_offsite!(c, name; passphrase = "--recovery" in rest ? passphrase_prompt() : nothing, config_files, included)
+                restore_offsite!(c, name; passphrase = "--recovery" in rest ? passphrase_prompt() : nothing, config_files, included,
+                                 progress = meter)
             else
                 restore_backup!(c, name; config_files, included)
             end
+            done()
             println("Restored $name into $(c.data_dir).", isempty(before) ? "" : " What was there is kept as the snapshot $before.")
         elseif cmd == "connect"
             return connect_cli(rest)

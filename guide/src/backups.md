@@ -153,7 +153,8 @@ zemi backup --offsite --follow       # shows the copy under way, whoever sends i
 ```
 
 Only one copy is sent at a time. Running `zemi backup --offsite` while one is under way follows it
-instead of starting another, and the service waits for it. A copy sent in the background writes its
+instead of starting another, and the service waits for it. A snapshot the store already has a whole
+copy of is not sent again. Files go several at a time, as each is a request of its own. A copy sent in the background writes its
 output to `offsite.log` in the backups folder.
 
 The first copy takes longest, since it sends every file; a knowledge base of a few hundred PDFs
@@ -170,7 +171,9 @@ zemi backups --offsite --check                # fetch the latest whole with the 
 zemi backups --offsite --check --recovery     # the same with the passphrase
 ```
 
-`--check` changes nothing: it fetches the copy into a folder of its own and removes it afterwards.
+`--check` changes nothing: it fetches the whole copy into a folder of its own, showing how far it has
+got, and removes it afterwards. It downloads as much as a restore would, the first copy's size, so it
+takes about as long as sending it did.
 
 ## Restoring
 

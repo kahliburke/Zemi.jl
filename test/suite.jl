@@ -7973,13 +7973,16 @@ end
                 kill(other); wait(other)
             end
             @test K.sending_offsite(c) === nothing && isempty(K.offsite_json(c)["sending"])     # its process gone
+            @test K.send_offsite!(c; snap = s2, progress = m -> push!(said, m)) == (; stamp = basename(s2), sent = 0)   # sent already
             @test [x.stamp for x in K.offsite_copies(c)] == basename.([s2, s1]) && all(x -> x.complete, K.offsite_copies(c))
             # Past keep_days a copy goes (the latest stays whatever its age), and then the files no copy names.
             store = K.offsite_store(c)
             @test K.thin_offsite!(c; at = D.now(D.UTC) + D.Day(2)) == [basename(s1)]
             @test length(K.list_objects(store, "files/")) == 2 && [x.stamp for x in K.offsite_copies(c)] == [basename(s2)]
             # The check fetches the latest whole, with the key, and finds its database intact.
-            @test K.check_offsite(c).stamp == basename(s2) && K.check_offsite(c).files == 2
+            fetched = String[]
+            @test K.check_offsite(c; progress = m -> push!(fetched, m)).stamp == basename(s2) && K.check_offsite(c).files == 2
+            @test !isempty(fetched) && all(m -> startswith(m, "Fetching $(basename(s2)):"), fetched)
             # A recovery passphrase opens the copies too; another passphrase or another key opens nothing.
             @test !K.has_offsite_recovery(store)
             @test_throws "no recovery passphrase" K.check_offsite(c; passphrase = "tidal flats at dawn")

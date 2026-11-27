@@ -196,6 +196,9 @@ function sending_offsite(c::Config)
     return d
 end
 
+"How many files a copy sends or fetches at once: each is a request of its own, and one at a time the requests' latency, not the bandwidth, sets the pace."
+const OFFSITE_PARALLEL = 8
+
 "How far copy `d` (see [`sending_offsite`](@ref)) has got, for people: sent of total, the rate and the time left."
 function offsite_progress_text(d::AbstractDict)
     mb(b) = round(b / 1e6; digits = 1)
@@ -206,7 +209,10 @@ function offsite_progress_text(d::AbstractDict)
     eta = left < 60 ? "under a minute left" : left < 3600 ? "about $(round(Int, left / 60)) min left" :
           "about $(round(left / 3600; digits = 1)) h left"
     what = d["phase"] == "state" ? "the packed state" : "$(d["files_done"]) of $(d["files_total"]) files"
-    return "Copying $(d["stamp"]) off this machine: $(mb(done)) of $(mb(total)) MB, $what · $(round(rate / 1e6; digits = 2)) MB/s, $eta"
+    # Nothing measured yet (the first file, or the packed state, which goes as one): no rate to go by.
+    pace = done == 0 ? "starting" : "$(round(rate / 1e6; digits = 2)) MB/s, $eta"
+    doing = get(d, "doing", "Copying $(d["stamp"]) off this machine")
+    return "$doing: $(mb(done)) of $(mb(total)) MB, $what · $pace"
 end
 
 """
@@ -215,7 +221,8 @@ end
 Copy snapshot `snap` to the store (see the top of this file): its files the store lacks, then its
 state, what its files are, and last its `snapshot.toml`. How far it has got is written for others to
 read as it goes (see [`sending_offsite`](@ref)), and given to `progress` (a message) about every
-second. Refused while another process sends one. Returns `(; stamp, sent)`, `sent` the files sent.
+second. A snapshot the store has a whole copy of already is not sent again. Refused while another
+process sends one. Returns `(; stamp, sent)`, `sent` the files sent.
 """
 function send_offsite!(c::Config; store = offsite_store(c), snap = latest_snapshot(c), progress = nothing)
     store === nothing && error("[backup.offsite] names no store")
@@ -225,6 +232,7 @@ function send_offsite!(c::Config; store = offsite_store(c), snap = latest_snapsh
         other = sending_offsite(c)
         other === nothing || other["pid"] == getpid() ||
             error("A copy is being sent already, by process $(other["pid"]): follow it with zemi backup --offsite --follow")
+        any(x -> x.stamp == stamp && x.complete, offsite_copies(c; store)) && return (; stamp, sent = 0)
         key = offsite_data_key(c, store; create = true)
         rows = c.backup.offsite.files ? snapshot_file_hashes(c, snap) : NamedTuple[]
         have = Set(list_objects(store, "files/"))
@@ -243,7 +251,7 @@ function send_offsite!(c::Config; store = offsite_store(c), snap = latest_snapsh
         end
         try
             note(; now = true)
-            for r in todo
+            asyncmap(todo; ntasks = OFFSITE_PARALLEL) do r
                 name = offsite_file_name(key, r.hash)
                 bytes = read(joinpath(snap, "files", r.path))
                 bytes2hex(sha256(bytes)) == r.hash || error("$(r.path) changed while it was being copied")
@@ -378,14 +386,15 @@ function follow_offsite(kb::KB)
 end
 
 """
-    fetch_offsite!(config, stamp, dest; store, passphrase = nothing) -> String
+    fetch_offsite!(config, stamp, dest; store, passphrase = nothing, progress = nothing) -> String
 
 Fetch copy `stamp` from the store into snapshot folder `dest`, laid out as [`snapshot!`](@ref) lays
-one out: each part checked as it is unsealed, each file against its hash. Opened with the server's
-key, or with the recovery `passphrase`. Returns `dest`.
+one out: each part checked as it is unsealed, each file against its hash, several files at once.
+Opened with the server's key, or with the recovery `passphrase`. `progress` is told how far it has
+got (a message) about every second. Returns `dest`.
 """
 function fetch_offsite!(c::Config, stamp::AbstractString, dest::AbstractString; store = offsite_store(c),
-                        passphrase::Union{AbstractString,Nothing} = nothing)
+                        passphrase::Union{AbstractString,Nothing} = nothing, progress = nothing)
     store === nothing && error("[backup.offsite] names no store")
     parse_backup_stamp(stamp) === nothing && error("A copy is named by its time, as `zemi backups --offsite` lists them: $stamp")
     key = offsite_data_key(c, store; passphrase)
@@ -395,18 +404,29 @@ function fetch_offsite!(c::Config, stamp::AbstractString, dest::AbstractString; 
     rm(part; force = true, recursive = true)
     mkpath(joinpath(part, "files"))
     try
-        write(joinpath(part, "state.tar.zst"), fetch("snapshots/$stamp/state"))
+        rows = [p for p in (split(l, '\t') for l in eachline(IOBuffer(fetch("snapshots/$stamp/files")))) if length(p) == 4]
+        d = Dict{String,Any}("doing" => "Fetching $stamp", "stamp" => stamp, "started" => time(), "phase" => "state",
+                             "files_done" => 0, "files_total" => length(rows), "bytes_done" => 0,
+                             "bytes_total" => sum(p -> parse(Int, p[2]), rows; init = 0))
+        said = Ref(0.0)
+        note(; now = false) = progress === nothing || !(now || time() - said[] >= 1) || (said[] = time(); progress(offsite_progress_text(d)))
+        note(; now = true)
+        state = fetch("snapshots/$stamp/state")
+        write(joinpath(part, "state.tar.zst"), state)
+        d["phase"], d["bytes_total"] = "files", d["bytes_total"] + length(state)
+        d["bytes_done"] += length(state)
+        asyncmap(rows; ntasks = OFFSITE_PARALLEL) do p
+            bytes = fetch(offsite_file_name(key, p[4]))
+            bytes2hex(sha256(bytes)) == p[4] || error("$(p[1]) in the store is not the file its copy names")
+            to = joinpath(part, "files", p[1])
+            mkpath(dirname(to))
+            write(to, bytes)
+            d["files_done"] += 1
+            d["bytes_done"] += length(bytes)
+            note()
+        end
         open(joinpath(part, "files.tsv"), "w") do manifest
-            for l in eachline(IOBuffer(fetch("snapshots/$stamp/files")))
-                p = split(l, '\t')
-                length(p) == 4 || continue
-                bytes = fetch(offsite_file_name(key, p[4]))
-                bytes2hex(sha256(bytes)) == p[4] || error("$(p[1]) in the store is not the file its copy names")
-                to = joinpath(part, "files", p[1])
-                mkpath(dirname(to))
-                write(to, bytes)
-                println(manifest, p[1], '\t', p[2], '\t', p[3])
-            end
+            foreach(p -> println(manifest, p[1], '\t', p[2], '\t', p[3]), rows)
         end
         for d in get(TOML.parse(meta), "files", String[])
             mkpath(joinpath(part, "files", d))
@@ -422,7 +442,7 @@ function fetch_offsite!(c::Config, stamp::AbstractString, dest::AbstractString; 
 end
 
 """
-    restore_offsite!(config, stamp; passphrase = nothing, config_files = false, included = false) -> String
+    restore_offsite!(config, stamp; passphrase = nothing, config_files = false, included = false, progress = nothing) -> String
 
 Fetch copy `stamp` (see [`fetch_offsite!`](@ref)) into the snapshot kept as `offsite-<stamp>`, then
 restore it (see [`restore_backup!`](@ref)). Needs only `[backup.offsite]` and its key, or the
@@ -430,20 +450,21 @@ recovery `passphrase`: on a new machine the knowledge base is put back from the 
 the name of the snapshot what was there is kept as.
 """
 function restore_offsite!(c::Config, stamp::AbstractString; passphrase::Union{AbstractString,Nothing} = nothing,
-                          config_files::Bool = false, included::Bool = false)
+                          config_files::Bool = false, included::Bool = false, progress = nothing)
     name = "offsite-$stamp"
-    fetch_offsite!(c, stamp, joinpath(backup_root(c), "kept", name); passphrase)
+    fetch_offsite!(c, stamp, joinpath(backup_root(c), "kept", name); passphrase, progress)
     return restore_backup!(c, name; config_files, included)
 end
 
 """
-    check_offsite(config; stamp = the latest complete copy, passphrase = nothing) -> NamedTuple
+    check_offsite(config; stamp = the latest complete copy, passphrase = nothing, progress = nothing) -> NamedTuple
 
 Prove a copy can be restored with the key at hand (the server's, or the recovery `passphrase`):
 fetch it whole into a folder of its own, unsealing and checking every part, and check its database's
 integrity. Nothing here is changed. Returns `(; stamp, files, bytes)`.
 """
-function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing, passphrase::Union{AbstractString,Nothing} = nothing)
+function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing, passphrase::Union{AbstractString,Nothing} = nothing,
+                       progress = nothing)
     store = offsite_store(c)
     store === nothing && error("[backup.offsite] names no store")
     if stamp === nothing
@@ -453,7 +474,7 @@ function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing
     end
     work = mktempdir()
     try
-        dest = fetch_offsite!(c, stamp, joinpath(work, stamp); store, passphrase)
+        dest = fetch_offsite!(c, stamp, joinpath(work, stamp); store, passphrase, progress)
         state = joinpath(work, "state")
         open(io -> Tar.extract(ZstdDecompressorStream(io), state), joinpath(dest, "state.tar.zst"))
         check = sqlite_value(joinpath(state, "kb.sqlite3"), "PRAGMA integrity_check")
