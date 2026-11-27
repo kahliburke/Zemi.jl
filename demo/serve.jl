@@ -173,8 +173,11 @@ if shared
     kb = demo_kb(dir; shared = Dict("port" => port, "base_url" => "http://127.0.0.1:$port", "providers" => providers))
     K.ensure_roles!(kb)
     ids = Dict(map(PEOPLE) do (email, name, role, member)
-        ismissing(K.scalar(kb, "SELECT id FROM users WHERE email = ?", (email,))) &&
+        if ismissing(K.scalar(kb, "SELECT id FROM users WHERE email = ?", (email,)))
             K.invite!(kb, email; roles = [role], projects = Dict("RB" => member, "LS" => member))
+        else            # Rowan, whose account the seeding made (see `owner`): their place as the invitation gives it
+            foreach(k -> K.set_member!(kb, k, email, member; by = DEMO_USER), ("RB", "LS"))
+        end
         email => K.sign_in!(kb, kb.config.shared, "local", email; email, verified = true, name)
     end)
     seed_shared!(kb, ids)
