@@ -3,7 +3,8 @@
 import type { Node } from './kbExplore'
 
 /** A node as the graph draws it: its place fixed (`fx`…) where the map has one. */
-export type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
+/** A node as drawn: where it is fixed, and its `room`, the distance to the nearest other one there. */
+export type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any; room?: number }
 export type GLink = { source: string; target: string; kind: string; similarity?: number }
 /** How far the map's and the space's coordinates (−1 to 1) are spread in the drawing. */
 export const SCALE_2D = 700, SCALE_3D = 360
@@ -107,3 +108,32 @@ export function discTexture(THREE: any) {
 /** How many world units a pixel spans at distance `d` from the camera. */
 export const pixelSize = (d: number, renderer: any, camera: any) =>
   2 * d * Math.tan((camera.fov * Math.PI) / 360) / renderer.domElement.clientHeight
+
+/**
+ * Each placed node's `room`: how far the nearest other placed node is, so its disc can be kept from
+ * covering it. Worked out on a grid of cells about a typical spacing wide.
+ */
+export function measureRoom(nodes: GNode[], deep: boolean) {
+  const placed = nodes.filter(n => n.fx !== undefined)
+  if (placed.length < 2) return
+  const at = (n: GNode) => [n.fx!, n.fy!, deep ? n.fz ?? 0 : 0]
+  const xs = placed.map(at)
+  const span = Math.max(...[0, 1, 2].map(a => Math.max(...xs.map(p => p[a])) - Math.min(...xs.map(p => p[a]))))
+  const size = Math.max(span / (deep ? Math.cbrt(placed.length) : Math.sqrt(placed.length)), 1e-6)
+  const key = (p: number[]) => p.map(v => Math.floor(v / size))
+  const grid = new Map<string, number[]>()
+  xs.forEach((p, i) => { const k = key(p).join(); (grid.get(k) ?? grid.set(k, []).get(k)!).push(i) })
+  placed.forEach((n, i) => {
+    const [cx, cy, cz] = key(xs[i])
+    // The cells around it, a ring further out than where the first other one is found (which may be nearer).
+    let best = Infinity
+    for (let reach = 1; reach <= 6; reach++) {
+      const found = best < Infinity
+      for (let dx = -reach; dx <= reach; dx++) for (let dy = -reach; dy <= reach; dy++) for (let dz = deep ? -reach : 0; dz <= (deep ? reach : 0); dz++)
+        for (const j of grid.get([cx + dx, cy + dy, cz + dz].join()) ?? [])
+          if (j !== i) best = Math.min(best, Math.hypot(xs[i][0] - xs[j][0], xs[i][1] - xs[j][1], xs[i][2] - xs[j][2]))
+      if (found) break
+    }
+    n.room = best
+  })
+}

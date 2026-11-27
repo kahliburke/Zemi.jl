@@ -24,7 +24,7 @@ import { BRAND, CLUSTER_COLOURS, DIMMED, KIND_COLOURS, LINK_COLOURS, NODE_KINDS,
          provideSettings, shortTitle, useExploreSettings, whose,
          type Detail, type Graph, type LegendRow, type Linked, type Near, type Node, type Pair, type Step } from './kbExplore'
 import { cameraMover, type View } from './exploreCamera'
-import { SCALE_2D, SCALE_3D, capHeight, clusterCentres, discTexture, pixelSize, placeTheRest, spacing,
+import { SCALE_2D, SCALE_3D, capHeight, clusterCentres, discTexture, pixelSize, placeTheRest, spacing, measureRoom,
          type GLink, type GNode } from './exploreLayout'
 
 
@@ -395,6 +395,24 @@ const packing = computed(() => {
   return a > 0 && b > 0 ? Math.min(1, Math.max(0.35, a / b)) : 1
 })
 const flatSize = (n: Node) => size(n) * packing.value ** 2
+// On the map, a disc's radius in the map's units: `√size × flatRel`, which grows with the zoom until a typical
+// disc is `FLAT_MOST` pixels across on screen, and is held there, so close in, the space between
+// documents keeps growing and the discs do not: a tight group comes apart (as `DISC_MOST` does in the space).
+const FLAT_MOST = 12
+let flatRel = 4
+// No wider than its room (see `measureRoom`) lets it be, nor smaller than a quarter of its size: discs
+// close together are drawn smaller rather than over each other.
+const ROOM_FILL = 0.45, ROOM_LEAST = 0.25
+const roomy = (r: number, n: Node) => Math.min(r, Math.max(ROOM_FILL * ((n as GNode).room ?? Infinity), ROOM_LEAST * r))
+const flatRadius = (n: Node) => roomy(Math.sqrt(Math.max(0, flatSize(n))) * flatRel, n)
+const flatVal = (n: Node) => (flatRadius(n) / flatRel) ** 2
+function fitFlatDiscs(k: number) {
+  const typical = Math.sqrt(1.4) * packing.value * 4                  // a document's radius at nodeRelSize 4
+  const rel = 4 * Math.min(1, FLAT_MOST / 2 / (typical * k))
+  if (Math.abs(rel - flatRel) < 1e-3 || !graph) return
+  flatRel = rel
+  graph.nodeRelSize(rel)
+}
 
 
 // The library's nodes and links: placed nodes fixed where the map puts them, the rest left to settle
@@ -424,6 +442,7 @@ function graphData() {
       links.push({ source: a, target: b, kind: 'similar', similarity: s })
   }
   placeTheRest(nodes, links, deep)
+  measureRoom(nodes, deep)
   return { nodes, links }
 }
 
@@ -462,7 +481,8 @@ async function draw() {
     graph = new ForceGraph(el)
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
-      .nodeVal(flatSize).nodeColor(shade).nodeLabel(() => "")
+      .nodeVal(flatVal).nodeRelSize(flatRel).nodeColor(shade).nodeLabel(() => "")
+      .onZoom(({ k }: { k: number }) => fitFlatDiscs(k))
       .linkColor(linkColour)
       .linkWidth(linkWidth2d)
       .linkLineDash((l: GLink) => (l.kind === 'similar' ? [2, 3] : null))
@@ -603,9 +623,14 @@ function drawNearestLabels2d(ctx: CanvasRenderingContext2D, scale: number) {
   ctx.font = `600 ${11 / scale}px system-ui, sans-serif`
   ctx.textBaseline = 'middle'
   const pad = 3 / scale, h = 15 / scale
-  for (const { to, similarity } of lines) {
+  // Most alike first, each beside its disc, and left out where an earlier one already is.
+  const taken: { x0: number; x1: number; y0: number; y1: number }[] = []
+  for (const { to, similarity } of [...lines].sort((p, q) => q.similarity - p.similarity)) {
     const text = `${Math.round(similarity * 100)}%`
-    const x = to.x + Math.sqrt(Math.max(0, size(to))) * 4 + 3 / scale, w = ctx.measureText(text).width + 2 * pad
+    const x = to.x + flatRadius(to) + 3 / scale, w = ctx.measureText(text).width + 2 * pad
+    const box = { x0: x, x1: x + w, y0: to.y - h / 2, y1: to.y + h / 2 }
+    if (taken.some(b => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0)) continue
+    taken.push(box)
     ctx.fillStyle = isDark.value ? 'rgba(17,17,22,0.75)' : 'rgba(250,250,250,0.8)'
     ctx.beginPath(); ctx.roundRect(x, to.y - h / 2, w, h, 3 / scale); ctx.fill()
     ctx.fillStyle = isDark.value ? 'rgba(235,235,248,0.95)' : 'rgba(30,30,45,0.95)'
@@ -627,6 +652,8 @@ function fitDisc(sprite: any, n: GNode, renderer: any, camera: any) {
   const k = Math.min(sprite.userData.d, most)
   if (sprite.scale.x !== k) { sprite.scale.set(k, k, 1); sprite.updateMatrixWorld() }
 }
+// How much of a disc in front of the selected one is left: enough to see it is there.
+const FADED = 0.45
 function keepFocusInSight(sprite: any, n: GNode, renderer: any, camera: any) {
   if (renderer.info.render.frame !== focusFrame) {
     focusFrame = renderer.info.render.frame
@@ -642,9 +669,12 @@ function keepFocusInSight(sprite: any, n: GNode, renderer: any, camera: any) {
   if (focus && distance < focus.distance) {
     const at = (scratch ??= sprite.position.clone()).copy(sprite.position).project(camera), el = renderer.domElement
     const apart = Math.hypot((at.x - focus.at.x) * el.clientWidth / 2, (at.y - focus.at.y) * el.clientHeight / 2)
-    if (apart < focus.radius + sprite.scale.x / 2 / pixelSize(distance, renderer, camera) + 4) opacity = 0.12
+    if (apart < focus.radius + sprite.scale.x / 2 / pixelSize(distance, renderer, camera) + 4) opacity = FADED
   }
-  if (sprite.material.opacity !== opacity) sprite.material.opacity = opacity
+  // Eased toward it a frame at a time, so a disc passing in front fades and returns rather than blinking.
+  const now = sprite.material.opacity
+  if (Math.abs(now - opacity) > 0.01) sprite.material.opacity = now + (opacity - now) * 0.2
+  else if (now !== opacity) sprite.material.opacity = opacity
 }
 // The clusters that matter to what one is looking at: a cluster gone to from the legend, or the selected
 // document's and those of its nearest. Null when nothing is in view in particular. The other clusters'
@@ -670,7 +700,7 @@ function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
 }
 // A thin ring in the brand colour around a node, and a faint wider one.
 function ring2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
-  const r = Math.sqrt(flatSize(n)) * 4
+  const r = flatRadius(n)
   ctx.strokeStyle = BRAND + 'c0'; ctx.lineWidth = 1.5 / scale
   ctx.beginPath(); ctx.arc(n.x, n.y, r + 3 / scale, 0, 2 * Math.PI); ctx.stroke()
   ctx.strokeStyle = BRAND + '26'; ctx.lineWidth = 3 / scale
@@ -678,7 +708,7 @@ function ring2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
 }
 // A node's short title above where its ring is, on a backing, a constant size on screen.
 function title2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
-  const r = Math.sqrt(flatSize(n)) * 4
+  const r = flatRadius(n)
   const text = shortTitle(n.title)
   ctx.font = `600 ${13 / scale}px system-ui, sans-serif`
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
@@ -783,7 +813,7 @@ async function showNearest3d() {
 const sprites = new Map<string, { sprite: any; node: GNode }>()
 // A disc's width: a little smaller than the sphere 3d-force-graph would draw for the node (radius 4·∛val),
 // as closely as the layout packs them.
-const spriteSize = (n: GNode) => 5 * Math.cbrt(size(n)) * packing.value
+const spriteSize = (n: GNode) => 2 * roomy(2.5 * Math.cbrt(size(n)) * packing.value, n)
 // How a linked document stands to the one shown: what it does to this one, or this one to it.
 
 // Redrawn as what is shown changes; recoloured as the selection, hits and colours do.
@@ -815,7 +845,7 @@ function restyle() {
   showTrail3d()
   const rel = relevantClusters.value
   for (const { sprite, id } of clusterLabels) sprite.material.opacity = !rel || rel.has(id) ? 1 : DIMMED
-  if (view.value === '2d') { graph.nodeColor(shade).nodeVal(flatSize); return }
+  if (view.value === '2d') { graph.nodeColor(shade).nodeVal(flatVal); return }
   for (const { sprite, node } of sprites.values()) {
     sprite.material.color.set(shade(node))
     const d = spriteSize(node)
@@ -914,7 +944,7 @@ function nodeAt(e: PointerEvent): GNode | null {
   for (const n of graph.graphData().nodes as GNode[]) {
     if (n.x === undefined) continue
     const d = Math.hypot(n.x - p.x, n.y - p.y)
-    if (d < Math.sqrt(flatSize(n)) * 4 + 3 / k && d < apart) { best = n; apart = d }
+    if (d < flatRadius(n) + 3 / k && d < apart) { best = n; apart = d }
   }
   return best
 }
