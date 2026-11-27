@@ -558,7 +558,9 @@ the citations, and the works it cites count towards the missing works. Once the 
 the list in its text is the one shown.
 
 A paper whose list was fetched is not asked about again; one with no list found is asked again after
-30 days. Requests go without a key unless `semantic_scholar_key` is set (see
+30 days. When Semantic Scholar or OpenAlex cannot be reached, or answers in a form Zemi does not
+expect, the papers it did not answer for keep what they had and are asked again the next time, and
+the service is left alone for ten minutes. The job says how many went unanswered and why. Requests go without a key unless `semantic_scholar_key` is set (see
 [Other keys](configuration.md#Other-keys)): they then share Semantic Scholar's public allowance, which
 is slower when it is busy.
 

@@ -189,9 +189,9 @@ function cli(args::AbstractVector{<:AbstractString})
             end
         elseif cmd == "references"
             db = kb()
-            n = fetch_references!(db, literature_ids(db); force = "--force" in rest, progress = meter)
+            r = fetch_references!(db, literature_ids(db); force = "--force" in rest, progress = meter)
             done()
-            println("Reference lists found for $n paper(s).")
+            println(references_report(r))
         elseif cmd == "admin"
             foreach(println, admin_cli(kb(), rest))
         elseif cmd == "backup" && "--offsite-key" in rest

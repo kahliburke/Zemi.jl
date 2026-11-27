@@ -36,110 +36,173 @@ const FetchedReference = @NamedTuple{arxiv::Union{String,Nothing}, doi::Union{St
 "How long a paper with no list found waits before it is asked about again: lists are added as papers are indexed."
 const REFETCH_EMPTY = Day(30)
 
+# A service that fails is left alone for a while, so that recording papers, or a long fetch, does not
+# wait on it again for each request; the papers it was not asked about are asked the next time.
+const RESTING = Dict{String,DateTime}()
+const RESTING_LOCK = ReentrantLock()
+"How long a service that failed is left alone."
+const REST = Minute(10)
+resting(service::AbstractString) = lock(() -> get(RESTING, service, DateTime(0)) > now(UTC), RESTING_LOCK)
+rest!(service::AbstractString) = lock(() -> (RESTING[service] = now(UTC) + REST), RESTING_LOCK)
+
+# Text from a service's answer, `nothing` for anything else.
+answer_text(x) = x isa AbstractString && !isempty(x) ? String(x) : nothing
+answer_year(x) = x isa Integer ? Int(x) : nothing
+
+# What a service answered for each work asked about: its list (empty for none), or `nothing` for a work
+# it does not know. A work it was not asked about, or did not answer for, is not there at all.
+const Answers = Dict{String,Union{Vector{FetchedReference},Nothing}}
+
 # ── Semantic Scholar ─────────────────────────────────────────────────────────────────────────────
 
 """
-    s2_references(ids; key = "", post = s2_post) -> Dict{String,Union{Vector{FetchedReference},Nothing}}
+    s2_references(ids; key = "", post = s2_post, progress, cancelled) -> (; found, error)
 
 The reference lists Semantic Scholar keeps for the works `ids` (its ids: `ARXIV:2401.00001`,
-`DOI:10.…`), asked a hundred at a time, a second apart; `nothing` for a work it does not know. `key`
-is a Semantic Scholar API key; without one, requests share its public allowance and are slower to be
-answered when it is busy.
+`DOI:10.…`), asked a hundred at a time, a second apart, as [`Answers`](@ref). A request that fails,
+or is answered in an unexpected form, stops the asking: `error` says why, the works not yet answered
+are left out, and Semantic Scholar is left alone for [`REST`](@ref). `key` is a Semantic Scholar API
+key; without one, requests share its public allowance and are slower to be answered when it is busy.
 """
 function s2_references(ids::AbstractVector{<:AbstractString}; key::AbstractString = "", post = s2_post,
                        progress = msg -> nothing, cancelled = () -> false)
-    out = Dict{String,Union{Vector{FetchedReference},Nothing}}()
+    found = Answers()
+    resting("Semantic Scholar") && return (; found, error = "Semantic Scholar failed lately and is not asked for a few minutes")
     batches = collect(Iterators.partition(ids, S2_BATCH_SIZE))
     for (n, batch) in enumerate(batches)
         cancelled() && break
         n > 1 && sleep(1.1)
         length(batches) > 1 && progress("Semantic Scholar: $(n) of $(length(batches)) requests")
-        for (id, p) in zip(batch, post(collect(batch); key))
-            out[id] = p === nothing ? nothing : FetchedReference[s2_reference(r) for r in something(get(p, "references", nothing), [])]
+        got = try
+            s2_answer(post(collect(batch); key), length(batch))
+        catch e
+            e isa InterruptException && rethrow()
+            rest!("Semantic Scholar")
+            return (; found, error = "Semantic Scholar: " * failure_message(e))
         end
+        merge!(found, Dict(zip(batch, got)))
     end
-    return out
+    return (; found, error = "")
 end
 
-"One request of [`s2_references`](@ref): Semantic Scholar's records of `ids`, in order, `nothing` for those it lacks."
+"One request of [`s2_references`](@ref): Semantic Scholar's answer for `ids`, as it came."
 function s2_post(ids::AbstractVector{<:AbstractString}; key::AbstractString = "")
     headers = ["Content-Type" => "application/json"]
     isempty(key) || push!(headers, "x-api-key" => key)
-    r = with_retry("Semantic Scholar"; tries = 3, patience = 180, pause = 2.0) do
+    r = with_retry("Semantic Scholar"; tries = 2, patience = 60, pause = 2.0) do
         HTTP.post(S2_BATCH, headers, JSON.json(Dict("ids" => ids)); query = ["fields" => S2_FIELDS], retry = false,
-                  connect_timeout = 20, readtimeout = 120)
+                  connect_timeout = 20, read_idle_timeout = 60)
     end
     return JSON.parse(body_text(r.body))
 end
 
+# Semantic Scholar's answer for `n` works: a list of `n`, each a record or null. Any other form is an
+# error; a record without a list of references has none.
+function s2_answer(answer, n::Integer)
+    answer isa AbstractVector && length(answer) == n || error("an answer of an unexpected form")
+    return map(answer) do p
+        p isa AbstractDict || return nothing
+        refs = get(p, "references", nothing)
+        refs isa AbstractVector ? FetchedReference[s2_reference(r) for r in refs if r isa AbstractDict] : FetchedReference[]
+    end
+end
+
 # An entry of Semantic Scholar's list. An arXiv DOI names no more than the arXiv id does, and is left out.
 function s2_reference(r::AbstractDict)
-    ext = something(get(r, "externalIds", nothing), Dict())
-    arxiv, doi = get(ext, "ArXiv", nothing), get(ext, "DOI", nothing)
+    ext = get(r, "externalIds", nothing)
+    ext isa AbstractDict || (ext = Dict())
+    arxiv, doi = answer_text(get(ext, "ArXiv", nothing)), answer_text(get(ext, "DOI", nothing))
     doi = doi === nothing || startswith(lowercase(doi), "10.48550/") ? nothing : normalize_doi(doi)
-    year = get(r, "year", nothing)
-    return FetchedReference((arxiv === nothing ? nothing : String(arxiv), doi, String(something(get(r, "title", nothing), "")),
-                             String[a["name"] for a in something(get(r, "authors", nothing), []) if get(a, "name", nothing) !== nothing],
-                             year isa Integer ? Int(year) : nothing))
+    authors = get(r, "authors", nothing)
+    names = String[n for a in (authors isa AbstractVector ? authors : []) if a isa AbstractDict
+                   for n in (answer_text(get(a, "name", nothing)),) if n !== nothing]
+    return FetchedReference((arxiv, doi, something(answer_text(get(r, "title", nothing)), ""), names, answer_year(get(r, "year", nothing))))
 end
 
 # ── OpenAlex ─────────────────────────────────────────────────────────────────────────────────────
 
 """
-    openalex_references(dois; contact = "") -> Dict{String,Union{Vector{FetchedReference},Nothing}}
+    openalex_references(dois; contact = "", get_works = openalex_get) -> (; found, error)
 
-The reference lists OpenAlex keeps for the works with DOIs `dois`, fifty works at a time; `nothing`
-for a work it does not know. OpenAlex names the works cited by its own ids, which are looked up for
-their DOIs, titles, authors and years, and their arXiv ids where they are posted there.
+The reference lists OpenAlex keeps for the works with DOIs `dois`, fifty works at a time, as
+[`Answers`](@ref) keyed by normalized DOI. OpenAlex names the works cited by its own ids, which are
+looked up for their DOIs, titles, authors and years, and their arXiv ids where they are posted there.
+A request that fails stops the asking, as for Semantic Scholar ([`s2_references`](@ref)): only the
+works whose whole list was looked up are answered.
 """
 function openalex_references(dois::AbstractVector{<:AbstractString}; contact::AbstractString = "", get_works = openalex_get)
+    found = Answers()
+    resting("OpenAlex") && return (; found, error = "OpenAlex failed lately and is not asked for a few minutes")
+    asked = unique(normalize_doi.(dois))
     cited = Dict{String,Vector{String}}()
-    for batch in Iterators.partition(unique(normalize_doi.(dois)), 50)
-        for w in get_works(["filter" => "doi:" * join(batch, '|'), "per-page" => "50", "select" => "doi,referenced_works"]; contact)
-            w["doi"] === nothing && continue
-            cited[normalize_doi(w["doi"])] = [last(split(String(u), '/')) for u in something(w["referenced_works"], [])]
-        end
-    end
     known = Dict{String,FetchedReference}()
-    for batch in Iterators.partition(unique(reduce(vcat, values(cited); init = String[])), 50)
-        for w in get_works(["filter" => "openalex_id:" * join(batch, '|'), "per-page" => "50",
-                            "select" => "id,doi,title,publication_year,authorships,locations"]; contact)
-            known[last(split(String(w["id"]), '/'))] = openalex_reference(w)
+    try
+        for batch in Iterators.partition(asked, 50)
+            works = get_works(["filter" => "doi:" * join(batch, '|'), "per-page" => "50", "select" => "doi,referenced_works"]; contact)
+            works isa AbstractVector || error("an answer of an unexpected form")
+            for w in works
+                doi = w isa AbstractDict ? answer_text(get(w, "doi", nothing)) : nothing
+                doi === nothing && continue
+                ids = get(w, "referenced_works", nothing)
+                cited[normalize_doi(doi)] = [last(split(u, '/')) for u in (ids isa AbstractVector ? ids : []) if u isa AbstractString]
+            end
         end
+        for batch in Iterators.partition(unique(reduce(vcat, values(cited); init = String[])), 50)
+            works = get_works(["filter" => "openalex_id:" * join(batch, '|'), "per-page" => "50",
+                               "select" => "id,doi,title,publication_year,authorships,locations"]; contact)
+            works isa AbstractVector || error("an answer of an unexpected form")
+            for w in works
+                id = w isa AbstractDict ? answer_text(get(w, "id", nothing)) : nothing
+                id === nothing || (known[last(split(id, '/'))] = openalex_reference(w))
+            end
+        end
+    catch e
+        e isa InterruptException && rethrow()
+        rest!("OpenAlex")
+        return (; found, error = "OpenAlex: " * failure_message(e))
     end
-    return Dict{String,Union{Vector{FetchedReference},Nothing}}(
-        normalize_doi(d) => (haskey(cited, normalize_doi(d)) ? FetchedReference[known[i] for i in cited[normalize_doi(d)] if haskey(known, i)] : nothing)
-        for d in dois)
+    for d in asked
+        found[d] = haskey(cited, d) ? FetchedReference[known[i] for i in cited[d] if haskey(known, i)] : nothing
+    end
+    return (; found, error = "")
 end
 
 function openalex_reference(w::AbstractDict)
-    doi = w["doi"] === nothing ? nothing : normalize_doi(w["doi"])
+    doi = answer_text(get(w, "doi", nothing))
+    doi = doi === nothing ? nothing : normalize_doi(doi)
     arxiv = nothing
     if doi !== nothing && startswith(doi, "10.48550/arxiv.")
         arxiv, doi = doi[length("10.48550/arxiv.")+1:end], nothing
     end
-    for l in something(get(w, "locations", nothing), [])
-        arxiv === nothing || break
-        id = parse_arxiv_id(something(get(l, "landing_page_url", nothing), ""))
+    locations = get(w, "locations", nothing)
+    for l in (locations isa AbstractVector ? locations : [])
+        arxiv === nothing && l isa AbstractDict || break
+        id = parse_arxiv_id(something(answer_text(get(l, "landing_page_url", nothing)), ""))
         id === nothing || (arxiv = id.id)
     end
-    authors = String[a["author"]["display_name"] for a in something(get(w, "authorships", nothing), [])
-                     if get(something(get(a, "author", nothing), Dict()), "display_name", nothing) !== nothing]
-    year = get(w, "publication_year", nothing)
-    return FetchedReference((arxiv, doi, String(something(get(w, "title", nothing), "")), authors, year isa Integer ? Int(year) : nothing))
+    authorships = get(w, "authorships", nothing)
+    authors = String[n for a in (authorships isa AbstractVector ? authorships : []) if a isa AbstractDict
+                     for who in (get(a, "author", nothing),) if who isa AbstractDict
+                     for n in (answer_text(get(who, "display_name", nothing)),) if n !== nothing]
+    return FetchedReference((arxiv, doi, something(answer_text(get(w, "title", nothing)), ""), authors,
+                             answer_year(get(w, "publication_year", nothing))))
 end
 
 # ── Keeping them ─────────────────────────────────────────────────────────────────────────────────
 
 """
     fetch_references!(kb, ids; force = false, s2 = s2_references, openalex = openalex_references,
-                      progress, cancelled) -> Int
+                      progress, cancelled) -> (; found, unanswered, error)
 
-Fetch the reference lists of the papers `ids` and keep them (see [`fetched_references`](@ref)),
-returning how many papers a list was found for. Each is asked of Semantic Scholar by its arXiv id or
-DOI; a paper it does not know, or knows no references of, is asked of OpenAlex by its DOI (an arXiv
-paper's being its arXiv DOI). A paper whose list was found before is skipped unless `force`, and one
-with none found is asked again after [`REFETCH_EMPTY`](@ref). Nothing is summarized or embedded.
+Fetch the reference lists of the papers `ids` and keep them (see [`fetched_references`](@ref)):
+`found` is how many papers a list was found for. Each is asked of Semantic Scholar by its arXiv id or
+DOI; a paper it does not know, knows no references of, or did not answer for, is asked of OpenAlex by
+its DOI (an arXiv paper's being its arXiv DOI). A paper whose list was found before is skipped unless
+`force`, and one both services answered with none for is asked again after [`REFETCH_EMPTY`](@ref).
+
+A service that is down or answers wrongly costs nothing kept: the papers it did not answer for keep
+what they had and are asked again next time (`unanswered` of them, `error` saying why). Nothing is
+summarized or embedded.
 """
 function fetch_references!(kb::KB, ids::AbstractVector{<:AbstractString}; force::Bool = false, s2 = s2_references,
                            openalex = openalex_references, progress = msg -> nothing, cancelled = () -> false)
@@ -155,35 +218,44 @@ function fetch_references!(kb::KB, ids::AbstractVector{<:AbstractString}; force:
         work = is_arxiv_id(id) ? "ARXIV:" * id : ismissing(p.doi) || isempty(p.doi) ? nothing : "DOI:" * normalize_doi(p.doi)
         work === nothing || (asked[id] = work)
     end
-    isempty(asked) && return 0
-    progress("Fetching the reference lists of $(length(asked)) paper(s) from Semantic Scholar")
-    found = s2(collect(values(asked)); key = resolve_key(kb.config.semantic_scholar_key, "semantic_scholar_key"), progress, cancelled)
-    lists = Dict{String,Tuple{String,Vector{FetchedReference}}}()
-    for (id, work) in asked
-        refs = get(found, work, nothing)
-        refs === nothing || isempty(refs) || (lists[id] = ("semanticscholar", refs))
+    isempty(asked) && return (; found = 0, unanswered = 0, error = "")
+    errors = String[]
+    key = try
+        resolve_key(kb.config.semantic_scholar_key, "semantic_scholar_key")
+    catch e                                          # asked without it, as with none
+        push!(errors, failure_message(e))
+        ""
     end
-    rest = Dict(id => (startswith(work, "DOI:") ? work[5:end] : "10.48550/arxiv." * lowercase(id))
+    progress("Fetching the reference lists of $(length(asked)) paper(s) from Semantic Scholar")
+    s = s2(collect(values(asked)); key, progress, cancelled)
+    isempty(s.error) || push!(errors, s.error)
+    lists = Dict{String,Tuple{String,Vector{FetchedReference}}}()
+    none = Set{String}()                             # those Semantic Scholar answered for with no list
+    for (id, work) in asked
+        haskey(s.found, work) || continue
+        refs = s.found[work]
+        refs === nothing || isempty(refs) ? push!(none, id) : (lists[id] = ("semanticscholar", refs))
+    end
+    rest = Dict(id => normalize_doi(startswith(work, "DOI:") ? work[5:end] : "10.48550/arxiv." * id)
                 for (id, work) in asked if !haskey(lists, id))
+    answered = Set{String}()                         # those OpenAlex answered for
     if !isempty(rest) && !cancelled()
         progress("Asking OpenAlex for $(length(rest)) paper(s) Semantic Scholar has no list for")
-        more = try
-            openalex(collect(values(rest)); contact = kb.config.contact)
-        catch e
-            e isa InterruptException && rethrow()
-            @warn "OpenAlex could not be asked for reference lists" exception = e
-            Dict{String,Any}()
-        end
+        o = openalex(collect(values(rest)); contact = kb.config.contact)
+        isempty(o.error) || push!(errors, o.error)
         for (id, doi) in rest
-            refs = get(more, normalize_doi(doi), nothing)
+            haskey(o.found, doi) || continue
+            push!(answered, id)
+            refs = o.found[doi]
             refs === nothing || isempty(refs) || (lists[id] = ("openalex", refs))
         end
     end
     at = now_iso()
+    # Kept: the lists found, and "none" for those both services answered for without one.
+    kept = [[(id, src, refs) for (id, (src, refs)) in lists]; [(id, "", FetchedReference[]) for id in none if id in answered && !haskey(lists, id)]]
     transaction(kb) do
-        for id in keys(asked)
+        for (id, source, refs) in kept
             pid = paper_id(kb, id)
-            source, refs = get(lists, id, ("", FetchedReference[]))
             execute!(kb, "DELETE FROM fetched_references WHERE paper_id = ?", (pid,))
             for (i, r) in enumerate(refs)
                 execute!(kb, """INSERT INTO fetched_references (paper_id, ord, arxiv, doi, title, authors, year)
@@ -194,8 +266,18 @@ function fetch_references!(kb::KB, ids::AbstractVector{<:AbstractString}; force:
                             count = excluded.count""", (pid, source, at, length(refs)))
         end
     end
-    return length(lists)
+    unanswered = length(asked) - length(kept)
+    unanswered > 0 && !isempty(errors) && @warn "Reference lists not fetched for $unanswered paper(s): $(join(errors, "; "))"
+    return (; found = length(lists), unanswered, error = join(errors, "; "))
 end
+
+"""
+    references_report(r) -> String
+
+What a [`fetch_references!`](@ref) did, said for a job or the terminal.
+"""
+references_report(r) = "Reference lists found for $(r.found) paper(s)." *
+    (r.unanswered > 0 && !isempty(r.error) ? " $(r.unanswered) not answered, to be asked again next time ($(r.error))." : "")
 
 "The ids of the knowledge base's papers and uploads, those a reference list can be fetched for."
 literature_ids(kb::KB) = String[r.id for r in query(kb, "SELECT doc_id AS id FROM papers WHERE $(literature_sql()) ORDER BY doc_id")]
@@ -204,7 +286,7 @@ literature_ids(kb::KB) = String[r.id for r in query(kb, "SELECT doc_id AS id FRO
     fetched_references(kb, doc_id) -> Vector{Reference}
 
 The reference list fetched for a paper (see [`fetch_references!`](@ref)), each entry as a reference
-list's entry reads: its authors, year and title, and its arXiv id or DOI.
+list's entry reads, its authors, year and title, with its arXiv id and DOI beside it.
 """
 function fetched_references(kb::KB, doc_id::AbstractString)
     rows = query(kb, """SELECT f.ord, f.arxiv, f.doi, f.title, f.authors, f.year FROM fetched_references f
@@ -216,7 +298,5 @@ end
 function fetched_text(r)
     names = json_list(r.authors)
     who = isempty(names) ? "" : length(names) > 3 ? join(names[1:3], ", ") * " et al." : join(names, ", ")
-    parts = filter(!isempty, [who * (ismissing(r.year) ? "" : " ($(r.year))"), strip(r.title),
-                              ismissing(r.arxiv) ? "" : "arXiv:" * r.arxiv, ismissing(r.doi) ? "" : "doi:" * r.doi])
-    return join(parts, ". ")
+    return join(filter(!isempty, [who * (ismissing(r.year) ? "" : " ($(r.year))"), strip(r.title)]), ". ")
 end

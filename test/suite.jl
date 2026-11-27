@@ -2955,28 +2955,66 @@ end
                           VALUES (?, ?, ?, '["Ada Lovelace"]', ?, ?, 'paper')""", (id, title, doi, K.now_iso(), K.now_iso()))
     end
     ref(; arxiv = nothing, doi = nothing, title = "", year = 2020) = (; arxiv, doi, title, authors = ["Cy Chen"], year)
-    asked = String[][]
+    answers(pairs) = (; found = K.Answers(pairs), error = "")
+    asked = Vector{String}[]
     s2(ids; _...) = (push!(asked, collect(ids));
-                     Dict{String,Any}(i => i == "ARXIV:2401.00001" ? [ref(arxiv = "2401.00002", title = "Fast surveys of reefs"), ref(doi = "10.1/x", title = "Elsewhere")] :
-                                         i == "ARXIV:2401.00009" ? K.FetchedReference[] : nothing for i in ids))
-    oa_asked = String[][]
+                     answers(i => i == "ARXIV:2401.00001" ? [ref(arxiv = "2401.00002", title = "Fast surveys of reefs"), ref(doi = "10.1/x", title = "Elsewhere")] :
+                                  i == "ARXIV:2401.00009" ? K.FetchedReference[] : nothing for i in ids))
+    oa_asked = Vector{String}[]
     openalex(dois; _...) = (push!(oa_asked, collect(dois));
-                            Dict{String,Any}(d => d == "10.1000/up.1" ? [ref(arxiv = "2401.00002", title = "Fast surveys of reefs")] : nothing for d in dois))
+                            answers(d => d == "10.1000/up.1" ? [ref(arxiv = "2401.00002", title = "Fast surveys of reefs")] : nothing for d in dois))
     ids = ["2401.00001", "2401.00002", "doc-upload", "2401.00009"]
-    @test K.fetch_references!(kb, ids; s2, openalex) == 2
+    @test K.fetch_references!(kb, ids; s2, openalex) == (found = 2, unanswered = 0, error = "")
     @test sort(only(asked)) == ["ARXIV:2401.00001", "ARXIV:2401.00002", "ARXIV:2401.00009", "DOI:10.1000/up.1"]
     # Those Semantic Scholar has no list for are asked of OpenAlex, an arXiv paper by its arXiv DOI.
     @test sort(only(oa_asked)) == ["10.1000/up.1", "10.48550/arxiv.2401.00002", "10.48550/arxiv.2401.00009"]
     refs = K.paper_references(kb, "2401.00001")
     @test [(r.label, r.arxiv, r.doi, r.cites) for r in refs] == [("1", "2401.00002", nothing, "2401.00002"), ("2", nothing, "10.1/x", nothing)]
-    @test refs[1].text == "Cy Chen (2020). Fast surveys of reefs. arXiv:2401.00002"
+    @test refs[1].text == "Cy Chen (2020). Fast surveys of reefs"
     @test only(K.paper_references(kb, "doc-upload")).cites == "2401.00002"
     @test sort([c.doc_id for c in K.citing_papers(kb, "2401.00002")]) == ["2401.00001", "doc-upload"]
     @test isempty(K.paper_references(kb, "2401.00009"))
     # Asked again: those with a list, and those with none found lately, are skipped; `force` asks again.
-    @test K.fetch_references!(kb, ids; s2, openalex) == 0 && length(asked) == 1
-    @test K.fetch_references!(kb, ["2401.00001"]; s2, openalex, force = true) == 1 && last(asked) == ["ARXIV:2401.00001"]
+    @test K.fetch_references!(kb, ids; s2, openalex).found == 0 && length(asked) == 1
+    @test K.fetch_references!(kb, ["2401.00001"]; s2, openalex, force = true).found == 1 && last(asked) == ["ARXIV:2401.00001"]
     @test length(K.paper_references(kb, "2401.00001")) == 2                    # replaced, not added to
+
+    # A service down, or answering wrongly, costs nothing kept: those it did not answer for keep their
+    # lists and are asked again, and it is left alone for a while.
+    empty!(K.RESTING)
+    down(_...; _...) = error("connection refused")
+    r = K.s2_references(["ARXIV:2401.00001"]; post = down)
+    @test isempty(r.found) && occursin("connection refused", r.error) && K.resting("Semantic Scholar")
+    @test occursin("not asked", K.s2_references(["ARXIV:2401.00001"]; post = (ids; _...) -> error("asked")).error)
+    empty!(K.RESTING)
+    @test occursin("unexpected form", K.s2_references(["ARXIV:1", "ARXIV:2"]; post = (ids; _...) -> Dict("message" => "Too Many Requests")).error)
+    empty!(K.RESTING)
+    @test K.s2_references(["ARXIV:1", "ARXIV:2", "ARXIV:3"];
+                          post = (ids; _...) -> [nothing, Dict("paperId" => "x"), Dict("references" => [Dict("title" => 3), "junk"])]).found ==
+          K.Answers("ARXIV:1" => nothing, "ARXIV:2" => K.FetchedReference[], "ARXIV:3" => [(arxiv = nothing, doi = nothing, title = "", authors = String[], year = nothing)])
+    empty!(K.RESTING)
+    @test occursin("unexpected form", K.openalex_references(["10.1/a"]; get_works = (q; _...) -> Dict("error" => "x")).error)
+    empty!(K.RESTING)
+    nowhere(ids; _...) = (; found = K.Answers(), error = "Semantic Scholar: connection refused")
+    @test K.fetch_references!(kb, ["2401.00001", "2401.00002"]; s2 = nowhere, openalex = nowhere, force = true) ==
+          (found = 0, unanswered = 2, error = "Semantic Scholar: connection refused; Semantic Scholar: connection refused")
+    @test length(K.paper_references(kb, "2401.00001")) == 2                    # kept
+    # Semantic Scholar down, OpenAlex answering: its lists are kept, and those it has none for are
+    # not taken to have none, as Semantic Scholar was not asked.
+    stamp(id) = only(K.query(kb, "SELECT f.fetched_at AS at FROM references_fetched f JOIN papers p ON p.id = f.paper_id WHERE p.doc_id = ?", (id,))).at
+    before = stamp("2401.00002")
+    sleep(1.1)                                                                 # a later time, were it kept again
+    @test K.fetch_references!(kb, ["doc-upload", "2401.00002"]; s2 = nowhere, openalex, force = true) ==
+          (found = 1, unanswered = 1, error = "Semantic Scholar: connection refused")
+    @test stamp("2401.00002") == before && stamp("doc-upload") != before
+    # A key that cannot be read is said, and the lists fetched without one.
+    was = kb.config
+    kb.config = K.Config(; data_dir = was.data_dir, semantic_scholar_key = "env:ZEMI_TEST_NO_SUCH_KEY", layers = Layer[])
+    keys_given = String[]
+    keyed(ids; key = "", _...) = (push!(keys_given, key); s2(ids))
+    r = K.fetch_references!(kb, ["2401.00001"]; s2 = keyed, openalex, force = true)
+    @test r.found == 1 && keys_given == [""] && occursin("ZEMI_TEST_NO_SUCH_KEY", r.error)
+    kb.config = was
     # A list in the paper's own text is the one it shows.
     K.store_parse!(kb, "2401.00001", K.ParsedPaper(1, [
         K.Piece(:heading, 1, (0.0, 0.0, 0.0, 0.0), "References", 1, 1, ""),
