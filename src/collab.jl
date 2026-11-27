@@ -191,10 +191,97 @@ function service_handler(kb::KB, respond)
     end
 end
 
+# ── Hubs' keys ────────────────────────────────────────────────────────────────────────────────────
+# A participant's Slate hub has a long-term CURVE key pair; when one hub reaches another's worker, the
+# key says whose hub is asking. The knowledge base vouches for keys: a hub registers its public key
+# for the person signed in, and the key counts in a room while that person may contribute to its
+# project and has not revoked it. Taking someone off the project, or their account, takes their keys
+# out of every room with them.
+
+migration!(34, ["""CREATE TABLE hub_keys (
+    key TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    label TEXT NOT NULL DEFAULT '',
+    added_at TEXT NOT NULL,
+    seen_at TEXT NOT NULL,
+    revoked_at TEXT)"""])
+
+"A CURVE public key in Z85: 40 characters of its alphabet."
+const HUB_KEY = r"^[0-9a-zA-Z.\-:+=^!/*?&<>()\[\]{}@%$#]{40}$"
+
+"""
+    register_hub_key!(kb, caller, key; label = "") -> NamedTuple
+
+Record `key` (a CURVE public key, Z85) as a hub of `caller`'s, or note it seen again: `(; key,
+label)`. Refused for a key another person registered, and for a caller without an account.
+"""
+function register_hub_key!(kb::KB, caller::Caller, key::AbstractString; label::AbstractString = "")
+    k = strip(key)
+    occursin(HUB_KEY, k) || error("A hub's key is a CURVE public key in Z85, 40 characters")
+    uid = caller.user_id
+    uid === nothing && error("A hub's key belongs to an account, and this caller has none")
+    l = first(strip(label), 80)
+    transaction(kb) do
+        had = query(kb, "SELECT user_id, revoked_at FROM hub_keys WHERE key = ?", (k,))
+        if isempty(had)
+            execute!(kb, "INSERT INTO hub_keys (key, user_id, label, added_at, seen_at) VALUES (?, ?, ?, ?, ?)",
+                     (k, uid, l, now_iso(), now_iso()))
+        else
+            only(had).user_id == uid || not_permitted("That hub key is someone else's")
+            ismissing(only(had).revoked_at) || not_permitted("That hub key was revoked: make the hub a new one")
+            execute!(kb, "UPDATE hub_keys SET seen_at = ?, label = CASE WHEN ? = '' THEN label ELSE ? END WHERE key = ?",
+                     (now_iso(), l, l, k))
+        end
+    end
+    return (; key = String(k), label = String(scalar(kb, "SELECT label FROM hub_keys WHERE key = ?", (k,))))
+end
+
+"Revoke hub key `key` of `caller`'s: it counts in no room from now on. Returns whether it was theirs."
+function revoke_hub_key!(kb::KB, caller::Caller, key::AbstractString)
+    caller.user_id === nothing && return false
+    changed!(kb, "UPDATE hub_keys SET revoked_at = ? WHERE key = ? AND user_id = ? AND revoked_at IS NULL",
+             (now_iso(), strip(key), caller.user_id)) > 0
+end
+
+"""
+    room_hub_keys(kb, project) -> Vector{NamedTuple}
+
+The hub keys that count in `project`'s rooms: those not revoked, of people who may contribute to the
+project now. `(; key, name, label, user_id)` each.
+"""
+function room_hub_keys(kb::KB, project::AbstractString)
+    out = NamedTuple[]
+    for r in query(kb, """SELECT h.key, h.label, h.user_id, u.name, u.email FROM hub_keys h JOIN users u ON u.id = h.user_id
+                          WHERE h.revoked_at IS NULL AND u.disabled = 0 ORDER BY u.name, h.added_at""")
+        who = account_caller(kb, r.user_id, :session)
+        project_access(kb, who, project) >= CONTRIBUTE || continue
+        push!(out, (; key = String(r.key), name = isempty(r.name) ? String(r.email) : String(r.name),
+                      label = String(r.label), user_id = Int(r.user_id)))
+    end
+    return out
+end
+
 route!("POST", "/api/projects/:key/collab/ticket"; need = "tasks.edit", project = CONTRIBUTE) do c
-    collab_ticket!(c.kb, c.caller, c[:key], String(get(json_body(c), "document", "")))
+    b = json_body(c)
+    hub = String(get(b, "hub_key", ""))
+    isempty(hub) || register_hub_key!(c.kb, c.caller, hub; label = String(get(b, "hub_label", "")))
+    t = collab_ticket!(c.kb, c.caller, c[:key], String(get(b, "document", "")))
+    (; t..., hub_keys = room_hub_keys(c.kb, c[:key]))
 end
 
 route!("GET", "/api/projects/:key/collab"; need = "tasks.view", project = VIEW) do c
     (; rooms = collab_rooms(c[:key]))
+end
+
+route!("GET", "/api/projects/:key/collab/keys"; need = "tasks.edit", project = CONTRIBUTE) do c
+    (; keys = room_hub_keys(c.kb, c[:key]))
+end
+
+route!("POST", "/api/me/hub-keys"; need = "tasks.edit") do c
+    b = json_body(c)
+    register_hub_key!(c.kb, c.caller, String(get(b, "key", "")); label = String(get(b, "label", "")))
+end
+
+route!("POST", "/api/me/hub-keys/revoke"; need = "tasks.edit") do c
+    (; revoked = revoke_hub_key!(c.kb, c.caller, String(get(json_body(c), "key", ""))))
 end

@@ -3095,6 +3095,24 @@ end
     r = K.handle(kb, K.HTTP.Request("POST", "/api/projects/RF/collab/ticket", [], K.JSON.json(Dict("document" => "doc-2"))), as(bea))
     @test r.status == 200 && K.JSON.parse(String(r.body))["room"] == "RF/doc-2"
 
+    # Hubs' keys: registered for the person signed in, vouched for while they may contribute.
+    ka, kb2, kc = "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7", "Yne@\$w-vo<fVvi]a<NY6T1ed:M\$fCG*[IaLV{hID", "b9d4f4X0f.qz2nV1d8F]rjDuh{1:6PG(w3e@5k@^"
+    @test_throws "Z85" K.register_hub_key!(kb, as(ada), "short")
+    @test K.register_hub_key!(kb, as(ada), ka; label = "Ada's laptop").label == "Ada's laptop"
+    @test K.register_hub_key!(kb, as(ada), ka).label == "Ada's laptop"                 # seen again, label kept
+    @test_throws "someone else's" K.register_hub_key!(kb, as(bea), ka)
+    hub(uid, key) = K.handle(kb, K.HTTP.Request("POST", "/api/projects/RF/collab/ticket", [],
+                                                K.JSON.json(Dict("document" => "doc-3", "hub_key" => key))), as(uid))
+    r = hub(bea, kb2)                                                                     # a ticket registers the hub
+    keys = K.JSON.parse(String(r.body))["hub_keys"]
+    @test r.status == 200 && Set(k["key"] for k in keys) == Set([ka, kb2])
+    K.register_hub_key!(kb, as(cy), kc)                                                   # Cy reaches no RF: not in its rooms
+    @test Set(k.key for k in K.room_hub_keys(kb, "RF")) == Set([ka, kb2]) && [k.key for k in K.room_hub_keys(kb, "OT")] == [kc]
+    @test K.revoke_hub_key!(kb, as(bea), kb2) && !K.revoke_hub_key!(kb, as(ada), kc)
+    @test [k.key for k in K.room_hub_keys(kb, "RF")] == [ka]
+    @test_throws "revoked" K.register_hub_key!(kb, as(bea), kb2)
+    K.register_hub_key!(kb, as(bea), "8nOS4bP.9tV:5Xx1M]R]^l)w+=Uj%2&\$K}f0.T1o")
+
     server = K.HTTP.listen!(K.service_handler(kb, req -> K.HTTP.Response(200, "plain")), "127.0.0.1", 0)
     port = K.HTTP.port(server)
     url(tk) = "ws://127.0.0.1:$port/api/collab?ticket=$tk"
@@ -3141,6 +3159,7 @@ end
         K.set_member!(kb, "RF", bea, "")
         @test K.collab_admit(kb, kept) === nothing
         @test_throws Exception peer(kept)
+        @test [k.key for k in K.room_hub_keys(kb, "RF")] == [ka]                     # nor do her hubs' keys count there
         close(a); close(b)
         @test timedwait(() -> isempty(K.collab_rooms("RF")), 5.0) == :ok
     finally
