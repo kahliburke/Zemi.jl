@@ -1663,9 +1663,20 @@ end
         written, removed = K.diff_site_pages!(kb, src, pub)
         @test "kb/index.md" in written && !("kb/timeline.md" in written)
         @test removed == ["kb/papers/gone.md"] && read(index, String) != "edited"
-        # Files whose contents differ are copied; the rest are left alone.
+        # In the development server's pages, the folders are links and the files copies, where they differ.
         to = mktempdir()
-        @test K.sync_files!(pub, to) > 0 && K.sync_files!(pub, to) == 0
+        @test K.link_public!(pub, to) > 0 && K.link_public!(pub, to) == 0
+        @test all(e -> isdir(joinpath(pub, e)) ? islink(joinpath(to, e)) : !islink(joinpath(to, e)), readdir(pub))
+        mkpath(joinpath(to, "stale")); write(joinpath(to, "stale", "x.json"), "{}")
+        mkpath(joinpath(pub, "stale"))
+        @test K.link_public!(pub, to) == 1 && islink(joinpath(to, "stale"))          # a copied folder becomes a link
+        # Pages whose sources are gone are removed, an emptied folder with them; the rest stay.
+        md = mktempdir()
+        mkpath(joinpath(md, "kb", "papers")); mkpath(joinpath(md, "generated", "kb"))
+        write(joinpath(md, "kb", "index.md"), "kept"); write(joinpath(md, "kb", "papers", "gone.md"), "")
+        write(joinpath(md, "generated", "kb", "old.md"), ""); write(joinpath(md, "other.md"), "not the knowledge base's")
+        @test K.prune_pages!(src, md) == 2
+        @test isfile(joinpath(md, "kb", "index.md")) && !isdir(joinpath(md, "generated")) && isfile(joinpath(md, "other.md"))
     finally
         K.DEV_URL[] = ""
         close(kb)

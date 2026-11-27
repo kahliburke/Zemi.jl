@@ -111,7 +111,8 @@ DocumenterVitepress.vitepress_components(::KnowledgeBaseSite) =
                                                       "KBStatusTables", "KBCodeFilePage", "KBCodebasePage", "KBCodebases", "KBDayPage",
                                                       "KBRecordPage", "KBRecords", "KBResourcePage", "KBResources", "KBExplore",
                                                       "KBSetup", "KBInstall", "KBOpenSource")]
-DocumenterVitepress.vitepress_assets(::KnowledgeBaseSite) = isdir(KB_PUBLIC) ? [KB_PUBLIC] : String[]
+# `zemi dev` links them into the pages itself rather than copying thousands of data files (see `link_public!`).
+DocumenterVitepress.vitepress_assets(::KnowledgeBaseSite) = isdir(KB_PUBLIC) && !DEV ? [KB_PUBLIC] : String[]
 function DocumenterVitepress.vitepress_config_transform(::KnowledgeBaseSite, config::String)
     # ZEMI_SITE_BASE serves the site under a path (the demo's, `/Zemi.jl/demo/`); otherwise it is at the
     # root, as a service serves it. Set either way: on a CI service DocumenterVitepress takes the base

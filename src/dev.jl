@@ -20,7 +20,8 @@ const PAGE_WRITER = Ref{Union{Base.Process,Nothing}}(nothing)
 Write the site's pages for the development server into [`dev_dir`](@ref), without bundling them, with
 the development server forwarding the API to `api`.
 The components and the theme's styles are links to the checkout's, so the development server puts
-their edits into the open page. Unless `all`, only what the knowledge base changed is written again
+their edits into the open page; the knowledge base's data folders are links to where it writes them
+(see [`link_public!`](@ref)), and pages whose sources are gone are removed (see [`prune_pages!`](@ref)). Unless `all`, only what the knowledge base changed is written again
 (see [`write_changed_pages!`](@ref)).
 """
 function write_dev_pages!(kb::KB; api::AbstractString, all::Bool = true)
@@ -33,6 +34,9 @@ function write_dev_pages!(kb::KB; api::AbstractString, all::Bool = true)
     t0 = time()
     run_make(kb.config, dir, Dict("ZEMI_SITE_BUILD" => joinpath(dir, "build"), "ZEMI_SITE_DOCS" => sources); api)
     link_sources!(docs, md)
+    link_public!(joinpath(sources, "kb_public"), joinpath(md, "public"))
+    pruned = prune_pages!(joinpath(sources, "src"), md)
+    pruned > 0 && @info "[dev] Removed $pruned page(s) whose sources are gone"
     @info "[dev] Pages written in $(duration(time() - t0))"
 end
 
@@ -77,7 +81,7 @@ function write_changed_pages!(kb::KB, docs::AbstractString, dir::AbstractString,
         end
         rm(only; recursive = true, force = true)
     end
-    n = length(written) + length(removed) + sync_files!(public, joinpath(md, "public"))
+    n = length(written) + length(removed) + link_public!(public, joinpath(md, "public"))
     @info "[dev] $n changed file(s) written in $(duration(time() - t0))"
     return n
 end
@@ -133,16 +137,48 @@ function diff_site_pages!(kb::KB, src::AbstractString, public::AbstractString)
             sort!([relpath(f, src) for f in keys(before) if !haskey(after, f)]))
 end
 
-"Copy the files in `from` whose contents differ from those in `to` into it. Returns how many."
-function sync_files!(from::AbstractString, to::AbstractString)
+"""
+    link_public!(public, to) -> Int
+
+The knowledge base's files at the site's root (`public`, docs/make.jl's `KB_PUBLIC`) in the
+development server's `public` folder `to`: each folder linked rather than copied (a paper's or a
+codebase file's data, thousands of them), each file copied where it differs. Returns how many
+were copied or linked.
+"""
+function link_public!(public::AbstractString, to::AbstractString)
     n = 0
-    for (root, _, files) in walkdir(from), f in files
-        a = joinpath(root, f)
-        b = joinpath(to, relpath(a, from))
-        isfile(b) && filesize(a) == filesize(b) && read(a) == read(b) && continue
-        mkpath(dirname(b))
-        cp(a, b; force = true)
+    mkpath(to)
+    for entry in readdir(public)
+        from, at = joinpath(public, entry), joinpath(to, entry)
+        if isdir(from)
+            islink(at) && link_target(at) == abspath(from) && continue
+            rm(at; recursive = true, force = true)
+            link_dir(from, at)
+        else
+            isfile(at) && !islink(at) && filesize(from) == filesize(at) && read(from) == read(at) && continue
+            cp(from, at; force = true)
+        end
         n += 1
+    end
+    return n
+end
+
+"""
+Remove from the development server's pages `md` the knowledge base's pages (`kb/`, and the older
+`generated/`) whose sources under `src` are gone: the documentation build adds and replaces pages,
+and leaves those of a paper since removed, or of a path no longer written.
+"""
+function prune_pages!(src::AbstractString, md::AbstractString)
+    n = 0
+    for dir in ("kb", "generated")
+        isdir(joinpath(md, dir)) || continue
+        for (root, _, files) in walkdir(joinpath(md, dir); topdown = false)
+            for f in files
+                rel = relpath(joinpath(root, f), md)
+                isfile(joinpath(src, rel)) || (rm(joinpath(md, rel)); n += 1)
+            end
+            isempty(readdir(root)) && rm(root)
+        end
     end
     return n
 end
