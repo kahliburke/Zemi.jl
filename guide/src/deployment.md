@@ -165,9 +165,16 @@ sudo systemctl start zemi
 the checkout, with Docker and its compose plugin:
 
 ```sh
+ZEMI_BUILD_REVISION="$(git describe --always --exclude '*' --abbrev=64 --dirty)" \
 ZEMI_BASE_URL=https://kb.example.org ZEMI_ADMINS=you@example.org ZEMI_GITHUB_CLIENT_ID=Ov23… \
     docker compose -f deploy/compose.yaml up -d --build
 ```
+
+Administration shows the running Zemi.jl package version and full source commit. A Git checkout
+records its revision when the process starts and marks tracked local changes. For a container,
+supply `ZEMI_BUILD_REVISION` on each build as above. Source archives made with `git archive`
+carry the commit in `REVISION`. When the package has no commit metadata, Administration displays
+the version and marks the commit unavailable.
 
 The first start writes the config at `deploy/config/config.toml` from these variables; from then on
 the file is the config. Put the GitHub app's secret in `deploy/config/github_oauth_secret` before
@@ -188,6 +195,7 @@ at `http://localhost:8800` (`ZEMI_LOCAL_PORT` for another port), and anyone on t
 in as any invited email.
 
 ```sh
+ZEMI_BUILD_REVISION="$(git describe --always --exclude '*' --abbrev=64 --dirty)" \
 ZEMI_ADMINS=you@example.org docker compose -f deploy/compose.yaml -f deploy/compose.local.yaml up -d --build
 ```
 

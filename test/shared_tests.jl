@@ -1307,6 +1307,30 @@ end
     close(kb)
 end
 
+@zset "server source revision" begin
+    root = mktempdir()
+    stamp = joinpath(root, "REVISION")
+    @test K.server_revision(root).commit === nothing
+    write(stamp, "\$Format:%H\$\n")
+    @test K.server_revision(root).commit === nothing
+    for n in (40, 64)
+        sha = repeat("a", n)
+        write(stamp, sha * "\n")
+        @test K.server_revision(root) == (; commit = sha, modified = false)
+        write(stamp, sha * "-dirty\n")
+        @test K.server_revision(root) == (; commit = sha, modified = true)
+    end
+    run(`git -C $root init --quiet`)
+    run(`git -C $root add REVISION`)
+    run(`git -C $root -c user.name=Test -c user.email=test@example.org -c commit.gpgsign=false commit --quiet -m initial`)
+    head = readchomp(`git -C $root rev-parse HEAD`)
+    @test K.server_revision(root) == (; commit = head, modified = false)
+    open(io -> println(io, "changed"), stamp, "a")
+    @test K.server_revision(root) == (; commit = head, modified = true)
+    # An extracted package inside someone else's checkout must never pick up the parent's HEAD.
+    @test K.server_revision(mkdir(joinpath(root, "package"))).commit === nothing
+end
+
 @zset "settings and the admin pages' API" begin
     HTTP, JSON = K.HTTP, K.JSON
     dir = mktempdir()
@@ -1347,6 +1371,9 @@ end
         @test call(reader, "GET", "/api/config")[1] == 403 && call(reader, "POST", "/api/config", Dict("changes" => Dict()))[1] == 403
         @test call(admin, "POST", "/api/admin/invite", Dict("email" => "new@x.org", "roles" => ["Learner"]))[1] == 200
         s, u = call(admin, "GET", "/api/admin/users")
+        @test u["server"]["version"] == string(pkgversion(K))
+        @test u["server"]["commit"] == K.SERVER_REVISION[].commit
+        @test u["server"]["modified"] == K.SERVER_REVISION[].modified
         @test s == 200 && length(u["users"]) == 2 && only(u["invitations"])["email"] == "new@x.org"
         @test call(admin, "POST", "/api/admin/users/$(admin.user_id)", Dict("disabled" => true))[1] == 400   # not oneself
         @test call(admin, "POST", "/api/admin/users/$(reader.user_id)", Dict("roles" => ["Learner"]))[1] == 200
