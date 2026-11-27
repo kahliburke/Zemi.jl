@@ -383,6 +383,17 @@ function delete_backup!(c::Config, name::AbstractString)
     return nothing
 end
 
+"A kept snapshot's name from `name`, with `-2`, `-3`… where one is kept by that name already (two restores in one second)."
+function unused_kept_name(c::Config, name::AbstractString)
+    taken(n) = ispath(joinpath(backup_root(c), "kept", n))
+    taken(name) || return String(name)
+    i = 2
+    while taken("$name-$i")
+        i += 1
+    end
+    return "$name-$i"
+end
+
 """
     restore_backup!(config, name; config_files = false, included = false) -> String
 
@@ -396,7 +407,7 @@ put back is given the data folder's owner.
 function restore_backup!(c::Config, name::AbstractString; config_files::Bool = false, included::Bool = false)
     snap = find_backup(c, name)
     meta = TOML.parsefile(joinpath(snap, "snapshot.toml"))
-    before = isfile(db_path(c)) ? basename(backup!(c; keep = "before-restore-" * backup_stamp(now(UTC)))) : ""
+    before = isfile(db_path(c)) ? basename(backup!(c; keep = unused_kept_name(c, "before-restore-" * backup_stamp(now(UTC))))) : ""
     mkpath(c.data_dir)
     work = mktempdir(dirname(rstrip(normpath(abspath(c.data_dir)), ['/', '\\'])))
     try

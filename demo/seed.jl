@@ -19,8 +19,10 @@ function demo_kb(dir::AbstractString; store::AbstractString = DEMO_DATASET, shar
     isdir(store) || error("No demo dataset at $store: make it with demo/make_dataset.jl")
     ENV["ZEMI_CONFIG"] = demo_config(dir; prefix = "zemi_demo", shared,
                                      dataset = Dict("role" => "consume", "store" => "dir:$(abspath(store))"))
-    K.LOCAL_USER[] = DEMO_USER
+    # Whoever runs it: Rowan's account (see `owner`), which the seeded work is given to.
+    ENV["ZEMI_OWNER_NAME"], ENV["ZEMI_OWNER_EMAIL"] = DEMO_USER, "rowan@example.org"
     kb = K.kb()
+    K.owner(kb)
     K.pull!(kb; progress = msg -> @info msg)
     ismissing(K.scalar(kb, "SELECT id FROM projects WHERE key = 'RB'")) && seed_work!(kb)
     return kb
