@@ -220,7 +220,7 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 10
+const EXPLORE_VERSION = 11
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -358,6 +358,55 @@ function packed(Y::AbstractMatrix; near = nothing, link::Real = 6, most::Real = 
 end
 
 """
+    spread(Y; least = 0.5, rounds = 12) -> Matrix
+
+Positions `Y` (one row each) with those that lie on top of each other set a little apart: two closer than
+`least` times the layout's typical spacing (the median distance from a point to its nearest) are pushed
+apart, each half the shortfall, for a few `rounds`. Documents alike enough to be placed at one point (a
+paper and its notes, near copies) come apart into a small group, and none moves further than that
+spacing, or not much further where many share a point, so where the layout put it still says
+what it is like. Neighbours are found on a grid of cells
+`least` spacings wide, so it costs little however many there are.
+"""
+function spread(Y::AbstractMatrix; least::Real = 0.5, rounds::Integer = 12)
+    n, dims = size(Y)
+    n < 2 && return Y
+    Y = Matrix{Float64}(Y)
+    # The typical spacing, from a sample of points against all, which is enough to set a scale.
+    sample = n <= 400 ? (1:n) : round.(Int, range(1, n; length = 400))
+    nearest(i) = minimum(j == i ? Inf : sum(abs2, view(Y, i, :) .- view(Y, j, :)) for j in 1:n)
+    apart = sort!(filter(>(1e-18), [nearest(i) for i in sample]))       # not counting those on one point
+    spacing = isempty(apart) ? 0.0 : sqrt(apart[cld(length(apart), 2)])
+    gap = least * (spacing > 0 ? spacing : 1e-3)
+    for _ in 1:rounds
+        cell = Dict{NTuple{3,Int},Vector{Int}}()
+        key(i) = ntuple(a -> a <= dims ? floor(Int, Y[i, a] / gap) : 0, 3)
+        foreach(i -> push!(get!(cell, key(i), Int[]), i), 1:n)
+        moved = false
+        for i in 1:n
+            k = key(i)
+            for dx in -1:1, dy in -1:1, dz in (dims == 3 ? (-1:1) : (0:0))
+                for j in get(cell, (k[1] + dx, k[2] + dy, k[3] + dz), ())
+                    j > i || continue
+                    d = view(Y, j, :) .- view(Y, i, :)
+                    r = sqrt(sum(abs2, d))
+                    r >= gap && continue
+                    # On one point, apart along a direction of their own, the same each time.
+                    dir = r > 1e-12 ? d ./ r : (θ = 2.399963 * (i + 7j); dims == 2 ? [cos(θ), sin(θ)] :
+                                                [cos(θ) * sin(1.1 + i), sin(θ) * sin(1.1 + i), cos(1.1 + i)])
+                    push = (gap - r) / 2
+                    Y[i, :] .-= push .* dir
+                    Y[j, :] .+= push .* dir
+                    moved = true
+                end
+            end
+        end
+        moved || break
+    end
+    return Y
+end
+
+"""
 Positions `Y` (one row each) about their centre, scaled so all but the farthest few lie within -1 to 1:
 a layout's outliers do not crowd the rest together. Those beyond are drawn in to 1.3.
 """
@@ -448,16 +497,16 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     # The nearest by meaning of the laid out, as rows of their layout, for bringing in groups left apart.
     row = Dict(r => k for (k, r) in enumerate(laid))
     near_laid = [[(row[m], s) for (m, s) in near[i] if haskey(row, m)] for i in laid]
-    flat = centred(packed(tsne(X[:, laid]; dims = 2); near = near_laid))
+    flat = centred(spread(packed(tsne(X[:, laid]; dims = 2); near = near_laid)))
     cancelled() && return nothing
     progress("$label · t-SNE space", 0.25)
-    deep = centred(packed(tsne(X[:, laid]; dims = 3); near = near_laid))
+    deep = centred(spread(packed(tsne(X[:, laid]; dims = 3); near = near_laid)))
     cancelled() && return nothing
     # UMAP too, which keeps more of how the groups lie to each other: every document, its cost growing with their number.
     # And PaCMAP, which keeps the arrangement between groups better still. Each of these four on a thread
     # of its own, from the nearest found above.
     progress("$label · UMAP and PaCMAP", 0.45)
-    laid_out(f) = Threads.@spawn centred(packed(f(); near))
+    laid_out(f) = Threads.@spawn centred(spread(packed(f(); near)))
     u2, u3 = laid_out(() -> umap(X; dims = 2, min_dist = 0.4, near = wide)), laid_out(() -> umap(X; dims = 3, min_dist = 0.4, near = wide))
     p2, p3 = laid_out(() -> pacmap(X; dims = 2, near = wide)), laid_out(() -> pacmap(X; dims = 3, near = wide))
     uflat, udeep, pflat, pdeep = fetch(u2), fetch(u3), fetch(p2), fetch(p3)

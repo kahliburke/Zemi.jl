@@ -3281,6 +3281,13 @@ end
         nearest_by_pacmap(id) = argmin(o -> o == id ? Inf : sum(abs2, px[o] .- px[id]), collect(keys(px)))
         @test all(id -> topic_of[nearest_by_pacmap(id)] == topic_of[id], collect(keys(px)))
         @test !K.explore_map!(kb).changed && !K.explore_stale(kb)
+        # Documents a layout puts on one point are set a little apart, and the rest stay where they were.
+        Y = reduce(vcat, [[4.0 4.0], [4.0 4.0], [4.0 4.0], [[Float64(i) Float64(j)] for i in 0:7 for j in 0:7]...])
+        Z = K.spread(Y)                                                     # a grid a spacing apart, and three on (4, 4)
+        on = [1, 2, 3, 3 + 8 * 4 + 5]                                       # those three, and the grid's (4, 4)
+        moved = [sqrt(sum(abs2, Z[i, :] .- Y[i, :])) for i in axes(Y, 1)]
+        @test minimum(sqrt(sum(abs2, Z[a, :] .- Z[b, :])) for a in on for b in on if a < b) >= 0.45
+        @test maximum(moved) < 1 && all(moved[i] < 0.25 for i in axes(Y, 1) if !(i in on))  # the rest at most nudged
         # Without a landscape, clusters of the map's own, labelled by their titles' words.
         mv(K.landscape_path(c), K.landscape_path(c) * ".kept")
         @test K.explore_stale(kb)
