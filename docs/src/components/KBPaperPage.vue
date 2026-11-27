@@ -49,7 +49,7 @@ const anchors = computed(() => {
   const kept = unique()
   const anchor = (text: string) => kept(anchorOf(text) || 'section')
   const p = paper.value
-  const fixed = Object.fromEntries(['Notebooks', 'Abstract', 'Figures', 'Sections', 'Cited by', 'Classification', 'Related papers']
+  const fixed = Object.fromEntries(['Notebooks', 'Abstract', 'Figures', 'Sections', 'Cited by', 'Classification', 'Nearby']
     .map(h => [h, anchor(h)]))
   return { fixed, sections: (p?.sections ?? []).map(s => anchor(s.title)) }
 })
@@ -182,11 +182,7 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
         <ul><li v-for="c in paper.classification" :key="c.label"><strong>{{ c.label }}:</strong> {{ c.value }}</li></ul>
       </template>
 
-      <template v-if="paper.related.length">
-        <h2 :id="anchors.fixed['Related papers']">Related papers</h2>
-        <ul><li v-for="r in paper.related" :key="r.slug"><a :href="linkHref(r)">{{ r.title }}</a></li></ul>
-      </template>
-      <KBNeighbourhood :id="paper.id" />
+      <KBNeighbourhood :id="paper.id" :related="paper.related" :anchor="anchors.fixed['Nearby']" />
 
       <div v-if="!paper.processed" class="tip custom-block"><p class="custom-block-title">Abstract only</p><p>Not read in full yet.</p></div>
     </template>

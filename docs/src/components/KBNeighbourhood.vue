@@ -3,16 +3,19 @@
   it, in a small map with a way to the explore page. The document, those linked to it and its nearest
   are named on the map, as far as there is room; pointing at any names it in full. Links are drawn in
   their kind's colour, pairs alike in meaning that nothing links dashed, and a legend says which is
-  which. Clicking a document opens its page. Shown with a running knowledge base, once the map has it.
+  which. Clicking a document opens its page. The map is shown with a running knowledge base, once the
+  map has it; the related papers the page was written with are listed below it, folded, and open where
+  there is no map (a published site).
 -->
 <script setup lang="ts">
 import { ref, shallowRef, computed, watch, nextTick } from 'vue'
 import { useData } from 'vitepress'
 import { getJSON, onLive } from './kbApi'
-import { exploreHref } from './kbLinks'
+import { exploreHref, kbPage } from './kbLinks'
 import { KIND_COLOURS, LINK_COLOURS, LINK_KINDS, NODE_KINDS, kindName } from './kbExplore'
 
-const props = defineProps<{ id: string }>()
+const props = withDefaults(defineProps<{ id: string; related?: { title: string; slug: string; page: string }[]; anchor?: string }>(),
+                           { related: () => [], anchor: 'nearby' })
 const { isDark } = useData()
 type Node = { id: string; kind: string; title: string; page: string; links: number; year?: string; x?: [number, number] }
 type Graph = { nodes: Node[]; links: [number, number, string][]; similar: [number, number, number, boolean][] }
@@ -21,6 +24,7 @@ type GLink = { source: any; target: any; kind: string; s?: number }
 
 // The most documents named on the map besides this one: its links first, then its nearest.
 const NAMED = 7
+const HEIGHT = 380
 const box = ref<HTMLDivElement | null>(null)
 const found = ref(false)
 const shown = shallowRef<{ kinds: string[]; links: string[]; similar: boolean }>({ kinds: [], links: [], similar: false })
@@ -63,7 +67,7 @@ async function draw() {
                   similar: links.some(l => l.kind === 'similar') }
   graph?._destructor?.()
   graph = new ForceGraph(box.value)
-    .width(box.value.clientWidth).height(260).backgroundColor('rgba(0,0,0,0)')
+    .width(box.value.clientWidth).height(HEIGHT).backgroundColor('rgba(0,0,0,0)')
     .graphData({ nodes, links }).nodeId('id')
     .nodeVal(radiusVal)
     .nodeColor((n: GNode) => (n.id === props.id ? selfColour() : KIND_COLOURS[n.kind] ?? '#999'))
@@ -131,20 +135,24 @@ watch(isDark, () => graph?.nodeColor(graph.nodeColor()))
 </script>
 
 <template>
-  <section v-show="found" class="kbn">
-    <div class="kbn-head"><h2>Nearby</h2><a :href="exploreHref(props.id)">Explore from here →</a></div>
-    <div class="kbn-frame" @pointermove="moved" @pointerleave="pointed = null">
+  <section v-show="found || related.length" class="kbn">
+    <div class="kbn-head"><h2 :id="anchor">Nearby</h2><a v-if="found" :href="exploreHref(props.id)">Explore from here →</a></div>
+    <div v-show="found" class="kbn-frame" @pointermove="moved" @pointerleave="pointed = null">
       <div ref="box" class="kbn-map"></div>
       <div v-if="pointed" class="kbn-tip" :style="{ left: tipAt.x + 'px', top: tipAt.y + 'px' }" role="tooltip">
         <b>{{ pointed.title }}</b><br>{{ [pointed.id === props.id ? 'this document' : kindName(pointed.kind), pointed.year].filter(Boolean).join(' · ') }}
       </div>
     </div>
-    <ul class="kbn-legend" aria-label="Legend">
+    <ul v-show="found" class="kbn-legend" aria-label="Legend">
       <li><i class="kbn-dot" :style="{ background: selfColour() }"></i>This document</li>
       <li v-for="k in shown.kinds" :key="k"><i class="kbn-dot" :style="{ background: KIND_COLOURS[k] }"></i>{{ nodeName[k] }}</li>
       <li v-for="k in shown.links" :key="k"><i class="kbn-line" :style="{ borderColor: LINK_COLOURS[k] }"></i>{{ linkName[k] }}</li>
       <li v-if="shown.similar"><i class="kbn-line kbn-dashed"></i>Alike in meaning, not linked</li>
     </ul>
+    <details v-if="related.length" class="kbn-related" :open="!found">
+      <summary>Related papers ({{ related.length }})</summary>
+      <ul><li v-for="r in related" :key="r.slug"><a :href="kbPage(r.page)">{{ r.title }}</a></li></ul>
+    </details>
   </section>
 </template>
 
@@ -153,7 +161,7 @@ watch(isDark, () => graph?.nodeColor(graph.nodeColor()))
 .kbn-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
 .kbn-head h2 { margin: 0; border: 0; padding: 0; font-size: 1.1rem; }
 .kbn-frame { position: relative; margin-top: 0.5rem; }
-.kbn-map { height: 260px; border: 1px solid var(--vp-c-divider); border-radius: 8px; overflow: hidden; }
+.kbn-map { height: 380px; border: 1px solid var(--vp-c-divider); border-radius: 8px; overflow: hidden; }
 .kbn-tip { position: absolute; z-index: 5; transform: translate(14px, 14px); max-width: 22rem; padding: 5px 9px; pointer-events: none;
            border: 1px solid var(--vp-c-divider); border-radius: 6px; background: var(--vp-c-bg-elv); box-shadow: var(--vp-shadow-2);
            color: var(--vp-c-text-1); font: 12px/1.4 system-ui, sans-serif; }
@@ -162,4 +170,7 @@ watch(isDark, () => graph?.nodeColor(graph.nodeColor()))
 .kbn-dot { width: 9px; height: 9px; border-radius: 50%; }
 .kbn-line { width: 18px; border-top: 2px solid; }
 .kbn-dashed { border-top: 2px dashed var(--vp-c-text-3); }
+.kbn-related { margin-top: 0.6rem; }
+.kbn-related summary { cursor: pointer; color: var(--vp-c-text-2); font-size: 0.9rem; }
+.kbn-related ul { margin: 0.4rem 0 0; }
 </style>
