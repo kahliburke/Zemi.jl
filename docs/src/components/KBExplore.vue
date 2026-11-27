@@ -21,7 +21,7 @@ import { can, getJSON, post, onLive } from './kbApi'
 import { exploreHref, kbPage } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { BRAND, CLUSTER_COLOURS, DIMMED, KIND_COLOURS, LINK_COLOURS, NODE_KINDS, TRAIL, WHOSE, WHOSE_COLOURS, kindName, mix, own,
-         provideSettings, shortTitle, useExploreSettings, whose,
+         provideSettings, shortTitle, useExploreSettings, whose, READING, SCALES, ramp, reading,
          type Detail, type Graph, type LegendRow, type Linked, type Near, type Node, type Pair, type Step } from './kbExplore'
 import { cameraMover, type View } from './exploreCamera'
 import { SCALE_2D, SCALE_3D, capHeight, clusterCentres, discTexture, pixelSize, placeTheRest, spacing, measureRoom,
@@ -236,9 +236,38 @@ const lit = computed(() => peek.value ?? selected.value)
 const near = computed(() => new Set([...(nearOf.value.get(selected.value?.id ?? '') ?? []).map(x => x.node.id),
                                      ...(linksOf.value.get(selected.value?.id ?? '') ?? []).map(x => x.node.id)]))
 
+// Coloured by a scale: each shown document's rank on it, 0 to 1, those with equal values sharing one.
+const scaleRank = computed(() => {
+  const s = SCALES[colourBy.value], out = new Map<string, number>()
+  if (!s || !data.value) return out
+  const vals = data.value.nodes.filter(visibleNode).map(n => [n.id, s.value(n)] as [string, number | undefined])
+    .filter((x): x is [string, number] => x[1] !== undefined && !Number.isNaN(x[1])).sort((a, b) => a[1] - b[1])
+  for (let i = 0; i < vals.length;) {
+    let j = i
+    while (j + 1 < vals.length && vals[j + 1][1] === vals[i][1]) j++
+    const t = vals.length > 1 ? (i + j) / 2 / (vals.length - 1) : 0.5
+    for (let k = i; k <= j; k++) out.set(vals[k][0], t)
+    i = j + 1
+  }
+  return out
+})
+// arXiv categories, the commonest among those shown first: those coloured, the rest one colour as others.
+const CATEGORIES_SHOWN = 10
+const categories = computed(() => {
+  const count = new Map<string, number>()
+  for (const n of data.value?.nodes.filter(visibleNode) ?? []) if (n.category) count.set(n.category, (count.get(n.category) ?? 0) + 1)
+  return [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, CATEGORIES_SHOWN).map(([c]) => c)
+})
+const categoryOf = (n: Node) => (n.category && categories.value.includes(n.category) ? n.category : 'other')
+// A document with nothing to place it on the scale, or in no category coloured.
+const NO_VALUE = '#5d626e'
 function colour(n: Node) {
-  if (colourBy.value === 'whose' && n.kind !== 'finding' && n.kind !== 'task') return WHOSE_COLOURS[whose(n)]
-  if (colourBy.value !== 'cluster' || n.cluster === undefined) return KIND_COLOURS[n.kind] ?? '#999'
+  const by = colourBy.value
+  if (SCALES[by]) { const t = scaleRank.value.get(n.id); return t === undefined ? NO_VALUE : ramp(t) }
+  if (by === 'reading') return READING.find(r => r[0] === reading(n))![2]
+  if (by === 'category') { const c = categoryOf(n); return c === 'other' ? NO_VALUE : CLUSTER_COLOURS[categories.value.indexOf(c) % CLUSTER_COLOURS.length] }
+  if (by === 'whose' && n.kind !== 'finding' && n.kind !== 'task') return WHOSE_COLOURS[whose(n)]
+  if (by !== 'cluster' || n.cluster === undefined) return KIND_COLOURS[n.kind] ?? '#999'
   return CLUSTER_COLOURS[(n.cluster - 1) % CLUSTER_COLOURS.length]
 }
 // What each colour stands for as the map is coloured, among the documents shown, with how many of them.
@@ -248,8 +277,12 @@ const legend = computed<LegendRow[]>(() => {
   const counts = new Map<string, number>(), sizes = new Map<string, number>()
   for (const n of g.nodes.filter(visibleNode)) counts.set(legendKey(n), (counts.get(legendKey(n)) ?? 0) + 1)
   for (const n of g.nodes) if (n.cluster !== undefined) sizes.set(`c${n.cluster}`, (sizes.get(`c${n.cluster}`) ?? 0) + 1)
+  if (SCALES[colourBy.value]) return []                         // a scale has its bar, not rows
   const rows = [
     ...g.clusters.map(c => ({ key: `c${c.id}`, colour: CLUSTER_COLOURS[(c.id - 1) % CLUSTER_COLOURS.length], label: c.name || 'Unnamed' })),
+    ...READING.map(([k, l, c]) => ({ key: `r${k}`, colour: c, label: l })),
+    ...[...categories.value, 'other'].map((c, i) => ({ key: `a${c}`, colour: c === 'other' ? NO_VALUE : CLUSTER_COLOURS[i % CLUSTER_COLOURS.length],
+                                                      label: c === 'other' ? 'Other or none' : c })),
     ...WHOSE.map(([k, l]) => ({ key: `w${k}`, colour: WHOSE_COLOURS[k], label: l })),
     ...NODE_KINDS.map(([k, l]) => ({ key: `k${k}`, colour: KIND_COLOURS[k] ?? '#999', label: l })),
   ]
@@ -258,6 +291,9 @@ const legend = computed<LegendRow[]>(() => {
 })
 // The legend's row a node falls in, as it is coloured.
 function legendKey(n: Node) {
+  if (SCALES[colourBy.value]) return 's'
+  if (colourBy.value === 'reading') return `r${reading(n)}`
+  if (colourBy.value === 'category') return `a${categoryOf(n)}`
   if (colourBy.value === 'cluster' && n.cluster !== undefined) return `c${n.cluster}`
   if (colourBy.value === 'whose' && n.kind !== 'finding' && n.kind !== 'task') return `w${whose(n)}`
   return `k${n.kind}`

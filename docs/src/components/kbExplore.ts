@@ -9,6 +9,9 @@ export type Node = {
   x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]
   px?: [number, number]; pp?: [number, number, number]
   cluster?: number; central?: number; rating?: number
+  /** What the map can be coloured by (see `explore_signals` and `explore_graph` in src/explore.jl). */
+  bridge?: number; alone?: number; ahead?: number; recent?: number
+  added?: string; category?: string; noted?: number; used?: number
 }
 export type Cluster = { id: number; name: string; description: string; size: number }
 /** A subset mapped by itself (`?set=`): what it is, how many documents it has, the subsets it was opened from. */
@@ -40,7 +43,40 @@ export const LINK_COLOURS: Record<string, string> = { cites: '#8ab4f8', refers: 
 /** Whose a document is: held for the reader, shared with projects' members, everyone's. */
 export const WHOSE = [['mine', 'Yours'], ['projects', 'Projects’'], ['open', 'Everyone’s']] as const
 export const WHOSE_COLOURS: Record<string, string> = { mine: '#ff7ab6', projects: '#f0a35e', open: '#5b8def' }
-export const COLOUR_BY = [['cluster', 'Cluster'], ['kind', 'Kind'], ['whose', 'Whose']] as const
+/** What the map is coloured by: a group each document is in (a row of the legend each), or a scale. */
+export const COLOUR_BY = [['cluster', 'Cluster'], ['recent', 'The field right now'], ['bridge', 'Bridges'],
+                          ['attention', 'The group’s attention'], ['ahead', 'Ahead of its time'], ['alone', 'Loners'],
+                          ['year', 'Year published'], ['added', 'Date added'],
+                          ['category', 'arXiv category'], ['reading', 'How it was read'], ['kind', 'Kind'], ['whose', 'Whose']] as const
+export type ColourBy = typeof COLOUR_BY[number][0]
+/** The scales: what a document's value is, and what each end of the scale says. Colours go by rank, so the
+ * scale's middle is the middle document, however the values bunch. */
+export const SCALES: Partial<Record<ColourBy, { value: (n: Node) => number | undefined; low: string; high: string; about: string }>> = {
+  recent: { value: n => n.recent, low: 'quiet', high: 'busy',
+            about: 'How much of what is nearest it in meaning was published in the last 30 days: where the field is busy now.' },
+  bridge: { value: n => n.bridge, low: 'within its cluster', high: 'between clusters',
+            about: 'How many of its nearest in meaning lie in other clusters: what joins topics.' },
+  attention: { value: n => (n.kind === 'record' ? 1.5 : n.noted === undefined && !n.used ? undefined : (n.noted ?? 0) + 0.25 * Math.min(n.used ?? 0, 4)),
+               low: 'collected', high: 'worked with',
+               about: 'How near the group’s notes and records come to it, and how often findings and tasks use it.' },
+  ahead: { value: n => n.ahead, low: 'like what came before', high: 'like what came after',
+           about: 'How much more it is like the papers published after it than those before it.' },
+  alone: { value: n => n.alone, low: 'among many alike', high: 'alone',
+           about: 'How unlike even the documents nearest it in meaning it is.' },
+  year: { value: n => (n.year ? Number(n.year) : undefined), low: 'earlier', high: 'later', about: 'When it was published.' },
+  added: { value: n => (n.added ? Date.parse(n.added) : undefined), low: 'first', high: 'latest', about: 'When it came into the knowledge base.' },
+}
+/** A colour from a scale's low end (0) to its high end (1): viridis, from where it reads on a dark ground. */
+const RAMP = ['#46337e', '#365c8d', '#277f8e', '#1fa187', '#4ac16d', '#9fda3a', '#fde725']
+export function ramp(t: number) {
+  const x = Math.max(0, Math.min(1, t)) * (RAMP.length - 1), i = Math.min(Math.floor(x), RAMP.length - 2)
+  return mix(RAMP[i], RAMP[i + 1], x - i)
+}
+export const RAMP_CSS = `linear-gradient(to right, ${RAMP.join(', ')})`
+/** How a document was read: in full, by its abstract alone, or a note or record of the group's. */
+export const READING = [['full', 'Read in full', '#4ac16d'], ['abstract', 'Abstract only', '#5b8def'],
+                        ['note', 'Notes and records', '#f0a35e'], ['other', 'Other', '#9aa0aa']] as const
+export const reading = (n: Node) => (n.kind === 'record' ? 'note' : n.kind !== 'paper' ? 'other' : n.read === false ? 'abstract' : 'full')
 export type ShadeBy = 'off' | 'linked' | 'central' | 'rated'
 export const SHADE_BY = [['off', 'Off', 'Every document in its full colour'],
                          ['linked', 'Linked', 'Most cited and referred to among the documents here'],
@@ -89,7 +125,7 @@ export function useExploreSettings() {
     view: useStored<'2d' | '3d'>('view', '2d'),
     // Where documents are placed: t-SNE keeps close neighbourhoods, UMAP and PaCMAP more of how groups lie.
     layout: useStored<'tsne' | 'umap' | 'pacmap'>('layout', 'tsne'),
-    colourBy: useStored<'cluster' | 'kind' | 'whose'>('colour', 'cluster'),
+    colourBy: useStored<ColourBy>('colour', 'cluster'),
     shadeBy: useStored<ShadeBy>('shade', 'linked'),
     shownLinks: useStored<string[]>('links', ['cites', 'refers', 'related', 'evidence']),
     shownKinds: useStored<string[]>('kinds', ['paper', 'record', 'code', 'resource', 'finding']),

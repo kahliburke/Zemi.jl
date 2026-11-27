@@ -151,3 +151,9 @@ html.kbx-takeover .VPFooter { display: none; }
 .kbx-peek-tip { position: absolute; z-index: 5; transform: translate(14px, 14px); max-width: 22rem; padding: 5px 9px; pointer-events: none;
                 border: 1px solid var(--vp-c-divider); border-radius: 6px; background: var(--vp-c-bg-elv); box-shadow: var(--vp-shadow-2);
                 color: var(--vp-c-text-1); font: 12px/1.4 system-ui, sans-serif; }
+/* Colour by: the list, and a scale's bar with what its ends mean. */
+.kbx-colour-by { max-width: 12rem; }
+.kbx-scale { margin: 6px 0 4px; }
+.kbx-scale-bar { height: 8px; border-radius: 4px; }
+.kbx-scale-ends { display: flex; justify-content: space-between; margin-top: 3px; font-size: 11px; color: var(--vp-c-text-2); }
+.kbx-scale .kbx-hint { margin: 4px 0 0; }

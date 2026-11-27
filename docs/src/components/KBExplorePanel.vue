@@ -2,15 +2,17 @@
 // The explore page's panel: the legend (what the colours stand for, a row to go to or to map by itself)
 // and the settings (layout, a project's library to map, the links and documents drawn, unlinked pairs).
 // The settings are the page's (see `useExploreSettings`), taken up here.
+import { computed } from 'vue'
 import { can } from './kbApi'
 import KBIcon from './KBIcon.vue'
-import { COLOUR_BY, KIND_COLOURS, LINK_COLOURS, LINK_KINDS, NODE_KINDS, SHADE_BY, all, toggle, useSettings,
+import { COLOUR_BY, RAMP_CSS, SCALES, KIND_COLOURS, LINK_COLOURS, LINK_KINDS, NODE_KINDS, SHADE_BY, all, toggle, useSettings,
          type LegendRow } from './kbExplore'
 
 const props = defineProps<{ legend: LegendRow[]; litRow: string | null; hereRow: string | null; subset: string; projects: { key: string; name: string }[] | null
                             layouts: { umap: boolean; pacmap: boolean }; flying: boolean; least: number }>()
 const emit = defineEmits<{ goToRow: [key: string]; map: [spec: string] }>()
 const { panel, colourBy, shadeBy, layout, shownLinks, shownKinds, showUnlinked, threshold, view } = useSettings()
+const scale = computed(() => SCALES[colourBy.value])
 const alt = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌥' : 'Alt'
 // A cluster with too few documents for a map of its own: its lens is greyed, and its tip says why.
 const few = (r: LegendRow) => (r.size ?? r.count) < props.least
@@ -33,9 +35,14 @@ function mapRow(r: LegendRow) {
     <div v-if="panel === 'colours'" class="kbx-key" role="tabpanel">
       <div class="kbx-shade">
         <span>Colour by</span>
-        <div class="kbx-seg kbx-seg-small" role="group" aria-label="Colour by">
-          <button v-for="[k, l] in COLOUR_BY" :key="k" :class="{ on: colourBy === k }" @click="colourBy = k">{{ l }}</button>
-        </div>
+        <select v-model="colourBy" class="kb-field kbx-pick kbx-colour-by" aria-label="Colour by">
+          <option v-for="[k, l] in COLOUR_BY" :key="k" :value="k">{{ l }}</option>
+        </select>
+      </div>
+      <div v-if="scale" class="kbx-scale">
+        <div class="kbx-scale-bar" :style="{ background: RAMP_CSS }"></div>
+        <div class="kbx-scale-ends"><span>{{ scale.low }}</span><span>{{ scale.high }}</span></div>
+        <p class="kbx-hint">{{ scale.about }} Coloured by rank; grey has no value.</p>
       </div>
       <div v-if="litRow" class="kbx-shade">
         <span>Shade by</span>

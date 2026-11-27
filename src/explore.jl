@@ -220,7 +220,7 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 11
+const EXPLORE_VERSION = 13
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -253,6 +253,7 @@ the watch's where it has none of its own yet.
 """
 explore_rows(kb::KB, l) = [r for r in query(kb, """
     SELECT p.doc_id AS id, e.point_id, e.text_sha, coalesce(p.title, w.title) AS title, p.access,
+           coalesce(p.published, w.published) AS published,
            EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read
     FROM embeddings e JOIN papers p ON p.id = e.paper_id LEFT JOIN watch w ON w.doc_id = p.doc_id
     WHERE e.layer = ? AND e.unit_key LIKE 'p:%' ORDER BY p.doc_id""", (l.name,))]
@@ -355,6 +356,60 @@ function packed(Y::AbstractMatrix; near = nothing, link::Real = 6, most::Real = 
         append!(placed, g)
     end
     return Y
+end
+
+"""
+    explore_signals(X, rows, near, wide, assign; recent_days = 30, now = today()) -> NamedTuple
+
+What each of `rows` (their unit vectors `X`'s columns) can be coloured by on the map, from its nearest
+by meaning (`near`, and the longer `wide`) and its cluster (`assign`), each 0 to 1:
+
+- `bridge`: the share of its nearest in clusters other than its own: what joins topics;
+- `alone`: how unlike even its nearest it is, 1 less their similarity;
+- `ahead`: of its nearest papers with a date, the share published after it, above the share of all the
+  dated documents that are: how much more it is like what came after it than what came before
+  (`NaN` without a date); 0.5 is as many as chance would give;
+- `recent`: the share of its nearest published in the last `recent_days`: where the field is busy now
+  (`NaN` where none of its nearest has a date);
+- `notes`: the three notes and records nearest it in meaning, with their similarity, from which the
+  group's attention to it is found for whoever looks (see `explore_graph`), counting only the notes
+  they may see.
+"""
+function explore_signals(X, rows, near, wide, assign; recent_days::Integer = 30, now::Date = today(), k::Integer = 20)
+    n = length(rows)
+    bridge = [isempty(near[i]) ? 0.0 : count(((m, _),) -> assign[m] != assign[i], near[i]) / length(near[i]) for i in 1:n]
+    alone = [isempty(near[i]) ? 1.0 : clamp(1 - near[i][1][2], 0.0, 1.0) for i in 1:n]
+    recs = [i for i in 1:n if is_record(rows[i].id)]
+    S = isempty(recs) ? zeros(0, n) : X[:, recs]' * X
+    notes = [isempty(recs) || is_record(rows[i].id) ? Tuple{Int,Float64}[] :
+             [(recs[m], Float64(S[m, i])) for m in partialsortperm(view(S, :, i), 1:min(3, length(recs)); rev = true)] for i in 1:n]
+    # Dates, as days, where a document says its year, month or day: papers' publication, not when a
+    # note was written.
+    function day(r)
+        is_record(r.id) && return nothing
+        d = match(r"^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?", strip(coalesce(r.published, "")))
+        d === nothing && return nothing
+        Date(parse(Int, d[1]), d[2] === nothing ? 6 : parse(Int, d[2]), d[3] === nothing ? 15 : parse(Int, d[3]))
+    end
+    dates = day.(rows)
+    dated = sort!([d for d in dates if d !== nothing])
+    ahead = fill(NaN, n); recent = fill(NaN, n)
+    since = now - Day(recent_days)
+    for i in 1:n
+        ns = [(j, s) for (j, s) in first(wide[i], k) if dates[j] !== nothing]
+        isempty(ns) && continue
+        weight = sum(s for (_, s) in ns)
+        weight > 0 || continue
+        recent[i] = sum(s for (j, s) in ns if dates[j] >= since; init = 0.0) / weight
+        t = dates[i]
+        t === nothing && continue
+        others = [(j, s) for (j, s) in ns if dates[j] != t]
+        isempty(others) && continue
+        later = sum(s for (j, s) in others if dates[j] > t; init = 0.0) / sum(s for (_, s) in others)
+        expected = (length(dated) - searchsortedlast(dated, t)) / max(length(dated) - count(==(t), dated), 1)
+        ahead[i] = clamp(0.5 + (later - expected) / 2, 0.0, 1.0)
+    end
+    return (; bridge, alone, ahead, recent, notes)
 end
 
 """
@@ -465,6 +520,13 @@ function explore_map!(kb::KB; force::Bool = false, progress = (msg, share = noth
         before += length(keep)
     end
     cancelled() && return nothing
+    # Ahead of its time, and the field right now, measured against the whole library on every map.
+    if haskey(views, "read") && haskey(views, "all")
+        for (id, d) in views["read"]["docs"], key in ("ah", "f")
+            a = get(views["all"]["docs"], id, Dict())
+            haskey(a, key) ? (d[key] = a[key]) : delete!(d, key)
+        end
+    end
     data = Dict("version" => EXPLORE_VERSION, "input_sha" => input_sha, "built_at" => now_iso(), "layer" => l.name,
                 "views" => views)
     mkpath(c.data_dir)
@@ -557,10 +619,16 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     centre = Dict(j => unit_columns(reshape(vec(sum(X[:, assign .== j]; dims = 2)), :, 1)) for j in unique(assign))
     central = [Float64(dot(view(X, :, i), view(centre[assign[i]], :, 1))) for i in 1:n]
     r4(x) = round(x; digits = 4)
+    # What the map can be coloured by, each 0 to 1 (see `explore_signals`).
+    sig = explore_signals(X, rows, near, wide, assign)
     docs = Dict(r.id => Dict("x" => r4.(pos2[i, :]), "p" => r4.(pos3[i, :]), "ux" => r4.(uflat[i, :]), "up" => r4.(udeep[i, :]),
                              "px" => r4.(pflat[i, :]), "pp" => r4.(pdeep[i, :]), "c" => assign[i],
                              "k" => r4(central[i]), "near" => [[rows[m].id, r4(s)] for (m, s) in near[i]],
-                             "lib" => [[rows[m].id, r4(s)] for (m, s) in get(library, i, ())])
+                             "lib" => [[rows[m].id, r4(s)] for (m, s) in get(library, i, ())],
+                             "b" => r4(sig.bridge[i]), "lo" => r4(sig.alone[i]),
+                             (isempty(sig.notes[i]) ? () : ("nr" => [[rows[m].id, r4(s)] for (m, s) in sig.notes[i]],))...,
+                             (isnan(sig.ahead[i]) ? () : ("ah" => r4(sig.ahead[i]),))...,
+                             (isnan(sig.recent[i]) ? () : ("f" => r4(sig.recent[i]),))...)
                 for (i, r) in enumerate(rows))
     return Dict("clusters" => clusters, "docs" => docs)
 end
@@ -637,7 +705,8 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     hidden = unfound_documents(kb, caller)
     rows = Dict(String(r.doc_id) => r for r in query(kb, """
         SELECT p.id, p.doc_id, p.kind, coalesce(p.title, w.title) AS title, coalesce(p.published, w.published) AS published, p.access,
-               EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read, w.relevance AS rating, p.metadata_at
+               EXISTS (SELECT 1 FROM parses s WHERE s.paper_id = p.id) AS read, w.relevance AS rating, p.metadata_at,
+               p.added_at, coalesce(p.primary_category, w.category) AS category
         FROM papers p LEFT JOIN watch w ON w.doc_id = p.doc_id"""))
     abstracts = abstracts || view !== nothing || !isempty(center) && haskey(rows, center) && !Bool(rows[center].read)
     m = read_explore(kb.config)
@@ -747,6 +816,17 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
         isempty(center) || push!(ids, String(center))
     end
 
+    # The group's attention: how near the notes and records the caller sees come to each document, and
+    # how often findings and tasks use it.
+    noted = Dict{String,Float64}()
+    for (id, d) in docs, (rec, sim) in get(d, "nr", ())
+        shown(rec) && (noted[id] = max(get(noted, id, 0.0), Float64(sim)))
+    end
+    used = Dict{String,Int}()
+    for (a, b, kind) in E
+        kind in ("evidence", "task") && (used[b] = get(used, b, 0) + 1)
+    end
+
     order = sort!(collect(ids))
     at = Dict(id => i - 1 for (i, id) in enumerate(order))
     year(r) = (d = coalesce(r.published, ""); occursin(r"^\d{4}", d) ? d[1:4] : "")
@@ -761,7 +841,14 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
             haskey(d, "ux") && (n["ux"] = d["ux"]; n["up"] = d["up"])
             haskey(d, "px") && (n["px"] = d["px"]; n["pp"] = d["pp"])
             haskey(d, "k") && (n["central"] = d["k"])
+            for (from, to) in ("b" => "bridge", "lo" => "alone", "ah" => "ahead", "f" => "recent")
+                haskey(d, from) && (n[to] = d[from])
+            end
         end
+        ismissing(r.added_at) || (n["added"] = first(String(r.added_at), 10))
+        ismissing(r.category) || isempty(r.category) || (n["category"] = String(r.category))
+        haskey(noted, id) && (n["noted"] = round(noted[id]; digits = 4))
+        haskey(used, id) && (n["used"] = used[id])
         ismissing(r.rating) || (n["rating"] = Int(r.rating))     # the watch's judge's, 0 to 3
         n
     end

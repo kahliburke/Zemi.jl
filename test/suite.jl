@@ -3288,6 +3288,17 @@ end
         moved = [sqrt(sum(abs2, Z[i, :] .- Y[i, :])) for i in axes(Y, 1)]
         @test minimum(sqrt(sum(abs2, Z[a, :] .- Z[b, :])) for a in on for b in on if a < b) >= 0.45
         @test maximum(moved) < 1 && all(moved[i] < 0.25 for i in axes(Y, 1) if !(i in on))  # the rest at most nudged
+        # What the map can be coloured by. Two topics, papers a month apart from January, the third between
+        # the topics, and a note by the first.
+        sx = K.unit_columns([1.0 0.95 0.6 0.0 0.1 0.0 0.98; 0.0 0.1 0.6 1.0 0.95 0.9 0.0; 0.0 0.0 0.0 0.0 0.0 0.3 0.1])
+        srows = [[(; id = "2601.0000$i", published = "2026-0$i-15") for i in 1:6]; (; id = "rec-the-note", published = missing)]
+        sig = K.explore_signals(sx, srows, K.nearest_columns(sx, 3), K.nearest_columns(sx, 6), [1, 1, 1, 2, 2, 2, 1];
+                                now = K.Dates.Date(2026, 6, 20))
+        @test sig.bridge[3] > sig.bridge[1] && sig.bridge[1] == 0                       # between the topics
+        @test sig.alone[1] < sig.alone[6] && all(0 .<= sig.alone .<= 1)                 # the first has a near twin
+        @test sig.recent[1] == 0 && sig.recent[5] > 0                                   # June's paper is by the fifth
+        @test isnan(sig.ahead[7]) && all(0 <= a <= 1 for a in sig.ahead[1:6])           # a note has no publication date
+        @test first(sig.notes[1])[1] == 7 && isempty(sig.notes[7])                       # the note nearest the first
         # Without a landscape, clusters of the map's own, labelled by their titles' words.
         mv(K.landscape_path(c), K.landscape_path(c) * ".kept")
         @test K.explore_stale(kb)

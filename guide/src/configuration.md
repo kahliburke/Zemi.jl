@@ -119,9 +119,21 @@ out and clustered afresh.
 
 The panel at the top right has two tabs:
 
-- **Legend**: **Colour by** cluster, kind, or whose a document is (yours, your projects', everyone's).
-  A row goes to its cluster and lights it; **Shade by** then shades its documents by how often they
-  are cited and referred to, how central they are to the cluster, or how relevant the watch rated them.
+- **Legend**: **Colour by** a group each document is in, a row of the legend each: its cluster, arXiv
+  category, how it was read (in full, by its abstract, or a note or record), kind, or whose it is
+  (yours, your projects', everyone's). Or by a scale, from one colour to another by rank, with what
+  each end means beneath:
+  - **The field right now**: how much of what is nearest it was published in the last 30 days;
+  - **Bridges**: how many of its nearest lie in other clusters, what joins topics;
+  - **The group's attention**: how near the notes and records you may see come to it, and how often
+    findings and tasks use it;
+  - **Ahead of its time**: how much more it is like the papers published after it than before it;
+  - **Loners**: how unlike even its nearest it is;
+  - **Year published** and **Date added**.
+
+  A row goes to its group and lights it; **Shade by** then shades a cluster's documents by how often
+  they are cited and referred to, how central they are to the cluster, or how relevant the watch rated
+  them.
 - **Settings**: the layout, which documents and which kinds of link are drawn, and the pairs close in
   meaning that no link joins, with a slider for how alike they must be. Of the layouts, **t-SNE**
   keeps each document's close neighbourhood, **UMAP** more of how the groups lie to each other, and
