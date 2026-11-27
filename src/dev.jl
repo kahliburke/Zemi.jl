@@ -168,9 +168,33 @@ function link_sources!(docs::AbstractString, md::AbstractString)
 end
 
 """
+Julia code that ends its process's group once process `ARGS[end]` is no longer its parent, checking
+every two seconds (not on Windows, where a group ends with the console).
+"""
+const ENDS_WITH_PARENT = """
+    Sys.iswindows() || let parent = parse(Int, ARGS[end])
+        @async while true
+            sleep(2)
+            ccall(:getppid, Cint, ()) == parent || (ccall(:kill, Cint, (Cint, Cint), 0, 15); exit(0))
+        end
+    end
+    """
+
+"""
+What runs the development server (see [`start_dev_server!`](@ref)), given the pages, the port, and
+the process that starts it: once that process is gone, its group ends (see [`ENDS_WITH_PARENT`](@ref)),
+VitePress with it, so a service killed outright leaves no server behind, watching the pages.
+"""
+const DEV_SERVER_SCRIPT = ENDS_WITH_PARENT * """
+    import DocumenterVitepress, Zemi
+    Zemi.vitepress(DocumenterVitepress.node, ARGS[1], "dev", "--port", ARGS[2], "--strictPort"; install = false)
+    """
+
+"""
 Start VitePress's development server on the pages, at `port`, in a process group of its own, the
 site's packages installed beside them first when they are not (see [`site_packages!`](@ref)):
-DocumenterVitepress installs none when it finds a `package.json`.
+DocumenterVitepress installs none when it finds a `package.json`. The group ends itself once this
+process is gone, stopped without stopping it (see [`DEV_SERVER_SCRIPT`](@ref)).
 """
 function start_dev_server!(c::Config; port::Integer)
     # Taken, the server would stop at once (it is held to its port) while the pages led to whatever has it.
@@ -178,11 +202,7 @@ function start_dev_server!(c::Config; port::Integer)
     in_use && error("Port $port is in use, and the development server needs it: free it, or choose another with ZEMI_DEV_PORT")
     build = joinpath(dev_dir(c), "build")
     site_packages!(dev_dir(c))
-    script = """
-        import DocumenterVitepress, Zemi
-        Zemi.vitepress(DocumenterVitepress.node, ARGS[1], "dev", "--port", ARGS[2], "--strictPort"; install = false)
-        """
-    cmd = setenv(`$(Base.julia_cmd()) --project=$(site_env(c)) -e $script $build $port`, build_env())
+    cmd = setenv(`$(Base.julia_cmd()) --project=$(site_env(c)) -e $DEV_SERVER_SCRIPT $build $port $(getpid())`, build_env())
     log = joinpath(dev_dir(c), "server.log")
     p = DEV_SERVER[] = run(pipeline(Cmd(cmd; detach = true); stdout = log, stderr = log); wait = false)
     DEV_URL[] = "http://localhost:$port"

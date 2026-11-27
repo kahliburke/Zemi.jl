@@ -18,9 +18,33 @@ function vitepress(node::Function, build::AbstractString, command::AbstractStrin
         withenv("PATH" => dirname(exe) * (Sys.iswindows() ? ";" : ":") * get(ENV, "PATH", "")) do
             (install || !isdir(joinpath(root, "node_modules"))) &&
                 run(Cmd(`$exe $(npm_cli(exe)) install --no-audit --no-fund`; dir = root))
+            command == "dev" && native_watcher!(exe, root)
             script = joinpath(root, "node_modules", "vitepress", "bin", "vitepress.js")
             run(Cmd(`$exe $script $command $(joinpath(build, ".documenter")) $(collect(args))`; dir = root))
         end
+    end
+    return nothing
+end
+
+"""
+    native_watcher!(node, root)
+
+On macOS, the file watcher VitePress's dev server uses (`fsevents`) in the packages at `root`, where
+npm left it out: the npm beside DocumenterVitepress's Node runs a build for it that fails, though it
+comes built, and drops it as optional. Without it the dev server watches the site's files by
+checking each over and over. Installed at the version the lockfile names, without its scripts.
+"""
+function native_watcher!(node::AbstractString, root::AbstractString)
+    Sys.isapple() || return nothing
+    isdir(joinpath(root, "node_modules", "fsevents")) && return nothing
+    lock = joinpath(root, "package-lock.json")
+    isfile(lock) || return nothing
+    version = get(get(get(JSON.parsefile(lock), "packages", Dict()), "node_modules/fsevents", Dict()), "version", nothing)
+    version === nothing && return nothing
+    try
+        run(Cmd(`$node $(npm_cli(node)) install fsevents@$version --no-save --ignore-scripts --no-audit --no-fund`; dir = root))
+    catch e
+        @warn "The dev server's file watcher could not be installed: it checks the site's files over and over instead" exception = e
     end
     return nothing
 end

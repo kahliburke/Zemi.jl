@@ -1605,6 +1605,23 @@ end
     finally
         close(held)
     end
+    # The server's process group ends once the process that started it is gone, without stopping it.
+    if !Sys.iswindows()
+        dir = mktempdir()
+        child = joinpath(dir, "child.jl")
+        write(child, K.ENDS_WITH_PARENT * "run(`sleep 60`)\n")
+        julia = Base.julia_cmd()
+        inner = join(Base.shell_escape.([julia.exec; "--startup-file=no"; child]), " ")
+        middle = "p = run(Cmd(`$inner \$(getpid())`; detach = true); wait = false); println(getpid(p))"
+        pid = parse(Int, readchomp(`$julia --startup-file=no -e $middle`))
+        alive(p) = ccall(:kill, Cint, (Cint, Cint), p, 0) == 0
+        deadline = time() + 30
+        while alive(pid) && time() < deadline
+            sleep(0.5)
+        end
+        @test !alive(pid)
+        alive(pid) && ccall(:kill, Cint, (Cint, Cint), -pid, 9)
+    end
     # The pages folder's copies of the checkout's components and theme styles become links to them.
     docs = mktempdir(); md = mktempdir()
     for d in (joinpath(docs, "src", "components"), joinpath(docs, "src", ".vitepress", "theme"), joinpath(md, "components"),
