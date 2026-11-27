@@ -924,8 +924,8 @@ function explore_near(kb::KB, caller::Caller, id::AbstractString; abstracts::Boo
         v, only = s.needs === nothing ? cached_subset(kb, s.ids) : nothing, Set(s.ids)
     end
     v === nothing && return Any[]
-    seen(d) = !(d in hidden) && (only === nothing || d in only) && haskey(v["docs"], d)
-    seen(id) || return Any[]
+    seen(d) = !(d in hidden) && (only === nothing || d in only)
+    seen(id) && haskey(v["docs"], id) || return Any[]
     return Any[p for p in get(v["docs"][id], "nd", Any[]) if seen(String(p[1]))]
 end
 
