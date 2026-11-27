@@ -242,6 +242,57 @@ schema, the snapshot `before-schema-<n>` is taken and kept until deleted. The St
 last snapshot and the backups' size, with **Back up now**; [Deployment](deployment.md#backups) covers
 restoring.
 
+`include` adds paths outside Zemi's folders to each snapshot, such as the web server's config. A
+restore puts them back only with `--include`:
+
+```toml
+[backup]
+include = ["/etc/caddy"]
+```
+
+#### Off this machine
+
+Snapshots on the same machine are lost with it. `[backup.offsite]` copies the latest one once a day
+to a bucket (Cloudflare R2, Backblaze B2, AWS S3, MinIO) or to a folder on a drive mounted here.
+Each file is sent once, so a day's copy is usually only the packed database and config, a few MB.
+Copies older than `keep_days` are deleted, except the latest.
+
+```toml
+[backup.offsite]
+store = "s3"                   # or "dir:/mnt/elsewhere/zemi"
+endpoint = "https://<account id>.r2.cloudflarestorage.com"
+bucket = "zemi-backups"
+prefix = "kb-example"          # one per knowledge base, when several share a bucket
+credentials = "r2_backup.toml" # access_key_id and secret_access_key
+key = "file:backup_key"        # made by zemi backup --offsite-key
+every_hours = 24
+keep_days = 14
+files = true                   # false: the database, config and content only
+```
+
+Everything sent is encrypted first, so the bucket holds nothing readable. A copy holds the config's
+secrets and everyone's private library documents, and the bucket's token is enough to read anything
+in it. Each object is sealed with AES-256-GCM under a data key made with the store's first copy, and
+even the files' names are hashed with it. The bucket keeps the data key only sealed:
+
+- with the **key**, a file on this machine (`zemi backup --offsite-key` makes it). Keep a copy
+  somewhere other than this machine, a password manager say. Several knowledge bases can share one.
+- with a **recovery passphrase**, set with `zemi backup --offsite-recovery` and never stored. It
+  is stretched with scrypt, so guessing it is slow. It opens the copies when the key is lost with
+  the machine.
+
+Either opens every copy. Without both, the copies can't be read by anyone, including you. Prove
+that the key and passphrase you keep work, from any machine with the config's `[backup.offsite]`:
+
+```sh
+zemi backups --offsite                        # the copies, and whether a passphrase is set
+zemi backups --offsite --check                # fetch the latest whole with the key and check it
+zemi backups --offsite --check --recovery     # the same with the passphrase
+```
+
+The Status page shows the last copy sent and any failure. [Deployment](deployment.md#backups)
+covers restoring from a copy.
+
 ### Notebooks
 
 [Kaimon Slate](https://github.com/kahliburke/KaimonSlate.jl) notebooks, rendered through the local

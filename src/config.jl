@@ -214,6 +214,30 @@ store_config(t::AbstractDict; path = expand_home) = StoreConfig(; store = store_
     credentials = (c = get(t, "credentials", ""); isempty(c) ? c : path(c)))
 
 """
+    OffsiteConfig
+
+Where the snapshots are copied off this machine (see backup_offsite.jl), `[backup.offsite]`: a store
+as [`StoreConfig`](@ref) names one (an S3-compatible bucket, such as Cloudflare R2, or `dir:<path>`
+for a drive mounted here; empty for none), a copy every `every_hours`, those younger than
+`keep_days` kept, with `files` the PDFs, figures and uploads too, everything encrypted with `key` (a
+key as layers' keys are: `file:PATH` or `env:NAME`; made by `zemi backup --offsite-key`).
+"""
+Base.@kwdef struct OffsiteConfig
+    store::StoreConfig = StoreConfig()
+    every_hours::Float64 = 24.0
+    keep_days::Float64 = 14.0
+    files::Bool = true
+    key::String = ""
+end
+
+function offsite_config(t::AbstractDict; path = expand_home)
+    d = OffsiteConfig()
+    return OffsiteConfig(; store = store_config(t; path), every_hours = Float64(get(t, "every_hours", d.every_hours)),
+        keep_days = Float64(get(t, "keep_days", d.keep_days)), files = Bool(get(t, "files", d.files)),
+        key = (k = String(get(t, "key", "")); startswith(k, "file:") ? "file:" * path(k[6:end]) : k))
+end
+
+"""
     BackupConfig
 
 Snapshots of the knowledge base (see backup.jl), `[backup]` in the config: `enabled` (on by default),
@@ -223,7 +247,9 @@ database, the config folder, the content and the records; with `files`, also a c
 figures and uploads, hard-linked to the last snapshot's where unchanged. Kept: every snapshot for
 `keep_all_hours`, one per 12 hours for `keep_half_daily_days`, one a day for `keep_daily_days`. None is
 taken when the disk has less than `min_free_gb` free, and past `max_gb` (0 for no limit) the oldest go
-first.
+first. `include`: further paths (a web server's config, say) packed into each snapshot's state, put
+back only when asked. `offsite`: where the snapshots are copied off this machine (see
+[`OffsiteConfig`](@ref)).
 """
 Base.@kwdef struct BackupConfig
     enabled::Bool = true
@@ -235,6 +261,8 @@ Base.@kwdef struct BackupConfig
     files::Bool = true
     min_free_gb::Float64 = 5.0
     max_gb::Float64 = 0.0
+    include::Vector{String} = String[]
+    offsite::OffsiteConfig = OffsiteConfig()
 end
 
 function backup_config(t::AbstractDict; path = expand_home)
@@ -244,7 +272,8 @@ function backup_config(t::AbstractDict; path = expand_home)
     return BackupConfig(; enabled = Bool(get(t, "enabled", d.enabled)), dir = isempty(dir) ? dir : path(dir),
         every_hours = num("every_hours"), keep_all_hours = num("keep_all_hours"), keep_half_daily_days = num("keep_half_daily_days"),
         keep_daily_days = num("keep_daily_days"), files = Bool(get(t, "files", d.files)), min_free_gb = num("min_free_gb"),
-        max_gb = num("max_gb"))
+        max_gb = num("max_gb"), include = String[path(String(p)) for p in get(t, "include", String[])],
+        offsite = offsite_config(get(t, "offsite", Dict{String,Any}()); path))
 end
 
 """
@@ -933,6 +962,15 @@ function validate(c::Config)
         v >= 0 || error("[backup] $k can't be negative, got $v")
     end
     within_dir(backup_dir(c), c.data_dir) && error("[backup] dir $(backup_dir(c)) is in the data folder, so losing the data would lose the backups")
+    o = b.offsite
+    if !isempty(o.store.store)
+        o.every_hours > 0 || error("[backup.offsite] every_hours must be more than 0, got $(o.every_hours)")
+        o.keep_days > 0 || error("[backup.offsite] keep_days must be more than 0, got $(o.keep_days)")
+        isempty(o.key) && error("[backup.offsite] needs a key: a snapshot holds the config's secrets, so what leaves this machine is encrypted. " *
+                                "Make one with `zemi backup --offsite-key`")
+        startswith(o.store.store, "dir:") && within_dir(expand_home(o.store.store[5:end]), c.data_dir) &&
+            error("[backup.offsite] store is in the data folder, so losing the data would lose the copies")
+    end
     c.library_max_gb > 0 || error("[library] max_gb must be more than 0, got $(c.library_max_gb)")
     stores_overlap(library_store_config(c), c.dataset) &&
         error("[library] store overlaps the dataset's: the dataset is read by others, and the libraries are private. Keep them apart")

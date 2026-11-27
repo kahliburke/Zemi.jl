@@ -4,7 +4,8 @@
 #   snapshots/<UTC time>/   taken every `every_hours`, thinned by age (see `thin_backups!`)
 #   kept/<name>/            taken by name (before a migration, a restore, or when asked), kept until deleted
 #
-# Each holds `state.tar.zst` (the database, the config folder, the content and the records),
+# Each holds `state.tar.zst` (the database, the config folder, the content, the records, and the
+# paths `[backup] include` names, under `include/` by their full path),
 # `files/` (uploads, and with `files` the PDFs and figures, each hard-linked to the last snapshot's
 # copy when unchanged, so an unchanged file takes no more space), `files.tsv` (what `files/` holds:
 # path, size and modification time) and `snapshot.toml`. Left out, as they are rebuilt: the site,
@@ -85,6 +86,7 @@ function snapshot!(c::Config; keep::AbstractString = "", at::DateTime = now(UTC)
             for x in BACKUP_STATE_ITEMS
                 ispath(joinpath(c.data_dir, x)) && cp(joinpath(c.data_dir, x), joinpath(stage, x))
             end
+            pack_included!(c, joinpath(stage, "include"))
             open(joinpath(part, "state.tar.zst"), "w") do io
                 z = ZstdCompressorStream(io; level = 10)
                 Tar.create(stage, z)
@@ -102,6 +104,28 @@ function snapshot!(c::Config; keep::AbstractString = "", at::DateTime = now(UTC)
             rethrow()
         end
         return final
+    end
+end
+
+"""
+Copy the files of the paths `[backup] include` names into `dest`, each under its full path. What is
+missing or can't be read is left out, with a warning, not the snapshot.
+"""
+function pack_included!(c::Config, dest::AbstractString)
+    for p in c.backup.include
+        ispath(p) || (@warn "[backup] include: nothing at $p" maxlog = 1; continue)
+        files = isdir(p) ? [joinpath(d, f) for (d, _, fs) in walkdir(p) for f in fs] : [p]
+        for f in files
+            isfile(f) && !islink(f) || continue
+            to = joinpath(dest, lstrip(abspath(f), ['/', '\\']))
+            try
+                mkpath(dirname(to))
+                cp(f, to)
+            catch e
+                e isa Base.IOError || e isa SystemError || rethrow()
+                @warn "The snapshot leaves out $f, which can't be read" exception = e maxlog = 1
+            end
+        end
     end
 end
 
@@ -299,9 +323,13 @@ function count_backups!(c::Config)
                         kept = length(all) - length(hourly), bytes = backups_bytes(c))
 end
 
-"The backups, for the Status page: whether they are on, where they go, and what [`BACKUP_STATE`](@ref) last noted (its times UTC)."
+"""
+The backups, for the Status page: whether they are on, where they go, what [`BACKUP_STATE`](@ref)
+last noted (its times UTC), and the copies off this machine (see [`offsite_json`](@ref)).
+"""
 backup_json(c::Config) = merge(Dict{String,Any}(string(k) => v isa String && occursin(r"^\d{4}-", v) ? v * "Z" : v for (k, v) in pairs(BACKUP_STATE[])),
-                               Dict{String,Any}("enabled" => c.backup.enabled, "dir" => backup_dir(c), "every_hours" => c.backup.every_hours))
+                               Dict{String,Any}("enabled" => c.backup.enabled, "dir" => backup_dir(c), "every_hours" => c.backup.every_hours,
+                                                "offsite" => offsite_json(c)))
 
 """
     follow_backups(kb) -> Task
@@ -356,15 +384,16 @@ function delete_backup!(c::Config, name::AbstractString)
 end
 
 """
-    restore_backup!(config, name; config_files = false) -> String
+    restore_backup!(config, name; config_files = false, included = false) -> String
 
 Put snapshot `name` (see [`find_backup`](@ref)) back into the data folder of the knowledge base
-`config` names, which must not be running: its database, content, records and files, and with
-`config_files` its config folder's files. What was there is first kept as a snapshot
+`config` names, which must not be running: its database, content, records and files, with
+`config_files` its config folder's files, and with `included` the files `[backup] include` packed,
+each where it was. What was there is first kept as a snapshot
 `before-restore-<time>`, whose name is returned (`""` with no database to keep). Run as root, what is
 put back is given the data folder's owner.
 """
-function restore_backup!(c::Config, name::AbstractString; config_files::Bool = false)
+function restore_backup!(c::Config, name::AbstractString; config_files::Bool = false, included::Bool = false)
     snap = find_backup(c, name)
     meta = TOML.parsefile(joinpath(snap, "snapshot.toml"))
     before = isfile(db_path(c)) ? basename(backup!(c; keep = "before-restore-" * backup_stamp(now(UTC)))) : ""
@@ -387,6 +416,14 @@ function restore_backup!(c::Config, name::AbstractString; config_files::Bool = f
             mkpath(conf)
             for f in readdir(joinpath(state, "config"))
                 cp(joinpath(state, "config", f), joinpath(conf, f); force = true)
+            end
+        end
+        inc = joinpath(state, "include")
+        if included && isdir(inc)
+            for (dir, _, fs) in walkdir(inc), f in fs
+                to = (Sys.iswindows() ? "" : "/") * slash_relpath(joinpath(dir, f), inc)
+                mkpath(dirname(to))
+                cp(joinpath(dir, f), to; force = true)
             end
         end
         for d in get(meta, "files", String[])

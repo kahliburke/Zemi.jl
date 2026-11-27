@@ -12,9 +12,12 @@ import { when, clock, bytes } from './kbFormat'
 
 type Agent = { id: string; status: string; model: string; turn: number; doing: string | null; purpose: string; mine: boolean;
                usage: Record<string, number>; last_activity: number | null }
-// The backups (src/backup.jl): what they last did, and the snapshots, listed when asked for.
+// The backups (src/backup.jl): what they last did, and the snapshots, listed when asked for; and the
+// copies off this machine (src/backup_offsite.jl).
+type Offsite = { enabled: boolean; where: string; every_hours: number; keep_days: number; ok_at: string; error: string; error_at: string;
+                 latest: string; count: number; sent: number }
 type Backups = { enabled: boolean; dir: string; every_hours: number; ok_at: string; seconds: number; error: string; error_at: string;
-                 latest: string; count: number; kept: number; bytes: number }
+                 latest: string; count: number; kept: number; bytes: number; offsite: Offsite }
 type Snapshot = { name: string; kept: boolean; at: string; schema: number; state_bytes: number }
 type Person = { email: string; name: string; what: string; via: string; last: string; active: boolean; open: boolean; requests: number }
 type Ops = {
@@ -172,6 +175,14 @@ const tokens = (u: Record<string, number>) => {
           · {{ ops.health.backup.enabled ? `every ${ops.health.backup.every_hours} h` : 'off in the config' }}
         </p>
         <p v-if="ops.health.backup.error" class="kb-error">The last backup failed {{ agoIso(ops.health.backup.error_at) }}: {{ ops.health.backup.error }}</p>
+        <p v-if="ops.health.backup.offsite?.enabled" class="kbo-dim">
+          Off this machine: <template v-if="ops.health.backup.offsite.ok_at">last copy {{ agoIso(ops.health.backup.offsite.ok_at) }}
+            · {{ ops.health.backup.offsite.count }} kept</template><template v-else>no copy sent since the service started</template>
+          in <code>{{ ops.health.backup.offsite.where }}</code> · every {{ ops.health.backup.offsite.every_hours }} h,
+          kept {{ ops.health.backup.offsite.keep_days }} days</p>
+        <p v-else class="kbo-dim">Nothing is copied off this machine: <code>[backup.offsite]</code> in the config names where.</p>
+        <p v-if="ops.health.backup.offsite?.error" class="kb-error">The last copy off this machine failed
+          {{ agoIso(ops.health.backup.offsite.error_at) }}: {{ ops.health.backup.offsite.error }}</p>
         <div class="kbo-actions">
           <button v-if="can('server.control')" class="kb-primary kbo-button" @click="backUp">Back up now</button>
           <button class="kb-primary kbo-button kbo-plain" @click="snapshots ? (snapshots = null) : listSnapshots()">

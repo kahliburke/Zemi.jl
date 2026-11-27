@@ -132,15 +132,27 @@ function es256(key::PKey, data::Vector{UInt8})
     return out
 end
 
-"`plain` encrypted with AES-128-GCM under `key` and `iv`, its 16-byte tag after it."
-function aes128gcm(key::Vector{UInt8}, iv::Vector{UInt8}, plain::Vector{UInt8})
+"AES-GCM for a key of 16 or 32 bytes (AES-128 or AES-256)."
+function gcm_cipher(key::Vector{UInt8})
+    length(key) in (16, 32) || error("An AES-GCM key is 16 or 32 bytes, not $(length(key))")
+    return length(key) == 16 ? ccall((:EVP_aes_128_gcm, libcrypto), Ptr{Cvoid}, ()) : ccall((:EVP_aes_256_gcm, libcrypto), Ptr{Cvoid}, ())
+end
+
+"""
+    aes_gcm_seal(key, iv, plain; aad = UInt8[]) -> Vector{UInt8}
+
+`plain` encrypted with AES-GCM under `key` (16 or 32 bytes) and `iv`, its 16-byte tag after it;
+`aad`, data the tag also vouches for without being encrypted.
+"""
+function aes_gcm_seal(key::Vector{UInt8}, iv::Vector{UInt8}, plain::AbstractVector{UInt8}; aad::AbstractVector{UInt8} = UInt8[])
     ctx = ccall((:EVP_CIPHER_CTX_new, libcrypto), Ptr{Cvoid}, ())
     try
-        cipher = ccall((:EVP_aes_128_gcm, libcrypto), Ptr{Cvoid}, ())
         ossl(ccall((:EVP_EncryptInit_ex, libcrypto), Cint, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}),
-                   ctx, cipher, C_NULL, key, iv), "EncryptInit")
-        out = Vector{UInt8}(undef, length(plain) + 32)
+                   ctx, gcm_cipher(key), C_NULL, key, iv), "EncryptInit")
         n = Ref{Cint}(0)
+        isempty(aad) || ossl(ccall((:EVP_EncryptUpdate, libcrypto), Cint, (Ptr{Cvoid}, Ptr{UInt8}, Ref{Cint}, Ptr{UInt8}, Cint),
+                                   ctx, C_NULL, n, aad, length(aad)), "EncryptUpdate (aad)")
+        out = Vector{UInt8}(undef, length(plain) + 32)
         ossl(ccall((:EVP_EncryptUpdate, libcrypto), Cint, (Ptr{Cvoid}, Ptr{UInt8}, Ref{Cint}, Ptr{UInt8}, Cint),
                    ctx, out, n, plain, length(plain)), "EncryptUpdate")
         total = Int(n[])
@@ -149,11 +161,44 @@ function aes128gcm(key::Vector{UInt8}, iv::Vector{UInt8}, plain::Vector{UInt8})
         total += n[]
         tag = Vector{UInt8}(undef, 16)
         ossl(ccall((:EVP_CIPHER_CTX_ctrl, libcrypto), Cint, (Ptr{Cvoid}, Cint, Cint, Ptr{UInt8}), ctx, 0x10, 16, tag), "GET_TAG")
-        return [out[1:total]; tag]
+        return [resize!(out, total); tag]
     finally
         ccall((:EVP_CIPHER_CTX_free, libcrypto), Cvoid, (Ptr{Cvoid},), ctx)
     end
 end
+
+"""
+    aes_gcm_open(key, iv, sealed; aad = UInt8[]) -> Vector{UInt8}
+
+What [`aes_gcm_seal`](@ref) sealed. Throws when the tag does not vouch for it: another key, `iv` or
+`aad`, or anything changed since.
+"""
+function aes_gcm_open(key::Vector{UInt8}, iv::Vector{UInt8}, sealed::AbstractVector{UInt8}; aad::AbstractVector{UInt8} = UInt8[])
+    length(sealed) >= 16 || error("Too short to be sealed with AES-GCM")
+    body, tag = sealed[1:end-16], Vector{UInt8}(sealed[end-15:end])
+    ctx = ccall((:EVP_CIPHER_CTX_new, libcrypto), Ptr{Cvoid}, ())
+    try
+        ossl(ccall((:EVP_DecryptInit_ex, libcrypto), Cint, (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}),
+                   ctx, gcm_cipher(key), C_NULL, key, iv), "DecryptInit")
+        n = Ref{Cint}(0)
+        isempty(aad) || ossl(ccall((:EVP_DecryptUpdate, libcrypto), Cint, (Ptr{Cvoid}, Ptr{UInt8}, Ref{Cint}, Ptr{UInt8}, Cint),
+                                   ctx, C_NULL, n, aad, length(aad)), "DecryptUpdate (aad)")
+        out = Vector{UInt8}(undef, length(body) + 32)
+        ossl(ccall((:EVP_DecryptUpdate, libcrypto), Cint, (Ptr{Cvoid}, Ptr{UInt8}, Ref{Cint}, Ptr{UInt8}, Cint),
+                   ctx, out, n, body, length(body)), "DecryptUpdate")
+        total = Int(n[])
+        ossl(ccall((:EVP_CIPHER_CTX_ctrl, libcrypto), Cint, (Ptr{Cvoid}, Cint, Cint, Ptr{UInt8}), ctx, 0x11, 16, tag), "SET_TAG")
+        ok = GC.@preserve out ccall((:EVP_DecryptFinal_ex, libcrypto), Cint, (Ptr{Cvoid}, Ptr{UInt8}, Ref{Cint}),
+                                    ctx, pointer(out, total + 1), n)
+        ok == 1 || error("Could not decrypt: the key is not the one it was encrypted with, or it was changed")
+        return resize!(out, total + n[])
+    finally
+        ccall((:EVP_CIPHER_CTX_free, libcrypto), Cvoid, (Ptr{Cvoid},), ctx)
+    end
+end
+
+"`plain` encrypted with AES-128-GCM under `key` and `iv`, its 16-byte tag after it."
+aes128gcm(key::Vector{UInt8}, iv::Vector{UInt8}, plain::Vector{UInt8}) = aes_gcm_seal(key, iv, plain)
 
 # ── RFC 8291 and RFC 8292 ────────────────────────────────────────────────────────────────────────
 

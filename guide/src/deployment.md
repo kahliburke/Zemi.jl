@@ -156,7 +156,24 @@ sudo systemctl start zemi
 
 Restoring puts back the database, the content, the records and the files, as they were. What was
 there is first kept as the snapshot `before-restore-<time>`, so a restore can be undone the same way.
-`--config` puts back the config folder's files too.
+`--config` puts back the config folder's files too. `--include` puts back the paths `[backup] include` names, each where it was.
+
+### From a copy off the machine
+
+With [`[backup.offsite]`](configuration.md#off-this-machine), a lost machine is put back from the
+store alone. On the new machine, install Zemi and write a config with only `[backup.offsite]` and
+the bucket's credentials. Then restore the latest copy with the key, or with the recovery
+passphrase:
+
+```sh
+zemi backups --offsite                                        # the copies, the latest first
+zemi restore --offsite 20261108T010000Z --config              # with the key in the config
+zemi restore --offsite 20261108T010000Z --config --recovery   # or with the passphrase
+```
+
+`--config` brings back the whole config folder, key included. Each part is checked as it is
+decrypted, and each file against its hash. The copy is kept as the snapshot `offsite-<time>`. Moving
+a knowledge base to another machine works the same way.
 
 ## In containers
 

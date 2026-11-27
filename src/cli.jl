@@ -41,11 +41,21 @@ const CLI_HELP = """
                                          the role back, otherwise it is invited as one and its first sign-in
                                          makes it an admin. Alone, who can administer it
     zemi backup [--keep NAME]            take a snapshot now ([backup] in the config), kept by NAME until deleted
-    zemi backups                         the snapshots, the latest first
-    zemi restore SNAPSHOT [--config] [--force]
+    zemi backup --offsite                copy the latest snapshot off this machine now ([backup.offsite])
+    zemi backup --offsite-key [FILE]     make the key [backup.offsite] seals copies with (beside the config
+                                         by default); keep a copy of it somewhere other than this machine
+    zemi backup --offsite-recovery       set the recovery passphrase, which opens the copies without the key
+    zemi backups [--offsite [--check] [--recovery]]
+                                         the snapshots, the latest first; with --offsite those in the store,
+                                         and with --check, proof the latest restores (with the passphrase
+                                         given --recovery)
+    zemi restore SNAPSHOT [--config] [--include] [--force]
+    zemi restore --offsite COPY [--recovery] [--config] [--include] [--force]
                                          put a snapshot back, with the service stopped: the database, content,
-                                         records and files (the config folder's files too with --config);
-                                         what was there is kept first as a snapshot. --force restores even
+                                         records and files (the config folder's files too with --config, the
+                                         paths [backup] include names with --include); what was there is kept
+                                         first as a snapshot. --offsite fetches it from the store first, opened
+                                         with the key or (--recovery) the passphrase. --force restores even
                                          though something answers on the service's port
 
     ZEMI_PORT=<port> serves on another port than [service] port, 8000 by default (ZEMI_DEV_PORT, the
@@ -74,6 +84,16 @@ function agent_session(; tools::Bool = false)
 end
 
 option(args, flag) = (i = findfirst(==(flag), args); i === nothing || i == length(args) ? nothing : args[i+1])
+
+"The recovery passphrase, asked for without echoing it."
+function passphrase_prompt()
+    p = Base.getpass("Recovery passphrase")
+    try
+        return read(seekstart(p), String)
+    finally
+        Base.shred!(p)
+    end
+end
 
 """
     progress_line() -> (report, finish)
@@ -167,6 +187,43 @@ function cli(args::AbstractVector{<:AbstractString})
             end
         elseif cmd == "admin"
             foreach(println, admin_cli(kb(), rest))
+        elseif cmd == "backup" && "--offsite-key" in rest
+            file = something(option(rest, "--offsite-key"), joinpath(dirname(config_path()), "backup_key"))
+            path = new_offsite_key!(expand_home(file))
+            println("Made a key at $path. In the config:\n\n  [backup.offsite]\n  key = \"file:$path\"\n\n",
+                    "Keep a copy of it somewhere other than this machine (a password manager, say), and set a recovery\n",
+                    "passphrase once copies are sent (zemi backup --offsite-recovery): without either, a lost machine's copies can't be opened.")
+        elseif cmd == "backup" && "--offsite-recovery" in rest
+            c = validate(load_config())
+            a = Base.getpass("Recovery passphrase (12 characters or more)")
+            b = Base.getpass("The same again")
+            try
+                read(seekstart(a), String) == read(seekstart(b), String) || error("The passphrases differ")
+                set_offsite_recovery!(c, read(seekstart(a), String))
+            finally
+                Base.shred!(a); Base.shred!(b)
+            end
+            println("The copies open with the recovery passphrase too. Keep it where you would look for it without this machine.")
+        elseif cmd == "backup" && "--offsite" in rest
+            c = validate(load_config())
+            r = offsite!(c)
+            println("Copied $(r.stamp) off this machine ($(r.sent) new file(s)) to $(offsite_json(c)["where"])")
+        elseif cmd == "backups" && "--offsite" in rest
+            c = validate(load_config())
+            passphrase = "--recovery" in rest ? passphrase_prompt() : nothing
+            if "--check" in rest
+                r = check_offsite(c; passphrase)
+                println("$(r.stamp) restores: every part unsealed and checked, $(r.files) file(s), $(round(r.bytes / 1e6; digits = 1)) MB, the database intact.")
+            else
+                store = offsite_store(c)
+                copies = offsite_copies(c; store)
+                isempty(copies) && println("No copies in $(offsite_json(c)["where"]).")
+                for x in copies
+                    println(rpad(x.stamp, 20), Dates.format(x.at, "yyyy-mm-dd HH:MM"), " UTC", x.complete ? "" : "  incomplete")
+                end
+                store === nothing || println(has_offsite_recovery(store) ? "A recovery passphrase is set." :
+                                             "No recovery passphrase: set one with zemi backup --offsite-recovery.")
+            end
         elseif cmd == "backup"
             c = validate(load_config())
             path = backup!(c; keep = something(option(rest, "--keep"), ""))
@@ -184,8 +241,15 @@ function cli(args::AbstractVector{<:AbstractString})
             port = serving_port(c)
             port === nothing || "--force" in rest ||
                 error("something answers on port $port, the service's: stop it first (or pass --force if it is not this knowledge base)")
-            before = restore_backup!(c, rest[1]; config_files = "--config" in rest)
-            println("Restored $(rest[1]) into $(c.data_dir).", isempty(before) ? "" : " What was there is kept as the snapshot $before.")
+            config_files, included = "--config" in rest, "--include" in rest
+            name = something(option(rest, "--offsite"), rest[1])
+            before = if "--offsite" in rest
+                option(rest, "--offsite") === nothing && error("say which copy: zemi restore --offsite COPY (zemi backups --offsite lists them)")
+                restore_offsite!(c, name; passphrase = "--recovery" in rest ? passphrase_prompt() : nothing, config_files, included)
+            else
+                restore_backup!(c, name; config_files, included)
+            end
+            println("Restored $name into $(c.data_dir).", isempty(before) ? "" : " What was there is kept as the snapshot $before.")
         elseif cmd == "connect"
             return connect_cli(rest)
         elseif cmd == "token"

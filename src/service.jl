@@ -411,7 +411,7 @@ function start_local(; port::Integer = local_port(kb().config), dev::Bool = fals
     api = "http://127.0.0.1:$port"
     r = Running(dev ? :dev : :local, dev ? DEV_URL[] : "http://localhost:$port", api, server, Any[], Function[], hosted)
     record_served!(db.config, r)
-    dev || push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db))
+    dev || push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db), follow_offsite(db))
     push!(r.tasks, follow_task_vectors(db), follow_commits(db), follow_media(db), follow_ingest_history(db))
     load_plugins!(db.config)
     push!(r.tasks, follow_sources(db))
@@ -507,7 +507,7 @@ function start_shared(; kaimon_mode::Union{Symbol,Nothing} = nothing, dev::Bool 
     begin_sources() = (STARTING[] = false; push!(r.tasks, follow_sources(db)); catch_up_libraries!(db); upgrade_landscape(db))
     ready === nothing ? begin_sources() : @async (try wait(ready) catch end; begin_sources())
     db.config.dataset.role == :none || start_import(db)
-    push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db), follow_notifications(db))
+    push!(r.tasks, follow_dataset!(db), start_watch!(db), follow_backups(db), follow_offsite(db), follow_notifications(db))
     hosted && push!(r.tasks, start_autosync!(db))
     dev && push!(r.stops, start_dev!(db; api = "http://127.0.0.1:$(db.config.shared.port)", dev_port))
     return r

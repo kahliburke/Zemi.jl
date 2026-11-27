@@ -7802,6 +7802,124 @@ end
     end
 end
 
+@zset "backups off this machine" begin
+    D = K.Dates
+    # Sealing: what is sealed opens only with its key, as the object it was sealed as, unchanged.
+    k = rand(UInt8, 32)
+    sealed = K.seal(k, "snapshots/x/state", Vector{UInt8}("tides"))
+    @test String(K.unseal(k, "snapshots/x/state", sealed)) == "tides" && !occursin("tides", String(copy(sealed)))
+    @test_throws "Could not decrypt" K.unseal(k, "snapshots/y/state", sealed)
+    @test_throws "Could not decrypt" K.unseal(rand(UInt8, 32), "snapshots/x/state", sealed)
+    @test_throws "Could not decrypt" K.unseal(k, "snapshots/x/state", (b = copy(sealed); b[end] ⊻= 0x01; b))
+    @test K.aes128gcm(zeros(UInt8, 16), zeros(UInt8, 12), UInt8[]) == K.aes_gcm_seal(zeros(UInt8, 16), zeros(UInt8, 12), UInt8[])
+
+    root = mktempdir()
+    conf = joinpath(root, "conf", "config.toml")
+    mkpath(dirname(conf))
+    shelf = joinpath(root, "offsite")
+    mkpath(joinpath(root, "etc")); write(joinpath(root, "etc", "site.conf"), "serve the site")
+    write(conf, """data_dir = "../data"
+                   [backup]
+                   include = ["../etc"]
+                   [backup.offsite]
+                   store = "dir:$shelf"
+                   key = "file:backup_key"
+                   keep_days = 3
+                   """)
+    withenv("ZEMI_CONFIG" => conf) do
+        c = K.load_config()
+        @test c.backup.include == [joinpath(root, "etc")] && c.backup.offsite.key == "file:" * joinpath(root, "conf", "backup_key")
+        # A copy holds the config's secrets: none leaves without a key.
+        @test_throws "needs a key" K.validate(K.with_config(c; backup = K.BackupConfig(offsite = K.OffsiteConfig(store = c.backup.offsite.store))))
+        keyfile = K.new_offsite_key!(joinpath(root, "conf", "backup_key"))
+        @test occursin(r"^[0-9a-f]{64}\n$", read(keyfile, String))
+        Sys.isunix() && @test filemode(keyfile) & 0o077 == 0
+        @test_throws "already" K.new_offsite_key!(keyfile)
+        c = K.validate(c)
+        kb = K.open_kb(c)
+        try
+            mkpath(joinpath(c.data_dir, "pdfs")); write(joinpath(c.data_dir, "pdfs", "a.pdf"), "A"^100)
+            mkpath(joinpath(c.data_dir, "media", "m")); write(joinpath(c.data_dir, "media", "m", "up.png"), "png")
+            K.execute!(kb, "INSERT INTO kv VALUES ('probe', 'then')")
+            t0 = D.now(D.UTC) - D.Day(5)
+            s1 = K.snapshot!(c; at = t0)
+            @test "site.conf" in K.packed_names(s1)                                       # what [backup] include names
+            @test K.send_offsite!(c; snap = s1).sent == 2
+            # The store holds nothing readable: neither what the files say nor what they are called.
+            stored = [joinpath(d, f) for (d, _, fs) in walkdir(shelf) for f in fs]
+            @test !any(f -> occursin("AAAA", read(f, String)) || occursin("a.pdf", f) || occursin("png", read(f, String)), stored)
+            # A later copy sends only the files the store lacks.
+            rm(joinpath(c.data_dir, "pdfs", "a.pdf")); write(joinpath(c.data_dir, "pdfs", "b.pdf"), "B"^50)
+            s2 = K.snapshot!(c; at = t0 + D.Day(4))
+            @test K.send_offsite!(c; snap = s2).sent == 1
+            @test [x.stamp for x in K.offsite_copies(c)] == basename.([s2, s1]) && all(x -> x.complete, K.offsite_copies(c))
+            # Past keep_days a copy goes (the latest stays whatever its age), and then the files no copy names.
+            store = K.offsite_store(c)
+            @test K.thin_offsite!(c; at = D.now(D.UTC) + D.Day(2)) == [basename(s1)]
+            @test length(K.list_objects(store, "files/")) == 2 && [x.stamp for x in K.offsite_copies(c)] == [basename(s2)]
+            # The check fetches the latest whole, with the key, and finds its database intact.
+            @test K.check_offsite(c).stamp == basename(s2) && K.check_offsite(c).files == 2
+            # A recovery passphrase opens the copies too; another passphrase or another key opens nothing.
+            @test !K.has_offsite_recovery(store)
+            @test_throws "no recovery passphrase" K.check_offsite(c; passphrase = "tidal flats at dawn")
+            @test_throws "12 characters" K.set_offsite_recovery!(c, "short")
+            K.set_offsite_recovery!(c, "tidal flats at dawn")
+            @test K.has_offsite_recovery(store) && K.check_offsite(c; passphrase = "tidal flats at dawn").files == 2
+            @test_throws "not the store's recovery passphrase" K.check_offsite(c; passphrase = "tidal flats at dusk")
+            other = K.with_config(c; backup = K.BackupConfig(offsite = K.OffsiteConfig(store = c.backup.offsite.store,
+                                                              key = "file:" * K.new_offsite_key!(joinpath(root, "other_key")))))
+            @test_throws "not the key this store's copies were made with" K.check_offsite(other)
+            # The service sends one every every_hours.
+            @test K.offsite_due(c)
+            K.offsite!(c)
+            @test !K.offsite_due(c) && K.offsite_due(c; at = D.now(D.UTC) + D.Hour(25))
+            st = K.backup_json(c)["offsite"]
+            @test st["enabled"] && st["where"] == shelf && st["count"] == 1 && isempty(st["error"])
+            # The same through an S3-compatible bucket.
+            s3 = standin_s3(Dict("key" => "secret"))
+            try
+                creds = joinpath(root, "conf", "r2.toml")
+                write(creds, "access_key_id = \"key\"\nsecret_access_key = \"secret\"\n")
+                cs = K.with_config(c; backup = K.BackupConfig(offsite = K.OffsiteConfig(key = c.backup.offsite.key,
+                        store = K.StoreConfig(store = "s3", endpoint = s3.endpoint, bucket = "bucket", prefix = "kb", credentials = creds))))
+                @test K.send_offsite!(cs; snap = s2).sent == 2 && K.check_offsite(cs).stamp == basename(s2)
+            finally
+                close(s3.server)
+            end
+        finally
+            close(kb)
+        end
+        # What [backup] include names is put back only when asked.
+        rm(joinpath(root, "etc", "site.conf"))
+        latest = basename(K.latest_snapshot(c))
+        K.restore_backup!(c, latest)
+        @test !isfile(joinpath(root, "etc", "site.conf"))
+        K.restore_backup!(c, latest; included = true)
+        @test read(joinpath(root, "etc", "site.conf"), String) == "serve the site"
+    end
+    # A new machine: an empty data folder and a config naming only the store, put back from the store
+    # alone with the passphrase, config folder and all.
+    root2 = mktempdir()
+    conf2 = joinpath(root2, "conf", "config.toml")
+    mkpath(dirname(conf2))
+    write(conf2, "data_dir = \"../data\"\n[backup.offsite]\nstore = \"dir:$shelf\"\nkey = \"file:backup_key\"\n")
+    withenv("ZEMI_CONFIG" => conf2) do
+        c2 = K.validate(K.load_config())
+        latest = first(K.offsite_copies(c2)).stamp
+        @test_throws "no key file" K.restore_offsite!(c2, latest)                           # its key is not here
+        @test K.restore_offsite!(c2, latest; passphrase = "tidal flats at dawn", config_files = true) == ""
+        kb2 = K.open_kb(c2)
+        try
+            @test K.scalar(kb2, "SELECT value FROM kv WHERE key = 'probe'") == "then"
+            @test read(joinpath(c2.data_dir, "pdfs", "b.pdf"), String) == "B"^50 && !isfile(joinpath(c2.data_dir, "pdfs", "a.pdf"))
+            @test read(joinpath(c2.data_dir, "media", "m", "up.png"), String) == "png"
+            @test isfile(joinpath(root2, "conf", "backup_key"))                                # the key came back with the config
+        finally
+            close(kb2)
+        end
+    end
+end
+
 @zset "what others changed on a board" begin
     kb = open_kb(temp_config())
     ada, bea = K.person("Ada"), K.person("Bea")
