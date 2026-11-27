@@ -1569,6 +1569,10 @@ end
         # Ada's alone: her notes, and the paper her note brings in, which the group does not have.
         @test all(i -> K.document_holders(kb, i) == [ada] && K.scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (i,)) == "private",
                   [t, e, d, "2401.00001"])
+        # Her library's documents are those read from her space; whoever runs a knowledge base for
+        # themselves, whom none is held for, has those of their own space (here, none).
+        @test issubset([t, e, d], K.space_documents(kb, space))
+        @test isempty(K.library_documents(kb, K.local_caller())) && K.library_space(K.local_caller()) == "people/local"
         # A paper note brings its paper in, and its record refers to it; links are references to the notes' records and papers.
         @test only(K.mentions(kb, "2401.00001")).source == "obsidian"
         @test occursin("as @[estuaries](record:$e) show", text(t)) && occursin("A note on @[Tidal mixing](paper:2401.00001).", text(t))

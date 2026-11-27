@@ -104,6 +104,35 @@ function read_space!(kb::KB, space::AbstractString; job::Union{Job,Nothing} = no
     return nothing
 end
 
+"""
+    space_documents(kb, space) -> Set{String}
+
+The documents read from library `space`: its vaults' notes, its bibliographies' entries and its
+other PDFs. For whoever runs the knowledge base for themselves, whom no document is held for (see
+`document_holders`), these are their library.
+"""
+function space_documents(kb::KB, space::AbstractString)
+    state = load_library_state(kb, space)
+    prefix = "$space/"
+    notes = Set{String}(String(r.doc_id) for r in query(kb, """
+        SELECT p.doc_id FROM records r JOIN papers p ON p.id = r.paper_id
+        WHERE r.source = 'obsidian' AND substr(r.key, 1, ?) = ?""", (length(prefix), prefix)))
+    return union(notes, bib_documents(state), Set{String}(String(e["id"]) for e in values(get(state, "pdfs", Dict()))))
+end
+
+"""
+    library_documents(kb, caller) -> Set{String}
+
+The documents in `caller`'s library: those held for them (see [`held_documents`](@ref)), and those
+read from their library's space, which for whoever runs the knowledge base for themselves are all
+of it. None for a caller with no library.
+"""
+function library_documents(kb::KB, caller::Caller)
+    held = caller.user_id === nothing ? Set{String}() : held_documents(kb, caller.user_id)
+    space = try library_space(caller) catch e; reason(e) === nothing ? rethrow() : nothing end
+    return space === nothing ? held : union(held, space_documents(kb, space))
+end
+
 "The spaces waiting to be read, and the job reading them."
 const LIBRARY_READING = (; spaces = Set{String}(), job = Ref{Union{Job,Nothing}}(nothing), reading = Ref(""), lock = ReentrantLock())
 

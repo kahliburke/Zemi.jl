@@ -595,7 +595,7 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     m = read_explore(kb.config)
     v = view !== nothing ? view : m === nothing ? nothing : get(get(m, "views", Dict()), abstracts ? "all" : "read", nothing)
     docs = v === nothing ? Dict{String,Any}() : v["docs"]
-    held = caller.user_id === nothing ? Set{String}() : held_documents(kb, caller.user_id)
+    held = library_documents(kb, caller)
     byrow = Dict(Int(r.id) => d for (d, r) in rows)
     seen(id) = haskey(rows, id) && !(id in hidden) && String(rows[id].kind) in kinds
     shown(id) = seen(id) && (abstracts || Bool(rows[id].read))

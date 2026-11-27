@@ -400,7 +400,7 @@ end
 route!("GET", "/api/documents"; need = "library") do c
     state = get(c.params, "state", "")
     can(c.caller, "paper.manage") || state == "mine" || not_permitted("Not permitted (paper.manage): ask for state=mine, your own documents")
-    held = c.caller.user_id === nothing ? Set{String}() : held_documents(c.kb, c.caller.user_id)
+    held = library_documents(c.kb, c.caller)
     list_documents(c.kb; q = get(c.params, "q", ""), state, except = others_private(c.kb, c.caller), held,
                    limit = int_param(c.params, "limit", 50, 1:500), offset = int_param(c.params, "offset", 0, 0:typemax(Int)))
 end
