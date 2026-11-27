@@ -29,9 +29,11 @@ const pointed = shallowRef<GNode | null>(null)
 const tipAt = ref({ x: 0, y: 0 })
 let graph: any = null
 
-// Discs small enough to leave the names room.
-const radiusVal = (n: { id: string; links: number }) => (n.id === props.id ? 3 : 0.8 + Math.sqrt(n.links) * 0.5)
-const radius = (n: { id: string; links: number }) => Math.sqrt(radiusVal(n)) * 4
+// Discs a steady size on screen however far apart the neighbours lie: drawn at `rel` per unit of
+// √value, which the fit sets against the zoom it ends at (see `draw`).
+const radiusVal = (n: { id: string; links: number }) => (n.id === props.id ? 5 : 1.8 + Math.sqrt(n.links) * 0.6)
+let rel = 4
+const radius = (n: { id: string; links: number }) => Math.sqrt(radiusVal(n)) * rel
 const short = (t: string) => (t.length > 34 ? t.slice(0, 32).trimEnd() + '…' : t)
 const selfColour = () => (isDark.value ? '#ffffff' : '#111111')
 const similarColour = (s: number) => (isDark.value ? `rgba(200,200,255,${0.15 + 0.35 * s})` : `rgba(60,60,140,${0.15 + 0.35 * s})`)
@@ -78,7 +80,11 @@ async function draw() {
   // The more alike, the closer: a neighbour's distance from this document says how alike they are.
   graph.d3Force('link')?.strength((l: GLink) => (l.kind === 'similar' ? 0.8 : 0.3))
     .distance((l: GLink) => (l.kind === 'similar' ? 20 + (1 - (l.s ?? 0)) * 220 : 50))
-  setTimeout(() => graph?.zoomToFit(400, 40), 400)
+  rel = 4
+  setTimeout(() => {
+    graph?.zoomToFit(400, 40)
+    setTimeout(() => { if (graph) { rel = 4 / graph.zoom(); graph.nodeRelSize(rel) } }, 420)
+  }, 400)
 }
 
 // The named documents' short titles beside them, a constant size on screen: each on the right of its node,
