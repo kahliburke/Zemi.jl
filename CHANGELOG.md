@@ -13,6 +13,9 @@
 
 ### Changes
 
+- **Whoever runs a knowledge base for themselves has an account**, made from git's name and email
+  the first time it is run: an admin and a maintainer of every project, whom agents can ask and work
+  can be given to. What they were given by name, and their library, are theirs by account.
 - **Clusters by Leiden**: the landscape's clusters, and those a map of a part finds for itself, are
   the communities of the graph joining each document to its nearest in meaning, rather than k-means.
   They follow the map's regions more closely, and keep their papers and names as the library changes.

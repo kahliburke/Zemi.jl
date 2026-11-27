@@ -70,7 +70,7 @@ function codebase_dir(kb::KB, id::AbstractString)
 end
 
 """
-    add_codebase_from!(kb, what; by = nothing, anyway = false, caller = local_caller()) -> String
+    add_codebase_from!(kb, what; by = nothing, anyway = false, caller = local_caller(kb)) -> String
 
 A codebase from `what`: a repository's address (`https://…`, `ssh://…`, `git@host:…`, `file://…`),
 recorded with it and read from this knowledge base's clone of it (see [`fetch_codebase!`](@ref)); or a
@@ -78,7 +78,7 @@ folder on this machine, read where it is, which in a shared service `caller` add
 change its configuration (`config.edit`). Returns its id. One a person dropped is refused, unless
 `anyway` (see [`link_repository!`](@ref)).
 """
-function add_codebase_from!(kb::KB, what::AbstractString; by = nothing, anyway::Bool = false, caller::Caller = local_caller())
+function add_codebase_from!(kb::KB, what::AbstractString; by = nothing, anyway::Bool = false, caller::Caller = local_caller(kb))
     w = strip(what)
     occursin(r"^[a-z]+://|^[\w.-]+@[\w.-]+:", w) && return link_repository!(kb, w; by, anyway)
     SHARED_MODE[] && !can(caller, "config.edit") &&

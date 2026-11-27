@@ -4,9 +4,8 @@
 
 "The agent making a change through a tool, working for the person calling over /mcp or for whoever runs the knowledge base."
 function tool_actor()
-    c = something(mcp_caller(), agent_caller(), Some(nothing))
-    agent("Claude for " * something(mcp_person(), local_user(), "this machine");
-          id = c === nothing ? something(local_user(), "") : person_id(c))
+    c = tool_caller()
+    agent("Claude for " * (!isempty(c.name) ? c.name : !isempty(c.email) ? c.email : "this machine"); id = person_id(c))
 end
 
 """
@@ -19,7 +18,7 @@ function tool_caller()
     c = something(mcp_caller(), agent_caller(), Some(nothing))
     c === nothing || return c
     SHARED_MODE[] && EMBEDDED[] !== nothing && not_permitted("Not permitted: this tool call is from no one the service knows")
-    return local_caller()
+    return local_caller(kb())
 end
 
 """

@@ -176,7 +176,7 @@ end
 # Leaving: one's library removed, what one contributed kept (`{"confirm": true}`).
 route!("POST", "/api/library/remove"; need = "library") do c
     get(json_body(c), "confirm", false) === true || error("Removing your library cannot be undone: confirm it")
-    c.caller.user_id === nothing && error("A library run for one person is removed with its data folder")
+    (c.caller.user_id === nothing || c.caller.via in (:local, :owner)) && error("A library run for one person is removed with its data folder")
     r = remove_library!(c.kb, c.caller.user_id)
     Dict("files" => r.files, "documents" => r.documents)
 end

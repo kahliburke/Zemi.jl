@@ -19,7 +19,8 @@ write(config, """
     """)
 ENV["ZEMI_CONFIG"] = config
 ENV["ZEMI_SITE_NOTEBOOKS"] = "0"            # they cite papers this knowledge base does not have
-K.LOCAL_USER[] = "Rowan"
+ENV["ZEMI_OWNER_NAME"] = "Rowan"            # whoever runs it, its owner's account (see `owner`)
+ENV["ZEMI_OWNER_EMAIL"] = "rowan@example.org"
 
 "Projects, tasks in every column, subtasks, a milestone, a plan with mathematics, an agent's question, a finding and a paper."
 function seed!(kb)

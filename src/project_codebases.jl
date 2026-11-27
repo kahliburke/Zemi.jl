@@ -155,7 +155,7 @@ named_codebases(s::AbstractString) = String.(filter(!isempty, strip.(split(s, r"
 
 """
     project_codebase!(kb, key, codebases; remove = false, main = false, forks = false, auto = false, add = true,
-                      read = true, by, caller = local_caller()) -> Vector{String}
+                      read = true, by, caller = local_caller(kb)) -> Vector{String}
 
 Link project `key` to each of `codebases` (one, or several as [`named_codebases`](@ref) reads them):
 a codebase (`code-…`), a repository's address or a folder (see [`codebase_id`](@ref), for `add` and
@@ -169,7 +169,7 @@ codebases linked or unlinked.
 """
 function project_codebase!(kb::KB, key::AbstractString, codebases; remove::Bool = false, main::Bool = false,
                            forks::Bool = false, auto::Bool = false, add::Bool = true, read::Bool = true, by::Actor,
-                           caller::Caller = local_caller())
+                           caller::Caller = local_caller(kb))
     pid = project_id(kb, key)
     names = codebases isa AbstractString ? named_codebases(codebases) : String.(codebases)
     isempty(names) && error("Name a codebase: its id (code-…), a repository's address, a folder, or github.com/<organization>")
@@ -265,7 +265,7 @@ end
 
 """
     choose_org!(kb, pid, host, owner; take = [], untake = [], decline = [], undecline = [], add = true, read = true,
-                by, caller = local_caller()) -> Vector{String}
+                by, caller = local_caller(kb)) -> Vector{String}
 
 Choose among the candidates of organization `owner` in `pid`'s scope, by their repositories'
 addresses: `take` them (linked to the project, or for the knowledge base, added to it; read together
@@ -275,7 +275,7 @@ them. Returns the codebases taken.
 """
 function choose_org!(kb::KB, pid::Scope, host::AbstractString, owner::AbstractString; take = String[], untake = String[],
                      decline = String[], undecline = String[], add::Bool = true, read::Bool = true, by::AbstractString,
-                     caller::Caller = local_caller())
+                     caller::Caller = local_caller(kb))
     oid = find_org(kb, pid, host, owner)
     oid === nothing && not_found("$host/$owner is not listed here")
     candidates = Set(String(r.remote) for r in query(kb, "SELECT remote FROM org_repositories WHERE org_id = ?", (oid,)))

@@ -275,7 +275,7 @@ function spawn_who!(m::ConnectApp)
     site = get(m.config, "site", "")
     isempty(site) && return
     TK.spawn_task!(m.tq, :who) do
-        site == "local" && return something(local_user(), "")
+        site == "local" && return owner_identity().name
         auth = load_connect_auth()
         get(auth, "site", "") == site || return ""
         r = HTTP.get("$site/api/library", ["Authorization" => "Bearer " * auth["access"]]; status_exception = false, connect_timeout = 10)

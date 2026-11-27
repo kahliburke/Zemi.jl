@@ -119,14 +119,14 @@ log_failure(req::HTTP.Request, e, bt) =
                             @warn("API request refused: $(reason(e))", target = req.target)
 
 """
-    handle(kb, req, caller = local_caller()) -> HTTP.Response
+    handle(kb, req, caller = local_caller(kb)) -> HTTP.Response
 
 Answer one request from `caller` with its route, if they have the permission it needs. Whether a
 change is allowed at all from where it came (this machine's pages, or the shared service's own) is
 the server's to decide before it gets here. Failures come back as JSON with a 4xx or 500 status
 (see `error_status`), and every change, done or refused, goes in the audit log.
 """
-function handle(kb::KB, req::HTTP.Request, caller::Caller = local_caller())
+function handle(kb::KB, req::HTTP.Request, caller::Caller = local_caller(kb))
     req.method == "OPTIONS" && return HTTP.Response(204)
     uri = HTTP.URI(req.target)
     params = HTTP.queryparams(uri)

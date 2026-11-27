@@ -281,7 +281,7 @@ function follow_connect(kb::KB; every::Real = CONNECT_EVERY)
                     continue
                 end
                 try
-                    sync_pass!(s; remote = InProcessLibrary(kb, local_caller()))
+                    sync_pass!(s; remote = InProcessLibrary(kb, local_caller(kb)))
                 catch e
                     @warn "Syncing zemi connect's folders failed" exception = e
                 end

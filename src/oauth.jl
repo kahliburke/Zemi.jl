@@ -256,7 +256,7 @@ function oauth_token!(kb::KB, form::AbstractDict)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                  (c.user_id, "$name (connected)", secret_hash(access), first(access, 10), JSON.json(perms), now_iso(),
                   iso_in(OAUTH_ACCESS), client, secret_hash(refresh), scope))
-        audit!(kb, owner ? owner_caller(:session) : account_caller(kb, c.user_id, :session), "oauth.connect"; detail = Dict("client" => name))
+        audit!(kb, owner ? owner_caller(kb, :session) : account_caller(kb, c.user_id, :session), "oauth.connect"; detail = Dict("client" => name))
     elseif grant == "refresh_token"
         r = query(kb, "SELECT * FROM api_tokens WHERE refresh_hash = ?", (secret_hash(get(form, "refresh_token", "")),))
         isempty(r) && throw(OAuthError("invalid_grant", "unknown refresh token"))
@@ -363,7 +363,7 @@ function oauth_response(kb::KB, sh::SharedConfig, req::HTTP.Request, parts, para
             # Bound to the knowledge base's key, which only its owner's browser has: no other page can
             # post an approval here.
             key = secret_hash("oauth|$(local_key(kb.config))|$(request.client_id)|$(request.redirect_uri)")
-            req.method == "GET" && return html(consent_page(request, something(local_user(), "you"), keep(), key; owner = true, theme))
+            req.method == "GET" && return html(consent_page(request, (n = local_caller(kb).name; n == "this machine" ? "you" : n), keep(), key; owner = true, theme))
             get(fields, "form_key", "") == key || return html(page("Not connected", "<p>This approval did not come from this knowledge base's page.</p>"); status = 403)
             get(fields, "decision", "") == "allow" ||
                 return redirect(back_to(request.redirect_uri, "error" => "access_denied", "state" => request.state))

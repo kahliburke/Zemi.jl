@@ -96,7 +96,7 @@ shared_config(; kw...) = K.SharedConfig(; base_url = "http://127.0.0.1:8800", ad
     @test K.quota_left(kb, learner, "notebook") == 0 && (try K.spend!(kb, learner, "notebook"); false catch; true end)
     @test K.quota_left(kb, K.session_caller(kb, K.start_session!(kb, reader, open_sh)), "tutor") == 0
     @test K.quota_left(kb, K.session_caller(kb, K.start_session!(kb, boss, sh)), "tutor") === nothing
-    @test K.quota_left(kb, K.local_caller(), "tutor") === nothing
+    @test K.quota_left(kb, K.local_caller(kb), "tutor") === nothing
 
     # The audit log.
     K.audit!(kb, learner, "token.create"; target = "laptop", detail = Dict("permissions" => ["read"]))
@@ -321,7 +321,7 @@ end
     @test call(reader, "GET", "/api/documents?state=mine")[1] == 200                              # their own library
     # One job is its starter's to follow, which needs no more than reading.
     @test K.find_route("GET", ["api", "jobs", "j3"])[1].need == "read"
-    @test call(K.local_caller(), "GET", "/api/documents")[1] == 200
+    @test call(K.local_caller(kb), "GET", "/api/documents")[1] == 200
 
     # Conversations are their owner's alone.
     for (id, owner) in (("cmine", learner.user_id), ("ctheirs", other.user_id))
@@ -330,7 +330,7 @@ end
     @test [c["id"] for c in call(learner, "GET", "/api/chats/2609.00001")[2]] == ["cmine"]
     @test call(learner, "GET", "/api/chat/ctheirs")[1] == 404 && call(learner, "GET", "/api/chat/ctheirs/files/x.svg")[1] == 404
     @test call(learner, "POST", "/api/chat", Dict("paper" => "2609.00001", "message" => "hi", "chat" => "ctheirs"))[1] == 404
-    @test length(call(K.local_caller(), "GET", "/api/chats/2609.00001")[2]) == 2       # run for one person: all of them
+    @test length(call(K.local_caller(kb), "GET", "/api/chats/2609.00001")[2]) == 2       # run for one person: all of them
     # A paper the knowledge base does not have is added only by someone who may add papers.
     for (route, field) in (("/api/chat", "paper"), ("/api/notebook", "id"))
         s, r = call(learner, "POST", route, Dict(field => "2609.09999", "message" => "hi"))
@@ -628,7 +628,7 @@ end
         @test call(rowan, "POST", "/api/documents/code-none/access", Dict("access" => "projects"))[1] == 404
         @test call(rowan, "POST", "/api/documents/$id/access", Dict("access" => "projects")) == (200, Dict("id" => id, "access" => "projects"))
         @test K.document_visible(kb, as(ada), id) && !K.document_visible(kb, as(bea), id) && !K.document_visible(kb, as(rowan), id)
-        @test K.document_visible(kb, as(boss), id) && K.document_visible(kb, K.local_caller(), id)    # projects.all; run for one person
+        @test K.document_visible(kb, as(boss), id) && K.document_visible(kb, K.local_caller(kb), id)    # projects.all; run for one person
         @test K.hidden_documents(kb, as(bea)) == Set([id]) && isempty(K.hidden_documents(kb, as(ada)))
 
         # To anyone else it is none: not listed, not found, not read.
@@ -712,7 +712,7 @@ end
         @test JSON.parse(text(site(ada, "/kb-data/code/$id/src_Tide_jl.json")))["path"] == "src/Tide.jl"
         @test [x["id"] for x in JSON.parse(text(site(ada, "/code/$id/notebooks/src_notes_jl.json")))["cells"]] == ["intro", "run"]
         @test site(ada, "/kb-data/code/$id/src_None_jl.json").status == 404 && site(ada, "/code/$id/notebooks/src_Tide_jl.json").status == 404
-        @test K.codebase_site_response(kb, K.local_caller(), "/kb-data/codebase/$id/index.json").status == 200   # run for one person
+        @test K.codebase_site_response(kb, K.local_caller(kb), "/kb-data/codebase/$id/index.json").status == 200   # run for one person
 
         # Nor does the dataset carry it: other members' services would show it to all their readers.
         K.set_shared!(kb, [id], true)
@@ -745,7 +745,7 @@ end
         K.execute!(kb, "INSERT INTO papers (doc_id, title, added_at, kind, access) VALUES ('note-survey', 'Survey notes', ?, 'note', 'projects')",
                    (K.now_iso(),))
         @test K.document_kind("note-survey") === note && isempty(K.document_projects(kb, "note-survey"))
-        @test !K.document_visible(kb, as(ada), "note-survey") && K.document_visible(kb, K.local_caller(), "note-survey")
+        @test !K.document_visible(kb, as(ada), "note-survey") && K.document_visible(kb, K.local_caller(kb), "note-survey")
         K.link_document!(kb, "note-survey", "RF")
         @test K.document_projects(kb, "note-survey") == ["RF"] && K.documents_projects(kb)["note-survey"] == ["RF"]
         @test K.document_visible(kb, as(ada), "note-survey") && !K.document_visible(kb, as(bea), "note-survey")
@@ -788,7 +788,7 @@ end
         id = only(K.add_papers!(kb, ["2609.00002"]; holder = ada))
         @test access(id) == "private" && K.document_holders(kb, id) == [ada]
         @test K.document_visible(kb, as(ada), id) && !K.document_visible(kb, as(bea), id) && !K.document_visible(kb, as(boss), id)
-        @test K.document_visible(kb, K.local_caller(), id)                                       # run for one person
+        @test K.document_visible(kb, K.local_caller(kb), id)                                       # run for one person
         @test K.hidden_documents(kb, as(boss)) == Set([id]) && isempty(K.hidden_documents(kb, as(ada)))
         @test_throws "No paper $id" K.seen_document(kb, as(boss), id)
         @test !(id in [d.id for d in K.list_documents(kb; except = K.others_private(kb, as(boss))).documents])
@@ -879,7 +879,7 @@ end
         tc = K.token_caller(kb, t)
         @test call(tc, "GET", "/api/library/files")[1] == 200 && call(tc, "GET", "/api/search?q=reef")[1] == 403
         # Run for one person, the space is theirs.
-        @test K.library_space(K.local_caller()) == "people/local"
+        @test K.library_space(K.local_caller(kb)) == "people/local"
     finally
         K.READ_LIBRARIES[] = true
         close(kb)
@@ -919,7 +919,7 @@ end
     try
         # Linked to no project, it is seen only by those who manage documents, and whoever runs it alone.
         @test K.paper_row(kb, id).access == "projects" && isempty(K.document_projects(kb, id))
-        @test K.document_visible(kb, as(rowan), id) && K.document_visible(kb, as(boss), id) && K.document_visible(kb, K.local_caller(), id)
+        @test K.document_visible(kb, as(rowan), id) && K.document_visible(kb, as(boss), id) && K.document_visible(kb, K.local_caller(kb), id)
         @test !K.document_visible(kb, as(ada), id) && !K.document_visible(kb, as(bea), id)
         # Those who manage documents link it to a project, whose members then see it.
         @test call(bea, "POST", "/api/documents/$id/projects", Dict("project" => "PU"))[1] == 403
@@ -1070,7 +1070,7 @@ end
         # Cited as a record: dated to the day, described by how it was made.
         @test data["cite"]["reference"] == "@$id" && occursin("(2026, October 2). Pump test review [Meeting notes written up by a tool].", data["cite"]["citation"])
         # Run for one person, every record is theirs; open, it is still served, never built.
-        @test K.record_site_response(kb, K.local_caller(), "/kb-data/records/$id.json").status == 200
+        @test K.record_site_response(kb, K.local_caller(kb), "/kb-data/records/$id.json").status == 200
         K.set_document_access!(kb, id, "open")
         @test site(bea, "/kb-data/records/$id.json").status == 200
         write_site(kb, site_dir, public; related = false)
@@ -1615,7 +1615,7 @@ end
         middle = "p = run(Cmd(`$inner \$(getpid())`; detach = true); wait = false); println(getpid(p))"
         pid = parse(Int, readchomp(`$julia --startup-file=no -e $middle`))
         alive(p) = ccall(:kill, Cint, (Cint, Cint), p, 0) == 0
-        deadline = time() + 30
+        deadline = time() + 90                 # a new Julia process starts slowly on a busy machine
         while alive(pid) && time() < deadline
             sleep(0.5)
         end
@@ -1846,7 +1846,7 @@ end
     @test "zemi.ingest" in K.mcp_tools(K.token_caller(kb, ct)) && "zemi.job_status" in K.mcp_tools(K.token_caller(kb, ct))
     @test K.mcp_tools(K.token_caller(kb, narrow)) == ["zemi.$t" for t in ("daily", "figure", "figures", "page", "paper", "papers", "read", "records", "references", "search", "similar", "status")]
     @test "zemi.plan" in K.mcp_tools(K.token_caller(kb, ct)) && !("zemi.plan" in K.mcp_tools(K.token_caller(kb, rt)))
-    @test !any(t -> occursin(r"add_pdf|ingest_code", t), K.mcp_tools(K.local_caller()))
+    @test !any(t -> occursin(r"add_pdf|ingest_code", t), K.mcp_tools(K.local_caller(kb)))
 
     # A stand-in for the service's Kaimon, which records what reaches it. Each session it opens has an
     # id of its own; ending one answers `ends[]` (Kaimon may refuse it and keep the session).
@@ -2403,7 +2403,7 @@ end
     @test serve("POST", "/api/actions"; headers = auth, body = "{}").status == 403  # paper.manage
     @test serve("GET", "/"; headers = auth).status == 401
     caller = K.token_caller(kb, t["access_token"])
-    @test caller.user_id === nothing && caller.permissions == Set(["read"]) && caller.via == :owner
+    @test caller.user_id == K.owner(kb).id && caller.permissions == Set(["read"]) && caller.via == :owner
     # It sees what the owner sees: a record of a vault, linked to no project, too.
     K.execute!(kb, "INSERT INTO papers (doc_id, title, added_at, kind, access) VALUES ('rec-note', 'Note', '2026-11-01T00:00:00Z', 'record', 'projects')")
     @test K.document_visible(kb, caller, "rec-note") && isempty(K.hidden_documents(kb, caller))
@@ -2727,7 +2727,7 @@ end
             st = K.read_connect_status()
             @test st["by"] == K.LOCAL_SYNCER && st["pid"] == getpid() && only(st["folders"])["state"] in ("in step", "syncing")
             # The library's page says so.
-            machine() = K.library_overview(kb, K.local_caller())["this_machine"]
+            machine() = K.library_overview(kb, K.local_caller(kb))["this_machine"]
             @test machine()["by"] == K.LOCAL_SYNCER && only(machine()["folders"])["name"] == "Notes" && !machine()["paused"]
             # A pass asked for is made at once.
             write(joinpath(vault, "Currents.md"), "Rip currents.\n")

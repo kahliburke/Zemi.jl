@@ -93,16 +93,93 @@ Caller(user_id, name, email, permissions, via, token_id) = Caller(user_id, name,
 Caller(user_id, name, email, permissions, via, token_id, projects) = Caller(user_id, name, email, permissions, via, token_id, projects, nothing)
 
 const ANONYMOUS = Caller(nothing, "", "", Set{String}(), :anonymous, nothing)
-local_caller() = Caller(nothing, something(local_user(), "this machine"), "", Set(PERMISSION_NAMES), :local, nothing)
+
+"""
+    owner(kb) -> Union{NamedTuple,Nothing}
+
+The account of whoever runs knowledge base `kb` for themselves, `(; id, name, email)`: made the first
+time it is asked for (see [`make_owner!`](@ref)), and kept in the knowledge base, so no setting of the
+process changes who it is. `nothing` in a shared service, whose people sign in.
+"""
+function owner(kb::KB)
+    SHARED_MODE[] && return nothing
+    r = query(kb, "SELECT u.id, u.name, u.email FROM kv JOIN users u ON u.id = CAST(kv.value AS INTEGER) WHERE kv.key = 'owner'")
+    isempty(r) && (make_owner!(kb); r = query(kb, "SELECT u.id, u.name, u.email FROM kv JOIN users u ON u.id = CAST(kv.value AS INTEGER) WHERE kv.key = 'owner'"))
+    o = first(r)
+    return (; id = Int(o.id), name = String(o.name), email = String(o.email))
+end
+
+"""
+    owner_identity() -> (; name, email)
+
+Who runs a knowledge base for themselves, for their account when it is made: `ZEMI_OWNER_NAME` and
+`ZEMI_OWNER_EMAIL`, else git's `user.name` and `user.email`, else the system's user name.
+"""
+function owner_identity()
+    git(key) = try String(strip(readchomp(pipeline(`git config $key`; stderr = devnull)))) catch; "" end
+    first_of(xs...) = something((x for x in xs if !isempty(x))..., "")
+    user = get(ENV, "USER", get(ENV, "USERNAME", "owner"))
+    return (; name = first_of(get(ENV, "ZEMI_OWNER_NAME", ""), git("user.name"), user),
+              email = first_of(get(ENV, "ZEMI_OWNER_EMAIL", ""), git("user.email"), "$user@localhost"))
+end
+
+"""
+The columns naming a person as [`person_id`](@ref) does: by their name where they had no account
+(run for one person), by their account's email where they have one.
+"""
+const PERSON_COLUMNS = (("tasks", "assignee"), ("task_events", "to_person"), ("task_events", "by_person"),
+                        ("finding_versions", "by_person"), ("finding_evidence", "by_person"), ("finding_comments", "by_person"))
+
+"""
+    make_owner!(kb; name, email) -> Int
+
+Make the account of whoever runs `kb` for themselves (see [`owner`](@ref)), or take the one with
+`email`: an admin, and a maintainer of every project. The work its person was given by name (tasks
+assigned, questions asked of them) is theirs by account from then on, and the documents read from
+their library (`people/local`) are held for them. Returns its id.
+
+What they wrote, named by their name (`by_person`), is theirs by account too, and shows the name the
+account has (see [`named_now`](@ref)).
+"""
+function make_owner!(kb::KB; name::AbstractString = owner_identity().name, email::AbstractString = owner_identity().email)
+    ensure_roles!(kb)
+    id = Ref(0)
+    transaction(kb) do
+        have = scalar(kb, "SELECT value FROM kv WHERE key = 'owner'")
+        ismissing(have) || return (id[] = parse(Int, have))
+        uid = scalar(kb, "SELECT id FROM users WHERE email = ?", (email,))
+        ismissing(uid) && (uid = scalar(kb, "INSERT INTO users (email, name, created_at) VALUES (?, ?, ?) RETURNING id", (email, name, now_iso())))
+        id[] = Int(uid)
+        execute!(kb, "INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, 'Admin')", (uid,))
+        execute!(kb, "INSERT INTO kv VALUES ('owner', ?)", (string(uid),))
+        foreach(((t, col),) -> execute!(kb, "UPDATE $t SET $col = ? WHERE $col = ?", (email, name)), PERSON_COLUMNS)
+        execute!(kb, """INSERT OR IGNORE INTO project_members (project_id, user_id, role, added_at, added_by)
+                        SELECT id, ?, 'maintainer', ?, ? FROM projects""", (uid, now_iso(), name))
+        foreach(d -> hold_document!(kb, d, uid), space_documents(kb, "people/local"))
+    end
+    return id[]
+end
+
+"""
+    local_caller(kb) -> Caller
+
+Whoever runs knowledge base `kb` for themselves, on this machine: their account (see [`owner`](@ref)),
+with every permission. In a shared service, the service itself, no one's account.
+"""
+function local_caller(kb::KB)
+    o = owner(kb)
+    o === nothing && return Caller(nothing, "this machine", "", Set(PERMISSION_NAMES), :local, nothing)
+    return Caller(o.id, o.name, o.email, Set(PERMISSION_NAMES), :local, nothing)
+end
 
 "Whether `caller` may do what `permission` allows."
 can(c::Caller, permission::AbstractString) = permission in c.permissions
 
-"The name additions are recorded under: the person's, or whoever runs the knowledge base."
-caller_name(c::Caller) = isempty(c.name) ? something(local_user(), "") : c.name
+"The name additions are recorded under: the person's."
+caller_name(c::Caller) = c.name
 
-"How tasks are assigned and questions addressed to `c`: their email in the shared service, else their name."
-person_id(c::Caller) = c.via == :local ? caller_name(c) : c.email
+"How tasks are assigned and questions addressed to `c`: their account's email, else (no account) their name."
+person_id(c::Caller) = isempty(c.email) ? c.name : c.email
 
 """
     named_now(who, by_agent, person) -> String
@@ -488,7 +565,7 @@ function token_caller(kb::KB, token::AbstractString; mcp::Bool = false)
     # to the shared service.
     ismissing(t.user_id) && SHARED_MODE[] && return ANONYMOUS
     only = Set{String}(JSON.parse(t.permissions))
-    caller = ismissing(t.user_id) ? owner_caller(:owner; token_id = Int(t.id), only) :
+    caller = ismissing(t.user_id) ? owner_caller(kb, :owner; token_id = Int(t.id), only) :
              account_caller(kb, t.user_id, :token; token_id = Int(t.id), only,
                             projects = ismissing(t.projects) ? nothing : Set{String}(JSON.parse(t.projects)))
     if caller !== ANONYMOUS
@@ -500,14 +577,14 @@ function token_caller(kb::KB, token::AbstractString; mcp::Bool = false)
 end
 
 """
-    owner_caller(via; token_id = nothing, only = nothing) -> Caller
+    owner_caller(kb, via; token_id = nothing, only = nothing) -> Caller
 
 The person who runs a knowledge base for one person (see [`local_caller`](@ref)), as a token or an
 approval of theirs acts: with the permissions in `only`, where given.
 """
-function owner_caller(via::Symbol; token_id = nothing, only = nothing)
-    c = local_caller()
-    return Caller(nothing, c.name, "", only === nothing ? c.permissions : intersect(c.permissions, only), via, token_id)
+function owner_caller(kb::KB, via::Symbol; token_id = nothing, only = nothing)
+    c = local_caller(kb)
+    return Caller(c.user_id, c.name, c.email, only === nothing ? c.permissions : intersect(c.permissions, only), via, token_id)
 end
 
 """

@@ -105,7 +105,7 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             oauth_response(kb, sh, req, parts, params)
         elseif !isempty(parts) && parts[1] == "api"
             if !shared
-                local_host(req) ? respond_local(kb, req; caller = something(token, local_caller())) :
+                local_host(req) ? respond_local(kb, req; caller = something(token, local_caller(kb))) :
                                   json_response(Dict("error" => "Not this machine's address"); status = 403)
             elseif req.method == "POST" && !shared_write_allowed(sh, req)
                 json_response(Dict("error" => "Only from this site's pages, or with a token."); status = 403)
@@ -147,7 +147,7 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             HTTP.Response(403, ["Content-Type" => "text/plain; charset=utf-8"], "Not permitted (read).")
         else
             # A codebase the site is built without, any record and any paper not open to all are answered here, to those who may see them.
-            caller, path = shared ? caller : local_caller(), HTTP.unescapeuri(uri.path)
+            caller, path = shared ? caller : local_caller(kb), HTTP.unescapeuri(uri.path)
             live = codebase_site_response(kb, caller, path; req)
             live === nothing && (live = record_site_response(kb, caller, path; req))
             live === nothing && (live = closed_paper_response(kb, caller, path; req))
@@ -237,7 +237,7 @@ function warm_up(kb::KB; shared::Bool = false)
         end
     end
     for t in targets
-        try handle(kb, HTTP.Request("GET", t), local_caller()) catch end
+        try handle(kb, HTTP.Request("GET", t), local_caller(kb)) catch end
     end
     try
         shared && sign_in_page(kb.config.shared)

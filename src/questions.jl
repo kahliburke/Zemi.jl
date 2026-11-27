@@ -50,8 +50,13 @@ task's assignee, or anyone when no person is assigned.
 function question_recipient(kb::KB, ref::AbstractString, by::Actor, to::AbstractString; replied = nothing)
     to = strip(to)
     if isempty(to)
-        replied === nothing || return !isempty(replied.by_person) ? ("person", String(replied.by_person)) :
-                                      replied.by_agent == 1 ? ("agents", "") : ("anyone", "")
+        # Asked back: to whoever asked the first, the person an agent works for, unless it is they who ask
+        # back about their own agent's question, which goes to the agents.
+        if replied !== nothing
+            own = replied.by_agent == 1 && !by.agent && !isempty(by.id) && replied.by_person == by.id
+            return own ? ("agents", "") : !isempty(replied.by_person) ? ("person", String(replied.by_person)) :
+                   replied.by_agent == 1 ? ("agents", "") : ("anyone", "")
+        end
         by.agent || return ("agents", "")
         a = coalesce(scalar(kb, "SELECT assignee FROM tasks WHERE id = ?", (task_ref(kb, ref),)), "")
         return isempty(a) || startswith(a, "agent:") ? ("anyone", "") : ("person", String(a))
@@ -168,7 +173,8 @@ end
     answered_questions(kb, me) -> Vector{NamedTuple}
 
 The questions person `me` asked, themselves or through an agent working for them, that a comment
-answers, not resolved, while they have not written on the task since the answer: each task, as [`tasks`](@ref) gives it, with the `question`, its
+answers, not resolved, while they have not written on the task since the answer (nor written the
+answer themselves, to their agent's question): each task, as [`tasks`](@ref) gives it, with the `question`, its
 `note`, the first `answer` and who wrote it (`answerer`), the latest answer first.
 """
 function answered_questions(kb::KB, me::AbstractString)
@@ -178,7 +184,7 @@ function answered_questions(kb::KB, me::AbstractString)
             FROM task_events e JOIN tasks t ON t.id = e.task_id
             JOIN task_events a ON a.id = (SELECT min(r.id) FROM task_events r WHERE r.reply_to = e.id AND r.kind = 'comment')
             WHERE e.kind = 'question' AND e.by_person = ? AND e.resolved_at IS NULL AND t.archived_at IS NULL
-              AND NOT EXISTS (SELECT 1 FROM task_events w WHERE w.task_id = e.task_id AND w.id > a.id AND w.by_agent = 0
+              AND NOT EXISTS (SELECT 1 FROM task_events w WHERE w.task_id = e.task_id AND w.id >= a.id AND w.by_agent = 0
                               AND w.by_person = ? AND w.kind IN ('comment', 'question'))
             ORDER BY a.id DESC""", (me, me))
         r = query(kb, TASK_SELECT * " WHERE t.id = ?", (q.task_id,))

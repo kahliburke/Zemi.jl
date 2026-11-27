@@ -7,8 +7,15 @@
 "Whether a change to a space through the API has it read (tests that read spaces themselves turn it off)."
 const READ_LIBRARIES = Ref(true)
 
-"The person whose space `space` is (their user id), or `nothing` for whoever runs the knowledge base on their own machine."
-space_holder(space::AbstractString) = (m = match(r"^people/(\d+)$", space); m === nothing ? nothing : parse(Int, m[1]))
+"""
+The person whose space `space` is (their user id): `people/<id>`'s, or `people/local`'s, whoever runs
+the knowledge base on their own machine (see [`owner`](@ref)); `nothing` for any other.
+"""
+function space_holder(kb::KB, space::AbstractString)
+    space == "people/local" && return (o = owner(kb); o === nothing ? nothing : o.id)
+    m = match(r"^people/(\d+)$", space)
+    return m === nothing ? nothing : parse(Int, m[1])
+end
 
 "What is known of how a space was last read: its vaults, and each PDF's hash and document."
 library_state_key(space::AbstractString) = "library_state:" * space
@@ -67,7 +74,7 @@ documents, a changed one again. A document none of the space's files brings in a
 held for its person (see [`release!`](@ref)).
 """
 function read_space!(kb::KB, space::AbstractString; job::Union{Job,Nothing} = nothing)
-    holder = space_holder(space)
+    holder = space_holder(kb, space)
     files = library_files(kb, space)
     state = load_library_state(kb, space)
     run = SourceRun(kb, registered_source("obsidian"), job; holder)
@@ -108,8 +115,8 @@ end
     space_documents(kb, space) -> Set{String}
 
 The documents read from library `space`: its vaults' notes, its bibliographies' entries and its
-other PDFs. For whoever runs the knowledge base for themselves, whom no document is held for (see
-`document_holders`), these are their library.
+other PDFs. Those of `people/local`, read before its person had an account, are held for them when it
+is made (see [`make_owner!`](@ref)).
 """
 function space_documents(kb::KB, space::AbstractString)
     state = load_library_state(kb, space)
@@ -118,19 +125,6 @@ function space_documents(kb::KB, space::AbstractString)
         SELECT p.doc_id FROM records r JOIN papers p ON p.id = r.paper_id
         WHERE r.source = 'obsidian' AND substr(r.key, 1, ?) = ?""", (length(prefix), prefix)))
     return union(notes, bib_documents(state), Set{String}(String(e["id"]) for e in values(get(state, "pdfs", Dict()))))
-end
-
-"""
-    library_documents(kb, caller) -> Set{String}
-
-The documents in `caller`'s library: those held for them (see [`held_documents`](@ref)), and those
-read from their library's space, which for whoever runs the knowledge base for themselves are all
-of it. None for a caller with no library.
-"""
-function library_documents(kb::KB, caller::Caller)
-    held = caller.user_id === nothing ? Set{String}() : held_documents(kb, caller.user_id)
-    space = try library_space(caller) catch e; reason(e) === nothing ? rethrow() : nothing end
-    return space === nothing ? held : union(held, space_documents(kb, space))
 end
 
 "The spaces waiting to be read, and the job reading them."

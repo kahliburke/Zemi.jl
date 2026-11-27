@@ -3,7 +3,7 @@
 
 """
     create_project!(kb, name; key, description = "", codebase = "", owner = nothing, add_codebase = true, by,
-                    caller = local_caller()) -> String
+                    caller = local_caller(kb)) -> String
 
 A project, with `key`, the short prefix of its tasks' references (`KB` for `KB-12`): letters and
 digits, made uppercase. `codebase` is its first codebase, its main one (see project_codebases.jl): a
@@ -16,7 +16,7 @@ the key; the same project asked for again by the same person moments later is th
 """
 function create_project!(kb::KB, name::AbstractString; key::AbstractString, description::AbstractString = "",
                          codebase::AbstractString = "", owner::Union{Integer,Nothing} = nothing, add_codebase::Bool = true,
-                         by::Actor, caller::Caller = local_caller())
+                         by::Actor, caller::Caller = local_caller(kb))
     key = uppercase(strip(key))
     occursin(r"^[A-Z][A-Z0-9]{0,9}$", key) || error("A project key is a letter and up to nine letters or digits: $key")
     isempty(strip(name)) && error("A project needs a name")
@@ -38,7 +38,7 @@ function create_project!(kb::KB, name::AbstractString; key::AbstractString, desc
 end
 
 """
-    codebase_id(kb, codebase; add = true, caller = local_caller())
+    codebase_id(kb, codebase; add = true, caller = local_caller(kb))
 
 The id of codebase `codebase` (`code-…`, a repository's address, or a folder on this machine, whose
 codebase is recorded if new); `missing` when it is empty or `none`, and an error for anything else. A
@@ -52,7 +52,7 @@ they decide who sees codebases (`paper.manage`).
 A codebase added here is read at once, as one added from the Manage page is (see
 [`start_codebase_reading`](@ref)), unless `read` is false.
 """
-function codebase_id(kb::KB, codebase::AbstractString; add::Bool = true, read::Bool = true, caller::Caller = local_caller())
+function codebase_id(kb::KB, codebase::AbstractString; add::Bool = true, read::Bool = true, caller::Caller = local_caller(kb))
     codebase = strip(codebase)
     (isempty(codebase) || lowercase(codebase) == "none") && return missing
     linkable(doc_id) = can(caller, "paper.manage") ? doc_id : seen_document(kb, caller, doc_id)

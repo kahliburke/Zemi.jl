@@ -15,6 +15,9 @@ ENV["ZEMI_CONFIG"] = joinpath(mktempdir(), "config.toml")
 ENV["KAIMON_CONFIG_DIR"] = joinpath(mktempdir(), "kaimon")
 ENV["XDG_DATA_HOME"] = mktempdir()
 delete!(ENV, "OPENCODE_API_KEY")
+# Whoever runs a test's knowledge base for themselves (see `owner`): not the person running the tests.
+ENV["ZEMI_OWNER_NAME"] = "Rowan"
+ENV["ZEMI_OWNER_EMAIL"] = "rowan@example.org"
 # Uploads are not looked up in OpenAlex here; the look-up is tested with a stand-in.
 K.UPLOAD_LOOKUP[] = (p; contact = "") -> nothing
 K.DOI_COPIES[] = (doi; contact = "") -> (; arxiv = nothing, pdfs = String[])

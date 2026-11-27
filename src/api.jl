@@ -10,10 +10,10 @@
 Who added something through the site: in the shared service the person signed in; otherwise the
 name given with it, else whoever runs the knowledge base.
 """
-function adder(by, caller::Caller = local_caller())
+function adder(by, caller::Caller)
     caller.via == :local || return caller_name(caller)
     name = strip(string(something(by, "")))
-    return isempty(name) ? local_user() : String(name)
+    return isempty(name) ? caller_name(caller) : String(name)
 end
 
 """
@@ -400,7 +400,7 @@ end
 route!("GET", "/api/documents"; need = "library") do c
     state = get(c.params, "state", "")
     can(c.caller, "paper.manage") || state == "mine" || not_permitted("Not permitted (paper.manage): ask for state=mine, your own documents")
-    held = library_documents(c.kb, c.caller)
+    held = c.caller.user_id === nothing ? Set{String}() : held_documents(c.kb, c.caller.user_id)
     list_documents(c.kb; q = get(c.params, "q", ""), state, except = others_private(c.kb, c.caller), held,
                    limit = int_param(c.params, "limit", 50, 1:500), offset = int_param(c.params, "offset", 0, 0:typemax(Int)))
 end
@@ -678,7 +678,7 @@ end
 Answer a request to the knowledge base run for one person: from whoever runs it, with every
 permission, and changes only from this machine's pages (see [`write_allowed`](@ref)).
 """
-function respond_local(kb::KB, req::HTTP.Request; caller::Caller = local_caller())
+function respond_local(kb::KB, req::HTTP.Request; caller::Caller = local_caller(kb))
     # A page's request is its owner's, and changes only from this machine's pages; a client's token
     # (see `bearer_owner_token`) does what its permissions allow.
     caller.via == :owner || req.method != "POST" || write_allowed(req) ||

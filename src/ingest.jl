@@ -98,19 +98,6 @@ function mentions(kb::KB, doc_id::AbstractString)
     return [(; r.source, r.channel, posted = unix2datetime(r.posted_at), r.author, r.url, r.message) for r in rows]
 end
 
-"""
-    local_user() -> Union{String,Nothing}
-
-Who runs this knowledge base, as git knows them (`git config user.name`), taken as who adds papers and
-notebooks through its site. `nothing` where git has no name.
-"""
-function local_user()
-    ismissing(LOCAL_USER[]) || return LOCAL_USER[]
-    name = try strip(readchomp(`git config user.name`)) catch; "" end
-    return LOCAL_USER[] = isempty(name) ? nothing : String(name)
-end
-const LOCAL_USER = Ref{Union{String,Nothing,Missing}}(missing)
-
 "Note that paper `pid` came into the knowledge base by `source` (see [`ARRIVALS`](@ref)), from `by` if known."
 record_arrival!(kb::KB, pid, source::AbstractString, by = nothing) =
     execute!(kb, """INSERT OR IGNORE INTO mentions (paper_id, source, channel, posted_at, author, url, message)

@@ -609,19 +609,15 @@ end
 """
     people(kb) -> Vector{NamedTuple}
 
-Who a task can be assigned to, `(; id, label, agent)`: the service's people (in the shared service,
-those with accounts, by email, and with `project` those who reach it; run for one person, whoever
-runs it), and the agents, `agent:Claude`
+Who a task can be assigned to, `(; id, label, agent)`: the service's people, those with accounts, by
+email (run for one person, whoever runs it, see [`owner`](@ref)), with `project` those who reach it,
+and the agents, `agent:Claude`
 (see `AGENTS`).
 """
 function people(kb::KB; project::AbstractString = "")
     list = [(; id = String(r.email), label = isempty(r.name) ? String(r.email) : String(r.name), agent = false)
             for r in query(kb, "SELECT id, email, name FROM users WHERE disabled = 0 ORDER BY name, email")
             if isempty(project) || in_project(kb, Int(r.id), project)]
-    if isempty(list)
-        me = something(local_user(), "")
-        isempty(me) || push!(list, (; id = me, label = me, agent = false))
-    end
     return [list; [(; id = a, label = a[7:end] * " (agent)", agent = true) for a in AGENTS]]
 end
 

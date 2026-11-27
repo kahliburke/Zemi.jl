@@ -3,13 +3,13 @@
 # person keeps them. The project's own codebase is always in it.
 
 """
-    library_source(kb, source; caller = local_caller()) -> (; kind, target)
+    library_source(kb, source; caller = local_caller(kb)) -> (; kind, target)
 
 What a library item names, written as it is mentioned anywhere: a paper (`@arXiv:2401.00001`, `@doc-…`,
 an arXiv id alone, or the DOI of a work here, see [`document_with_doi`](@ref)), a notebook (`@[label](notebook:path)`), or a codebase (its id, `code-…`, or its
 repository's address, which records it if it is new) that `caller` may see.
 """
-function library_source(kb::KB, source::AbstractString; caller::Caller = local_caller())
+function library_source(kb::KB, source::AbstractString; caller::Caller = local_caller(kb))
     s = String(strip(source))
     if is_codebase(lstrip(s, '@')) && occursin(r"^@?[A-Za-z0-9-]+$", s)
         id = lowercase(lstrip(s, '@'))
@@ -31,7 +31,7 @@ function library_source(kb::KB, source::AbstractString; caller::Caller = local_c
 end
 
 """
-    library_add!(kb, key, source; why = "", by, caller = local_caller()) -> Int
+    library_add!(kb, key, source; why = "", by, caller = local_caller(kb)) -> Int
 
 Put `source` (see [`library_source`](@ref), for `caller`) in project `key`'s library, with `why` it
 matters to the project, returning the item's id. An agent's item is proposed until a person keeps
@@ -39,7 +39,7 @@ it; adding an item already there gives it the new `why`, and a person adding an 
 keeps it.
 """
 function library_add!(kb::KB, key::AbstractString, source::AbstractString; why::AbstractString = "", by::Actor,
-                      caller::Caller = local_caller())
+                      caller::Caller = local_caller(kb))
     pid = project_id(kb, key)
     src = library_source(kb, source; caller)
     rows = query(kb, "SELECT id FROM library WHERE project_id = ? AND kind = ? AND target = ?", (pid, src.kind, src.target))
@@ -80,7 +80,7 @@ function library_remove!(kb::KB, key::AbstractString, id::Integer; by::Actor)
 end
 
 """
-    library(kb, key; caller = local_caller()) -> Vector{NamedTuple}
+    library(kb, key; caller = local_caller(kb)) -> Vector{NamedTuple}
 
 Project `key`'s library: its codebase first, then its items, kept before proposed, papers, notebooks
 and codebases, each `(; id, kind, target, label, why, status, added_by, by_agent, added_at, tasks,
@@ -88,7 +88,7 @@ findings)`, `tasks` and `findings` the references of the project's tasks that li
 findings that rest on it. The codebase linked to the project has id 0. A document `caller` may not
 see (see [`document_visible`](@ref)) is left out.
 """
-function library(kb::KB, key::AbstractString; caller::Caller = local_caller())
+function library(kb::KB, key::AbstractString; caller::Caller = local_caller(kb))
     pid = project_id(kb, key)
     items = query(kb, """SELECT * FROM library WHERE project_id = ?
                          ORDER BY status = 'proposed', CASE kind WHEN 'paper' THEN 0 WHEN 'notebook' THEN 1 ELSE 2 END, added_at""", (pid,))
@@ -153,12 +153,12 @@ library_papers(kb::KB, key::AbstractString) =
 library_noun(x) = x.kind == "paper" ? something(document_kind(x.target), PAPER).noun : x.kind
 
 """
-    format_library(kb, key; caller = local_caller()) -> String
+    format_library(kb, key; caller = local_caller(kb)) -> String
 
 Project `key`'s library as text for an agent working for `caller` (see [`library`](@ref)): each item
 with why it matters to the project and what cites it, those an agent proposed marked so.
 """
-function format_library(kb::KB, key::AbstractString; caller::Caller = local_caller())
+function format_library(kb::KB, key::AbstractString; caller::Caller = local_caller(kb))
     items = library(kb, key; caller)
     k = uppercase(strip(key))
     isempty(items) && return "$k's library is empty. Propose what the project works from with `library_add`."

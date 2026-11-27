@@ -182,7 +182,7 @@ end
 const CODE_MATCHES = 12
 
 """
-    at_reference_matches(kb, q; limit = 5, project = "", caller = local_caller()) -> Vector{NamedTuple}
+    at_reference_matches(kb, q; limit = 5, project = "", caller = local_caller(kb)) -> Vector{NamedTuple}
 
 What a reference being typed as `@q` may mean, for the board's picker: tasks, papers, the records
 `caller` may see, authors, people and notebooks with a word beginning `q`, up to `limit` of each kind,
@@ -191,7 +191,7 @@ as `(; kind, target, label, detail)`, and with a `project`, the files and defini
 `<codebase>:<path>`. Those whose label `q` begins come first, then those with a word of the label beginning it.
 """
 function at_reference_matches(kb::KB, q::AbstractString; limit::Integer = 5, project::AbstractString = "",
-                              caller::Caller = local_caller(), projects = visible_projects(kb, caller),
+                              caller::Caller = local_caller(kb), projects = visible_projects(kb, caller),
                               only = nothing, except = hidden_documents(kb, caller))
     code = NamedTuple[]
     for c in (isempty(project) ? NamedTuple[] : project_codebases(kb, project))

@@ -1570,9 +1570,9 @@ end
         @test all(i -> K.document_holders(kb, i) == [ada] && K.scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (i,)) == "private",
                   [t, e, d, "2401.00001"])
         # Her library's documents are those read from her space; whoever runs a knowledge base for
-        # themselves, whom none is held for, has those of their own space (here, none).
+        # themselves holds those of its own space by their account.
         @test issubset([t, e, d], K.space_documents(kb, space))
-        @test isempty(K.library_documents(kb, K.local_caller())) && K.library_space(K.local_caller()) == "people/local"
+        @test K.space_holder(kb, "people/local") == K.owner(kb).id && K.library_space(K.local_caller(kb)) == "people/local"
         # A paper note brings its paper in, and its record refers to it; links are references to the notes' records and papers.
         @test only(K.mentions(kb, "2401.00001")).source == "obsidian"
         @test occursin("as @[estuaries](record:$e) show", text(t)) && occursin("A note on @[Tidal mixing](paper:2401.00001).", text(t))
@@ -2492,7 +2492,7 @@ end
     withenv("ZEMI_CONFIG" => cfg, "XDG_DATA_HOME" => joinpath(dir, "share")) do
         kb = open_kb(K.load_config())
         call(method, target, body = nothing) = (r = K.handle(kb, HTTP.Request(method, target, ["Content-Type" => "application/json"],
-                                                                              body === nothing ? UInt8[] : JSON.json(body)), K.local_caller());
+                                                                              body === nothing ? UInt8[] : JSON.json(body)), K.local_caller(kb));
                                                 (r.status, JSON.parse(String(r.body))))
         empty!(K.SUMMARY_FAILURES)                              # (summaries other testsets failed)
         s, setup = call("GET", "/api/config/setup")
@@ -2663,7 +2663,7 @@ end
     HTTP, JSON = K.HTTP, K.JSON
     kb = open_kb(temp_config())
     c = kb.config
-    call(method, target, body = UInt8[]) = (r = K.handle(kb, HTTP.Request(method, target, ["Content-Type" => "image/png"], body), K.local_caller());
+    call(method, target, body = UInt8[]) = (r = K.handle(kb, HTTP.Request(method, target, ["Content-Type" => "image/png"], body), K.local_caller(kb));
                                             (r.status, r.body))
     # Zemi's own images until the content has its own.
     @test !any(b -> b["own"], values(JSON.parse(String(call("GET", "/api/config/brand")[2]))))
@@ -3435,7 +3435,7 @@ end
         least = K.SUBSET_LEAST[]
         try
             K.SUBSET_LEAST[] = 4
-            me = K.local_caller()
+            me = K.local_caller(kb)
             whole = views["all"]
             cl = first(whole["clusters"])
             members = sort([id for (id, d) in whole["docs"] if d["c"] == cl["id"]])
@@ -6178,9 +6178,9 @@ end
 
 @zset "projects and tasks" begin
     kb = open_kb(temp_config())
-    me, bot = K.person("Rowan"), K.agent("Claude for Rowan")
-    saved_user = K.LOCAL_USER[]
-    K.LOCAL_USER[] = "Rowan"                                                       # who runs it: the one person work goes to
+    # Run for one person, Rowan: their account, which work and questions go to.
+    R = K.owner(kb).email
+    me, bot = K.person("Rowan"; id = R), K.agent("Claude for Rowan"; id = R)
     root = mktempdir()
     id = K.add_codebase!(kb, root; name = "demo")
     @test K.create_project!(kb, "Demo"; key = "dm", codebase = id, by = me) == "DM"
@@ -6331,7 +6331,7 @@ end
     # tasks in Review, and their own open tasks.
     K.create_task!(kb, "NE", "Proposed under an approved task"; parent = "NE-1", by = bot)          # NE-4
     K.update_task!(kb, "NE-2"; status = "review", by = me)
-    w = K.waiting(kb; me = "Rowan")
+    w = K.waiting(kb; me = R)
     @test "NE-4" in [t.ref for t in w.proposed] && !any(t -> t.parent == "DM-6", w.proposed)       # DM-6's subtasks come with it
     @test [t.ref for t in w.review] == ["NE-2"] && [t.ref for t in w.mine] == ["NE-1", "NE-2"]
     @test isempty(K.waiting(kb).mine)
@@ -6339,16 +6339,16 @@ end
     # comment that is not a reply, or an agent's progress, answers nothing.
     q1 = K.note_task!(kb, "NE-1", "Should the bottom task stay under NE-1?"; kind = "question", by = bot)
     asked_of(who) = [(t.ref, t.question, t.asker) for t in K.waiting(kb; me = who).questions]
-    @test asked_of("Rowan") == [("NE-1", "Should the bottom task stay under NE-1?", "Claude for Rowan")]
+    @test asked_of(R) == [("NE-1", "Should the bottom task stay under NE-1?", "Claude for Rowan")]
     @test isempty(asked_of("Bea")) && isempty(K.waiting(kb).questions)
     progress = K.note_task!(kb, "NE-1", "Still checking"; kind = "progress", by = bot)
     K.note_task!(kb, "NE-1", "Looking at it."; by = me)
-    @test length(asked_of("Rowan")) == 1
+    @test length(asked_of(R)) == 1
     @test_throws "a reply is to a question" K.note_task!(kb, "NE-1", "Seen"; by = me, reply_to = progress)
     @test_throws "A reply is a comment" K.note_task!(kb, "NE-1", "Done"; kind = "progress", by = bot, reply_to = q1)
     @test_throws "Only a question" K.note_task!(kb, "NE-1", "Hello"; by = me, to = "agents")
     K.note_task!(kb, "NE-1", "Yes, keep it there."; by = me, reply_to = q1)
-    @test isempty(asked_of("Rowan"))
+    @test isempty(asked_of(R))
     # An agent waiting for people (task_wait) is told what answers its question.
     @test occursin("Rowan answered note $q1: Yes, keep it there.", K.people_events_text(K.people_events(kb, "NE", q1)))
     @test occursin("asked Rowan (answered): Should", K.format_task(K.task(kb, "NE-1")))
@@ -6356,22 +6356,22 @@ end
     # A question asked back goes to whoever asked the first, which waits on its answer meanwhile.
     q2 = K.note_task!(kb, "NE-1", "Shall I split it?"; kind = "question", by = bot)
     back = K.note_task!(kb, "NE-1", "Split how?"; kind = "question", by = me, reply_to = q2)
-    @test isempty(asked_of("Rowan"))
+    @test isempty(asked_of(R))
     a = K.asked_of_agents(kb, "NE")
     @test [(t.ref, t.question, t.note) for t in a] == [("NE-1", "Split how?", back)]
     @test occursin("Rowan asked [note $back]: Split how?", K.questions_text(a))
     states() = Dict(e.id => e.state for e in K.task(kb, "NE-1").activity if e.kind == "question")
     @test states()[q2] == "asked back" && states()[back] == "open"
     K.note_task!(kb, "NE-1", "In two, by phase."; by = bot, reply_to = back)
-    @test isempty(K.asked_of_agents(kb, "NE")) && asked_of("Rowan") == [("NE-1", "Shall I split it?", "Claude for Rowan")]
+    @test isempty(K.asked_of_agents(kb, "NE")) && asked_of(R) == [("NE-1", "Shall I split it?", "Claude for Rowan")]
     @test states()[q2] == "open" && states()[back] == "answered"
     K.note_task!(kb, "NE-1", "Yes, split it."; by = me, reply_to = q2)
-    @test isempty(asked_of("Rowan")) && states()[q2] == "answered"
+    @test isempty(asked_of(R)) && states()[q2] == "answered"
     # A person's question goes to the agents, shown before the next task, until an agent replies to it.
     w1 = K.note_task!(kb, "NE-2", "Why is this in Review?"; kind = "question", by = me)
     a = K.asked_of_agents(kb, "NE")
     @test [(t.ref, t.question, t.asker) for t in a] == [("NE-2", "Why is this in Review?", "Rowan")]
-    @test isempty(asked_of("Rowan")) && isempty(K.asked_of_agents(kb, "DM"))
+    @test isempty(asked_of(R)) && isempty(K.asked_of_agents(kb, "DM"))
     @test occursin("asked the agents (waiting for an agent's reply): Why", K.format_task(K.task(kb, "NE-2")))
     @test_throws "Ask someone else" K.note_task!(kb, "NE-2", "Me?"; kind = "question", by = me, to = "Rowan")
     K.note_task!(kb, "NE-2", "Its subtasks are done."; by = bot)                                  # not a reply
@@ -6379,7 +6379,7 @@ end
     K.note_task!(kb, "NE-2", "Its subtasks are done."; by = bot, reply_to = w1)
     @test isempty(K.asked_of_agents(kb, "NE"))
     # The answer waits on whoever asked until they write on the task again or mark it resolved.
-    answered() = [(t.ref, t.question, t.answer, t.answerer) for t in K.waiting(kb; me = "Rowan").answered]
+    answered() = [(t.ref, t.question, t.answer, t.answerer) for t in K.waiting(kb; me = R).answered]
     @test answered() == [("NE-2", "Why is this in Review?", "Its subtasks are done.", "Claude for Rowan")]
     @test isempty(K.waiting(kb; me = "Ada").answered) && isempty(K.waiting(kb).answered)
     w2 = K.note_task!(kb, "NE-2", "Which ones?"; kind = "question", by = me)
@@ -6397,7 +6397,7 @@ end
     @test qt in asking() && qt in [t.ref for t in K.waiting(kb; me = "Bea").questions]
     # It waits on the person the agent works for too (run for one person, the only one there is),
     # as a question to answer rather than one they asked.
-    rowan = K.waiting(kb; me = "Rowan")
+    rowan = K.waiting(kb; me = R)
     @test qt in [t.ref for t in rowan.questions] && !(qt in [t.ref for t in rowan.asked])
     @test_throws "only its own" K.resolve_question!(kb, qt, mesh; by = K.agent("Claude for Bea"))
     K.resolve_question!(kb, qt, mesh; by = me)
@@ -6442,10 +6442,11 @@ end
     K.edit_note!(kb, "NE-2", note, "Checked the deterministic runs"; by = me, maintainer = true)   # a maintainer corrects any agent's
     @test length(K.note_history(kb, note)) == 2
     # A person corrects the notes of agents working for them; another's, only as a maintainer.
-    rowans = K.note_task!(kb, "NE-2", "Ran the deterministic case"; kind = "progress", by = K.agent("Claude for Rowan"; id = "Rowan"))
+    rowans = K.note_task!(kb, "NE-2", "Ran the deterministic case"; kind = "progress", by = K.agent("Claude for Rowan"; id = R))
     @test K.edit_note!(kb, "NE-2", rowans, "Ran the deterministic case twice"; by = me) == rowans
     @test_throws "agents working for them" K.edit_note!(kb, "NE-2", rowans, "Changed"; by = K.person("Bea"))
-    @test_throws "agents working for them" K.edit_note!(kb, "NE-2", note, "Changed"; by = me)
+    beas = K.note_task!(kb, "NE-2", "Bea's agent's progress"; kind = "progress", by = K.agent("Claude for Bea"; id = "bea@x.org"))
+    @test_throws "agents working for them" K.edit_note!(kb, "NE-2", beas, "Changed"; by = me)
     @test K.edit_note!(kb, "NE-2", rowans, "Ran the deterministic case, twice"; by = K.person("Bea"), maintainer = true) == rowans
     latest_edit = last(K.note_history(kb, note)).at
     @test occursin("$(edited.at) $(edited.who) (agent) [note $note, edited $latest_edit]: reported: Checked the deterministic runs", K.format_task(K.task(kb, "NE-2")))
@@ -6744,7 +6745,7 @@ end
     @test any(p -> p.id == K.AGENT_ASSIGNEE && p.agent && p.label == "Claude (agent)", who)
     # An agent by its id or name; one that does not exist is refused, not added to the list. Without
     # accounts, a person is whoever is named.
-    @test K.assignee_id(kb, "Claude (agent)") == K.assignee_id(kb, "Claude") == "agent:Claude" && K.assignee_id(kb, "rowan") == "Rowan"
+    @test K.assignee_id(kb, "Claude (agent)") == K.assignee_id(kb, "Claude") == "agent:Claude" && K.assignee_id(kb, "rowan") == R
     @test_throws "No one called agent:Claudea" K.update_task!(kb, "NE-1"; assignee = "agent:Claudea", by = me)
     @test_throws "No one called Bea" K.assignee_id(kb, "Bea")
     @test [p.id for p in K.people(kb) if p.agent] == K.AGENTS
@@ -7070,7 +7071,6 @@ end
         K._KB[] = nothing
         close(kb)
     end
-    K.LOCAL_USER[] = saved_user
 end
 
 @zset "the site's parts, published with the dataset" begin
@@ -7225,10 +7225,39 @@ end
     @test K.slate_cells("function f()\n    1\nend\n") === nothing
 end
 
+@zset "whoever runs a knowledge base for themselves has an account" begin
+    kb = open_kb(temp_config(layers = Layer[]))
+    try
+        me = K.person("Rowan")
+        # Work they were given by name before they had an account, and a project they did not join.
+        K.create_project!(kb, "Before"; key = "BE", by = me)
+        t = K.create_task!(kb, "BE", "Read the survey"; by = me)
+        foreach(sql -> K.execute!(kb, sql), ("DELETE FROM users", "DELETE FROM kv WHERE key = 'owner'"))   # as before accounts
+        K.execute!(kb, "UPDATE tasks SET assignee = 'Rowan' WHERE id = ?", (K.task_ref(kb, t),))
+        # Asked for, the account is made: theirs by the name and email git (here, the tests) gives.
+        o = K.owner(kb)
+        @test (o.name, o.email) == ("Rowan", "rowan@example.org") && K.owner(kb) == o                 # made once
+        @test "Admin" in [String(r.role) for r in K.query(kb, "SELECT role FROM user_roles WHERE user_id = ?", (o.id,))]
+        c = K.local_caller(kb)
+        @test c.user_id == o.id && c.via == :local && K.person_id(c) == "rowan@example.org" && K.caller_name(c) == "Rowan"
+        # The work is theirs by account, they belong to every project, and agents may ask them.
+        @test K.task(kb, t).assignee == "rowan@example.org"
+        @test K.in_project(kb, o.id, "BE") && any(p -> p.id == "rowan@example.org", K.people(kb; project = "BE"))
+        q = K.question_recipient(kb, t, K.agent("Claude for Rowan"), "Rowan")
+        @test q == ("person", "rowan@example.org")
+        K.create_project!(kb, "After"; key = "AF", owner = c.user_id, by = me)
+        @test K.in_project(kb, o.id, "AF")
+        # In a shared service no one runs it for themselves: the local caller is the service's own.
+        K.SHARED_MODE[] = true
+        @test K.owner(kb) === nothing && K.local_caller(kb).user_id === nothing
+    finally
+        K.SHARED_MODE[] = false
+        close(kb)
+    end
+end
+
 @zset "approving gives the work to whoever planned it" begin
     kb = open_kb(temp_config(layers = Layer[]))
-    saved = K.LOCAL_USER[]
-    K.LOCAL_USER[] = "Rowan"
     try
         me, bot = K.person("Rowan"), K.agent("Claude for Rowan")
         K.create_project!(kb, "Approvals"; key = "AP", by = me)
@@ -7237,13 +7266,12 @@ end
         @test all(t -> t.assignee == K.AGENT_ASSIGNEE, [K.task(kb, plan); K.task(kb, plan).subtasks_list])
         mine = K.create_task!(kb, "AP", "Think it over"; status = "proposed", by = me)
         K.update_task!(kb, mine; status = "ready", by = me)
-        @test K.task(kb, mine).assignee == "Rowan"
+        @test K.task(kb, mine).assignee == "rowan@example.org"       # by the account of whoever runs it
         given = K.create_task!(kb, "AP", "Already given"; by = bot)
         K.update_task!(kb, given; assignee = "Rowan", by = me)
         K.update_task!(kb, given; status = "ready", by = me)
-        @test K.task(kb, given).assignee == "Rowan"                  # an assignee already set stays
+        @test K.task(kb, given).assignee == "rowan@example.org"      # an assignee already set stays
     finally
-        K.LOCAL_USER[] = saved
         close(kb)
     end
 end
@@ -7965,7 +7993,7 @@ end
     c = temp_config(layers = Layer[])
     kb = open_kb(c)
     id = add_codebase!(kb, mktempdir(); name = "Reef")
-    caller = K.local_caller()
+    caller = K.local_caller(kb)
     job = K.start_job("Read reef"; ids = [id]) do _
         ingest!(kb, [id]; classify = false)
     end
