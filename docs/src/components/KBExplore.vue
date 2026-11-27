@@ -20,7 +20,7 @@ import { useData } from 'vitepress'
 import { can, getJSON, post, onLive } from './kbApi'
 import { exploreHref, kbPage } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
-import { BRAND, CLUSTER_COLOURS, DIMMED, KIND_COLOURS, LINK_COLOURS, NODE_KINDS, TRAIL, WHOSE, WHOSE_COLOURS, esc, kindName, mix, own,
+import { BRAND, CLUSTER_COLOURS, DIMMED, KIND_COLOURS, LINK_COLOURS, NODE_KINDS, TRAIL, WHOSE, WHOSE_COLOURS, kindName, mix, own,
          provideSettings, shortTitle, useExploreSettings, whose,
          type Detail, type Graph, type LegendRow, type Linked, type Near, type Node, type Pair, type Step } from './kbExplore'
 import { cameraMover, type View } from './exploreCamera'
@@ -226,6 +226,13 @@ function watchJob(id: string) {
 
 const visibleNode = (n: Node) => shownKinds.value.includes(n.kind)
 const hits = ref<Map<string, number>>(new Map())          // a search's hits, by id, with their strength
+// A document pointed at with ⌥ (Alt) held: its links and nearest drawn over the map where the view is,
+// without going to it, opening its card or fading the rest. `lit` is that one while it lasts, else the
+// selected document.
+const peek = shallowRef<Node | null>(null)
+// The document under the pointer, ⌥ or not: named by its short title (see `drawFocus2d`).
+const pointed = shallowRef<Node | null>(null)
+const lit = computed(() => peek.value ?? selected.value)
 const near = computed(() => new Set([...(nearOf.value.get(selected.value?.id ?? '') ?? []).map(x => x.node.id),
                                      ...(linksOf.value.get(selected.value?.id ?? '') ?? []).map(x => x.node.id)]))
 
@@ -424,8 +431,11 @@ function graphData() {
 function linkColour(l: GLink) {
   if (l.kind === 'similar') return isDark.value ? 'rgba(200,200,255,0.45)' : 'rgba(60,60,140,0.4)'
   const c = LINK_COLOURS[l.kind] ?? '#999'
+  if (peek.value && touches(l, peek.value.id)) return c + 'ff'
   return selected.value && !touches(l, selected.value.id) ? c + '40' : c + 'b0'
 }
+// On the map, a peeked document's links twice as wide as the rest.
+const linkWidth2d = (l: GLink) => (l.kind === 'similar' ? 0.8 : 1.2) * (peek.value && touches(l, peek.value.id) ? 2 : 1)
 const endId = (e: any) => (typeof e === 'object' ? e.id : e) as string
 const touches = (l: any, id: string) => endId(l.source) === id || endId(l.target) === id
 
@@ -446,16 +456,15 @@ async function draw() {
   const el = box.value
   const { nodes, links } = graphData()
   const bg = isDark.value ? '#111116' : '#fafafa'
-  const label = (n: Node) => `<div class="kbx-tip"><b>${esc(n.title)}</b><br>${esc([kindName(n.kind), n.year, clusterName(n.cluster)].filter(Boolean).join(' · '))}</div>`
   if (view.value === '2d') {
     const ForceGraph = (await import('force-graph')).default as any
     centres = clusterCentres(nodes, clusterName)
     graph = new ForceGraph(el)
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
-      .nodeVal(flatSize).nodeColor(shade).nodeLabel(label)
+      .nodeVal(flatSize).nodeColor(shade).nodeLabel(() => "")
       .linkColor(linkColour)
-      .linkWidth((l: GLink) => (l.kind === 'similar' ? 0.8 : 1.2))
+      .linkWidth(linkWidth2d)
       .linkLineDash((l: GLink) => (l.kind === 'similar' ? [2, 3] : null))
       .linkDirectionalArrowLength((l: GLink) => (l.kind === 'cites' || l.kind === 'refers' ? 3 : 0))
       .linkDirectionalArrowRelPos(1)
@@ -507,7 +516,7 @@ async function draw() {
     graph = new ForceGraph3D(el, { controlType: fly.value ? 'fly' : 'orbit' })
       .backgroundColor(bg).width(el.clientWidth).height(el.clientHeight)
       .graphData({ nodes, links }).nodeId('id')
-      .nodeVal(size).nodeLabel(label)
+      .nodeVal(size).nodeLabel(() => "")
       // Each node a disc facing the camera, shaded to read as a sphere: smooth at any distance, and cheap.
       .nodeThreeObject((n: GNode) => {
         const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: disc, color: shade(n), transparent: true, depthWrite: false }))
@@ -525,7 +534,7 @@ async function draw() {
       // Plain lines, a pixel wide however near: tubes and arrowheads have a size in the space and swell up
       // close. Which way a link goes is in the card.
       .linkWidth(0)
-      .onNodeClick(clicked).onBackgroundClick(() => { selected.value = null; litRow.value = null })
+      .onNodeClick(clicked).onNodeHover(hovered).onBackgroundClick(() => { selected.value = null; litRow.value = null })
       .enableNodeDrag(false)
       .cooldownTicks(1)
     graph.d3Force('charge')?.strength(-10)
@@ -563,12 +572,12 @@ async function draw() {
 // The selected document's nearest in meaning, drawn from it: brighter and, on the map, wider the more
 // alike, with how alike beside each. Their nodes are the ones left lit (see `shade`).
 function nearestShown() {
-  const s = selected.value
+  const s = lit.value
   if (!s || !graph) return []
   const at = new Map<string, GNode>(graph.graphData().nodes.map((n: GNode) => [n.id, n]))
   const from = at.get(s.id)
   if (!from) return []
-  const xs = nearSelected.value.filter(x => at.has(x.node.id))
+  const xs = nearLit.value.filter(x => at.has(x.node.id))
   const lo = Math.min(...xs.map(x => x.similarity)), hi = Math.max(...xs.map(x => x.similarity))
   // Strength 0 to 1: mostly how alike the pair is, a little where it stands among these.
   return xs.map(x => ({ from, to: at.get(x.node.id)!, similarity: x.similarity,
@@ -648,17 +657,28 @@ const relevantClusters = computed<Set<number> | null>(() => {
 })
 // The space's cluster names, with their clusters.
 const clusterLabels: { sprite: any; id: number }[] = []
-// The selected document marked where it is: a thin ring in the brand colour around its node, and a faint wider one.
+// The selected document marked where it is, its ring and short title, and the one peeked at its ring (the
+// tooltip by the pointer names the one pointed at).
 function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
-  const n: GNode | undefined = selected.value ? graph?.graphData().nodes.find((x: GNode) => x.id === selected.value!.id) : undefined
-  if (!n || n.x === undefined) return
-  const r = Math.sqrt(flatSize(n)) * 4
+  const nodes: GNode[] = graph?.graphData().nodes ?? []
+  const at = (d: Node | null) => (d ? nodes.find(x => x.id === d.id && x.x !== undefined) : undefined)
+  const s = at(selected.value), p = at(peek.value)
   ctx.save()
+  if (s) { ring2d(ctx, s, scale); if (p !== s) title2d(ctx, s, scale) }
+  if (p && p !== s) ring2d(ctx, p, scale)
+  ctx.restore()
+}
+// A thin ring in the brand colour around a node, and a faint wider one.
+function ring2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
+  const r = Math.sqrt(flatSize(n)) * 4
   ctx.strokeStyle = BRAND + 'c0'; ctx.lineWidth = 1.5 / scale
   ctx.beginPath(); ctx.arc(n.x, n.y, r + 3 / scale, 0, 2 * Math.PI); ctx.stroke()
   ctx.strokeStyle = BRAND + '26'; ctx.lineWidth = 3 / scale
   ctx.beginPath(); ctx.arc(n.x, n.y, r + 8 / scale, 0, 2 * Math.PI); ctx.stroke()
-  // Its title above the ring, on a backing, a constant size on screen.
+}
+// A node's short title above where its ring is, on a backing, a constant size on screen.
+function title2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
+  const r = Math.sqrt(flatSize(n)) * 4
   const text = shortTitle(n.title)
   ctx.font = `600 ${13 / scale}px system-ui, sans-serif`
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
@@ -668,7 +688,6 @@ function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
   ctx.strokeStyle = BRAND; ctx.lineWidth = 1 / scale; ctx.stroke()
   ctx.fillStyle = isDark.value ? '#f0f0f8' : '#1a1a24'
   ctx.fillText(text, n.x, y)
-  ctx.restore()
 }
 // A title short enough to label a node with.
 // In the space, the selected document's title, kept above its disc whichever way the camera turns.
@@ -716,7 +735,7 @@ function showRing3d() {
     ring3d = new three.Sprite(new three.SpriteMaterial({ map, color: BRAND, transparent: true, opacity: 0.75, depthTest: false, depthWrite: false }))
     ring3d.renderOrder = 998
     ring3d.onBeforeRender = () => {
-      const f = selected.value && sprites.get(selected.value.id)
+      const f = lit.value && sprites.get(lit.value.id)
       if (!f) return
       const k = f.sprite.scale.x * 1.8
       ring3d.position.copy(f.sprite.position)
@@ -725,7 +744,7 @@ function showRing3d() {
     }
     graph.scene().add(ring3d)
   }
-  ring3d.visible = !!(selected.value && sprites.has(selected.value.id))
+  ring3d.visible = !!(lit.value && sprites.has(lit.value.id))
   showTitle3d()
 }
 let three: any = null
@@ -784,12 +803,13 @@ function refresh() {
   graph.graphData({ nodes, links })
   restyle()
 }
-watch([selected, hits, colourBy, litRow, standing], restyle)
+watch([selected, peek, hits, colourBy, litRow, standing], restyle)
 watch(colourBy, () => { litRow.value = null })
 // Recoloured and resized in place: the space's discs directly, the map's through its accessors.
 function restyle() {
   if (!graph) return
   graph.linkColor(linkColour)
+  if (view.value === '2d') graph.linkWidth(linkWidth2d)
   showNearest3d()
   showRing3d()
   showTrail3d()
@@ -839,8 +859,14 @@ onLive(() => {
   addEventListener('resize', resize)
   document.addEventListener('fullscreenchange', onFullScreen)
   addEventListener('keydown', key)
+  addEventListener('keydown', altKey); addEventListener('keyup', altKey); addEventListener('blur', altGone)
+  box.value?.addEventListener('pointermove', altKey)
+  box.value?.addEventListener('pointerleave', unpointed)
   return () => {
     removeEventListener('resize', resize); removeEventListener('keydown', key); removeEventListener('popstate', fromAddress)
+    removeEventListener('keydown', altKey); removeEventListener('keyup', altKey); removeEventListener('blur', altGone)
+    box.value?.removeEventListener('pointermove', altKey)
+    box.value?.removeEventListener('pointerleave', unpointed)
     document.documentElement.classList.remove('kbx-takeover')
     document.removeEventListener('fullscreenchange', onFullScreen)
     clearTimeout(jobTimer); stopDrift(); graph?._destructor?.()
@@ -852,12 +878,60 @@ onLive(() => {
 const trail: Node[] = []
 let lastClick = { id: '', at: 0 }
 
-function clicked(n: GNode) {
+function clicked(n: GNode, e?: MouseEvent) {
   const now = Date.now()
   if (lastClick.id === n.id && now - lastClick.at < 350) { open(n); return }
   lastClick = { id: n.id, at: now }
-  go(byId.value.get(n.id) ?? n)
+  const doc = byId.value.get(n.id) ?? n
+  // With ⌥: chosen where it is, its card shown and the view left as it is.
+  if (e?.altKey) {
+    if (selected.value && selected.value.id !== doc.id) trail.push(selected.value)
+    stopDrift()
+    selected.value = doc
+    return
+  }
+  go(doc)
 }
+
+// Peeking: the document under the pointer while ⌥ is held (see `peek`).
+let altHeld = false
+function peekNow() {
+  const n = altHeld ? pointed.value : null
+  if (n?.id !== peek.value?.id) peek.value = n
+}
+function hovered(n: GNode | null) {
+  const d = n ? byId.value.get(n.id) ?? n : null
+  if (d?.id !== pointed.value?.id) pointed.value = d
+  peekNow()
+}
+// The map's document under the pointer, by where each is drawn and how large: force-graph's own hover
+// reads a copy of the canvas it redraws at most every 800 ms, which misses for a moment after a zoom or pan.
+function nodeAt(e: PointerEvent): GNode | null {
+  if (!graph || !box.value) return null
+  const r = box.value.getBoundingClientRect()
+  const p = graph.screen2GraphCoords(e.clientX - r.left, e.clientY - r.top), k = graph.zoom()
+  let best: GNode | null = null, apart = Infinity
+  for (const n of graph.graphData().nodes as GNode[]) {
+    if (n.x === undefined) continue
+    const d = Math.hypot(n.x - p.x, n.y - p.y)
+    if (d < Math.sqrt(flatSize(n)) * 4 + 3 / k && d < apart) { best = n; apart = d }
+  }
+  return best
+}
+// Where the pointer is over the map, for the tooltip of the document under it.
+const tipAt = shallowRef({ x: 0, y: 0 })
+function altKey(e: KeyboardEvent | PointerEvent) {
+  if (e instanceof PointerEvent && frame.value) {
+    const r = frame.value.getBoundingClientRect()
+    tipAt.value = { x: e.clientX - r.left, y: e.clientY - r.top }
+    if (drawnView === '2d') hovered(nodeAt(e))
+  }
+  if (e.altKey === altHeld) return
+  altHeld = e.altKey
+  peekNow()
+}
+const altGone = () => { altHeld = false; peekNow() }
+const unpointed = () => hovered(null)
 
 /** Move the view to `n` and show its card, keeping where one came from. */
 // To document `n`: `remember`ed for Back; in the map, closer in where `zoomIn` asks (a person picking it).
@@ -1077,6 +1151,7 @@ watch([pairs, showPairs], () => {
 })
 function goPair(p: Pair) { go(p.a); setTimeout(() => { selected.value = p.a }, 50) }
 const nearSelected = computed(() => (nearOf.value.get(selected.value?.id ?? '') ?? []).slice(0, 8))
+const nearLit = computed(() => (nearOf.value.get(lit.value?.id ?? '') ?? []).slice(0, 8))
 const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? '') ?? [])
 </script>
 
@@ -1084,6 +1159,11 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
   <KBNeedsService>
     <div ref="frame" class="kbx" :class="{ dark: isDark, full }" :style="{ '--kbx-top': barBottom + 'px' }">
       <div ref="box" class="kbx-canvas"></div>
+      <div v-if="pointed && (peek || pointed.id !== selected?.id)" class="kbx-peek-tip" :style="{ left: tipAt.x + 'px', top: tipAt.y + 'px' }"
+           role="tooltip">
+        <b>{{ pointed.title }}</b>
+        <template v-if="peek"><br>{{ [kindName(pointed.kind), pointed.year, clusterName(pointed.cluster)].filter(Boolean).join(' · ') }}</template>
+      </div>
       <p v-if="loading" class="kbx-status">Loading the map…</p>
       <p v-else-if="error" class="kbx-status kb-error">{{ error }}</p>
       <p v-else-if="data?.set?.few" class="kbx-status">

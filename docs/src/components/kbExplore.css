@@ -145,3 +145,7 @@ html.kbx-takeover .VPFooter { display: none; }
 .kbx-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
 .kbx-close { position: absolute; top: 4px; right: 8px; font-size: 18px; color: var(--vp-c-text-2); }
 .kbx-tip { font: 12px system-ui, sans-serif; max-width: 22rem; }
+/* The peeked document's title in full, beside the pointer. */
+.kbx-peek-tip { position: absolute; z-index: 5; transform: translate(14px, 14px); max-width: 22rem; padding: 5px 9px; pointer-events: none;
+                border: 1px solid var(--vp-c-divider); border-radius: 6px; background: var(--vp-c-bg-elv); box-shadow: var(--vp-shadow-2);
+                color: var(--vp-c-text-1); font: 12px/1.4 system-ui, sans-serif; }

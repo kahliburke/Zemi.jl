@@ -101,6 +101,9 @@ out and clustered afresh.
   links, and the documents nearest it in meaning, with lines drawn to them, fainter the less alike.
   From the card, copy its citation or a link to this view. Double-click opens its page; Backspace
   goes back.
+- Pointing at a document names it. Holding ⌥ (Alt) as you do draws its links and nearest documents
+  where the view is, without moving it or fading the rest, and says its kind, year and cluster;
+  ⌥-click chooses it without moving the view.
 - The search box lights up what Zemi's search finds; Enter goes to the best, Tab to the next.
   **Drift** moves on by itself to the nearest document not yet visited, pausing as long as you set.
   Its trail lists where it went, to copy as text.

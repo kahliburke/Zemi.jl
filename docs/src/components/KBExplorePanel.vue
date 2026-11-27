@@ -11,6 +11,7 @@ const props = defineProps<{ legend: LegendRow[]; litRow: string | null; subset: 
                             layouts: { umap: boolean; pacmap: boolean }; flying: boolean; least: number }>()
 const emit = defineEmits<{ goToRow: [key: string]; map: [spec: string] }>()
 const { panel, colourBy, shadeBy, layout, shownLinks, shownKinds, showUnlinked, threshold, view } = useSettings()
+const alt = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌥' : 'Alt'
 // A cluster with too few documents for a map of its own: its lens is greyed, and its tip says why.
 const few = (r: LegendRow) => (r.size ?? r.count) < props.least
 const mapTip = (r: LegendRow) => few(r)
@@ -90,6 +91,7 @@ function mapRow(r: LegendRow) {
           <span class="kbx-value">≥ {{ Math.round(threshold * 100) }}%</span>
         </div>
       </div>
+      <p class="kbx-hint">Hold {{ alt }} over a document to see its links and nearest where you are; {{ alt }}-click chooses it without moving.</p>
       <p v-if="view === '3d'" class="kbx-hint">Drag to turn, scroll to come closer. F flies: WASD to move, the mouse to steer.{{ flying ? ' Flying: F to stop.' : '' }}</p>
     </div>
   </section>
