@@ -457,11 +457,38 @@ route!("POST", "/api/me/tokens/:id/revoke") do c
     ok_json()
 end
 
+# Capture the package checkout when Julia loads it. A pull while the service is running
+# must not make the old process report the new HEAD. Archives and images can carry REVISION.
+function server_revision(root)
+    gitdir = joinpath(root, ".git")
+    stamp = joinpath(root, "REVISION")
+    value = try
+        if ispath(gitdir)
+            readchomp(pipeline(`git --no-optional-locks --git-dir=$gitdir --work-tree=$root describe --always --exclude "*" --abbrev=64 --dirty`; stderr = devnull))
+        elseif isfile(stamp)
+            strip(read(stamp, String))
+        else
+            ""
+        end
+    catch e
+        e isa InterruptException && rethrow()
+        ""
+    end
+    m = match(r"^([0-9a-f]{40}|[0-9a-f]{64})(-dirty)?\z", value)
+    return m === nothing ? (; commit = nothing, modified = false) : (; commit = String(m[1]), modified = m[2] !== nothing)
+end
+
+const SERVER_REVISION = Ref{NamedTuple{(:commit, :modified),Tuple{Union{Nothing,String},Bool}}}()
+function __init__()
+    SERVER_REVISION[] = server_revision(pkgdir(@__MODULE__))
+end
+
 # ── People, roles, tokens and keys ────────────────────────────────────────────────────────────────
 
 route!("GET", "/api/admin/users"; need = "users.manage") do c
     kb = c.kb
-    Dict("users" => [user_json(u) for u in users(kb)],
+    Dict("server" => (; version = string(pkgversion(@__MODULE__)), SERVER_REVISION[]...),
+         "users" => [user_json(u) for u in users(kb)],
          "invitations" => [Dict("email" => i.email, "roles" => i.roles, "created_at" => i.created_at,
                                 "accepted_at" => i.accepted_at, "projects" => i.projects) for i in invitations(kb)],
          "roles" => [r.name for r in roles(kb)],

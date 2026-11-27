@@ -3,6 +3,7 @@
 # base_url "http://localhost:<port>" and [shared] host "127.0.0.1". ZEMI_LOCAL_PORT publishes it on
 # another port than 8800, and a first config's base_url names that port.
 #
+#   ZEMI_BUILD_REVISION="$(git describe --always --exclude '*' --abbrev=64 --dirty)" \
 #   ZEMI_ADMINS=you@example.org docker compose -f deploy/compose.yaml -f deploy/compose.local.yaml up -d --build
 services:
   zemi:

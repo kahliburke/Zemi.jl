@@ -32,6 +32,7 @@ const tab = ref('')
 const error = ref('')
 const note = ref('')
 
+const server = ref<{ version: string; commit: string | null; modified: boolean }>()
 const users = ref<User[]>([]); const invitations = ref<Invitation[]>([]); const roleNames = ref<string[]>([])
 const rolePermissions = ref<Record<string, string[]>>({})
 const roles = ref<Role[]>([]); const permissionGroups = ref<PermissionGroup[]>([])
@@ -47,7 +48,7 @@ async function load(which = tab.value) {
   error.value = ''
   try {
     if (which === 'people') {
-      ({ users: users.value, invitations: invitations.value, roles: roleNames.value,
+      ({ server: server.value, users: users.value, invitations: invitations.value, roles: roleNames.value,
          role_permissions: rolePermissions.value } = await getJSON('/api/admin/users'))
       projectKeys.value = (await getJSON('/api/projects')).projects.map((p: any) => ({ key: p.key, name: p.name }))
     }
@@ -126,6 +127,11 @@ const brief = (d: Record<string, any>) => Object.entries(d).filter(([k]) => k !=
 <template>
   <div class="kbad">
     <KBNeedsService shared :allowed="tabs.length > 0">
+      <p v-if="server && can('users.manage')" class="kbad-version">
+        Zemi.jl <strong>{{ server.version }}</strong> · Commit
+        <code v-if="server.commit">{{ server.commit }}</code><span v-else>unavailable</span>
+        <span v-if="server.modified"> (modified checkout)</span>
+      </p>
       <nav class="kbad-tabs"><button v-for="t in tabs" :key="t.id" :class="{ on: tab === t.id }" @click="tab = t.id">{{ t.label }}</button></nav>
       <p v-if="note" class="kbad-note">{{ note }}</p>
       <p v-if="error" class="kb-error">{{ error }}</p>
@@ -265,6 +271,7 @@ const brief = (d: Record<string, any>) => Object.entries(d).filter(([k]) => k !=
 <style scoped>
 .kbad-dim, .kbad-s { color: var(--vp-c-text-2); }
 .kbad-s { font-size: 0.8rem; }
+.kbad-version { overflow-wrap: anywhere; }
 .kbad-note { padding: 0.4rem 0.8rem; border-radius: 8px; background: var(--vp-c-brand-soft); }
 .kbad-tabs { display: flex; gap: 0.3rem; border-bottom: 1px solid var(--vp-c-divider); margin: 1rem 0; flex-wrap: wrap; }
 .kbad-tabs button { background: none; border: none; padding: 0.5rem 0.9rem; cursor: pointer; color: var(--vp-c-text-2); font: inherit; border-bottom: 2px solid transparent; }

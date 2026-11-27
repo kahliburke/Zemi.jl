@@ -2,6 +2,7 @@
 # Ollama and Caddy for HTTPS. Its config is config/config.toml beside this file. The first start
 # writes it from these, with the GitHub OAuth app's secret in config/github_oauth_secret:
 #
+#   ZEMI_BUILD_REVISION="$(git describe --always --exclude '*' --abbrev=64 --dirty)" \
 #   ZEMI_BASE_URL=https://kb.example.org ZEMI_ADMINS=you@example.org ZEMI_GITHUB_CLIENT_ID=Ov23… \
 #       docker compose -f deploy/compose.yaml up -d --build
 #
@@ -17,6 +18,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        ZEMI_BUILD_REVISION: ${ZEMI_BUILD_REVISION:-}
     image: zemi
     restart: unless-stopped
     init: true

@@ -2,7 +2,7 @@
 # and the package with its environment and the site's compiled. compose.yaml runs it
 # with Qdrant, Ollama and Caddy. From the checkout:
 #
-#   docker build -f deploy/Dockerfile -t zemi .
+#   docker build --build-arg ZEMI_BUILD_REVISION="$(git describe --always --exclude '*' --abbrev=64 --dirty)" -f deploy/Dockerfile -t zemi .
 #
 # The config, the data and Julia's later installs are volumes (see compose.yaml). Agents are not in
 # it: an image built FROM this one installs the group's own for the zemi user.
@@ -36,6 +36,10 @@ WORKDIR /srv/zemi/Zemi.jl
 RUN JULIA_DEPOT_PATH=/opt/julia-depot julia -e 'using Pkg; Pkg.Registry.add("General")' \
  && JULIA_DEPOT_PATH=/opt/julia-depot julia --project=app -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()' \
  && JULIA_DEPOT_PATH=/opt/julia-depot julia --project=docs -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+# Stamp the sources after precompilation so a new revision can reuse the environment layers.
+ARG ZEMI_BUILD_REVISION
+RUN if [ -n "$ZEMI_BUILD_REVISION" ]; then printf '%s\n' "$ZEMI_BUILD_REVISION" > REVISION; fi
 
 # What the service installs later goes in the depot on its volume, before the image's.
 ENV JULIA_DEPOT_PATH=/srv/zemi/.julia:/opt/julia-depot: \
