@@ -744,16 +744,56 @@ function ring2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
 }
 // A node's short title above where its ring is, on a backing, a constant size on screen.
 function title2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
-  const r = flatRadius(n)
   const text = shortTitle(n.title)
   ctx.font = `600 ${13 / scale}px system-ui, sans-serif`
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-  const w = ctx.measureText(text).width + 12 / scale, h = 20 / scale, y = n.y - r - 14 / scale - h / 2
-  ctx.fillStyle = isDark.value ? 'rgba(17,17,22,0.85)' : 'rgba(250,250,250,0.9)'
-  ctx.beginPath(); ctx.roundRect(n.x - w / 2, y - h / 2, w, h, 4 / scale); ctx.fill()
-  ctx.strokeStyle = BRAND; ctx.lineWidth = 1 / scale; ctx.stroke()
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
+  const w = ctx.measureText(text).width + 12 / scale, h = 20 / scale
+  const { box, from, to } = callout(n, w, h, scale)
+  // The leader, from the ring to the label.
+  ctx.strokeStyle = BRAND + 'b0'; ctx.lineWidth = 1 / scale
+  ctx.beginPath(); ctx.moveTo(from[0], from[1]); ctx.lineTo(to[0], to[1]); ctx.stroke()
+  ctx.fillStyle = isDark.value ? 'rgba(17,17,22,0.88)' : 'rgba(250,250,250,0.92)'
+  ctx.beginPath(); ctx.roundRect(box.x0, box.y0, w, h, 4 / scale); ctx.fill()
+  ctx.strokeStyle = BRAND; ctx.stroke()
   ctx.fillStyle = isDark.value ? '#f0f0f8' : '#1a1a24'
-  ctx.fillText(text, n.x, y)
+  ctx.fillText(text, box.x0 + 6 / scale, box.y0 + h / 2)
+}
+// Where a node's callout goes: a label `w` by `h` set off from its ring, on the side whose box covers the
+// fewest discs, the up and right sides first among equals; kept on that side until another covers
+// clearly fewer, so it does not jump as the view moves. With the points the leader runs between.
+const CALLOUT_SIDES = [-45, -135, 45, 135, -90, 90, 0, 180].map(d => (d * Math.PI) / 180)
+let calloutSide = { id: '', side: 0 }
+function callout(n: GNode, w: number, h: number, scale: number) {
+  const r = flatRadius(n) + 9 / scale, reach = 26 / scale
+  const place = (a: number) => {
+    const dx = Math.cos(a), dy = Math.sin(a)
+    const ax = n.x + (r + reach) * dx, ay = n.y + (r + reach) * dy
+    const x0 = dx > 0.3 ? ax : dx < -0.3 ? ax - w : ax - w / 2
+    const y0 = dy < -0.3 ? ay - h : dy > 0.3 ? ay : ay - h / 2
+    return { box: { x0, y0, x1: x0 + w, y1: y0 + h }, from: [n.x + r * dx, n.y + r * dy], to: [ax, ay] }
+  }
+  const nodes: GNode[] = graph?.graphData().nodes ?? []
+  const covered = (b: { x0: number; y0: number; x1: number; y1: number }) => {
+    let k = 0
+    for (const m of nodes) {
+      if (m === n || m.x === undefined) continue
+      const q = flatRadius(m)
+      if (m.x + q > b.x0 && m.x - q < b.x1 && m.y + q > b.y0 && m.y - q < b.y1) k++
+    }
+    return k
+  }
+  // A side that puts the label under the card or the panel, or off the screen, is the worst there is.
+  const open = uncovered()
+  const hidden = (b: { x0: number; y0: number; x1: number; y1: number }) => {
+    const p = graph.graph2ScreenCoords(b.x0, b.y0), q = graph.graph2ScreenCoords(b.x1, b.y1)
+    return p.x < open.left || q.x > open.right || p.y < open.top || q.y > open.bottom
+  }
+  const counts = CALLOUT_SIDES.map(a => { const b = place(a).box; return hidden(b) ? 1e6 : covered(b) })
+  let best = 0
+  counts.forEach((c, i) => { if (c < counts[best]) best = i })
+  if (calloutSide.id === n.id && counts[calloutSide.side] <= counts[best] + 1) best = calloutSide.side
+  calloutSide = { id: n.id, side: best }
+  return place(CALLOUT_SIDES[best])
 }
 // A title short enough to label a node with.
 // In the space, the selected document's title, kept above its disc whichever way the camera turns.
@@ -762,7 +802,9 @@ let title3d: any = null
 function showTitle3d() {
   const f = selected.value && sprites.get(selected.value.id)
   if (title3d && title3d.userData.id !== f?.node.id) {
+    const leader = title3d.userData.leader
     graph?.scene().remove(title3d); title3d.material.map?.dispose(); title3d.material.dispose(); title3d = null
+    if (leader) { graph?.scene().remove(leader); leader.geometry.dispose(); leader.material.dispose() }
   }
   if (!f || title3d || !SpriteTextOf || !graph) return
   const t = new SpriteTextOf(shortTitle(f.node.title), 5, isDark.value ? '#f0f0f8' : '#1a1a24')
@@ -773,17 +815,40 @@ function showTitle3d() {
   t.renderOrder = 1002
   t.userData.id = f.node.id
   capHeight(t, 18, 22)
+  // A callout: the label set off up and to the right of the disc on screen, a leader running to it, so it
+  // does not lie over the documents around the disc.
+  const leaderGeometry = new three.BufferGeometry()
+  leaderGeometry.setAttribute('position', new three.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3))
+  const leader = new three.Line(leaderGeometry, new three.LineBasicMaterial({ color: BRAND, transparent: true, opacity: 0.7, depthTest: false }))
+  leader.renderOrder = 1001
+  leader.frustumCulled = false
+  t.userData.leader = leader
   const sized = t.onBeforeRender
-  const up = new three.Vector3()
+  const up = new three.Vector3(), right = new three.Vector3(), dir = new three.Vector3(), from = new three.Vector3(), to = new three.Vector3()
   t.onBeforeRender = (renderer: any, scene: any, camera: any) => {
     sized(renderer, scene, camera)
-    // Above the disc on screen: along the camera's up, by the disc's radius and half the label's height.
     up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
-    t.position.copy(f.sprite.position).addScaledVector(up, f.sprite.scale.y * 1.1 + t.scale.y / 2)
+    right.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
+    // Up and to the right where the label fits beside what the card and the panel leave open, else up
+    // and to the left, else straight up and centred over the disc, so it stays in view.
+    const px = pixelSize(camera.position.distanceTo(f.sprite.position), renderer, camera)
+    const open = uncovered(), onScreen = f.sprite.position.clone().project(camera)
+    const x = (onScreen.x + 1) / 2 * open.width, wide = t.scale.x / px + 40
+    const side = x + wide <= open.right ? 1 : x - wide >= open.left ? -1 : 0
+    right.multiplyScalar(side)
+    dir.copy(up).add(right).normalize()
+    const radius = f.sprite.scale.x / 2, reach = 26 * px
+    from.copy(f.sprite.position).addScaledVector(dir, radius * 1.1)
+    to.copy(f.sprite.position).addScaledVector(dir, radius * 1.1 + reach)
+    // Its near corner at the leader's end, or its middle when it is centred.
+    t.position.copy(to).addScaledVector(right, t.scale.x / 2).addScaledVector(up, t.scale.y / 2)
     t.updateMatrixWorld()
+    const at = leaderGeometry.attributes.position
+    at.setXYZ(0, from.x, from.y, from.z); at.setXYZ(1, to.x, to.y, to.z); at.needsUpdate = true
   }
   title3d = t
   graph.scene().add(t)
+  graph.scene().add(leader)
 }
 // In the space, a ring sprite over the selected disc, drawn over everything but the labels, breathing slowly.
 let ring3d: any = null
