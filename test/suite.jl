@@ -3108,7 +3108,7 @@ end
     @test near[Tuple(sort(["2401.00002", rec]))] == (0.55, false)                   # a note's nearest in the library
     @test pairs(g, "links") == Set([("2401.00001", "2401.00005"), ("2401.00001", "2401.00006"), Tuple(sort([rec, "2401.00005"]))])
     n1 = only(n for n in g["nodes"] if n["id"] == "2401.00001")
-    @test n1["x"] == [0.1, 0.2] && n1["ux"] == [0.3, 0.4] && n1["cluster"] == 1 && n1["year"] == "2017" && n1["links"] == 2 && first(g["clusters"])["name"] == "Reefs"
+    @test n1["x"] == [0.1, 0.2] && n1["ux"] == [0.3, 0.4] && n1["cluster"] == 1 && n1["year"] == "2017" && n1["date"] == "2017-03-01" && n1["links"] == 2 && first(g["clusters"])["name"] == "Reefs"
     @test !haskey(only(n for n in g["nodes"] if n["id"] == "2401.00006"), "x")         # linked, not placed: no vector
     # A paper whose arXiv record has not come has no page on the site yet: its page is arXiv's.
     @test only(n for n in g["nodes"] if n["id"] == "2401.00006")["page"] == "https://arxiv.org/abs/2401.00006" &&

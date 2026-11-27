@@ -155,6 +155,28 @@ html.kbx-takeover .VPFooter { display: none; }
 .kbx-colour-by { max-width: 12rem; }
 .kbx-scale { margin: 6px 0 4px; }
 .kbx-scale-bar { height: 8px; border-radius: 4px; }
+/* The part of the scale shown: two handles over the bar, the rest of it dimmed. */
+.kbx-scale-range { position: relative; height: 16px; display: flex; align-items: center; }
+.kbx-scale-range .kbx-scale-bar { width: 100%; }
+.kbx-scale-out { position: absolute; top: 4px; height: 8px; background: var(--vp-c-bg); opacity: 0.72; pointer-events: none; }
+.kbx-scale-out.low { border-radius: 4px 0 0 4px; }
+.kbx-scale-out.high { border-radius: 0 4px 4px 0; }
+.kbx-scale-range input[type=range] {
+  position: absolute; inset: 0; width: 100%; margin: 0; background: none; pointer-events: none;
+  -webkit-appearance: none; appearance: none;
+}
+.kbx-scale-range input[type=range]::-webkit-slider-runnable-track { background: none; height: 16px; }
+.kbx-scale-range input[type=range]::-moz-range-track { background: none; }
+.kbx-scale-range input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; pointer-events: auto; cursor: ew-resize; width: 8px; height: 16px; border-radius: 3px;
+  background: var(--vp-c-text-1); border: 1px solid var(--vp-c-bg); box-shadow: 0 0 0 1px var(--vp-c-divider);
+}
+.kbx-scale-range input[type=range]::-moz-range-thumb {
+  pointer-events: auto; cursor: ew-resize; width: 8px; height: 16px; border-radius: 3px;
+  background: var(--vp-c-text-1); border: 1px solid var(--vp-c-bg);
+}
+.kbx-scale-span { color: var(--vp-c-text-1); }
+.kbx-scale-span button { margin-left: 4px; color: var(--vp-c-brand-1); font-size: 11px; }
 .kbx-scale-ends { display: flex; justify-content: space-between; margin-top: 3px; font-size: 11px; color: var(--vp-c-text-2); }
 .kbx-scale .kbx-hint { margin: 4px 0 0; }
 /* The selected document's title, a callout set over the map (see `showTitle`), its maths set. */

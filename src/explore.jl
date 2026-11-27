@@ -830,10 +830,11 @@ function explore_graph(kb::KB, caller::Caller; center::AbstractString = "", dept
     order = sort!(collect(ids))
     at = Dict(id => i - 1 for (i, id) in enumerate(order))
     year(r) = (d = coalesce(r.published, ""); occursin(r"^\d{4}", d) ? d[1:4] : "")
+    date(r) = (d = coalesce(r.published, ""); occursin(r"^\d{4}-\d{2}-\d{2}", d) ? d[1:10] : "")
     nodes = map(order) do id
         haskey(extra, id) && return merge(extra[id], Dict("links" => get(degree, id, 0)))
         r, d = rows[id], get(docs, id, nothing)
-        n = Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "year" => year(r),
+        n = Dict{String,Any}("id" => id, "kind" => String(r.kind), "title" => coalesce(r.title, id), "year" => year(r), "date" => date(r),
                              "page" => explore_page(kb.config, id, r.metadata_at), "links" => get(degree, id, 0),
                              "access" => coalesce(r.access, "open"), "mine" => id in held, "read" => Bool(r.read))
         if d !== nothing

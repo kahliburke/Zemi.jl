@@ -129,11 +129,15 @@ The panel at the top right has two tabs:
     findings and tasks use it;
   - **Ahead of its time**: how much more it is like the papers published after it than before it;
   - **Loners**: how unlike even its nearest it is;
-  - **Year published** and **Date added**.
+  - **Date published** and **Date added**.
+
+  On these scales, drag the ends of the colour bar to show only part of it: the documents outside fade
+  to faint dots that can't be chosen, and the ends name the values they stand at. **All** shows the whole
+  scale again.
 
   **Size by** makes a document's disc larger for more of something: its links, the group's attention,
   the watch's rating, how central it is to its cluster, or the field right now; or the same for all.
-  Where documents crowd, every disc is drawn smaller and the sizes keep their proportions. A change of
+  A plain disc is the same size for every document, set by how closely the layout packs them. A change of
   either eases each document from its old colour and size to its new one.
 
   A row goes to its group and lights it; **Shade by** then shades a cluster's documents by how often

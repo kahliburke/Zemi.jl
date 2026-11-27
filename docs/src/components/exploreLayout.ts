@@ -3,8 +3,7 @@
 import type { Node } from './kbExplore'
 
 /** A node as the graph draws it: its place fixed (`fx`…) where the map has one. */
-/** A node as drawn: where it is fixed, and its `room`, the distance to the nearest other one there. */
-export type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any; room?: number }
+export type GNode = Node & { fx?: number; fy?: number; fz?: number; x?: any; y?: any; z?: any }
 export type GLink = { source: string; target: string; kind: string; similarity?: number }
 /** How far the map's and the space's coordinates (−1 to 1) are spread in the drawing. */
 export const SCALE_2D = 700, SCALE_3D = 360
@@ -110,18 +109,18 @@ export const pixelSize = (d: number, renderer: any, camera: any) =>
   2 * d * Math.tan((camera.fov * Math.PI) / 360) / renderer.domElement.clientHeight
 
 /**
- * Each placed node's `room`: how far the nearest other placed node is, so its disc can be kept from
- * covering it. Worked out on a grid of cells about a typical spacing wide.
+ * How far a placed node's nearest other placed node typically is (the median), so the discs can be drawn
+ * no wider than leaves most of them apart. Worked out on a grid of cells about a typical spacing wide.
  */
 export function measureRoom(nodes: GNode[], deep: boolean) {
   const placed = nodes.filter(n => n.fx !== undefined)
-  if (placed.length < 2) return
+  if (placed.length < 2) return Infinity
   const at = (n: GNode) => [n.fx!, n.fy!, deep ? n.fz ?? 0 : 0]
   const xs = placed.map(at)
   const span = Math.max(...[0, 1, 2].map(a => Math.max(...xs.map(p => p[a])) - Math.min(...xs.map(p => p[a]))))
   const size = Math.max(span / (deep ? Math.cbrt(placed.length) : Math.sqrt(placed.length)), 1e-6)
   const key = (p: number[]) => p.map(v => Math.floor(v / size))
-  const grid = new Map<string, number[]>()
+  const grid = new Map<string, number[]>(), rooms: number[] = []
   xs.forEach((p, i) => { const k = key(p).join(); (grid.get(k) ?? grid.set(k, []).get(k)!).push(i) })
   placed.forEach((n, i) => {
     const [cx, cy, cz] = key(xs[i])
@@ -134,6 +133,8 @@ export function measureRoom(nodes: GNode[], deep: boolean) {
           if (j !== i) best = Math.min(best, Math.hypot(xs[i][0] - xs[j][0], xs[i][1] - xs[j][1], xs[i][2] - xs[j][2]))
       if (found) break
     }
-    n.room = best
+    rooms.push(best)
   })
+  rooms.sort((a, b) => a - b)
+  return rooms[rooms.length >> 1]
 }

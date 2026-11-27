@@ -35,7 +35,7 @@ const { isDark } = useData()
 const settings = useExploreSettings()
 provideSettings(settings)
 const { view, layout, colourBy, sizeBy, shadeBy, shownLinks, shownKinds, showUnlinked, threshold, abstracts, driftEvery, scope,
-        panelOpen, settingsOpen } = settings
+        panelOpen, settingsOpen, span } = settings
 const fly = ref(false)
 watch(abstracts, v => { if (data.value && data.value.abstracts !== v) load() })
 
@@ -247,6 +247,28 @@ const sizeRank = computed(() => {
   const v = SIZES[sizeBy.value].value
   return !v || !data.value ? new Map<string, number>() : ranks(data.value.nodes.filter(visibleNode).map(n => [n.id, v(n)]))
 })
+// Outside the part of the colour scale shown (`span`): drawn faint and small, and not picked. Those with no
+// value on the scale are outside any part of it.
+const narrowed = computed(() => !!SCALES[colourBy.value] && (span.value[0] > 0 || span.value[1] < 1))
+function ablated(n: Node | undefined) {
+  if (!n || !narrowed.value) return false
+  const t = scaleRank.value.get(n.id)
+  return t === undefined || t < span.value[0] - 1e-9 || t > span.value[1] + 1e-9
+}
+// The value at a rank on the colour scale, for the panel to name the ends of the part shown: the scale's
+// own (a year, a date) where it has a form for it, else the rank.
+const scaleAt = computed(() => {
+  const s = SCALES[colourBy.value]
+  if (!s || !data.value) return null
+  const at = data.value.nodes.filter(visibleNode).map(n => [scaleRank.value.get(n.id), s.value(n)] as const)
+    .filter((p): p is readonly [number, number] => p[0] !== undefined && p[1] !== undefined).sort((a, b) => a[0] - b[0])
+  // The end of the part shown at `t`: from the least value ranked at or above it, up to the most at or below.
+  return (t: number, from: boolean) => {
+    if (!s.format || !at.length) return `${Math.round(t * 100)}%`
+    const inside = from ? at.find(p => p[0] >= t - 1e-9) : at.findLast(p => p[0] <= t + 1e-9)
+    return inside ? s.format(inside[1]) : '–'
+  }
+})
 // arXiv categories, the commonest among those shown first: those coloured, the rest one colour as others.
 const CATEGORIES_SHOWN = 10
 const categories = computed(() => {
@@ -399,6 +421,7 @@ const standing = computed(() => {
 })
 watch(settingsOpen, open => { if (open) loadProjects() }, { immediate: true })
 function shade(n: Node) {
+  if (ablated(n)) return isDark.value ? '#24242c' : '#e6e6ea'
   const c = colour(n)
   if (hits.value.size) return hits.value.has(n.id) ? c : isDark.value ? '#3a3a44' : '#d8d8de'
   if (litRow.value) {
@@ -413,7 +436,8 @@ function shade(n: Node) {
 // A document's size: from what Size by measures (its links, or its rank on another measure, 0.4 to 2.8
 // times the base, those with no value the smallest), larger for a search's hit, the selected document,
 // and in a lit cluster, those that stand out most by Shade by.
-const plain = (n: Node) => (n.kind === 'finding' ? 3 : 1.4)
+const PLAIN = 1.4
+const plain = (n: Node) => (n.kind === 'finding' ? 3 : PLAIN)
 function measured(n: Node) {
   const base = plain(n)
   if (sizeBy.value === 'none') return base
@@ -423,10 +447,10 @@ function measured(n: Node) {
 }
 const size = (n: Node) => (measured(n) + (hits.value.get(n.id) ?? 0) * 3) * (n.id === selected.value?.id ? 2.5 : 1) *
                          (0.7 + 0.8 * (standing.value.get(n.id) ?? 0.375))
-// How much wider than a plain document of its kind a document's disc is, by area. The discs' limits (their
-// room, and the most a disc is on screen in the space) hold the plain disc, and this scales it after, so
-// the sizes keep their proportions wherever a document stands.
-const grow = (n: Node) => Math.sqrt(size(n) / plain(n))
+// How much wider than a plain paper's disc a document's is (by area, as a radius). The discs' limits (the
+// typical room, and the most a disc is on screen in the space) hold the plain disc, and this scales it
+// after, so the sizes keep their proportions wherever a document stands.
+const grow = (n: Node) => Math.sqrt(size(n) / PLAIN) * (ablated(n) ? 0.5 : 1)
 
 // A change of Colour by or Size by eased in: each document's colour and size moved from where they were
 // last drawn (`look`) to where they now are.
@@ -477,11 +501,12 @@ const packing = computed(() => {
 // documents keeps growing and the discs do not: a tight group comes apart (as `DISC_MOST` does in the space).
 const FLAT_MOST = 12
 let flatRel = 4
-// No wider than its room (see `measureRoom`) lets it be, nor smaller than a quarter of its size: discs
-// close together are drawn smaller rather than over each other.
-const ROOM_FILL = 0.45, ROOM_LEAST = 0.25
-const roomy = (r: number, n: Node) => Math.min(r, Math.max(ROOM_FILL * ((n as GNode).room ?? Infinity), ROOM_LEAST * r))
-const flatRadius = (n: Node) => roomy(Math.sqrt(plain(n)) * packing.value * flatRel, n) * shownGrow(n)
+// A plain disc no wider than leaves the typical document apart from its nearest (see `measureRoom`): the
+// same for every document, so that only Size by tells them apart.
+const ROOM_FILL = 0.45
+let crowd = Infinity
+const roomy = (r: number) => Math.min(r, ROOM_FILL * crowd)
+const flatRadius = (n: Node) => roomy(Math.sqrt(PLAIN) * packing.value * flatRel) * shownGrow(n)
 const flatVal = (n: Node) => (flatRadius(n) / flatRel) ** 2
 function fitFlatDiscs(k: number) {
   const typical = Math.sqrt(1.4) * packing.value * 4                  // a document's radius at nodeRelSize 4
@@ -519,12 +544,14 @@ function graphData() {
       links.push({ source: a, target: b, kind: 'similar', similarity: s })
   }
   placeTheRest(nodes, links, deep)
-  measureRoom(nodes, deep)
+  crowd = measureRoom(nodes, deep)
   return { nodes, links }
 }
 
 
 function linkColour(l: GLink) {
+  if (narrowed.value && (ablated(byId.value.get(endId(l.source))) || ablated(byId.value.get(endId(l.target)))))
+    return isDark.value ? 'rgba(200,200,255,0.06)' : 'rgba(60,60,140,0.06)'
   if (l.kind === 'similar') return isDark.value ? 'rgba(200,200,255,0.45)' : 'rgba(60,60,140,0.4)'
   const c = LINK_COLOURS[l.kind] ?? '#999'
   if (peek.value && touches(l, peek.value.id)) return c + 'ff'
@@ -959,11 +986,11 @@ function showNearest3d() {
 const sprites = new Map<string, { sprite: any; node: GNode }>()
 // A disc's width: a little smaller than the sphere 3d-force-graph would draw for the node (radius 4·∛val),
 // as closely as the layout packs them.
-const spriteSize = (n: GNode, g: number) => 2 * roomy(2.5 * Math.cbrt(plain(n)) * packing.value, n) * g
+const spriteSize = (g: number) => 2 * roomy(2.5 * Math.cbrt(PLAIN) * packing.value) * g
 // A disc's colour and size as now shown.
 function dressDisc(sprite: any, n: GNode) {
   sprite.material.color.set(shownColour(n))
-  const g = shownGrow(n), d = spriteSize(n, g)
+  const g = shownGrow(n), d = spriteSize(g)
   sprite.userData.d = d; sprite.userData.g = g; sprite.scale.set(d, d, 1)
 }
 // How a linked document stands to the one shown: what it does to this one, or this one to it.
@@ -1007,7 +1034,7 @@ function morph() {
     morphing = 0
     graph.cooldownTicks(1)
     drawnShape = `${view.value} ${layout.value} ${subset.value} ${data.value?.abstracts}`
-    measureRoom(nodes, deep)
+    crowd = measureRoom(nodes, deep)
     if (deep) {
       const at = new Map(clusterCentres(nodes, clusterName).map(c => [c.id, c]))
       for (const { sprite, id } of clusterLabels) { const c = at.get(id); if (c) sprite.position.set(c.x, c.y, c.z) }
@@ -1053,7 +1080,8 @@ function refresh() {
 }
 watch([selected, peek, hits, litRow, standing], restyle)
 watch([colourBy, sizeBy], () => { easeLook(); restyle() })
-watch(colourBy, () => { litRow.value = null })
+watch(colourBy, () => { litRow.value = null; span.value = [0, 1] })
+watch(span, restyle, { deep: true })
 // Recoloured and resized in place: the space's discs directly, the map's through its accessors.
 function restyle() {
   if (!graph) return
@@ -1190,7 +1218,7 @@ function discAt(e: PointerEvent): GNode | null {
   const x = e.clientX - r.left, y = e.clientY - r.top
   let best: GNode | null = null, depth = Infinity
   for (const { sprite, node } of sprites.values()) {
-    if (!sprite.visible) continue
+    if (!sprite.visible || ablated(node)) continue
     const p = sprite.position.clone().project(camera)
     if (p.z < -1 || p.z > 1) continue                              // behind the camera, or past the far plane
     const sx = (p.x + 1) / 2 * r.width, sy = (1 - p.y) / 2 * r.height
@@ -1205,7 +1233,7 @@ function nodeAt(e: PointerEvent): GNode | null {
   const p = graph.screen2GraphCoords(e.clientX - r.left, e.clientY - r.top), k = graph.zoom()
   let best: GNode | null = null, apart = Infinity
   for (const n of graph.graphData().nodes as GNode[]) {
-    if (n.x === undefined) continue
+    if (n.x === undefined || ablated(n)) continue
     const d = Math.hypot(n.x - p.x, n.y - p.y)
     if (d < flatRadius(n) + 3 / k && d < apart) { best = n; apart = d }
   }
@@ -1297,7 +1325,8 @@ function next(step = 1) {
   go(byId.value.get(order.value[at])!)
 }
 
-// Drifting: from where one is to its nearest not yet seen, pausing at each.
+// Drifting: from where one is to its nearest not yet seen (within the part of the colour scale shown),
+// pausing at each.
 const drifting = ref(false)
 let driftTimer: ReturnType<typeof setInterval> | undefined
 const seen = new Set<string>()
@@ -1343,7 +1372,7 @@ function showTrail3d() {
 }
 function drift() {
   if (drifting.value) { stopDrift(); return }
-  const start = selected.value ?? data.value?.nodes.find(n => n.x) ?? null
+  const start = selected.value ?? data.value?.nodes.find(n => n.x && visibleNode(n) && !ablated(n)) ?? null
   if (!start) return
   drifting.value = true
   seen.clear(); seen.add(start.id)
@@ -1353,7 +1382,7 @@ function drift() {
 }
 function driftStep() {
   const here = selected.value
-  const nextOne = (nearOf.value.get(here?.id ?? '') ?? []).find(x => !seen.has(x.node.id) && visibleNode(x.node))
+  const nextOne = (nearOf.value.get(here?.id ?? '') ?? []).find(x => !seen.has(x.node.id) && visibleNode(x.node) && !ablated(x.node))
   if (!nextOne) { stopDrift(); return }
   seen.add(nextOne.node.id)
   driftTrail.value.push({ node: nextOne.node, similarity: nextOne.similarity })
@@ -1444,7 +1473,8 @@ watch([pairs, showPairs], () => {
 })
 function goPair(p: Pair) { go(p.a); setTimeout(() => { selected.value = p.a }, 50) }
 const nearSelected = computed(() => (nearOf.value.get(selected.value?.id ?? '') ?? []).slice(0, 8))
-const nearLit = computed(() => (nearOf.value.get(lit.value?.id ?? '') ?? []).slice(0, 8))
+// The lit document's nearest in meaning drawn on the map: those within the part of the colour scale shown.
+const nearLit = computed(() => (nearOf.value.get(lit.value?.id ?? '') ?? []).filter(x => !ablated(x.node)).slice(0, 8))
 const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? '') ?? [])
 </script>
 
@@ -1501,7 +1531,7 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
       </div>
 
       <KBExplorePanel v-if="panelOpen" :legend="legend" :lit-row="litRow" :subset="subset" :projects="projectList" :flying="fly"
-                      :least="data?.least ?? 0" :here-row="selected ? legendKey(selected) : null"
+                      :least="data?.least ?? 0" :scale-at="scaleAt" :here-row="selected ? legendKey(selected) : null"
                       :layouts="{ umap: !!data?.nodes.some(n => n.ux), pacmap: !!data?.nodes.some(n => n.px) }"
                       @go-to-row="goToRow" @map="mapSet" />
 

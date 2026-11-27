@@ -4,7 +4,7 @@
 import { ref, watch, computed, inject, provide, type InjectionKey, type Ref } from 'vue'
 
 export type Node = {
-  id: string; kind: string; title: string; year?: string; page: string; links: number; status?: string; project?: string
+  id: string; kind: string; title: string; year?: string; date?: string; page: string; links: number; status?: string; project?: string
   access?: 'open' | 'projects' | 'private'; mine?: boolean; read?: boolean
   x?: [number, number]; p?: [number, number, number]; ux?: [number, number]; up?: [number, number, number]
   px?: [number, number]; pp?: [number, number, number]
@@ -46,12 +46,13 @@ export const WHOSE_COLOURS: Record<string, string> = { mine: '#ff7ab6', projects
 /** What the map is coloured by: a group each document is in (a row of the legend each), or a scale. */
 export const COLOUR_BY = [['cluster', 'Cluster'], ['recent', 'The field right now'], ['bridge', 'Bridges'],
                           ['attention', 'The group’s attention'], ['ahead', 'Ahead of its time'], ['alone', 'Loners'],
-                          ['year', 'Year published'], ['added', 'Date added'],
+                          ['year', 'Date published'], ['added', 'Date added'],
                           ['category', 'arXiv category'], ['reading', 'How it was read'], ['kind', 'Kind'], ['whose', 'Whose']] as const
 export type ColourBy = typeof COLOUR_BY[number][0]
 /** The scales: what a document's value is, and what each end of the scale says. Colours go by rank, so the
  * scale's middle is the middle document, however the values bunch. */
-export const SCALES: Partial<Record<ColourBy, { value: (n: Node) => number | undefined; low: string; high: string; about: string }>> = {
+export const SCALES: Partial<Record<ColourBy, { value: (n: Node) => number | undefined; low: string; high: string; about: string;
+                                                format?: (v: number) => string }>> = {
   recent: { value: n => n.recent, low: 'quiet', high: 'busy',
             about: 'How much of what is nearest it in meaning was published in the last 30 days: where the field is busy now.' },
   bridge: { value: n => n.bridge, low: 'within its cluster', high: 'between clusters',
@@ -63,8 +64,10 @@ export const SCALES: Partial<Record<ColourBy, { value: (n: Node) => number | und
            about: 'How much more it is like the papers published after it than those before it.' },
   alone: { value: n => n.alone, low: 'among many alike', high: 'alone',
            about: 'How unlike even the documents nearest it in meaning it is.' },
-  year: { value: n => (n.year ? Number(n.year) : undefined), low: 'earlier', high: 'later', about: 'When it was published.' },
-  added: { value: n => (n.added ? Date.parse(n.added) : undefined), low: 'first', high: 'latest', about: 'When it came into the knowledge base.' },
+  year: { value: n => (n.date ? Date.parse(n.date) : n.year ? Date.parse(`${n.year}-07-01`) : undefined), low: 'earlier', high: 'later',
+          about: 'When it was published.', format: v => new Date(v).toISOString().slice(0, 7) },
+  added: { value: n => (n.added ? Date.parse(n.added) : undefined), low: 'first', high: 'latest', about: 'When it came into the knowledge base.',
+           format: v => new Date(v).toISOString().slice(0, 10) },
 }
 /** What a document's size shows: how much of something, larger for more. Links as before (each link adds
  * to the disc); the rest by rank among the documents shown, as the colour scales are. */
@@ -162,6 +165,8 @@ export function useExploreSettings() {
     // The papers known only by their abstract: left out unless asked for, the map then being of every document.
     abstracts: useStored('abstracts', false),
     driftEvery: useStored('drift', 4.5),
+    // The part of a colour scale shown, by rank, 0 to 1: the documents outside it all but taken away.
+    span: ref<[number, number]>([0, 1]),
     scope: useStored<'all' | 'cluster' | 'own'>('scope', 'own'),
     panelOpen, panel,
     settingsOpen: computed(() => panelOpen.value && panel.value === 'show'),
