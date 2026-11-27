@@ -7098,6 +7098,18 @@ end
     end
 end
 
+@zset "notebooks rendered before the pages moved" begin
+    # A rendering links the papers' pages where they were when it was made; a build brings it up to /kb.
+    dir = mktempdir()
+    old = joinpath(dir, "tides", "slate-bundle.json")
+    mkpath(dirname(old))
+    write(old, "[Ada 2020](slate-docpage:generated/kb/papers/2005-07226.md); [x](slate-docpage:kb/papers/2401-00001.md)")
+    write(joinpath(dir, "now.json"), "slate-docpage:generated/kb/papers/a.md")            # not a bundle: left alone
+    @test K.upgrade_renders!(dir) == 1 && K.upgrade_renders!(dir) == 0
+    @test read(old, String) == "[Ada 2020](slate-docpage:kb/papers/2005-07226.md); [x](slate-docpage:kb/papers/2401-00001.md)"
+    @test occursin("generated/kb", read(joinpath(dir, "now.json"), String))
+end
+
 @zset "the site's parts, published with the dataset" begin
     # The content's notebooks, as two machines have them: the publisher's, with a notebook rendered, and a consumer's.
     function content!(c)

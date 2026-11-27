@@ -257,8 +257,31 @@ function site_sources(c::Config, dir::AbstractString)
     mkpath(content_path(c, "notebooks"))
     link_dir(content_path(c, "notebooks"), joinpath(dir, "notebooks"))
     mkpath(slate_dir(c))
+    upgrade_renders!(slate_dir(c))
     link_dir(slate_dir(c), joinpath(dir, "slate"))
     return dir
+end
+
+"""
+    upgrade_renders!(dir) -> Int
+
+Bring the notebooks' rendered bundles in `dir` (see [`slate_dir`](@ref)) up to where the site's pages
+are now: one rendered while the knowledge base's pages were under `generated/` links them there
+(`slate-docpage:generated/kb/…`), and a build reuses a rendering rather than running the notebook
+again. Returns how many bundles changed.
+"""
+function upgrade_renders!(dir::AbstractString)
+    n = 0
+    isdir(dir) || return n
+    for (root, _, files) in walkdir(dir), f in files
+        f == "slate-bundle.json" || continue
+        path = joinpath(root, f)
+        text = read(path, String)
+        occursin("slate-docpage:generated/kb/", text) || continue
+        write(path, replace(text, "slate-docpage:generated/kb/" => "slate-docpage:kb/"))
+        n += 1
+    end
+    return n
 end
 
 "Copy the files under `from`, if it is there, into `to` at the same paths, over what is there."
