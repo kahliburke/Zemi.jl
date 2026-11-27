@@ -43,7 +43,11 @@ const CLI_HELP = """
                                          the role back, otherwise it is invited as one and its first sign-in
                                          makes it an admin. Alone, who can administer it
     zemi backup [--keep NAME]            take a snapshot now ([backup] in the config), kept by NAME until deleted
-    zemi backup --offsite                copy the latest snapshot off this machine now ([backup.offsite])
+    zemi backup --offsite [--background | --follow]
+                                         copy the latest snapshot off this machine now ([backup.offsite]),
+                                         showing how far it has got; --background sends it from a process
+                                         of its own, which goes on when the terminal closes; --follow (or the
+                                         same command while one is being sent) shows the copy under way
     zemi backup --offsite-key [FILE]     make the key [backup.offsite] seals copies with (beside the config
                                          by default); keep a copy of it somewhere other than this machine
     zemi backup --offsite-recovery       set the recovery passphrase, which opens the copies without the key
@@ -108,6 +112,28 @@ function progress_line()
     report(msg) = tty ? print(stderr, "\r\e[K", first(msg, displaysize(stderr)[2] - 1)) : println(stderr, msg)
     finish() = tty && println(stderr)
     return report, finish
+end
+
+"""
+    follow_copy(config)
+
+Show how far the copy being sent off this machine has got (see [`sending_offsite`](@ref)), by
+whichever process sends it, until it ends; then the last copy made. Leaving it (Ctrl-C) leaves the
+copy going.
+"""
+function follow_copy(c::Config)
+    meter, done = progress_line()
+    d = sending_offsite(c)
+    d === nothing && return println("No copy is being sent off this machine now.")
+    stamp = d["stamp"]
+    while (d = sending_offsite(c)) !== nothing
+        meter(offsite_progress_text(d))
+        sleep(1)
+    end
+    done()
+    mark = try TOML.parsefile(offsite_mark(c)) catch; Dict{String,Any}() end
+    println(get(mark, "stamp", "") == stamp ? "Copied $stamp off this machine to $(offsite_json(c)["where"])." :
+            "The copy of $stamp stopped before it was done; see $(joinpath(backup_dir(c), "offsite.log")) when it was sent in the background.")
 end
 
 """
@@ -213,8 +239,21 @@ function cli(args::AbstractVector{<:AbstractString})
             println("The copies open with the recovery passphrase too. Keep it where you would look for it without this machine.")
         elseif cmd == "backup" && "--offsite" in rest
             c = validate(load_config())
-            r = offsite!(c)
-            println("Copied $(r.stamp) off this machine ($(r.sent) new file(s)) to $(offsite_json(c)["where"])")
+            if "--follow" in rest || sending_offsite(c) !== nothing
+                follow_copy(c)
+            elseif "--background" in rest
+                log = joinpath(backup_dir(c), "offsite.log")
+                mkpath(dirname(log))
+                project = something(Base.active_project(), "@.")
+                cmd = `$(Base.julia_cmd()) --startup-file=no --threads=auto --project=$project -m Zemi backup --offsite`
+                p = run(pipeline(Cmd(cmd; detach = true); stdout = log, stderr = log, stdin = devnull); wait = false)
+                println("Copying off this machine in the background (process $(getpid(p))), on when this terminal closes.\n",
+                        "zemi backup --offsite --follow shows how far it has got; its output goes to $log.")
+            else
+                r = offsite!(c; progress = meter)
+                done()
+                println("Copied $(r.stamp) off this machine ($(r.sent) new file(s)) to $(offsite_json(c)["where"])")
+            end
         elseif cmd == "backups" && "--offsite" in rest
             c = validate(load_config())
             passphrase = "--recovery" in rest ? passphrase_prompt() : nothing

@@ -172,38 +172,101 @@ function snapshot_file_hashes(c::Config, snap::AbstractString)
 end
 
 """
-    send_offsite!(config; store, snap = latest_snapshot(config)) -> NamedTuple
+Where the copy being sent says how far it has got, beside the backups: whichever process sends it
+(the service, `zemi backup --offsite`, or one put in the background) writes it, and the Status page
+and `zemi backup --offsite --follow` read it (see [`sending_offsite`](@ref)).
+"""
+offsite_progress_file(c::Config) = joinpath(backup_dir(c), "offsite-progress.json")
+
+"Whether process `pid` still runs (on Windows, whether its progress was written in the last ten minutes)."
+sender_alive(pid::Integer, file::AbstractString) =
+    pid == getpid() || (Sys.iswindows() ? time() - mtime(file) < 600 : ccall(:kill, Cint, (Cint, Cint), pid, 0) == 0)
+
+"""
+    sending_offsite(config) -> Union{Dict,Nothing}
+
+The copy being sent now, by this process or another: `pid`, `stamp`, `started` (Unix time), `phase`
+(`files`, then `state`), `files_done` of `files_total` and `bytes_done` of `bytes_total` still to send
+when it began. `nothing` when none is, or the process that was sending it is gone.
+"""
+function sending_offsite(c::Config)
+    f = offsite_progress_file(c)
+    d = try JSON.parse(read(f, String)) catch; return nothing end
+    d isa AbstractDict && sender_alive(Int(get(d, "pid", 0)), f) || return nothing
+    return d
+end
+
+"How far copy `d` (see [`sending_offsite`](@ref)) has got, for people: sent of total, the rate and the time left."
+function offsite_progress_text(d::AbstractDict)
+    mb(b) = round(b / 1e6; digits = 1)
+    done, total = Int(d["bytes_done"]), Int(d["bytes_total"])
+    took = max(time() - Float64(d["started"]), 1.0)
+    rate = done / took
+    left = rate > 0 && total > done ? (total - done) / rate : 0.0
+    eta = left < 60 ? "under a minute left" : left < 3600 ? "about $(round(Int, left / 60)) min left" :
+          "about $(round(left / 3600; digits = 1)) h left"
+    what = d["phase"] == "state" ? "the packed state" : "$(d["files_done"]) of $(d["files_total"]) files"
+    return "Copying $(d["stamp"]) off this machine: $(mb(done)) of $(mb(total)) MB, $what · $(round(rate / 1e6; digits = 2)) MB/s, $eta"
+end
+
+"""
+    send_offsite!(config; store, snap = latest_snapshot(config), progress = nothing) -> NamedTuple
 
 Copy snapshot `snap` to the store (see the top of this file): its files the store lacks, then its
-state, what its files are, and last its `snapshot.toml`. Returns `(; stamp, sent)`, `sent` the files
-sent.
+state, what its files are, and last its `snapshot.toml`. How far it has got is written for others to
+read as it goes (see [`sending_offsite`](@ref)), and given to `progress` (a message) about every
+second. Refused while another process sends one. Returns `(; stamp, sent)`, `sent` the files sent.
 """
-function send_offsite!(c::Config; store = offsite_store(c), snap = latest_snapshot(c))
+function send_offsite!(c::Config; store = offsite_store(c), snap = latest_snapshot(c), progress = nothing)
     store === nothing && error("[backup.offsite] names no store")
     snap === nothing && error("No snapshot to copy: take one first (zemi backup)")
     stamp = basename(snap)
     return lock(OFFSITE_LOCK) do
+        other = sending_offsite(c)
+        other === nothing || other["pid"] == getpid() ||
+            error("A copy is being sent already, by process $(other["pid"]): follow it with zemi backup --offsite --follow")
         key = offsite_data_key(c, store; create = true)
         rows = c.backup.offsite.files ? snapshot_file_hashes(c, snap) : NamedTuple[]
         have = Set(list_objects(store, "files/"))
-        sent = 0
-        for r in rows
-            name = offsite_file_name(key, r.hash)
-            name in have && continue
-            bytes = read(joinpath(snap, "files", r.path))
-            bytes2hex(sha256(bytes)) == r.hash || error("$(r.path) changed while it was being copied")
-            write_object!(store, name, seal(key, name, bytes))
-            push!(have, name)
-            sent += 1
+        todo = [r for r in rows if !(offsite_file_name(key, r.hash) in have)]
+        state = joinpath(snap, "state.tar.zst")
+        file = offsite_progress_file(c)
+        d = Dict{String,Any}("pid" => getpid(), "stamp" => stamp, "started" => time(), "phase" => "files",
+                             "files_done" => 0, "files_total" => length(todo), "bytes_done" => 0,
+                             "bytes_total" => sum(r -> parse(Int, r.size), todo; init = 0) + filesize(state))
+        written = Ref(0.0)
+        function note(; now = false)
+            (now || time() - written[] >= 1) || return
+            written[] = time()
+            write_atomic(file, JSON.json(d))
+            progress === nothing || progress(offsite_progress_text(d))
         end
-        meta = TOML.parsefile(joinpath(snap, "snapshot.toml"))
-        # Without its files, a copy restores none, rather than emptying the folders the snapshot had.
-        c.backup.offsite.files || (meta["files"] = String[])
-        put(part, bytes) = (name = "snapshots/$stamp/$part"; write_object!(store, name, seal(key, name, bytes)))
-        put("state", read(joinpath(snap, "state.tar.zst")))
-        put("files", Vector{UInt8}(join(("$(r.path)\t$(r.size)\t$(r.mtime)\t$(r.hash)\n" for r in rows))))
-        put("done", Vector{UInt8}(sprint(TOML.print, meta)))
-        return (; stamp, sent)
+        try
+            note(; now = true)
+            for r in todo
+                name = offsite_file_name(key, r.hash)
+                bytes = read(joinpath(snap, "files", r.path))
+                bytes2hex(sha256(bytes)) == r.hash || error("$(r.path) changed while it was being copied")
+                write_object!(store, name, seal(key, name, bytes))
+                d["files_done"] += 1
+                d["bytes_done"] += length(bytes)
+                note()
+            end
+            meta = TOML.parsefile(joinpath(snap, "snapshot.toml"))
+            # Without its files, a copy restores none, rather than emptying the folders the snapshot had.
+            c.backup.offsite.files || (meta["files"] = String[])
+            put(part, bytes) = (name = "snapshots/$stamp/$part"; write_object!(store, name, seal(key, name, bytes)))
+            d["phase"] = "state"
+            note(; now = true)
+            put("state", read(state))
+            d["bytes_done"] += filesize(state)
+            put("files", Vector{UInt8}(join(("$(r.path)\t$(r.size)\t$(r.mtime)\t$(r.hash)\n" for r in rows))))
+            put("done", Vector{UInt8}(sprint(TOML.print, meta)))
+            note(; now = true)
+            return (; stamp, sent = length(todo))
+        finally
+            rm(file; force = true)
+        end
     end
 end
 
@@ -277,16 +340,17 @@ function offsite_due(c::Config; at::DateTime = now(UTC))
 end
 
 """
-    offsite!(config) -> NamedTuple
+    offsite!(config; progress = nothing) -> NamedTuple
 
 Copy the latest snapshot off this machine (taking one first when there is none), and thin the
-copies, noting how it went for the Status page. Returns what [`send_offsite!`](@ref) did.
+copies, noting how it went for the Status page; `progress` is told how far it has got (see
+[`send_offsite!`](@ref)). Returns what `send_offsite!` did.
 """
-function offsite!(c::Config)
+function offsite!(c::Config; progress = nothing)
     started = time()
     try
         latest_snapshot(c) === nothing && backup!(c)
-        r = send_offsite!(c)
+        r = send_offsite!(c; progress)
         thin_offsite!(c)
         write_atomic(offsite_mark(c), sprint(TOML.print, Dict("sent_at" => string(now(UTC)) * "Z", "stamp" => r.stamp)))
         copies = offsite_copies(c)
@@ -309,7 +373,7 @@ The service's copies off this machine: every ten minutes, while the backups are 
 function follow_offsite(kb::KB)
     return every!("Copying the backups off this machine"; seconds = 600) do
         c = kb.config
-        c.backup.enabled && !isempty(c.backup.offsite.store.store) && offsite_due(c) && offsite!(c)
+        c.backup.enabled && !isempty(c.backup.offsite.store.store) && offsite_due(c) && sending_offsite(c) === nothing && offsite!(c)
     end
 end
 
@@ -407,6 +471,8 @@ function offsite_json(c::Config)
     o = c.backup.offsite
     s = o.store
     where = isempty(s.store) ? "" : startswith(s.store, "dir:") ? s.store[5:end] : join(filter(!isempty, [s.endpoint, s.bucket, s.prefix]), " · ")
+    sending = sending_offsite(c)
     return merge(Dict{String,Any}(string(k) => v isa String && occursin(r"^\d{4}-\d\d-\d\dT", v) ? v * "Z" : v for (k, v) in pairs(OFFSITE_STATE[])),
-                 Dict{String,Any}("enabled" => !isempty(s.store), "where" => where, "every_hours" => o.every_hours, "keep_days" => o.keep_days))
+                 Dict{String,Any}("enabled" => !isempty(s.store), "where" => where, "every_hours" => o.every_hours, "keep_days" => o.keep_days,
+                                  "sending" => sending === nothing ? "" : offsite_progress_text(sending)))
 end

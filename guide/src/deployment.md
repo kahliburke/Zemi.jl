@@ -137,43 +137,27 @@ be running).
 
 ## Backups
 
-The service snapshots itself every hour into `/srv/zemi/data.backups` (see
-[Configuration](configuration.md#backups)); its agents can't read them. A `[backup] dir` elsewhere
-needs adding to `ReadWritePaths` in the service's unit.
+The service snapshots itself every hour into `/srv/zemi/data.backups`, and with `[backup.offsite]`
+sends an encrypted copy off the machine once a day ([Backups](backups.md) covers both, and
+restoring). Its agents can't read the backups. A `[backup] dir` elsewhere needs adding to
+`ReadWritePaths` in the service's unit.
+
+On a server, run `zemi` as the service's user, with its config:
 
 ```sh
-sudo -u zemi env ZEMI_CONFIG=/srv/zemi/.config/zemi/config.toml /srv/zemi/Zemi.jl/zemi backups
-sudo -u zemi env ZEMI_CONFIG=/srv/zemi/.config/zemi/config.toml /srv/zemi/Zemi.jl/zemi backup --keep before-upgrade
+z() { sudo -u zemi env ZEMI_CONFIG=/srv/zemi/.config/zemi/config.toml /srv/zemi/Zemi.jl/zemi "$@"; }
+z backups
+z backup --keep before-upgrade
+z backup --offsite --background         # a copy off the machine now, on when the ssh session ends
 ```
 
-To restore one, stop the service, restore, and start it:
+To restore a snapshot, stop the service, restore, and start it:
 
 ```sh
 sudo systemctl stop zemi
-sudo -u zemi env ZEMI_CONFIG=/srv/zemi/.config/zemi/config.toml /srv/zemi/Zemi.jl/zemi restore 20261108T010000Z
+z restore 20261108T010000Z
 sudo systemctl start zemi
 ```
-
-Restoring puts back the database, the content, the records and the files, as they were. What was
-there is first kept as the snapshot `before-restore-<time>`, so a restore can be undone the same way.
-`--config` puts back the config folder's files too. `--include` puts back the paths `[backup] include` names, each where it was.
-
-### From a copy off the machine
-
-With [`[backup.offsite]`](configuration.md#off-this-machine), a lost machine is put back from the
-store alone. On the new machine, install Zemi and write a config with only `[backup.offsite]` and
-the bucket's credentials. Then restore the latest copy with the key, or with the recovery
-passphrase:
-
-```sh
-zemi backups --offsite                                        # the copies, the latest first
-zemi restore --offsite 20261108T010000Z --config              # with the key in the config
-zemi restore --offsite 20261108T010000Z --config --recovery   # or with the passphrase
-```
-
-`--config` brings back the whole config folder, key included. Each part is checked as it is
-decrypted, and each file against its hash. The copy is kept as the snapshot `offsite-<time>`. Moving
-a knowledge base to another machine works the same way.
 
 ## In containers
 

@@ -227,82 +227,9 @@ assets/       logo, front page images (hero-light.svg, hero-dark.svg), images pa
 
 ### Backups
 
-The knowledge base snapshots itself every hour, into `backups` beside the data folder (the data
-folder's path with `.backups` added, `~/.local/share/zemi.backups` by default). A snapshot holds the
-database, the config folder, the content and the records, packed, and a copy of the uploads, PDFs
-and figures. A file unchanged since the last snapshot is hard-linked to that snapshot's copy, so it
-takes no more space. The site, cloned codebases, Kaimon's index and the vectors are left out: they
-are rebuilt. The folder is readable only by its owner, since the config holds secrets.
-
-```toml
-[backup]
-enabled = true                 # on by default
-dir = "/mnt/backups/zemi"      # another disk, or a mounted share, survives losing this one
-every_hours = 1
-keep_all_hours = 24            # every snapshot of the last day
-keep_half_daily_days = 3       # then one per 12 hours
-keep_daily_days = 14           # then one a day; none older
-files = true                   # false: the uploads only, not the PDFs and figures
-min_free_gb = 5                # no snapshot when the disk has less free
-max_gb = 0                     # past this, the oldest go first; 0 for no limit
-```
-
-`dir` must be outside the data folder. A small group's knowledge base takes a few MB a snapshot
-packed, and its files once: about 45 snapshots under 1 GB. Before the database is migrated to a new
-schema, the snapshot `before-schema-<n>` is taken and kept until deleted. The Status page shows the
-last snapshot and the backups' size, with **Back up now**; [Deployment](deployment.md#backups) covers
-restoring.
-
-`include` adds paths outside Zemi's folders to each snapshot, such as the web server's config. A
-restore puts them back only with `--include`:
-
-```toml
-[backup]
-include = ["/etc/caddy"]
-```
-
-#### Off this machine
-
-Snapshots on the same machine are lost with it. `[backup.offsite]` copies the latest one once a day
-to a bucket (Cloudflare R2, Backblaze B2, AWS S3, MinIO) or to a folder on a drive mounted here.
-Each file is sent once, so a day's copy is usually only the packed database and config, a few MB.
-Copies older than `keep_days` are deleted, except the latest.
-
-```toml
-[backup.offsite]
-store = "s3"                   # or "dir:/mnt/elsewhere/zemi"
-endpoint = "https://<account id>.r2.cloudflarestorage.com"
-bucket = "zemi-backups"
-prefix = "kb-example"          # one per knowledge base, when several share a bucket
-credentials = "r2_backup.toml" # access_key_id and secret_access_key
-key = "file:backup_key"        # made by zemi backup --offsite-key
-every_hours = 24
-keep_days = 14
-files = true                   # false: the database, config and content only
-```
-
-Everything sent is encrypted first, so the bucket holds nothing readable. A copy holds the config's
-secrets and everyone's private library documents, and the bucket's token is enough to read anything
-in it. Each object is sealed with AES-256-GCM under a data key made with the store's first copy, and
-even the files' names are hashed with it. The bucket keeps the data key only sealed:
-
-- with the **key**, a file on this machine (`zemi backup --offsite-key` makes it). Keep a copy
-  somewhere other than this machine, a password manager say. Several knowledge bases can share one.
-- with a **recovery passphrase**, set with `zemi backup --offsite-recovery` and never stored. It
-  is stretched with scrypt, so guessing it is slow. It opens the copies when the key is lost with
-  the machine.
-
-Either opens every copy. Without both, the copies can't be read by anyone, including you. Prove
-that the key and passphrase you keep work, from any machine with the config's `[backup.offsite]`:
-
-```sh
-zemi backups --offsite                        # the copies, and whether a passphrase is set
-zemi backups --offsite --check                # fetch the latest whole with the key and check it
-zemi backups --offsite --check --recovery     # the same with the passphrase
-```
-
-The Status page shows the last copy sent and any failure. [Deployment](deployment.md#backups)
-covers restoring from a copy.
+`[backup]` sets the snapshots taken every hour on this machine, and `[backup.offsite]` the encrypted
+copies sent off it once a day. [Backups](backups.md) covers both: what they hold, setting up a
+bucket, watching and checking copies, and restoring.
 
 ### Notebooks
 

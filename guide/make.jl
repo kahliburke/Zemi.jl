@@ -42,6 +42,7 @@ makedocs(;
             "Installation" => "installation.md",
             "Serving modes" => "serving.md",
             "Configuration" => "configuration.md",
+            "Backups" => "backups.md",
             "Models" => "models.md",
             "Projects, records and findings" => "work.md",
             "Datasets" => "datasets.md",

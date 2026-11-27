@@ -7956,7 +7956,23 @@ end
             # A later copy sends only the files the store lacks.
             rm(joinpath(c.data_dir, "pdfs", "a.pdf")); write(joinpath(c.data_dir, "pdfs", "b.pdf"), "B"^50)
             s2 = K.snapshot!(c; at = t0 + D.Day(4))
-            @test K.send_offsite!(c; snap = s2).sent == 1
+            said = String[]
+            @test K.send_offsite!(c; snap = s2, progress = m -> push!(said, m)).sent == 1
+            # It says how far it has got as it goes, and leaves no word of a copy under way once done.
+            @test !isempty(said) && all(m -> startswith(m, "Copying $(basename(s2)) off this machine:"), said) &&
+                  occursin("of 1 files", first(said)) && K.sending_offsite(c) === nothing
+            # A copy another process is sending is shown, and a second is refused meanwhile.
+            other = run(`sleep 30`; wait = false)
+            try
+                K.write_atomic(K.offsite_progress_file(c), K.JSON.json(Dict("pid" => getpid(other), "stamp" => basename(s2),
+                    "started" => time() - 10, "phase" => "files", "files_done" => 1, "files_total" => 4,
+                    "bytes_done" => 5_000_000, "bytes_total" => 20_000_000)))
+                @test occursin("5.0 of 20.0 MB, 1 of 4 files", K.offsite_json(c)["sending"])
+                @test_throws "being sent already" K.send_offsite!(c; snap = s2)
+            finally
+                kill(other); wait(other)
+            end
+            @test K.sending_offsite(c) === nothing && isempty(K.offsite_json(c)["sending"])     # its process gone
             @test [x.stamp for x in K.offsite_copies(c)] == basename.([s2, s1]) && all(x -> x.complete, K.offsite_copies(c))
             # Past keep_days a copy goes (the latest stays whatever its age), and then the files no copy names.
             store = K.offsite_store(c)
