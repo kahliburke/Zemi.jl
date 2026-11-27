@@ -721,6 +721,7 @@ end
 # Its records are handed in by Zemi as it reads people's libraries (see library_reading.jl): it neither
 # polls nor reads uploads, and a library holds many notes, so a run may write many.
 record_source!("obsidian"; label = "From an Obsidian vault", summarized = false, about = "a person's own note",
+               arrives = "As people's libraries are read: the notes of their vaults",
                budget = (; records = 100_000, figure_bytes = 10_000_000_000, seconds = 86_400.0), api = PLUGIN_API)
 
 # The record a note of one's vault is read as (`?path=`, its place in one's library as `zemi connect`

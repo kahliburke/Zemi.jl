@@ -15,7 +15,8 @@ migration!(18, ["""CREATE TABLE contributions (
 
 # The source of the records people contribute from their libraries.
 record_source!("contributions"; label = "Contributed from a person's library", summarized = false,
-               about = "a note a person contributed to the group from their library", api = PLUGIN_API)
+               about = "a note a person contributed to the group from their library",
+               arrives = "When a person contributes a note from their library to the group", api = PLUGIN_API)
 
 "Document `id`, refused as none unless `caller` holds it."
 held_document(kb::KB, caller::Caller, id::AbstractString) =

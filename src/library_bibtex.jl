@@ -7,7 +7,8 @@
 # go. Entries are told apart by their keys, from one read of a file to the next.
 
 record_source!("bibtex"; label = "From a person's BibTeX bibliography", summarized = false,
-               about = "a work in a person's bibliography", api = PLUGIN_API)
+               about = "a work in a person's bibliography",
+               arrives = "As people's libraries are read: the entries of their .bib files", api = PLUGIN_API)
 
 "A space's bibliographies: its `.bib` files, outside hidden folders."
 bib_files_of(files) = [f for f in files if lowercase(splitext(f.path)[2]) == ".bib" && !any(startswith("."), split(f.path, '/'))]

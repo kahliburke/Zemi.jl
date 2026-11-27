@@ -1481,6 +1481,10 @@ end
         b = K.JSON.parse(String(resp.body))
         @test resp.status == 200 && [p["loaded"] for p in b["plugins"]] == [true, false, false]
         @test only(x for x in b["sources"] if x["name"] == "zz-folder")["plugin"] == "ZemiTestPlugin"
+        # Each says how its records arrive, and when the latest changed.
+        folder = only(x for x in b["sources"] if x["name"] == "zz-folder")
+        @test folder["records"] == 1 && !isempty(folder["latest"])
+        @test startswith(only(x for x in K.sources_status(kb) if x["name"] == "obsidian")["arrives"], "As people's libraries are read")
     finally
         K.TRACK_PLUGIN[] = nothing
         K.PLUGINS[] = empty(K.PLUGINS[])

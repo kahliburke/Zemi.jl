@@ -34,6 +34,7 @@ struct RecordSource
     used::Union{Function,Nothing}
     summarized::Bool
     about::String
+    arrives::String
     plugin::String
 end
 
@@ -44,7 +45,7 @@ const SOURCES_LOCK = ReentrantLock()
 """
     record_source!(name; label, modes = (:local, :shared), every = nothing, poll = nothing,
                    accepts = nothing, read = nothing, budget = (;), configured = false, used = nothing,
-                   summarized = true, about = RECORD_ABOUT, api) -> RecordSource
+                   summarized = true, about = RECORD_ABOUT, arrives = "", api) -> RecordSource
 
 Register a source of records, or replace the one of that name. A source is code that reads another
 system and hands Zemi what it finds; it is given only a run (see [`SourceRun`](@ref)), and Zemi
@@ -64,6 +65,8 @@ writes, labels and guards what it hands in.
   searching without a model writing summaries of them (a person's many short notes, say)
 - `about`: what its records are, as readers and agents are told wherever one is given them ("a
   person's own note"); by default, a record of the group's own work
+- `arrives`: for a source that neither polls nor reads uploads, how its records come in, as the
+  Status page says it ("as people's libraries are read")
 - `budget`: the most a run may do, as `records` written, `figure_bytes` of their figures and
   `seconds` (see `DEFAULT_BUDGET`); a run that has spent it is stopped
 - `api`: the version of this interface it was written for; one that is not [`PLUGIN_API`](@ref) is refused
@@ -75,7 +78,8 @@ to their methods to the source as registered.
 function record_source!(name::AbstractString; label::AbstractString, modes = SOURCE_MODES, every = nothing,
                         poll::Union{Function,Nothing} = nothing, accepts::Union{Function,Nothing} = nothing,
                         read::Union{Function,Nothing} = nothing, budget = (;), configured::Bool = false,
-                        used::Union{Function,Nothing} = nothing, summarized::Bool = true, about::AbstractString = RECORD_ABOUT, api::Integer)
+                        used::Union{Function,Nothing} = nothing, summarized::Bool = true, about::AbstractString = RECORD_ABOUT,
+                        arrives::AbstractString = "", api::Integer)
     api == PLUGIN_API ||
         error("Source $name is written for Zemi's plugin interface $api, and this Zemi's is $PLUGIN_API: update the one or the other")
     name = record_source(name)
@@ -93,7 +97,7 @@ function record_source!(name::AbstractString; label::AbstractString, modes = SOU
     isempty(extra) || error("Source $name's budget is $(join(keys(DEFAULT_BUDGET), ", ")), not $(join(extra, ", "))")
     b = (; (k => convert(fieldtype(typeof(DEFAULT_BUDGET), k), get(budget, k, DEFAULT_BUDGET[k])) for k in keys(DEFAULT_BUDGET))...)
     all(>(0), values(b)) || error("Source $name's budget is positive: $b")
-    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, configured, used, summarized, about,
+    s = RecordSource(name, label, modes, seconds, poll, accepts, read, b, configured, used, summarized, about, String(strip(arrives)),
                      get(task_local_storage(), :zemi_plugin, ""))
     lock(SOURCES_LOCK) do
         i = findfirst(x -> x.name == name, SOURCES[])
@@ -467,12 +471,14 @@ end
 
 Every source the knowledge base knows of, those registered first: each one's registration (its
 label, the plugin it came from, its modes and whether it runs here, whether it polls and how often,
-whether it reads uploads), how many records it has, and its status (see `source_status!`): its last
-run, whether it is running or paused, and when it next runs. A source whose records or status are
+whether it reads uploads, how else its records arrive), how many records it has and when the latest
+changed, and its status (see `source_status!`): its last run, whether it is running or paused, and
+when it next runs. A source whose records or status are
 kept but that is not registered (its package not loaded) is listed as such.
 """
 function sources_status(kb::KB)
-    counts = Dict(String(r.source) => Int(r.n) for r in query(kb, "SELECT source, count(*) AS n FROM records GROUP BY source"))
+    counts = Dict(String(r.source) => (Int(r.n), String(r.latest))
+                  for r in query(kb, "SELECT source, count(*) AS n, max(updated_at) AS latest FROM records GROUP BY source"))
     kept = [String(r.key)[length("source_status:")+1:end] for r in query(kb, "SELECT key FROM kv WHERE key LIKE 'source_status:%'")]
     names = unique([[s.name for s in SOURCES[] if used_here(kb, s)]; sort!(unique([collect(keys(counts)); kept]))])
     return map(names) do name
@@ -483,7 +489,8 @@ function sources_status(kb::KB)
         Dict{String,Any}("name" => name, "registered" => s !== nothing, "plugin" => s === nothing ? "" : s.plugin,
              "label" => s === nothing ? "" : s.label, "modes" => s === nothing ? String[] : string.(s.modes),
              "here" => s !== nothing && runs_here(s), "polls" => polls, "every" => polls ? s.every : 0.0,
-             "uploads" => s !== nothing && s.read !== nothing, "records" => get(counts, name, 0),
+             "uploads" => s !== nothing && s.read !== nothing, "arrives" => s === nothing ? "" : s.arrives,
+             "records" => first(get(counts, name, (0, ""))), "latest" => last(get(counts, name, (0, ""))),
              "running" => source_running(name), "paused" => paused, "next" => next,
              (k => get(st, k, nothing) for k in ("started", "finished", "outcome", "trigger"))...,
              (k => get(st, k, 0) for k in ("added", "changed", "skipped", "failures"))..., "error" => get(st, "error", ""))

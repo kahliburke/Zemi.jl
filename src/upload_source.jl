@@ -52,7 +52,8 @@ function read_upload(run::SourceRun, path::AbstractString)
     return nothing
 end
 
-record_source!("upload"; label = "Uploaded as a Markdown file", accepts = upload_accepts, read = read_upload, api = PLUGIN_API)
+record_source!("upload"; label = "Uploaded as a Markdown file", accepts = upload_accepts, read = read_upload,
+               arrives = "When someone uploads a Markdown file as a record", api = PLUGIN_API)
 
 """
     upload_record!(kb, path; name = basename(path), date = nothing, project = "", by = nothing,

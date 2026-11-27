@@ -1,9 +1,10 @@
 <!--
-  The sources of records, for those who look after the documents: each source's label, where it runs,
-  its last run (what it added, changed and skipped, or why it failed) and its next, and its records;
-  a source whose package is not loaded is shown as such, and a plugin that failed to load with its
-  error. Run now, pause and resume a source; those who may remove a source's records are asked to
-  confirm how many first.
+  The sources of records, for those who look after the documents: each source's label, how its records
+  arrive (checked on a schedule, with its last run and its next; uploaded; or handed in as people's
+  libraries are read), where it runs when that is not everywhere, and its records, with when the
+  latest changed. A source whose package is not loaded is shown as such, and a plugin that failed to
+  load with its error. Run now, pause and resume a scheduled source; those who may remove a source's
+  records are asked to confirm how many first.
 -->
 <script setup lang="ts">
 import KBNeedsService from './KBNeedsService.vue'
@@ -12,7 +13,8 @@ import { getJSON, post, can, onLive, every, followJobs, RequestError } from './k
 import { when, plural } from './kbFormat'
 
 type Source = { name: string; registered: boolean; plugin: string; label: string; modes: string[]; here: boolean; polls: boolean
-                every: number; uploads: boolean; records: number; running: boolean; paused: boolean; started: string | null
+                every: number; uploads: boolean; arrives: string; records: number; latest: string; running: boolean
+                paused: boolean; started: string | null
                 finished: string | null; outcome: string | null; added: number; changed: number; skipped: number; error: string
                 failures: number; next: string | null }
 type Plugin = { name: string; loaded: boolean; error: string; sources: string[] }
@@ -56,6 +58,11 @@ function period(s: number) {
        : s >= 60 ? plural(Math.round(s / 60), 'minute') : plural(Math.round(s), 'second')
 }
 const OUTCOMES: Record<string, string> = { ok: 'done', spent: 'stopped at its budget', stopped: 'stopped', failed: 'failed' }
+// Where a source runs, said only when that is not in both modes.
+const WHERE: Record<string, string> = { local: 'Runs only where a person runs the knowledge base for themselves',
+                                        shared: 'Runs only on a shared service' }
+const where = (s: Source) => s.modes.length === 1 ? WHERE[s.modes[0]] ?? `${s.modes[0]} mode only` : ''
+const how = (s: Source) => s.arrives || (s.uploads ? 'From files uploaded as records' : s.polls ? '' : 'Handed in by Zemi')
 </script>
 
 <template>
@@ -67,7 +74,7 @@ const OUTCOMES: Record<string, string> = { ok: 'done', spent: 'stopped at its bu
         <li v-for="p in data.plugins.filter(p => !p.loaded)" :key="p.name" class="kb-error">Plugin {{ p.name }} did not load: {{ p.error }}</li>
       </ul>
       <table v-if="data?.sources.length" class="kbsrc-table">
-        <thead><tr><th>Source</th><th>Runs</th><th>Last run</th><th>Next</th><th>Records</th><th></th></tr></thead>
+        <thead><tr><th>Source</th><th>How records arrive</th><th>Records</th><th></th></tr></thead>
         <tbody>
           <tr v-for="s in data.sources" :key="s.name" :class="{ 'kbsrc-off': !s.registered || !s.here }">
             <td><strong>{{ s.name }}</strong>
@@ -75,22 +82,21 @@ const OUTCOMES: Record<string, string> = { ok: 'done', spent: 'stopped at its bu
               <div v-if="s.plugin" class="kbsrc-s">from {{ s.plugin }}</div></td>
             <td class="kbsrc-s">
               <template v-if="s.registered">
-                <template v-if="s.polls">every {{ period(s.every) }}</template><template v-if="s.polls && s.uploads">; </template>
-                <template v-if="s.uploads">reads uploads</template>
-                <div>{{ s.modes.includes('local') && s.modes.includes('shared') ? 'both modes' : `${s.modes[0]} mode only` }}<template
-                  v-if="!s.here"> · not here</template></div>
+                <div v-if="how(s)">{{ how(s) }}</div>
+                <template v-if="s.polls">
+                  <div>Checked every {{ period(s.every) }}{{ s.paused ? ': paused' : s.next && s.here ? `, next ${when(s.next)}` : '' }}</div>
+                  <div v-if="s.running"><span class="kbsrc-running">Running</span> since {{ when(s.started) }}</div>
+                  <template v-else-if="s.outcome">
+                    <div>Last run <span :class="'kbsrc-' + s.outcome">{{ OUTCOMES[s.outcome] ?? s.outcome }}</span> {{ when(s.finished) }}:
+                      {{ s.added }} added, {{ s.changed }} changed, {{ s.skipped }} skipped</div>
+                    <div v-if="s.error" :class="{ 'kb-error': s.outcome === 'failed' }">{{ s.error }}<template
+                      v-if="s.failures > 1"> ({{ s.failures }} failures in a row)</template></div>
+                  </template>
+                  <div v-else>Not run yet</div>
+                </template>
+                <div v-if="where(s)">{{ where(s) }}<template v-if="!s.here">: not here</template></div>
               </template></td>
-            <td class="kbsrc-s">
-              <template v-if="s.running"><span class="kbsrc-running">running</span> since {{ when(s.started) }}</template>
-              <template v-else-if="s.outcome">
-                <span :class="'kbsrc-' + s.outcome">{{ OUTCOMES[s.outcome] ?? s.outcome }}</span> {{ when(s.finished) }}
-                <div>{{ s.added }} added, {{ s.changed }} changed, {{ s.skipped }} skipped</div>
-                <div v-if="s.error" :class="{ 'kb-error': s.outcome === 'failed' }">{{ s.error }}<template
-                  v-if="s.failures > 1"> ({{ s.failures }} failures in a row)</template></div>
-              </template>
-              <template v-else>never</template></td>
-            <td class="kbsrc-s">{{ s.paused ? 'paused' : when(s.next, '') }}</td>
-            <td>{{ s.records }}</td>
+            <td>{{ s.records }}<div v-if="s.latest" class="kbsrc-s">latest {{ when(s.latest) }}</div></td>
             <td class="kbsrc-actions">
               <template v-if="s.registered && s.polls && s.here">
                 <button v-if="!s.running" class="kb-link" @click="act(s, 'run')">run now</button>
