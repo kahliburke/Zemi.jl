@@ -86,6 +86,7 @@ test('a link from the site\'s root stays under its base', () => {
   globalThis.__KB_BASE__ = '/docs'
   try {
     assert.match(md('[a paper](/generated/kb/papers/2401-00001.html)'), /href="\/docs\/kb\/papers\/2401-00001\.html"/)
+    assert.match(md('[a notebook](/generated/notebooks/tides.html)'), /href="\/docs\/notebooks\/tides\.html"/)
     assert.match(md('[elsewhere](//example.org/x)'), /href="\/\/example.org\/x"/)
     assert.match(md('[here](#notes)'), /href="#notes"/)
   } finally { delete globalThis.__KB_BASE__ }

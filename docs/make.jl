@@ -20,7 +20,8 @@ isdefined(Main, :Revise) && Main.Revise.revise()
 const DOCS = get(ENV, "ZEMI_SITE_DOCS", @__DIR__)
 const SRC = joinpath(DOCS, "src")
 const NOTEBOOKS = joinpath(DOCS, "notebooks")      # the content's, linked into the sources
-const GENERATED = joinpath(SRC, "generated")
+# The notebooks' pages, beside the knowledge base's (`kb/`), whose pages a notebook's text links to as `../kb/…`.
+const NOTEBOOK_PAGES = joinpath(SRC, "notebooks")
 const KB_PAGES = joinpath(SRC, "kb")
 const KB_PUBLIC = joinpath(DOCS, "kb_public")   # build output: copied to the site's root
 const PUBLIC_DEMO = get(ENV, "ZEMI_PUBLIC_DEMO", "") == "1"
@@ -52,7 +53,7 @@ function write_page(file, text)
 end
 
 # A notebook's page: the notebook, as Slate renders it.
-placement(nb) = "```@slate ../../../notebooks/$nb\n```\n"
+placement(nb) = "```@slate ../../notebooks/$nb\n```\n"
 
 # The knowledge base API this site's components talk to: by default the one serving the site, on the
 # same origin (`zemi` and `zemi --shared` serve both from one port); ZEMI_API names another.
@@ -64,10 +65,10 @@ if isempty(ONLY)
     # or built where no Slate hub can render them (a paper's notebooks then go unrendered too).
     nbs = get(ENV, "ZEMI_SITE_NOTEBOOKS", "1") == "0" || !isdir(NOTEBOOKS) ? String[] : sort!(filter(endswith(".jl"), readdir(NOTEBOOKS)))
     t = time()
-    notebook_pages = [notebook_title(joinpath(NOTEBOOKS, nb)) => write_page(joinpath(GENERATED, "notebooks", replace(nb, ".jl" => ".md")), placement(nb))
+    notebook_pages = [notebook_title(joinpath(NOTEBOOKS, nb)) => write_page(joinpath(NOTEBOOK_PAGES, replace(nb, ".jl" => ".md")), placement(nb))
                       for nb in nbs]
     step_time("wrote the notebooks' pages", t)
-    rm(joinpath(GENERATED, "dates"); recursive = true, force = true)       # pages of cells by date, no longer made
+    rm(joinpath(SRC, "generated"); recursive = true, force = true)        # where they were once written
 
     # The knowledge base's pages. The search component on its index page uses the knowledge base API
     # when `zemi` is serving it and papers.json otherwise.

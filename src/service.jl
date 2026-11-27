@@ -154,9 +154,9 @@ function respond_service(kb::KB, req::HTTP.Request; shared::Bool)
             f = live === nothing ? site_file(kb.config, uri.path) : nothing
             live !== nothing ? live :
             f !== nothing ? file_response(f; req) :
-            # The knowledge base's pages were once under /generated/kb/, as links kept in notes still say.
-            occursin(r"^/generated/kb(?=/|$)", uri.path) ?
-                HTTP.Response(301, ["Location" => "/kb" * req.target[length("/generated/kb") + 1:end]]) :
+            # The knowledge base's and notebooks' pages were once under /generated/, as links kept in notes still say.
+            occursin(r"^/generated/(kb|notebooks)(?=/|$)", uri.path) ?
+                HTTP.Response(301, ["Location" => req.target[length("/generated") + 1:end]]) :
             current_site(kb.config) === nothing ? HTTP.Response(503, ["Retry-After" => "30"], "Site building. Try again shortly.") :
             not_found_page(kb.config)
         end

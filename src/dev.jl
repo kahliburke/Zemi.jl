@@ -164,13 +164,13 @@ function link_public!(public::AbstractString, to::AbstractString)
 end
 
 """
-Remove from the development server's pages `md` the knowledge base's pages (`kb/`, and the older
-`generated/`) whose sources under `src` are gone: the documentation build adds and replaces pages,
+Remove from the development server's pages `md` the knowledge base's and notebooks' pages (`kb/`,
+`notebooks/`, and the older `generated/`) whose sources under `src` are gone: the documentation build adds and replaces pages,
 and leaves those of a paper since removed, or of a path no longer written.
 """
 function prune_pages!(src::AbstractString, md::AbstractString)
     n = 0
-    for dir in ("kb", "generated")
+    for dir in ("kb", "notebooks", "generated")
         isdir(joinpath(md, dir)) || continue
         for (root, _, files) in walkdir(joinpath(md, dir); topdown = false)
             for f in files
@@ -260,7 +260,7 @@ What the pages are written by besides the knowledge base: docs/make.jl and the c
 """
 dev_sources(docs::AbstractString) =
     (site = () -> newest([joinpath(docs, "make.jl"), joinpath(docs, "src")];
-                         keep = f -> endswith(f, ".md") && first(splitpath(relpath(f, joinpath(docs, "src")))) ∉ ("generated", "kb")),
+                         keep = f -> endswith(f, ".md") && first(splitpath(relpath(f, joinpath(docs, "src")))) ∉ ("generated", "kb", "notebooks")),
      code = () -> newest([joinpath(dirname(docs), "src")]; keep = endswith(".jl")))
 
 "The port VitePress's development server takes for `zemi dev`: `ZEMI_DEV_PORT`, else `[service] dev_port`."

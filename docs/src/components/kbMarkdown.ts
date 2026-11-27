@@ -200,7 +200,7 @@ async function build(): Promise<Render> {
     md.renderer.rules.link_open = (tokens, i, options, env, self) => {
       const href = tokens[i].attrGet('href') ?? ''
       if (MEDIA.test(href)) tokens[i].attrSet('href', mediaHref(href))
-      else if (/^\/(?!\/)/.test(href)) tokens[i].attrSet('href', withBase(href.replace(/^\/generated\/kb(?=\/|$|[?#])/, '/kb')))
+      else if (/^\/(?!\/)/.test(href)) tokens[i].attrSet('href', withBase(href.replace(/^\/generated\/(kb|notebooks)(?=\/|$|[?#])/, '/$1')))
       if (/^https?:\/\//.test(href) || MEDIA.test(href)) { tokens[i].attrSet('target', '_blank'); tokens[i].attrSet('rel', 'noopener') }
       return link(tokens, i, options, env, self)
     }

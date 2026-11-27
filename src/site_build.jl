@@ -247,7 +247,7 @@ function site_sources(c::Config, dir::AbstractString)
     rm(dir; recursive = true, force = true)
     mkpath(joinpath(dir, "src"))
     for entry in readdir(joinpath(docs, "src"))
-        entry in ("generated", "kb") || cp(joinpath(docs, "src", entry), joinpath(dir, "src", entry))
+        entry in ("generated", "kb", "notebooks") || cp(joinpath(docs, "src", entry), joinpath(dir, "src", entry))
     end
     # The package's files are read-only where it is installed, and the copies would be too.
     chmod(joinpath(dir, "src"), 0o755; recursive = true)
