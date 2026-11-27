@@ -7981,8 +7981,15 @@ end
             @test length(K.list_objects(store, "files/")) == 2 && [x.stamp for x in K.offsite_copies(c)] == [basename(s2)]
             # The check fetches the latest whole, with the key, and finds its database intact.
             fetched = String[]
-            @test K.check_offsite(c; progress = m -> push!(fetched, m)).stamp == basename(s2) && K.check_offsite(c).files == 2
+            @test K.check_offsite(c; full = true, progress = m -> push!(fetched, m)).stamp == basename(s2) && K.check_offsite(c).files == 2
             @test !isempty(fetched) && all(m -> startswith(m, "Fetching $(basename(s2)):"), fetched)
+            # Without full, every file is found at its size and a sample fetched; one gone, or changed, fails it.
+            @test K.check_offsite(c; sample = 1).fetched == 1
+            one = first(k for k in K.list_objects(store, "files/"))
+            saved = K.read_object(store, one)
+            K.write_object!(store, one, saved[1:end-1])
+            @test_throws "missing from the store or the wrong size" K.check_offsite(c)
+            K.write_object!(store, one, saved)
             # A recovery passphrase opens the copies too; another passphrase or another key opens nothing.
             @test !K.has_offsite_recovery(store)
             @test_throws "no recovery passphrase" K.check_offsite(c; passphrase = "tidal flats at dawn")

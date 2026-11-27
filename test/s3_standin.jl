@@ -67,7 +67,7 @@ function standin_s3(secrets::AbstractDict; region = "auto", allow = (id, method,
                 listed = found[start+1:min(start + page, end)]
                 more = start + page < length(found)
                 modified(k) = Dates.format(get(stamps, bucket * "/" * k, Dates.now(Dates.UTC)), "yyyy-mm-ddTHH:MM:SS") * ".000Z"
-                return xml(200, "<ListBucketResult>" * join("<Contents><Key>$(K.html_escape(k))</Key><LastModified>$(modified(k))</LastModified></Contents>"
+                return xml(200, "<ListBucketResult>" * join("<Contents><Key>$(K.html_escape(k))</Key><LastModified>$(modified(k))</LastModified><Size>$(length(objects[bucket * "/" * k]))</Size></Contents>"
                                                             for k in listed) *
                                 "<IsTruncated>$more</IsTruncated>" *
                                 (more ? "<NextContinuationToken>$(start + page)</NextContinuationToken>" : "") * "</ListBucketResult>")

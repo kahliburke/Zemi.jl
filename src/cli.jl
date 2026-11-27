@@ -51,10 +51,11 @@ const CLI_HELP = """
     zemi backup --offsite-key [FILE]     make the key [backup.offsite] seals copies with (beside the config
                                          by default); keep a copy of it somewhere other than this machine
     zemi backup --offsite-recovery       set the recovery passphrase, which opens the copies without the key
-    zemi backups [--offsite [--check] [--recovery]]
+    zemi backups [--offsite [--check [--full]] [--recovery]]
                                          the snapshots, the latest first; with --offsite those in the store,
-                                         and with --check, proof the latest restores (with the passphrase
-                                         given --recovery)
+                                         and with --check, proof in seconds that the latest restores (its
+                                         database checked, its files found, a sample fetched; every file
+                                         with --full), with the passphrase given --recovery
     zemi restore SNAPSHOT [--config] [--include] [--force]
     zemi restore --offsite COPY [--recovery] [--config] [--include] [--force]
                                          put a snapshot back, with the service stopped: the database, content,
@@ -258,9 +259,13 @@ function cli(args::AbstractVector{<:AbstractString})
             c = validate(load_config())
             passphrase = "--recovery" in rest ? passphrase_prompt() : nothing
             if "--check" in rest
-                r = check_offsite(c; passphrase, progress = meter)
+                full = "--full" in rest
+                r = check_offsite(c; passphrase, full, progress = meter)
                 done()
-                println("$(r.stamp) restores: every part unsealed and checked, $(r.files) file(s), $(round(r.bytes / 1e6; digits = 1)) MB, the database intact.")
+                mb = round(r.bytes / 1e6; digits = 1)
+                println(full ? "$(r.stamp) restores: every part fetched, unsealed and checked, $(r.files) file(s), $mb MB, the database intact." :
+                        "$(r.stamp) restores: it opens, its database is intact, all $(r.files) of its files ($mb MB) are in the store " *
+                        "at their sizes, and $(r.fetched) fetched at random unseal and match. --full fetches every file.")
             else
                 store = offsite_store(c)
                 copies = offsite_copies(c; store)

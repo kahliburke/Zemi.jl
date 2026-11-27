@@ -118,6 +118,25 @@ function list_objects(s::S3Store, prefix::AbstractString; modified::Bool = false
         (s3_text(listing, "IsTruncated") == "true" && token !== nothing) || return modified ? keys .=> times : keys
     end
 end
+"The sizes of the objects under `prefix`, by key, from the same listing as [`list_objects`](@ref)."
+function object_sizes(s::S3Store, prefix::AbstractString)
+    full = isempty(s.prefix) ? prefix : s.prefix * "/" * prefix
+    out, token = Dict{String,Int}(), nothing
+    while true
+        params = ["list-type" => "2", "prefix" => full]
+        token === nothing || push!(params, "continuation-token" => token)
+        r = s3_request(s, "GET", nothing; query = s3_query(params...))
+        listing = r.status == 200 ? s3_xml(r) : nothing
+        listing === nothing && http_failure("S3 list $prefix", r)
+        for c in s3_elements(listing, "Contents")
+            out[chopprefix(something(s3_text(c, "Key"), ""), isempty(s.prefix) ? "" : s.prefix * "/")] =
+                parse(Int, something(s3_text(c, "Size"), "-1"))
+        end
+        token = s3_text(listing, "NextContinuationToken")
+        (s3_text(listing, "IsTruncated") == "true" && token !== nothing) || return out
+    end
+end
+
 function delete_object!(s::S3Store, key::AbstractString)
     r = s3_request(s, "DELETE", key)
     r.status in (200, 204, 404) || http_failure("S3 DELETE $key", r)

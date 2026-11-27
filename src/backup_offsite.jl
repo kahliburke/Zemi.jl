@@ -197,7 +197,7 @@ function sending_offsite(c::Config)
 end
 
 "How many files a copy sends or fetches at once: each is a request of its own, and one at a time the requests' latency, not the bandwidth, sets the pace."
-const OFFSITE_PARALLEL = 8
+const OFFSITE_PARALLEL = 16
 
 "How far copy `d` (see [`sending_offsite`](@ref)) has got, for people: sent of total, the rate and the time left."
 function offsite_progress_text(d::AbstractDict)
@@ -457,14 +457,18 @@ function restore_offsite!(c::Config, stamp::AbstractString; passphrase::Union{Ab
 end
 
 """
-    check_offsite(config; stamp = the latest complete copy, passphrase = nothing, progress = nothing) -> NamedTuple
+    check_offsite(config; stamp = the latest complete copy, passphrase = nothing, full = false, sample = 16,
+                  progress = nothing) -> NamedTuple
 
-Prove a copy can be restored with the key at hand (the server's, or the recovery `passphrase`):
-fetch it whole into a folder of its own, unsealing and checking every part, and check its database's
-integrity. Nothing here is changed. Returns `(; stamp, files, bytes)`.
+Prove a copy can be restored with the key at hand (the server's, or the recovery `passphrase`),
+changing nothing here. It opens the copy, fetches its packed state and checks the database's
+integrity, finds every file the copy names in the store at the size its sealing gives it, and fetches
+`sample` of them at random whole, unsealed and checked against their hashes: in seconds, what a
+restore would need, short of downloading every file. With `full`, every file is fetched and checked,
+as a restore fetches them (see [`fetch_offsite!`](@ref)). Returns `(; stamp, files, bytes, fetched)`.
 """
 function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing, passphrase::Union{AbstractString,Nothing} = nothing,
-                       progress = nothing)
+                       full::Bool = false, sample::Integer = 16, progress = nothing)
     store = offsite_store(c)
     store === nothing && error("[backup.offsite] names no store")
     if stamp === nothing
@@ -474,17 +478,46 @@ function check_offsite(c::Config; stamp::Union{AbstractString,Nothing} = nothing
     end
     work = mktempdir()
     try
-        dest = fetch_offsite!(c, stamp, joinpath(work, stamp); store, passphrase, progress)
-        state = joinpath(work, "state")
-        open(io -> Tar.extract(ZstdDecompressorStream(io), state), joinpath(dest, "state.tar.zst"))
-        check = sqlite_value(joinpath(state, "kb.sqlite3"), "PRAGMA integrity_check")
-        check == "ok" || error("The copy's database fails its integrity check: $check")
-        files = countlines(joinpath(dest, "files.tsv"))
-        bytes = sum(filesize(joinpath(d, f)) for (d, _, fs) in walkdir(dest) for f in fs; init = 0)
-        return (; stamp = String(stamp), files, bytes)
+        if full
+            dest = fetch_offsite!(c, stamp, joinpath(work, stamp); store, passphrase, progress)
+            database_intact(joinpath(dest, "state.tar.zst"), joinpath(work, "state"))
+            files = countlines(joinpath(dest, "files.tsv"))
+            bytes = sum(filesize(joinpath(d, f)) for (d, _, fs) in walkdir(dest) for f in fs; init = 0)
+            return (; stamp = String(stamp), files, bytes, fetched = files)
+        end
+        key = offsite_data_key(c, store; passphrase)
+        fetch(name) = (b = read_object(store, name); b === nothing ? not_found("The store has no $name") : unseal(key, name, b))
+        say(m) = progress === nothing || progress(m)
+        say("Checking $stamp: opening it and fetching its packed state")
+        fetch("snapshots/$stamp/done")
+        state = fetch("snapshots/$stamp/state")
+        write(joinpath(work, "state.tar.zst"), state)
+        database_intact(joinpath(work, "state.tar.zst"), joinpath(work, "state"))
+        rows = [p for p in (split(l, '\t') for l in eachline(IOBuffer(fetch("snapshots/$stamp/files")))) if length(p) == 4]
+        say("Checking $stamp: finding its $(length(rows)) files in the store")
+        sizes = object_sizes(store, "files/")
+        overhead = length(seal(zeros(UInt8, 32), "x", UInt8[]))
+        wrong = [p[1] for p in rows if get(sizes, offsite_file_name(key, p[4]), -1) != parse(Int, p[2]) + overhead]
+        isempty(wrong) || error("$(length(wrong)) of the copy's files are missing from the store or the wrong size, " *
+                                "$(first(wrong)) among them")
+        picked = rows[Random.randperm(length(rows))[1:min(sample, length(rows))]]
+        say("Checking $stamp: fetching $(length(picked)) of its files whole")
+        asyncmap(picked; ntasks = OFFSITE_PARALLEL) do p
+            bytes2hex(sha256(fetch(offsite_file_name(key, p[4])))) == p[4] || error("$(p[1]) in the store is not the file its copy names")
+        end
+        bytes = length(state) + sum(p -> parse(Int, p[2]), rows; init = 0)
+        return (; stamp = String(stamp), files = length(rows), bytes, fetched = length(picked))
     finally
         rm(work; force = true, recursive = true)
     end
+end
+
+"Unpack packed state `file` into `dir` and check its database's integrity; an error says what fails."
+function database_intact(file::AbstractString, dir::AbstractString)
+    open(io -> Tar.extract(ZstdDecompressorStream(io), dir), file)
+    check = sqlite_value(joinpath(dir, "kb.sqlite3"), "PRAGMA integrity_check")
+    check == "ok" || error("The copy's database fails its integrity check: $check")
+    return nothing
 end
 
 "The copies off this machine, for the Status page: whether they are on, where they go, and how the last went."

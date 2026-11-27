@@ -167,13 +167,16 @@ from any machine with the config's `[backup.offsite]`:
 
 ```sh
 zemi backups --offsite                        # the copies, the latest first, and whether a passphrase is set
-zemi backups --offsite --check                # fetch the latest whole with the key: decrypt every part, check the database
+zemi backups --offsite --check                # the latest, with the key: in seconds
 zemi backups --offsite --check --recovery     # the same with the passphrase
+zemi backups --offsite --check --full         # every file fetched and checked, as a restore would
 ```
 
-`--check` changes nothing: it fetches the whole copy into a folder of its own, showing how far it has
-got, and removes it afterwards. It downloads as much as a restore would, the first copy's size, so it
-takes about as long as sending it did.
+`--check` opens the copy with the key (or the passphrase), fetches its packed state and checks the
+database's integrity, finds every file the copy names in the store at its size, and fetches a sample
+of 16 at random whole, decrypting each and checking its hash. That proves in seconds what a restore
+needs, short of downloading every file. `--full` downloads them all, as much as a restore fetches.
+Neither changes anything here: what is fetched goes to a folder of its own, removed afterwards.
 
 ## Restoring
 

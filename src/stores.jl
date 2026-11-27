@@ -23,6 +23,8 @@ function list_objects(s::DirStore, prefix::AbstractString; modified::Bool = fals
             if !endswith(f, ".part") && !hidden(d, f)]
     return modified ? [k => unix2datetime(mtime(joinpath(s.dir, k))) for k in keys] : keys
 end
+"The sizes of the objects under `prefix`, by key."
+object_sizes(s::DirStore, prefix::AbstractString) = Dict(k => filesize(joinpath(s.dir, k)) for k in list_objects(s, prefix))
 delete_object!(s::DirStore, key::AbstractString) = rm(joinpath(s.dir, key); force = true)
 function write_object!(s::DirStore, key::AbstractString, bytes::AbstractVector{UInt8}; content_type = "",
                        progress = (sent, total) -> nothing)
