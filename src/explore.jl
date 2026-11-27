@@ -220,7 +220,7 @@ end
 
 # ── The map ───────────────────────────────────────────────────────────────────────────────────────
 
-const EXPLORE_VERSION = 9
+const EXPLORE_VERSION = 10
 
 "How many of its nearest documents each document is drawn to."
 const EXPLORE_NEIGHBOURS = 10
@@ -425,10 +425,10 @@ end
 
 """
 One map (see [`explore_map!`](@ref)): of the documents `rows`, whose unit vectors are `X`'s columns.
-Without the landscape's clusters (`land`), it makes `clusters` of its own, or as many as suit its size.
+Without the landscape's clusters (`land`), it finds its own (see [`communities`](@ref)).
 `progress(msg, share)` is told each step and the share of the map done before it, by the steps' usual times.
 """
-function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancelled, what, clusters::Integer = c.landscape_clusters)
+function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancelled, what)
     n = length(rows)
     label = strip("$n documents $what")
     progress("$label · nearest neighbours", 0.0)
@@ -476,7 +476,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     end
 
     # The landscape's clusters, each centred on its members here; every document joins the nearest.
-    wanted, clusters, assign = clusters, Dict{String,Any}[], ones(Int, n)
+    clusters, assign = Dict{String,Any}[], ones(Int, n)
     col = Dict(r.id => i for (i, r) in enumerate(rows))
     if land !== nothing && !isempty(land["clusters"])
         members = Dict{Int,Vector{Int}}()
@@ -493,8 +493,7 @@ function explore_view(c::Config, X::AbstractMatrix, rows, land; progress, cancel
     end
     # With no landscape, clusters of its own, labelled by the words of the titles every reader sees.
     if isempty(clusters)
-        k = wanted > 0 ? wanted : clamp(round(Int, sqrt(n / 4)), 2, 16)
-        assign, _ = spherical_kmeans(X, k)
+        assign, _ = communities(X; near = wide, resolution = c.landscape_resolution)
         open_titles = [coalesce(r.title, "") for r in rows if coalesce(r.access, "open") == "open"]
         all_titles = [coalesce(r.title, "") for r in rows]
         clusters = map(1:maximum(assign)) do j

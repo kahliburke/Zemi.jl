@@ -575,9 +575,9 @@ URL, the one Kaimon runs (see [`qdrant_endpoint`](@ref)).
 `group` says who the knowledge base is for (see [`Group`](@ref)): its name, field, description,
 focus areas and tutoring profile. The landscape (see [`landscape!`](@ref)) measures every paper
 against the focus areas; `landscape_layer` names the paper layer it places papers by (by default the
-first searched one that embeds titles and abstracts), and `landscape_clusters` how many clusters it
-finds (0 for a number suited to the count of papers), in a `[landscape]` table with `layer` and
-`clusters`.
+first searched one that embeds titles and abstracts), and `landscape_resolution` how finely it divides
+the papers into clusters (see [`communities`](@ref): above 1 more and smaller, below 1 fewer and
+larger), in a `[landscape]` table with `layer` and `resolution`.
 
 `watch_categories` are the arXiv categories watched for new papers (see [`watch!`](@ref)), none by
 default, each check looking back `watch_days`; `zemi` checks every `watch_hours` (0 for only when asked).
@@ -636,7 +636,7 @@ Base.@kwdef struct Config
     search_layers::Vector{String} = best_layers(layers)
     search_keyword::Bool = true
     landscape_layer::String = ""
-    landscape_clusters::Int = 0
+    landscape_resolution::Float64 = 1.0
     ingestion_history_days::Int = 90
     watch_categories::Vector{String} = String[]
     watch_days::Int = 7
@@ -813,7 +813,7 @@ function load_config(path::AbstractString = config_path())
         search_layers = String.(get(get(t, "search", Dict()), "layers", best_layers(layers))),
         search_keyword = Bool(get(get(t, "search", Dict()), "keyword", true)),
         landscape_layer = get(get(t, "landscape", Dict()), "layer", ""),
-        landscape_clusters = get(get(t, "landscape", Dict()), "clusters", 0),
+        landscape_resolution = Float64(get(get(t, "landscape", Dict()), "resolution", 1.0)),
         ingestion_history_days = get(get(t, "ingestion", Dict()), "history_days", d.ingestion_history_days),
         watch_categories = String.(get(get(t, "watch", Dict()), "categories", d.watch_categories)),
         watch_days = Int(get(get(t, "watch", Dict()), "days", d.watch_days)),

@@ -86,6 +86,11 @@ by how near it is to each of them:
 </figure>
 ```
 
+Its clusters are the communities of the graph that joins each paper to those nearest it in meaning
+(found by Leiden), so their number and sizes are the library's own. Rebuilt as papers come and go, the
+clusters keep their papers, and so their names. `resolution` under `[landscape]` makes them finer
+(above 1) or coarser (below 1).
+
 **Explore**, beside the landscape, places every document you may see by what it is about, your own
 notes included, with the links people made drawn between them: citations between papers, references
 in notes and records, a finding's evidence, a task's links. It needs a running server.
@@ -175,7 +180,7 @@ content_dir = "/srv/zemi/content"   # what people write
 restarting = "Surveying the reef"   # shown while it restarts
 
 [landscape]
-clusters = 5                        # default: from the library's size
+resolution = 1.5                    # finer clusters (default 1.0; below 1, fewer and larger)
 
 [backup]
 dir = "/mnt/backups/zemi"           # see Backups

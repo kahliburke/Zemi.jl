@@ -8,8 +8,15 @@
   (`data.backups/kept/before-schema-25`); 0.5 cannot read it afterwards.
 - The shared knowledge base is exported as `default_kb()`; `kb` is no longer exported, so code and
   notebooks can name their own knowledge base `kb`.
+- `[landscape] clusters`, a fixed number of clusters, is replaced by `[landscape] resolution`
+  (default 1.0): the landscape's clusters are now found as communities, their number the library's own.
 
 ### Changes
+
+- **Clusters by Leiden**: the landscape's clusters, and those a map of a part finds for itself, are
+  the communities of the graph joining each document to its nearest in meaning, rather than k-means.
+  They follow the map's regions more closely, and keep their papers and names as the library changes.
+  The landscape is rebuilt once, and its clusters named afresh.
 
 - **A project has several codebases**, the first its main one, linked one by one or chosen from a
   GitHub organization's repositories, which are listed again each day for new ones. Schema 32 moves each project's

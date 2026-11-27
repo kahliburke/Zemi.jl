@@ -122,7 +122,7 @@ function subset_view!(kb::KB, ids; progress = (msg, share = nothing) -> nothing,
     rows = [r for r in rows if haskey(got, r.point_id)]
     length(rows) < 3 && return nothing
     X = unit_columns(reduce(hcat, [Float64.(got[r.point_id][1]) for r in rows]))
-    v = explore_view(c, X, rows, nothing; progress, cancelled, what = "in this set", clusters = 0)
+    v = explore_view(c, X, rows, nothing; progress, cancelled, what = "in this set")
     (v === nothing || cancelled()) && return nothing
     key = subset_key(m, ids)
     lock(SUBSET_LOCK) do

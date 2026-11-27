@@ -1,10 +1,11 @@
 # The landscape: where the papers lie relative to each other and to the group's focus areas. Every
 # paper is placed by the vector of its title and abstract: its closeness to each focus area is its
-# similarity to that area's description, clusters group papers by similarity, and a 2D map lays them
+# similarity to that area's description, its cluster is the community it forms with those nearest it
+# in meaning (see `communities`), and a 2D map lays them
 # out so that neighbours on the map are neighbours in meaning. The result is a JSON file the site
 # draws from, published with the dataset, so seeing it needs neither Qdrant nor a model.
 
-const LANDSCAPE_VERSION = 2
+const LANDSCAPE_VERSION = 3
 
 landscape_path(c::Config) = joinpath(c.data_dir, "landscape.json")
 
@@ -41,8 +42,7 @@ function landscape!(kb::KB; force::Bool = false, progress = msg -> nothing, canc
             # The site every reader is served draws it: not a document only some may see.
             if c.dataset.role != :publish || publishable(kb, r.id)]
     length(rows) < 5 && return nothing
-    k = c.landscape_clusters > 0 ? c.landscape_clusters : clamp(round(Int, sqrt(length(rows) / 4)), 2, 16)
-    input_sha = bytes2hex(sha256(JSON.json(Dict("version" => LANDSCAPE_VERSION, "layer" => l.name, "k" => k,
+    input_sha = bytes2hex(sha256(JSON.json(Dict("version" => LANDSCAPE_VERSION, "layer" => l.name, "resolution" => c.landscape_resolution,
         "areas" => [(f.name, f.description) for f in c.group.focus_areas],
         # A paper's classification is shown with it, so classifying one rebuilds the landscape too.
         "papers" => [(r.id, r.text_sha, coalesce(r.title, ""), coalesce(r.classification, "")) for r in rows]))))
@@ -66,8 +66,12 @@ function landscape!(kb::KB; force::Bool = false, progress = msg -> nothing, canc
     nearest = [isempty(focus) ? nothing : argmax(view(scores, i, :)) for i in axes(scores, 1)]
     cancelled() && return nothing
 
-    progress("Mapping $(length(rows)) papers: finding $k clusters")
-    assign, centres = spherical_kmeans(X, k)
+    progress("Mapping $(length(rows)) papers: finding their clusters")
+    # From the clusters the papers had, so that they keep their papers, and their names, as papers come and go.
+    was = last !== nothing && get(last, "version", 1) == LANDSCAPE_VERSION && get(last, "layer", "") == l.name ?
+          Dict(String(p["id"]) => Int(p["cluster"]) for p in last["papers"]) : Dict{String,Int}()
+    assign, centres = communities(X; resolution = c.landscape_resolution, from = [get(was, r.id, 0) for r in rows])
+    k = size(centres, 2)
     progress("Mapping $(length(rows)) papers: laying out the map")
     Y = tsne(X)
     Y = (Y .- minimum(Y; dims = 1)) ./ max.(maximum(Y; dims = 1) .- minimum(Y; dims = 1), eps())
@@ -238,46 +242,6 @@ function keyword_label(titles, all_titles)
 end
 
 # ── Clustering and layout ─────────────────────────────────────────────────────────────────────────
-
-"""
-    spherical_kmeans(X, k; iterations = 100, seed = 1) -> (assign, centres)
-
-Cluster the unit columns of `X` by cosine similarity: k-means++ starting centres from a fixed
-seed, so the same vectors give the same clusters. Clusters are numbered by size, largest first.
-"""
-function spherical_kmeans(X::AbstractMatrix, k::Integer; iterations::Integer = 100, seed::Integer = 1)
-    n = size(X, 2)
-    k = min(k, n)
-    rng = Random.Xoshiro(seed)
-    picks = [rand(rng, 1:n)]
-    far = 1 .- X' * X[:, picks[1]]
-    while length(picks) < k
-        w = max.(far, 0) .^ 2
-        i = sum(w) > 0 ? searchsortedfirst(cumsum(w), rand(rng) * sum(w)) : rand(rng, 1:n)
-        push!(picks, clamp(i, 1, n))
-        far = min.(far, 1 .- X' * X[:, picks[end]])
-    end
-    C = X[:, picks]
-    assign = zeros(Int, n)
-    for _ in 1:iterations
-        S = C' * X
-        next = [argmax(view(S, :, i)) for i in 1:n]
-        next == assign && break
-        assign = next
-        for j in 1:k
-            m = vec(sum(X[:, assign .== j]; dims = 2))
-            if iszero(m)                       # an empty cluster restarts at the worst-placed paper
-                worst = argmin([S[assign[i], i] for i in 1:n])
-                m = X[:, worst]
-                assign[worst] = j
-            end
-            C[:, j] = m / norm(m)
-        end
-    end
-    order = sortperm([count(==(j), assign) for j in 1:k]; rev = true)
-    renumber = invperm(order)
-    return [renumber[a] for a in assign], C[:, order]
-end
 
 """
 The columns of `X` on their first `dims` principal components (one row each), each signed so its skew

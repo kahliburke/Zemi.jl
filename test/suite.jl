@@ -3244,7 +3244,7 @@ end
         namer = Summarizer(; name = "namer", url, model = "m")
         c = temp_config(; qdrant_url = "http://127.0.0.1:$qport", layers = [Layer(; name = "paper-t", model = "m", unit = :paper, url)],
                         summarizers = [namer], summarizer = "namer", code_summarizer = "namer", judge = "namer",
-                        landscape_clusters = 3, group = K.Group(; focus_areas = [FocusArea("Corals", "coral"), FocusArea("Engineering", "engineering")]))
+                        group = K.Group(; focus_areas = [FocusArea("Corals", "coral"), FocusArea("Engineering", "engineering")]))
         kb = open_kb(c)
         topic_of = Dict{String,String}()
         for (t, topic) in enumerate(topics), i in 1:6
@@ -3329,6 +3329,22 @@ end
         # A cluster of papers with no titles yet is left for later rather than named from its ids.
         untitled = K.name_clusters!(kb, [["2609.99901", "2609.99902"]], [String[]], ["2609.99901", "2609.99902"])
         @test asked[] == 1 && !only(untitled).named
+        # Clusters as the communities of the nearest-neighbour graph: planted groups of uneven sizes found
+        # as they are, their number not given, numbered by size; a group too small to keep joins the
+        # nearest; finer at a higher resolution; and started from an earlier clustering, a document added
+        # leaves the rest where they were.
+        rng = K.Random.Xoshiro(7)
+        centre = [vec(K.unit_columns(randn(rng, 64, 1))) for _ in 1:4]
+        planted = [fill(1, 40); fill(2, 25); fill(3, 15); fill(4, 2)]
+        X = K.unit_columns(reduce(hcat, [centre[g] .+ 0.04 .* randn(rng, 64) for g in planted]))
+        assign, C = K.communities(X)
+        @test sort(unique(assign)) == 1:3 && size(C) == (64, 3)
+        @test [only(unique(assign[planted .== g])) for g in 1:3] == [1, 2, 3]          # each group whole, by size
+        @test only(unique(assign[planted .== 4])) in 1:3                                # the two left over joined one
+        @test length(unique(K.communities(X; resolution = 6.0)[1])) > 3
+        Y = K.unit_columns([X centre[2] .+ 0.04 .* randn(rng, 64)])
+        again, _ = K.communities(Y; from = [assign; 0])
+        @test again[1:end-1] == assign && again[end] == assign[41]
 
         # The site draws it, and a consumer gets it with the dataset.
         site, public = mktempdir(), mktempdir()
