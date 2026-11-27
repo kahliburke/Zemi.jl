@@ -621,6 +621,7 @@ async function draw() {
     }
     settle(was, same)
     three = THREE
+    spriteText = SpriteText
     nearest3d = null
     ring3d = null
     title3d = null
@@ -881,15 +882,20 @@ function showRing3d() {
   ring3d.visible = !!(lit.value && sprites.has(lit.value.id))
   showTitle3d()
 }
-let three: any = null
+let three: any = null, spriteText: any = null
 let nearest3d: any = null
-async function showNearest3d() {
-  if (!graph || view.value !== '3d' || !three) return
-  if (nearest3d) { graph.scene().remove(nearest3d); nearest3d.traverse((o: any) => { o.geometry?.dispose?.(); o.material?.map?.dispose?.(); o.material?.dispose?.() }) }
+// Built at once, with the classes the space was drawn with, so the old lines are always gone first.
+function clearNearest3d() {
+  if (nearest3d) { graph?.scene().remove(nearest3d); nearest3d.traverse((o: any) => { o.geometry?.dispose?.(); o.material?.map?.dispose?.(); o.material?.dispose?.() }) }
   nearest3d = null
+}
+function showNearest3d() {
+  if (!graph || view.value !== '3d' || !three || !spriteText) return
+  clearNearest3d()
+  if (morphing) return                                       // until the documents arrive
   const lines = nearestShown()
   if (!lines.length) return
-  const SpriteText = (await import('three-spritetext')).default as any
+  const SpriteText = spriteText
   const group = new three.Group()
   const pos: number[] = [], col: number[] = []
   const brand = new three.Color(BRAND), bg = new three.Color(isDark.value ? 0x111116 : 0xfafafa)
@@ -941,6 +947,7 @@ function morph() {
     return t ? [t.fx ?? t.x ?? from[i][0], t.fy ?? t.y ?? from[i][1], t.fz ?? t.z ?? from[i][2]] : null
   })
   cancelAnimationFrame(morphing)
+  if (deep) clearNearest3d()                                 // drawn again where the documents arrive
   graph.cooldownTicks(Infinity).d3ReheatSimulation()
   const start = performance.now(), ms = moveMs(1100)
   const step = (now: number) => {
