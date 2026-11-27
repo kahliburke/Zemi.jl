@@ -326,7 +326,7 @@ function fetch_offsite!(c::Config, stamp::AbstractString, dest::AbstractString; 
     parse_backup_stamp(stamp) === nothing && error("A copy is named by its time, as `zemi backups --offsite` lists them: $stamp")
     key = offsite_data_key(c, store; passphrase)
     fetch(name) = (b = read_object(store, name); b === nothing ? not_found("The store has no $name") : unseal(key, name, b))
-    meta = fetch("snapshots/$stamp/done")                       # missing for a copy never completed
+    meta = String(fetch("snapshots/$stamp/done"))               # missing for a copy never completed
     part = dest * ".part"
     rm(part; force = true, recursive = true)
     mkpath(joinpath(part, "files"))
@@ -344,7 +344,7 @@ function fetch_offsite!(c::Config, stamp::AbstractString, dest::AbstractString; 
                 println(manifest, p[1], '\t', p[2], '\t', p[3])
             end
         end
-        for d in get(TOML.parse(String(meta)), "files", String[])
+        for d in get(TOML.parse(meta), "files", String[])
             mkpath(joinpath(part, "files", d))
         end
         write(joinpath(part, "snapshot.toml"), meta)
