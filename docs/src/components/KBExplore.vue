@@ -983,12 +983,17 @@ onLive(() => {
 })
 onLive(() => {
   const hold = () => camera.stop()
-  box.value?.addEventListener('pointerdown', hold)
+  // Taking hold of the view stops a move under way: heard before the graph's own zoom, which keeps the
+  // wheel and touches to itself, or a move begun by choosing a document would pull the view back after.
+  const first = { capture: true }, quietly = { passive: true, capture: true }
+  box.value?.addEventListener('pointerdown', hold, first)
+  box.value?.addEventListener('wheel', hold, quietly)
+  box.value?.addEventListener('touchstart', hold, quietly)
   box.value?.addEventListener('pointerdown', pressed)
   box.value?.addEventListener('pointerup', released)
-  box.value?.addEventListener('wheel', hold, { passive: true })
   return () => {
-    box.value?.removeEventListener('pointerdown', hold); box.value?.removeEventListener('wheel', hold)
+    box.value?.removeEventListener('pointerdown', hold, first); box.value?.removeEventListener('wheel', hold, first)
+    box.value?.removeEventListener('touchstart', hold, first)
     box.value?.removeEventListener('pointerdown', pressed); box.value?.removeEventListener('pointerup', released)
     camera.stop()
   }
