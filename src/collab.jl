@@ -41,8 +41,9 @@ const COLLAB_LOCK = ReentrantLock()
     collab_ticket!(kb, caller, project, document) -> NamedTuple
 
 A ticket for `caller` to the room of `document` in `project`, which they must reach as a
-contributor: `(; ticket, room, path, expires, name)`, `path` the WebSocket to open with `?ticket=`,
-`name` theirs, for the others in the room to see.
+contributor: `(; ticket, room, path, expires, name, rooms)`, `path` the WebSocket to open with
+`?ticket=`, `name` theirs, for the others in the room to see, and `rooms` the project's rooms with
+someone in them (see [`collab_rooms`](@ref)), so a copy whose document id differs is noticed.
 """
 function collab_ticket!(kb::KB, caller::Caller, project::AbstractString, document::AbstractString)
     key = need_project!(kb, caller, project, CONTRIBUTE)
@@ -55,7 +56,7 @@ function collab_ticket!(kb::KB, caller::Caller, project::AbstractString, documen
         filter!(((_, t),) -> t.expires > now(UTC), COLLAB_TICKETS)
         COLLAB_TICKETS[ticket] = CollabTicket(caller, room, key, expires)
     end
-    return (; ticket, room, path = "/api/collab", expires = iso(expires), name = caller_name(caller))
+    return (; ticket, room, path = "/api/collab", expires = iso(expires), name = caller_name(caller), rooms = collab_rooms(key))
 end
 
 "The ticket `ticket` names, if it is current and its caller still reaches its project as a contributor."

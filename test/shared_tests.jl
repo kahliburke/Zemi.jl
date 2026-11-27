@@ -3089,7 +3089,7 @@ end
     K.set_member!(kb, "RF", bea, "contributor")
     ticket(uid, doc = "doc-1") = K.collab_ticket!(kb, as(uid), "rf", doc)
     t = ticket(ada)
-    @test t.room == "RF/doc-1" && t.path == "/api/collab" && length(t.ticket) == 48
+    @test t.room == "RF/doc-1" && t.path == "/api/collab" && length(t.ticket) == 48 && isempty(t.rooms)
     @test_throws "No project RF" ticket(cy)
     @test_throws "A document's id" ticket(ada, "../x")
     r = K.handle(kb, K.HTTP.Request("POST", "/api/projects/RF/collab/ticket", [], K.JSON.json(Dict("document" => "doc-2"))), as(bea))
