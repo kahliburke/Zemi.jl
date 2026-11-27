@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Suggested links: pairs of documents near in meaning that nothing links yet, with the words they share,
 // and what can be done with each (link them, set them aside, add one as a finding's evidence, cite it).
+import KBTitle from './KBTitle.vue'
 import { can } from './kbApi'
 import { KIND_COLOURS, useSettings, type Node, type Pair } from './kbExplore'
 
@@ -32,9 +33,9 @@ const evidence = (p: Pair) => (p.a.kind === 'finding' ? emit('evidence', p.a, p.
       <li v-for="p in pairs" :key="p.a.id + p.b.id">
         <div class="kbx-pair">
           <div class="kbx-pair-doc"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[p.a.kind] ?? '#999' }"></i>
-            <a href="#" :title="p.a.title" @click.prevent="$emit('goPair', p)">{{ p.a.title }}</a></div>
+            <a href="#" :title="p.a.title" @click.prevent="$emit('goPair', p)"><KBTitle :text="p.a.title" /></a></div>
           <div class="kbx-pair-doc"><i class="kbx-swatch" :style="{ background: KIND_COLOURS[p.b.kind] ?? '#999' }"></i>
-            <a href="#" :title="p.b.title" @click.prevent="$emit('go', p.b)">{{ p.b.title }}</a></div>
+            <a href="#" :title="p.b.title" @click.prevent="$emit('go', p.b)"><KBTitle :text="p.b.title" /></a></div>
           <p v-if="shared.get(key(p))?.length" class="kbx-pair-why">Shared: {{ shared.get(key(p))!.join(' · ') }}</p>
           <div class="kbx-pair-act">
             <a v-if="(p.a.kind === 'finding') !== (p.b.kind === 'finding') && can('tasks.edit')" href="#" @click.prevent="evidence(p)">Add as evidence</a>

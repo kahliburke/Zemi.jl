@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The explore page's card for the selected document: what it is and where it sits, its summary (a note's
 // opening until it has one, else its abstract), what to do with it, and what links it and lies nearest.
+import KBTitle from './KBTitle.vue'
 import { computed } from 'vue'
 import KBClampText from './KBClampText.vue'
 import KBIcon from './KBIcon.vue'
@@ -24,7 +25,7 @@ const citable = computed(() => props.node.kind !== 'finding' && props.node.kind 
     <p class="kbx-meta"><i class="kbx-swatch" :style="{ background: colour }"></i>{{ kindName(node.kind) }}<template
       v-if="node.year"> · {{ node.year }}</template><template v-if="node.read === false"> · abstract only</template></p>
     <p v-if="cluster" class="kbx-cluster" :title="cluster">{{ cluster }}</p>
-    <h3><a :href="node.page" target="_blank" rel="noopener">{{ node.title }}</a></h3>
+    <h3><a :href="node.page" target="_blank" rel="noopener"><KBTitle :text="node.title" /></a></h3>
     <template v-if="shown">
       <p v-if="byline(shown)" class="kbx-byline">{{ byline(shown) }}</p>
       <KBClampText data-share-text v-if="text" :head="head" :html="render(text)" />
@@ -44,7 +45,7 @@ const citable = computed(() => props.node.kind !== 'finding' && props.node.kind 
       <ul class="kbx-list">
         <li v-for="l in linked" :key="l.node.id + l.kind">
           <i class="kbx-swatch" :style="{ background: KIND_COLOURS[l.node.kind] ?? '#999' }"></i>
-          <a href="#" :title="l.node.title" @click.prevent="$emit('go', l.node)">{{ l.node.title }}</a>
+          <a href="#" :title="l.node.title" @click.prevent="$emit('go', l.node)"><KBTitle :text="l.node.title" /></a>
           <span class="kbx-aside">{{ relation(l.kind, l.out) }}</span>
         </li>
       </ul>
@@ -54,7 +55,7 @@ const citable = computed(() => props.node.kind !== 'finding' && props.node.kind 
       <ul class="kbx-list">
         <li v-for="x in nearest" :key="x.node.id">
           <i class="kbx-swatch" :style="{ background: KIND_COLOURS[x.node.kind] ?? '#999' }"></i>
-          <a href="#" :title="x.node.title" @click.prevent="$emit('go', x.node)">{{ x.node.title }}</a>
+          <a href="#" :title="x.node.title" @click.prevent="$emit('go', x.node)"><KBTitle :text="x.node.title" /></a>
           <span class="kbx-aside"><span v-if="x.linked" class="kbx-tag">linked</span><span class="kbx-bar-track"><span class="kbx-bar-fill"
             :style="{ width: `${Math.max(4, Math.round(x.similarity * 100))}%` }"></span></span>{{ Math.round(x.similarity * 100) }}%</span>
         </li>

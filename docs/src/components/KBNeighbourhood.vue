@@ -8,6 +8,7 @@
   there is no map (a published site).
 -->
 <script setup lang="ts">
+import KBTitle from './KBTitle.vue'
 import { ref, shallowRef, computed, watch, nextTick } from 'vue'
 import { useData } from 'vitepress'
 import { getJSON, onLive } from './kbApi'
@@ -29,6 +30,9 @@ const box = ref<HTMLDivElement | null>(null)
 const found = ref(false)
 const shown = shallowRef<{ kinds: string[]; links: string[]; similar: boolean }>({ kinds: [], links: [], similar: false })
 const named = new Set<string>()
+// The named documents' titles, elements over the map (so their maths is set, see KBTitle), placed each frame.
+const namedNodes = shallowRef<Node[]>([])
+const nameEls = new Map<string, HTMLElement>()
 const pointed = shallowRef<GNode | null>(null)
 const tipAt = ref({ x: 0, y: 0 })
 let graph: any = null
@@ -38,7 +42,6 @@ let graph: any = null
 const radiusVal = (n: { id: string; links: number }) => (n.id === props.id ? 5 : 1.8 + Math.sqrt(n.links) * 0.6)
 let rel = 4
 const radius = (n: { id: string; links: number }) => Math.sqrt(radiusVal(n)) * rel
-const short = (t: string) => (t.length > 34 ? t.slice(0, 32).trimEnd() + '…' : t)
 const selfColour = () => (isDark.value ? '#ffffff' : '#111111')
 const similarColour = (s: number) => (isDark.value ? `rgba(200,200,255,${0.15 + 0.35 * s})` : `rgba(60,60,140,${0.15 + 0.35 * s})`)
 
@@ -62,6 +65,7 @@ async function draw() {
   const alike = links.filter(l => l.kind === 'similar').sort((a, b) => (b.s ?? 0) - (a.s ?? 0)).map(touching).filter((x): x is string => !!x)
   named.clear()
   for (const id of [...new Set([...linked, ...alike])].slice(0, NAMED)) named.add(id)
+  namedNodes.value = g.nodes.filter(n => named.has(n.id))
   shown.value = { kinds: NODE_KINDS.map(([k]) => k).filter(k => nodes.some(n => n.id !== props.id && n.kind === k)),
                   links: LINK_KINDS.map(([k]) => k).filter(k => links.some(l => l.kind === k)),
                   similar: links.some(l => l.kind === 'similar') }
@@ -94,32 +98,31 @@ async function draw() {
 // The named documents' short titles beside them, a constant size on screen: each on the right of its node,
 // else its left, above or below, clear of the names placed and the named discs, and left out where none is.
 // This document is the page's, so it goes unnamed.
-function names(ctx: CanvasRenderingContext2D, scale: number) {
+function names(_ctx: CanvasRenderingContext2D, scale: number) {
   const nodes: GNode[] = (graph?.graphData().nodes ?? []).filter((n: GNode) => n.x !== undefined)
   const order = nodes.filter(n => named.has(n.id))
   const taken = nodes.filter(n => n.id === props.id || named.has(n.id)).map(n => {
     const r = radius(n)
     return { x0: n.x - r, x1: n.x + r, y0: n.y - r, y1: n.y + r }
   })
-  const h = 15 / scale, pad = 4 / scale
-  ctx.save()
-  ctx.textBaseline = 'middle'
-  ctx.font = `500 ${11 / scale}px system-ui, sans-serif`
+  // The map's edges, in its own units: a name is put only where it is whole within them.
+  const edge0 = graph.screen2GraphCoords(4, 4), edge1 = graph.screen2GraphCoords((box.value?.clientWidth ?? 0) - 4, HEIGHT - 4)
   for (const n of order) {
-    const text = short(n.title), w = ctx.measureText(text).width + 2 * pad
+    const el = nameEls.get(n.id)
+    if (!el) continue
+    const w = el.offsetWidth / scale, h = el.offsetHeight / scale
     const r = radius(n) + 3 / scale
     const spots = [[n.x + r, n.y - h / 2], [n.x - r - w, n.y - h / 2], [n.x - w / 2, n.y - r - h], [n.x - w / 2, n.y + r]]
-    const clear = ([x, y]: number[]) => taken.every(b => x + w < b.x0 || x > b.x1 || y + h < b.y0 || y > b.y1)
+    const inside = ([x, y]: number[]) => x >= edge0.x && x + w <= edge1.x && y >= edge0.y && y + h <= edge1.y
+    const clear = ([x, y]: number[]) => inside([x, y]) && taken.every(b => x + w < b.x0 || x > b.x1 || y + h < b.y0 || y > b.y1)
     const at = spots.find(clear)
-    if (!at) continue
+    if (!at) { el.style.visibility = 'hidden'; continue }
     const [x, y] = at
     taken.push({ x0: x, x1: x + w, y0: y, y1: y + h })
-    ctx.fillStyle = isDark.value ? 'rgba(17,17,22,0.78)' : 'rgba(250,250,250,0.86)'
-    ctx.beginPath(); ctx.roundRect(x, y, w, h, 3 / scale); ctx.fill()
-    ctx.fillStyle = isDark.value ? 'rgba(230,230,240,0.92)' : 'rgba(35,35,45,0.9)'
-    ctx.fillText(text, x + pad, y + h / 2)
+    const p = graph.graph2ScreenCoords(x, y)
+    el.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px)`
+    el.style.visibility = 'visible'
   }
-  ctx.restore()
 }
 
 function moved(e: PointerEvent) {
@@ -139,8 +142,10 @@ watch(isDark, () => graph?.nodeColor(graph.nodeColor()))
     <div class="kbn-head"><h2 :id="anchor">Nearby</h2><a v-if="found" :href="exploreHref(props.id)">Explore from here →</a></div>
     <div v-show="found" class="kbn-frame" @pointermove="moved" @pointerleave="pointed = null">
       <div ref="box" class="kbn-map"></div>
+      <div v-for="n in namedNodes" :key="n.id" :ref="el => el ? nameEls.set(n.id, el as HTMLElement) : nameEls.delete(n.id)"
+           class="kbn-name" aria-hidden="true"><KBTitle :text="n.title" /></div>
       <div v-if="pointed" class="kbn-tip" :style="{ left: tipAt.x + 'px', top: tipAt.y + 'px' }" role="tooltip">
-        <b>{{ pointed.title }}</b><br>{{ [pointed.id === props.id ? 'this document' : kindName(pointed.kind), pointed.year].filter(Boolean).join(' · ') }}
+        <b><KBTitle :text="pointed.title" /></b><br>{{ [pointed.id === props.id ? 'this document' : kindName(pointed.kind), pointed.year].filter(Boolean).join(' · ') }}
       </div>
     </div>
     <ul v-show="found" class="kbn-legend" aria-label="Legend">
@@ -151,7 +156,7 @@ watch(isDark, () => graph?.nodeColor(graph.nodeColor()))
     </ul>
     <details v-if="related.length" class="kbn-related" :open="!found">
       <summary>Related papers ({{ related.length }})</summary>
-      <ul><li v-for="r in related" :key="r.slug"><a :href="kbPage(r.page)">{{ r.title }}</a></li></ul>
+      <ul><li v-for="r in related" :key="r.slug"><a :href="kbPage(r.page)"><KBTitle :text="r.title" /></a></li></ul>
     </details>
   </section>
 </template>
@@ -162,6 +167,9 @@ watch(isDark, () => graph?.nodeColor(graph.nodeColor()))
 .kbn-head h2 { margin: 0; border: 0; padding: 0; font-size: 1.1rem; }
 .kbn-frame { position: relative; margin-top: 0.5rem; }
 .kbn-map { height: 380px; border: 1px solid var(--vp-c-divider); border-radius: 8px; overflow: hidden; }
+.kbn-name { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; max-width: 15rem; padding: 1px 4px;
+            border-radius: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font: 500 11px/1.4 system-ui, sans-serif;
+            color: var(--vp-c-text-1); background: color-mix(in srgb, var(--vp-c-bg) 80%, transparent); }
 .kbn-tip { position: absolute; z-index: 5; transform: translate(14px, 14px); max-width: 22rem; padding: 5px 9px; pointer-events: none;
            border: 1px solid var(--vp-c-divider); border-radius: 6px; background: var(--vp-c-bg-elv); box-shadow: var(--vp-shadow-2);
            color: var(--vp-c-text-1); font: 12px/1.4 system-ui, sans-serif; }

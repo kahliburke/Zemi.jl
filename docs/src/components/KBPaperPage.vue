@@ -5,6 +5,7 @@
   (the tutor, notebooks, findings, figures, a section's text) are its components, as on other pages.
 -->
 <script setup lang="ts">
+import KBTitle from './KBTitle.vue'
 import { computed } from 'vue'
 import { useTemplatedPage } from './kbTemplates'
 import { kbPage, topicHref, authorHref, manageHref, dayHref, notebookHref } from './kbLinks'
@@ -153,7 +154,7 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
           <template v-if="s.references">
             <p v-if="paper.here.length"><strong>Here:</strong>
               <template v-for="(h, j) in paper.here" :key="h.slug + j"><template v-if="j"> · </template>
-                <a :href="linkHref(h)">{{ h.title }}</a><template v-if="h.label"> (ref. {{ h.label }})</template></template>
+                <a :href="linkHref(h)"><KBTitle :text="h.title" /></a><template v-if="h.label"> (ref. {{ h.label }})</template></template>
             </p>
             <details class="details custom-block">
               <summary>{{ paper.references.length }} references<template v-if="paper.here.length"> · {{ paper.here.length }} here</template></summary>
@@ -162,7 +163,7 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
                   <span v-if="r.doi || r.arxiv" class="kb-ref-links">
                     <a v-if="r.doi" :href="`https://doi.org/${r.doi}`">DOI</a>
                     <a v-if="r.arxiv" :href="`https://arxiv.org/abs/${r.arxiv}`">arXiv</a></span>
-                  <template v-if="r.cites"><br><a class="kb-ref-kb" :href="linkHref(r.cites)">Here: {{ r.cites.title }}</a></template>
+                  <template v-if="r.cites"><br><a class="kb-ref-kb" :href="linkHref(r.cites)">Here: <KBTitle :text="r.cites.title" /></a></template>
                 </li>
               </component>
             </details>
@@ -174,7 +175,7 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
 
       <template v-if="paper.cited_by.length">
         <h2 :id="anchors.fixed['Cited by']">Cited by</h2>
-        <ul><li v-for="c in paper.cited_by" :key="c.slug"><a :href="linkHref(c)">{{ c.title }}</a></li></ul>
+        <ul><li v-for="c in paper.cited_by" :key="c.slug"><a :href="linkHref(c)"><KBTitle :text="c.title" /></a></li></ul>
       </template>
 
       <template v-if="paper.classification.length">

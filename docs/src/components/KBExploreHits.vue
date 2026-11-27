@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // What a search of the map found, before one is picked: its best matches, each with how strongly it
 // matched, to go to; Enter goes to the first, Tab to the next.
+import KBTitle from './KBTitle.vue'
 import { KIND_COLOURS, kindName, type Node } from './kbExplore'
 
 defineProps<{ query: string; hits: { node: Node; strength: number }[]; total: number; canMap: boolean }>()
@@ -13,7 +14,7 @@ defineEmits<{ go: [node: Node]; map: [] }>()
     <ul class="kbx-list">
       <li v-for="h in hits" :key="h.node.id">
         <i class="kbx-swatch" :style="{ background: KIND_COLOURS[h.node.kind] ?? '#999' }" :title="kindName(h.node.kind)"></i>
-        <a href="#" :title="h.node.title" @click.prevent="$emit('go', h.node)">{{ h.node.title }}</a>
+        <a href="#" :title="h.node.title" @click.prevent="$emit('go', h.node)"><KBTitle :text="h.node.title" /></a>
         <span class="kbx-aside"><span class="kbx-bar-track"><span class="kbx-bar-fill"
           :style="{ width: `${Math.max(4, Math.round(h.strength * 100))}%` }"></span></span></span>
       </li>

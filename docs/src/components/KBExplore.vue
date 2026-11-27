@@ -6,6 +6,7 @@
   move the view; in 3D, F flies freely. `?center=<id>` opens it at a document.
 -->
 <script setup lang="ts">
+import KBTitle from './KBTitle.vue'
 import KBNeedsService from './KBNeedsService.vue'
 import KBIcon from './KBIcon.vue'
 import KBShare from './KBShare.vue'
@@ -21,7 +22,7 @@ import { can, getJSON, post, onLive } from './kbApi'
 import { exploreHref, kbPage } from './kbLinks'
 import { loadMarkdown, escapeText, type Render } from './kbMarkdown'
 import { BRAND, CLUSTER_COLOURS, DIMMED, KIND_COLOURS, LINK_COLOURS, NODE_KINDS, TRAIL, WHOSE, WHOSE_COLOURS, kindName, mix, own,
-         provideSettings, shortTitle, useExploreSettings, whose, READING, SCALES, ramp, reading,
+         provideSettings, useExploreSettings, whose, READING, SCALES, ramp, reading,
          type Detail, type Graph, type LegendRow, type Linked, type Near, type Node, type Pair, type Step } from './kbExplore'
 import { cameraMover, type View } from './exploreCamera'
 import { SCALE_2D, SCALE_3D, capHeight, clusterCentres, discTexture, pixelSize, placeTheRest, spacing, measureRoom,
@@ -565,7 +566,6 @@ async function draw() {
   } else {
     const ForceGraph3D = (await import('3d-force-graph')).default as any
     const SpriteText = (await import('three-spritetext')).default as any
-    SpriteTextOf = SpriteText
     const THREE = await import('three')
     const disc = discTexture(THREE)
     sprites.clear()
@@ -730,9 +730,11 @@ function drawFocus2d(ctx: CanvasRenderingContext2D, scale: number) {
   const at = (d: Node | null) => (d ? nodes.find(x => x.id === d.id && x.x !== undefined) : undefined)
   const s = at(selected.value), p = at(peek.value)
   ctx.save()
-  if (s) { ring2d(ctx, s, scale); if (p !== s) title2d(ctx, s, scale) }
+  let titled = false
+  if (s) { ring2d(ctx, s, scale); if (p !== s) titled = title2d(ctx, s, scale) }
   if (p && p !== s) ring2d(ctx, p, scale)
   ctx.restore()
+  if (!titled) hideTitle()
 }
 // A thin ring in the brand colour around a node, and a faint wider one.
 function ring2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
@@ -743,21 +745,28 @@ function ring2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
   ctx.beginPath(); ctx.arc(n.x, n.y, r + 8 / scale, 0, 2 * Math.PI); ctx.stroke()
 }
 // A node's short title above where its ring is, on a backing, a constant size on screen.
+// The selected document's title: an element over the map (so its maths is set, see KBTitle), placed as its
+// callout says, the leader drawn on the map to it. False where there is no element to place.
 function title2d(ctx: CanvasRenderingContext2D, n: GNode, scale: number) {
-  const text = shortTitle(n.title)
-  ctx.font = `600 ${13 / scale}px system-ui, sans-serif`
-  ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-  const w = ctx.measureText(text).width + 12 / scale, h = 20 / scale
+  const el = titleEl.value
+  if (!el || !graph) return false
+  const w = el.offsetWidth / scale, h = el.offsetHeight / scale
   const { box, from, to } = callout(n, w, h, scale)
-  // The leader, from the ring to the label.
   ctx.strokeStyle = BRAND + 'b0'; ctx.lineWidth = 1 / scale
   ctx.beginPath(); ctx.moveTo(from[0], from[1]); ctx.lineTo(to[0], to[1]); ctx.stroke()
-  ctx.fillStyle = isDark.value ? 'rgba(17,17,22,0.88)' : 'rgba(250,250,250,0.92)'
-  ctx.beginPath(); ctx.roundRect(box.x0, box.y0, w, h, 4 / scale); ctx.fill()
-  ctx.strokeStyle = BRAND; ctx.stroke()
-  ctx.fillStyle = isDark.value ? '#f0f0f8' : '#1a1a24'
-  ctx.fillText(text, box.x0 + 6 / scale, box.y0 + h / 2)
+  const at = graph.graph2ScreenCoords(box.x0, box.y0)
+  showTitle(at.x, at.y)
+  return true
 }
+// The title element over the map, where its top left goes, or out of sight.
+const titleEl = ref<HTMLDivElement | null>(null)
+function showTitle(x: number, y: number) {
+  const el = titleEl.value
+  if (!el) return
+  el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`
+  el.style.visibility = 'visible'
+}
+const hideTitle = () => { if (titleEl.value) titleEl.value.style.visibility = 'hidden' }
 // Where a node's callout goes: a label `w` by `h` set off from its ring, on the side whose box covers the
 // fewest discs, the up and right sides first among equals; kept on that side until another covers
 // clearly fewer, so it does not jump as the view moves. With the points the leader runs between.
@@ -797,62 +806,47 @@ function callout(n: GNode, w: number, h: number, scale: number) {
 }
 // A title short enough to label a node with.
 // In the space, the selected document's title, kept above its disc whichever way the camera turns.
-let SpriteTextOf: any = null
 let title3d: any = null
 function showTitle3d() {
   const f = selected.value && sprites.get(selected.value.id)
   if (title3d && title3d.userData.id !== f?.node.id) {
-    const leader = title3d.userData.leader
-    graph?.scene().remove(title3d); title3d.material.map?.dispose(); title3d.material.dispose(); title3d = null
-    if (leader) { graph?.scene().remove(leader); leader.geometry.dispose(); leader.material.dispose() }
+    graph?.scene().remove(title3d); title3d.geometry.dispose(); title3d.material.dispose(); title3d = null
   }
-  if (!f || title3d || !SpriteTextOf || !graph) return
-  const t = new SpriteTextOf(shortTitle(f.node.title), 5, isDark.value ? '#f0f0f8' : '#1a1a24')
-  t.fontWeight = '600'
-  t.backgroundColor = isDark.value ? 'rgba(17,17,22,0.85)' : 'rgba(250,250,250,0.9)'
-  t.borderColor = BRAND; t.borderWidth = 0.4; t.borderRadius = 3; t.padding = [3, 1.5]
-  t.material.depthTest = false; t.material.depthWrite = false
-  t.renderOrder = 1002
-  t.userData.id = f.node.id
-  capHeight(t, 18, 22)
-  // A callout: the label set off up and to the right of the disc on screen, a leader running to it, so it
-  // does not lie over the documents around the disc.
-  const leaderGeometry = new three.BufferGeometry()
-  leaderGeometry.setAttribute('position', new three.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3))
-  const leader = new three.Line(leaderGeometry, new three.LineBasicMaterial({ color: BRAND, transparent: true, opacity: 0.7, depthTest: false }))
-  leader.renderOrder = 1003                                  // after the label, which moves it each frame
+  if (!f) { hideTitle(); return }
+  if (title3d || !graph) return
+  // A callout: the title (an element over the map, see `showTitle`) set off up and to the right of the
+  // disc on screen, or to the left, or above, wherever it fits in what the card and the panel leave open,
+  // a leader running to it. The leader, drawn each frame, places the title as it goes.
+  const geometry = new three.BufferGeometry()
+  geometry.setAttribute('position', new three.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3))
+  const leader = new three.Line(geometry, new three.LineBasicMaterial({ color: BRAND, transparent: true, opacity: 0.7, depthTest: false }))
+  leader.renderOrder = 1003
   leader.frustumCulled = false
-  t.userData.leader = leader
-  const sized = t.onBeforeRender
+  leader.userData.id = f.node.id
   const up = new three.Vector3(), right = new three.Vector3(), dir = new three.Vector3(), from = new three.Vector3(), to = new three.Vector3()
-  // Sized for the screen from where it is, so first set at the disc: from anywhere else, its first frame
-  // would be sized for another distance.
-  t.position.copy(f.sprite.position)
-  t.onBeforeRender = (renderer: any, scene: any, camera: any) => {
-    t.position.copy(f.sprite.position)
-    t.updateMatrixWorld()
-    sized(renderer, scene, camera)
+  leader.onBeforeRender = (renderer: any, _scene: any, camera: any) => {
+    const el = titleEl.value
+    if (!el) return
     up.setFromMatrixColumn(camera.matrixWorld, 1).normalize()
     right.setFromMatrixColumn(camera.matrixWorld, 0).normalize()
-    // Up and to the right where the label fits beside what the card and the panel leave open, else up
-    // and to the left, else straight up and centred over the disc, so it stays in view.
     const px = pixelSize(camera.position.distanceTo(f.sprite.position), renderer, camera)
     const open = uncovered(), onScreen = f.sprite.position.clone().project(camera)
-    const x = (onScreen.x + 1) / 2 * open.width, wide = t.scale.x / px + 40
-    const side = x + wide <= open.right ? 1 : x - wide >= open.left ? -1 : 0
+    const x = (onScreen.x + 1) / 2 * open.width, w = el.offsetWidth, h = el.offsetHeight
+    const side = x + w + 40 <= open.right ? 1 : x - w - 40 >= open.left ? -1 : 0
     right.multiplyScalar(side)
     dir.copy(up).add(right).normalize()
-    const radius = f.sprite.scale.x / 2, reach = 26 * px
+    const radius = f.sprite.scale.x / 2
     from.copy(f.sprite.position).addScaledVector(dir, radius * 1.1)
-    to.copy(f.sprite.position).addScaledVector(dir, radius * 1.1 + reach)
-    // Its near corner at the leader's end, or its middle when it is centred.
-    t.position.copy(to).addScaledVector(right, t.scale.x / 2).addScaledVector(up, t.scale.y / 2)
-    t.updateMatrixWorld()
-    const at = leaderGeometry.attributes.position
+    to.copy(f.sprite.position).addScaledVector(dir, radius * 1.1 + 26 * px)
+    const at = geometry.attributes.position
     at.setXYZ(0, from.x, from.y, from.z); at.setXYZ(1, to.x, to.y, to.z); at.needsUpdate = true
+    // The title's near corner at the leader's end, or its middle when it is above.
+    const end = to.clone().project(camera)
+    if (end.z > 1) { hideTitle(); return }
+    const ex = (end.x + 1) / 2 * open.width, ey = (1 - end.y) / 2 * open.height
+    showTitle(side === 1 ? ex : side === -1 ? ex - w : ex - w / 2, ey - h)
   }
-  title3d = t
-  graph.scene().add(t)
+  title3d = leader
   graph.scene().add(leader)
 }
 // In the space, a ring sprite over the selected disc, drawn over everything but the labels, breathing slowly.
@@ -1339,9 +1333,10 @@ const linkedSelected = computed(() => linksOf.value.get(selected.value?.id ?? ''
   <KBNeedsService>
     <div ref="frame" class="kbx" :class="{ dark: isDark, full }" :style="{ '--kbx-top': barBottom + 'px' }">
       <div ref="box" class="kbx-canvas"></div>
+      <div ref="titleEl" class="kbx-callout" aria-hidden="true"><KBTitle v-if="selected" :text="selected.title" /></div>
       <div v-if="pointed && (peek || pointed.id !== selected?.id)" class="kbx-peek-tip" :style="{ left: tipAt.x + 'px', top: tipAt.y + 'px' }"
            role="tooltip">
-        <b>{{ pointed.title }}</b>
+        <b><KBTitle :text="pointed.title" /></b>
         <template v-if="peek"><br>{{ [kindName(pointed.kind), pointed.year, clusterName(pointed.cluster)].filter(Boolean).join(' · ') }}</template>
       </div>
       <p v-if="loading" class="kbx-status">Loading the map…</p>
