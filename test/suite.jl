@@ -8051,6 +8051,9 @@ end
             @test read(joinpath(c2.data_dir, "pdfs", "b.pdf"), String) == "B"^50 && !isfile(joinpath(c2.data_dir, "pdfs", "a.pdf"))
             @test read(joinpath(c2.data_dir, "media", "m", "up.png"), String) == "png"
             @test isfile(joinpath(root2, "conf", "backup_key"))                                # the key came back with the config
+            # Readable by their owner alone, as they were: the config folder's files and the data folder's keys.
+            Sys.isunix() && @test all(f -> filemode(joinpath(root2, "conf", f)) & 0o077 == 0, readdir(joinpath(root2, "conf"))) &&
+                                  filemode(joinpath(root2, "conf")) & 0o077 == 0
         finally
             close(kb2)
         end

@@ -14,6 +14,9 @@
 "The data folder's own files and folders a snapshot's state holds, besides the database and the content."
 const BACKUP_STATE_ITEMS = ("records", "landscape.json", "dataset-profile.json", "local_key", "push_key")
 
+"Of [`BACKUP_STATE_ITEMS`](@ref), the secrets: put back readable by their owner alone, as the config folder's files are."
+const BACKUP_SECRET_ITEMS = ("local_key", "push_key")
+
 "The data folder's folders of files a snapshot copies: uploads always; with `[backup] files`, PDFs and figures too."
 backup_file_dirs(c::Config) = c.backup.files ? ["media", "pdfs", "figures", "daily"] : ["media"]
 
@@ -422,11 +425,17 @@ function restore_backup!(c::Config, name::AbstractString; config_files::Bool = f
         for x in BACKUP_STATE_ITEMS
             put(joinpath(state, x), joinpath(c.data_dir, x))
         end
+        # A packed state keeps no file modes: the secrets go back readable by their owner alone.
+        for x in BACKUP_SECRET_ITEMS
+            isfile(joinpath(c.data_dir, x)) && chmod(joinpath(c.data_dir, x), 0o600)
+        end
         if config_files && isdir(joinpath(state, "config"))
             conf = dirname(config_path())
             mkpath(conf)
+            chmod(conf, 0o700)
             for f in readdir(joinpath(state, "config"))
                 cp(joinpath(state, "config", f), joinpath(conf, f); force = true)
+                chmod(joinpath(conf, f), 0o600)
             end
         end
         inc = joinpath(state, "include")
