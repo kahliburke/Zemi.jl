@@ -16,6 +16,10 @@
 - **Whoever runs a knowledge base for themselves has an account**, made from git's name and email
   the first time it is run: an admin and a maintainer of every project, whom agents can ask and work
   can be given to. What they were given by name, and their library, are theirs by account.
+- **Reference lists for papers not read in full**, from Semantic Scholar (OpenAlex for a work it does
+  not know): fetched when papers are recorded, or for those already here with **Fetch references** or
+  `zemi references`, with nothing summarized or embedded again. Their citations show on the paper's
+  page, in **Cited by**, on the explore page and in the missing works. Schema 33 keeps them.
 - **Clusters by Leiden**: the landscape's clusters, and those a map of a part finds for itself, are
   the communities of the graph joining each document to its nearest in meaning, rather than k-means.
   They follow the map's regions more closely, and keep their papers and names as the library changes.

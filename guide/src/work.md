@@ -545,6 +545,23 @@ Only the service reads the store; people reach their own space through the API (
 permission `library`). The store is kept apart from the dataset's, which others read: one that
 overlaps it is refused.
 
+## Reference lists
+
+A paper read in full has the reference list in its text. A paper known only by its title and abstract
+has the list Semantic Scholar keeps for it, or OpenAlex's for one Semantic Scholar does not know. The
+lists are fetched when papers are recorded; **Fetch references** on the Manage page, or
+`zemi references`, fetches them for papers already here. Nothing is summarized or embedded again.
+
+A fetched list does what a list from the text does. The paper's page shows it under **References**,
+with the papers here it cites, and those papers list it under **Cited by**. The explore page draws
+the citations, and the works it cites count towards the missing works. Once the paper is read in full,
+the list in its text is the one shown.
+
+A paper whose list was fetched is not asked about again; one with no list found is asked again after
+30 days. Requests go without a key unless `semantic_scholar_key` is set (see
+[Other keys](configuration.md#Other-keys)): they then share Semantic Scholar's public allowance, which
+is slower when it is busy.
+
 ## Dropping a document
 
 Drop a document on the Documents page, with a reason if you like, and it is removed and kept out.

@@ -216,12 +216,16 @@ end
 """
     paper_references(kb, doc_id; index = ReferenceIndex(kb)) -> Vector{Reference}
 
-A paper's reference list, each entry with the paper of the knowledge base it cites, if any.
+A paper's reference list, each entry with the paper of the knowledge base it cites, if any: the list
+in its text, or for a paper with none (one not read here), the list fetched for it (see
+[`fetched_references`](@ref)).
 """
 function paper_references(kb::KB, doc_id::AbstractString; index::ReferenceIndex = ReferenceIndex(kb))
     blocks = String[coalesce(r.text, "") for r in query(kb, """SELECT text FROM blocks WHERE paper_id = ? AND kind = 'reference' ORDER BY ord""",
                                    (paper_id(kb, doc_id),))]
-    return map(split_references(blocks)) do r
+    refs = split_references(blocks)
+    isempty(refs) && (refs = fetched_references(kb, doc_id))
+    return map(refs) do r
         hit = cited_paper(index, r; citing = doc_id)
         hit === nothing ? r : Reference(; r.label, r.text, r.arxiv, r.doi, cites = hit[1], cites_title = index.title[hit[1]], how = hit[2])
     end
@@ -232,7 +236,7 @@ end
 
 The knowledge base's papers whose references cite `doc_id` (see [`paper_references`](@ref)), each
 `(; doc_id, title, label)` with the label it is cited under. Only papers with a reference naming its
-arXiv id, DOI or first author's surname are checked.
+arXiv id, DOI or first author's surname, or a fetched list naming it, are checked.
 """
 function citing_papers(kb::KB, doc_id::AbstractString; index::ReferenceIndex = ReferenceIndex(kb))
     p = paper_row(kb, doc_id)
@@ -246,6 +250,11 @@ function citing_papers(kb::KB, doc_id::AbstractString; index::ReferenceIndex = R
     candidates = [String(r.id) for r in query(kb, """SELECT DISTINCT p.doc_id AS id FROM blocks b JOIN papers p ON p.id = b.paper_id
                                                   WHERE b.kind = 'reference' AND p.doc_id != ? AND ($like) ORDER BY p.doc_id""",
                                               (doc_id, ("%" * lowercase(t) * "%" for t in terms)...))]
+    # And those whose fetched list names it by its arXiv id or DOI, or by its title.
+    fetched = query(kb, """SELECT DISTINCT p.doc_id AS id FROM fetched_references f JOIN papers p ON p.id = f.paper_id
+                            WHERE p.doc_id != ? AND (f.arxiv = ? OR f.doi = ? OR lower(f.title) = ?)""",
+                    (doc_id, doc_id, ismissing(p.doi) ? "" : normalize_doi(p.doi), lowercase(coalesce(p.title, ""))))
+    candidates = sort!(unique!([candidates; [String(r.id) for r in fetched]]))
     out = NamedTuple[]
     for c in candidates
         refs = paper_references(kb, c; index)

@@ -135,6 +135,10 @@ const ACTIONS = Dict(
         report!(job, "fetching arXiv metadata")
         return refresh_metadata!(kb, papers; force = true) + length(uploads)
     end,
+    "references" => (kb, ids, job; _...) -> begin
+        n = fetch_references!(kb, filter(id -> something(document_kind(id), RECORD).name == PAPER.name, ids); progress = m -> report!(job, m), cancelled = () -> cancelled(job))
+        "Reference lists found for $n paper(s)."
+    end,
     "share" => (kb, ids, job; _...) -> set_shared!(kb, ids, true),
     "unshare" => (kb, ids, job; _...) -> set_shared!(kb, ids, false),
     "drop" => (kb, ids, job; by = nothing, why = "") -> [begin
@@ -172,7 +176,14 @@ function record_papers!(kb::KB, ids::Vector{String}, job)
     blocked = cannot_run(kb, "embed", ids)
     isempty(blocked) || return "Recorded $(length(ids)) paper(s), $fetched record(s) fetched; not embedded: $(join(blocked, "; "))"
     embedded = embed_records!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
-    return "Recorded $(length(ids)) paper(s): $fetched arXiv record(s) fetched, $embedded abstract(s) embedded."
+    listed = try
+        fetch_references!(kb, ids; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
+    catch e
+        e isa InterruptException && rethrow()
+        @warn "Reference lists could not be fetched" exception = e
+        0
+    end
+    return "Recorded $(length(ids)) paper(s): $fetched arXiv record(s) fetched, $embedded abstract(s) embedded, $listed reference list(s) fetched."
 end
 
 """

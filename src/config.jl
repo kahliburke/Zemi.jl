@@ -596,6 +596,10 @@ from the config file's folder, so an instance can be one folder: its config, con
 `qdrant_url` and `qdrant_key` name a Qdrant and its API key (a key as layers' keys are); with no
 URL, the one Kaimon runs (see [`qdrant_endpoint`](@ref)).
 
+`semantic_scholar_key` is a Semantic Scholar API key (a key as layers' keys are), for the reference
+lists of papers not read here (see [`fetch_references!`](@ref)); with none, requests share its public
+allowance.
+
 `mutool` is MuPDF's tool, which reads PDFs and cuts their figures: empty for the one Zemi carries
 (see [`mutool`](@ref)), or another program by its name or path.
 
@@ -645,6 +649,7 @@ Base.@kwdef struct Config
     collection_prefix::String = "zemi"
     mutool::String = ""
     contact::String = ""
+    semantic_scholar_key::String = ""
     about::AboutConfig = AboutConfig()
     summarizers::Vector{Summarizer} = default_summarizers()
     summarizer::String = "deepseek-v4.1-flash"
@@ -829,6 +834,7 @@ function load_config(path::AbstractString = config_path())
         collection_prefix = get(t, "collection_prefix", d.collection_prefix),
         mutool = get(t, "mutool", d.mutool),
         contact = get(t, "contact", d.contact),
+        semantic_scholar_key = get(t, "semantic_scholar_key", d.semantic_scholar_key),
         summarizers, summarizer,
         code_summarizer = get(t, "code_summarizer", d.code_summarizer),
         record_summarizer = get(t, "record_summarizer", d.record_summarizer),

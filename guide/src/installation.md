@@ -95,7 +95,8 @@ group's dataset or start one. Setup is later in the top bar's menu.
 
 `zemi help` lists the other commands: `zemi sync [--unread]` brings the knowledge base up to date,
 `zemi bib [FILE]` writes every paper, upload and record as BibTeX (an entry a `.bib` file in your
-library keys gets that key too, see [Bibliographies](work.md#Bibliographies)), and `zemi publish`, `zemi pull` and
+library keys gets that key too, see [Bibliographies](work.md#Bibliographies)), `zemi references`
+fetches the reference lists of papers not read in full (see [Reference lists](work.md#Reference-lists)), and `zemi publish`, `zemi pull` and
 `zemi token` manage a dataset (see [Datasets](datasets.md)). To work on Zemi itself, from a checkout,
 see [Development](development.md).
 

@@ -20,6 +20,7 @@ import KBSectionText from './KBSectionText.vue'
 import KBPdf from './KBPdf.vue'
 import KBCite from './KBCite.vue'
 import KBNeighbourhood from './KBNeighbourhood.vue'
+import KBReferences from './KBReferences.vue'
 import { mode } from './kbApi'
 
 type Link = { id: string; slug: string; title: string; page: string }
@@ -50,7 +51,7 @@ const anchors = computed(() => {
   const kept = unique()
   const anchor = (text: string) => kept(anchorOf(text) || 'section')
   const p = paper.value
-  const fixed = Object.fromEntries(['Notebooks', 'Abstract', 'Figures', 'Sections', 'Cited by', 'Classification', 'Nearby']
+  const fixed = Object.fromEntries(['Notebooks', 'Abstract', 'Figures', 'Sections', 'References', 'Cited by', 'Classification', 'Nearby']
     .map(h => [h, anchor(h)]))
   return { fixed, sections: (p?.sections ?? []).map(s => anchor(s.title)) }
 })
@@ -62,7 +63,6 @@ const shownAuthors = computed(() => {
   const a = paper.value?.authors ?? []
   return a.length <= 12 ? { list: a, more: 0 } : { list: a.slice(0, 10), more: a.length - 10 }
 })
-const numbered = computed(() => (paper.value?.references ?? []).every(r => r.label !== ''))
 const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
 
 </script>
@@ -151,26 +151,16 @@ const sectionTag = (level: number) => `h${Math.min(2 + level, 6)}`
         <template v-for="(s, i) in paper.sections" :key="s.ord">
           <component data-share-text :is="sectionTag(s.level)" :id="anchors.sections[i]" v-html="render(s.title, { inline: true })" />
           <div data-share-text v-if="s.summary" v-html="render(s.summary)"></div>
-          <template v-if="s.references">
-            <p v-if="paper.here.length"><strong>Here:</strong>
-              <template v-for="(h, j) in paper.here" :key="h.slug + j"><template v-if="j"> · </template>
-                <a :href="linkHref(h)"><KBTitle :text="h.title" /></a><template v-if="h.label"> (ref. {{ h.label }})</template></template>
-            </p>
-            <details class="details custom-block">
-              <summary>{{ paper.references.length }} references<template v-if="paper.here.length"> · {{ paper.here.length }} here</template></summary>
-              <component :is="numbered ? 'ol' : 'ul'" class="kb-refs">
-                <li v-for="(r, j) in paper.references" :key="j" :value="numbered ? r.label : undefined">{{ r.text }}
-                  <span v-if="r.doi || r.arxiv" class="kb-ref-links">
-                    <a v-if="r.doi" :href="`https://doi.org/${r.doi}`">DOI</a>
-                    <a v-if="r.arxiv" :href="`https://arxiv.org/abs/${r.arxiv}`">arXiv</a></span>
-                  <template v-if="r.cites"><br><a class="kb-ref-kb" :href="linkHref(r.cites)">Here: <KBTitle :text="r.cites.title" /></a></template>
-                </li>
-              </component>
-            </details>
-          </template>
+          <KBReferences v-if="s.references" :references="paper.references" :here="paper.here" />
           <KBSectionText v-else-if="s.text" :id="paper.id" :section="s.ord" :label="s.text" :page="s.page"
                          :version="paper.version" :local="paper.local" />
         </template>
+      </template>
+
+      <!-- A paper not read here: the reference list fetched for it. -->
+      <template v-if="paper.references.length && !paper.sections.some(s => s.references)">
+        <h2 :id="anchors.fixed['References']">References</h2>
+        <KBReferences :references="paper.references" :here="paper.here" />
       </template>
 
       <template v-if="paper.cited_by.length">

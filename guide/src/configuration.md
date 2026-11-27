@@ -97,7 +97,8 @@ in notes and records, a finding's evidence, a task's links. It needs a running s
 
 It maps the documents read in full. **Include abstract only** adds the papers known only by their
 title and abstract (recorded but not yet read, or found by the watch), on a map of every document laid
-out and clustered afresh.
+out and clustered afresh. Their citations are drawn from the reference lists fetched for them (see
+[Reference lists](work.md#Reference-lists)).
 
 - **Map** lays them out flat; **Space** in three dimensions, to turn with the mouse, or fly through
   with F (WASD to move, the mouse to steer). The clusters are the landscape's, named where they lie;
@@ -318,6 +319,7 @@ Slate hub, or the one on `[notebooks] slate_port`. `ZEMI_SITE_NOTEBOOKS=0` leave
 | `collection_prefix` | `"zemi"` | Qdrant collections are `<prefix>_<layer>` |
 | `mutool` | `""` | MuPDF's command; empty for the one Zemi carries |
 | `contact` | `""` | an email sent to arXiv and OpenAlex with requests |
+| `semantic_scholar_key` | `""` | a Semantic Scholar API key, as `"env:NAME"` or `"file:PATH"`, for fetching reference lists; without one, requests share its public allowance |
 | `base_set` | `""` | a file a new, empty knowledge base is seeded from |
 | `[[layers]]` | five layers (see [Models](models.md)) | replaces the default layers |
 | `[search] layers`, `keyword` | the layers on the strongest model, `true` | what a search uses unless it says otherwise |

@@ -277,7 +277,7 @@ function site_paper(kb::KB, doc_id::AbstractString; summarizer = nothing, relate
         related = related && processed ? get(d.related, doc_id, []) : [], processed,
         classification = get(d.classifications, pid, nothing), version = coalesce(p.version, ""),
         blocks = get(d.blocks, pid, Dict{Int,Vector{Symbol}}()),
-        references = processed ? paper_references(kb, doc_id; index = references === nothing ? ReferenceIndex(kb) : references) : Reference[],
+        references = paper_references(kb, doc_id; index = references === nothing ? ReferenceIndex(kb) : references),
         daily = get(d.daily, doc_id, ""), figures = get(get(d.figures, pid, Dict()), "figure", 0),
         tables = get(get(d.figures, pid, Dict()), "table", 0))
 end

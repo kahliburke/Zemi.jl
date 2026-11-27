@@ -21,6 +21,8 @@ const CLI_HELP = """
     zemi publish                         publish this knowledge base's stream of the dataset
     zemi pull                            import the dataset's streams
     zemi bib [FILE]                      every paper and upload as BibTeX, to FILE or the terminal
+    zemi references [--force]            fetch reference lists for the papers that have none fetched yet
+                                         (--force: every paper again); nothing is summarized or embedded
     zemi connect SITE FOLDER [--name NAME] [--skip SUBFOLDER]...
                                          keep FOLDER (an Obsidian vault, say) in step with your library at SITE,
                                          signing in there in the browser (SITE `local`: the knowledge base run
@@ -185,6 +187,11 @@ function cli(args::AbstractVector{<:AbstractString})
                 write(expand_home(rest[1]), text)
                 println("Wrote $(count(startswith("@"), split(text, '\n'))) entries to $(rest[1])")
             end
+        elseif cmd == "references"
+            db = kb()
+            n = fetch_references!(db, literature_ids(db); force = "--force" in rest, progress = meter)
+            done()
+            println("Reference lists found for $n paper(s).")
         elseif cmd == "admin"
             foreach(println, admin_cli(kb(), rest))
         elseif cmd == "backup" && "--offsite-key" in rest

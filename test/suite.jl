@@ -2939,6 +2939,53 @@ end
     close(kb)
 end
 
+@zset "fetched references" begin
+    # Semantic Scholar's entries: an arXiv DOI says no more than the arXiv id, other DOIs as DOIs compare.
+    r = K.s2_reference(Dict("externalIds" => Dict("ArXiv" => "2401.00002", "DOI" => "10.48550/arXiv.2401.00002"), "title" => "Fast surveys of reefs",
+                            "year" => 2024, "authors" => [Dict("name" => "Bea Bard")]))
+    @test r == (arxiv = "2401.00002", doi = nothing, title = "Fast surveys of reefs", authors = ["Bea Bard"], year = 2024)
+    @test K.s2_reference(Dict("externalIds" => Dict("DOI" => "10.1063/5.0015420"), "title" => nothing, "authors" => [])).doi == "10.1063/5.0015420"
+    @test K.s2_reference(Dict("externalIds" => nothing, "title" => "Unresolved", "authors" => nothing)) ==
+          (arxiv = nothing, doi = nothing, title = "Unresolved", authors = String[], year = nothing)
+
+    kb = open_kb(temp_config(; layers = Layer[]))
+    for (id, title, doi) in (("2401.00001", "Read by its abstract", missing), ("2401.00002", "Fast surveys of reefs", missing),
+                             ("doc-upload", "An uploaded paper", "10.1000/up.1"), ("2401.00009", "Unknown anywhere", missing))
+        K.execute!(kb, """INSERT INTO papers (doc_id, title, doi, authors, added_at, metadata_at, kind)
+                          VALUES (?, ?, ?, '["Ada Lovelace"]', ?, ?, 'paper')""", (id, title, doi, K.now_iso(), K.now_iso()))
+    end
+    ref(; arxiv = nothing, doi = nothing, title = "", year = 2020) = (; arxiv, doi, title, authors = ["Cy Chen"], year)
+    asked = String[][]
+    s2(ids; _...) = (push!(asked, collect(ids));
+                     Dict{String,Any}(i => i == "ARXIV:2401.00001" ? [ref(arxiv = "2401.00002", title = "Fast surveys of reefs"), ref(doi = "10.1/x", title = "Elsewhere")] :
+                                         i == "ARXIV:2401.00009" ? K.FetchedReference[] : nothing for i in ids))
+    oa_asked = String[][]
+    openalex(dois; _...) = (push!(oa_asked, collect(dois));
+                            Dict{String,Any}(d => d == "10.1000/up.1" ? [ref(arxiv = "2401.00002", title = "Fast surveys of reefs")] : nothing for d in dois))
+    ids = ["2401.00001", "2401.00002", "doc-upload", "2401.00009"]
+    @test K.fetch_references!(kb, ids; s2, openalex) == 2
+    @test sort(only(asked)) == ["ARXIV:2401.00001", "ARXIV:2401.00002", "ARXIV:2401.00009", "DOI:10.1000/up.1"]
+    # Those Semantic Scholar has no list for are asked of OpenAlex, an arXiv paper by its arXiv DOI.
+    @test sort(only(oa_asked)) == ["10.1000/up.1", "10.48550/arxiv.2401.00002", "10.48550/arxiv.2401.00009"]
+    refs = K.paper_references(kb, "2401.00001")
+    @test [(r.label, r.arxiv, r.doi, r.cites) for r in refs] == [("1", "2401.00002", nothing, "2401.00002"), ("2", nothing, "10.1/x", nothing)]
+    @test refs[1].text == "Cy Chen (2020). Fast surveys of reefs. arXiv:2401.00002"
+    @test only(K.paper_references(kb, "doc-upload")).cites == "2401.00002"
+    @test sort([c.doc_id for c in K.citing_papers(kb, "2401.00002")]) == ["2401.00001", "doc-upload"]
+    @test isempty(K.paper_references(kb, "2401.00009"))
+    # Asked again: those with a list, and those with none found lately, are skipped; `force` asks again.
+    @test K.fetch_references!(kb, ids; s2, openalex) == 0 && length(asked) == 1
+    @test K.fetch_references!(kb, ["2401.00001"]; s2, openalex, force = true) == 1 && last(asked) == ["ARXIV:2401.00001"]
+    @test length(K.paper_references(kb, "2401.00001")) == 2                    # replaced, not added to
+    # A list in the paper's own text is the one it shows.
+    K.store_parse!(kb, "2401.00001", K.ParsedPaper(1, [
+        K.Piece(:heading, 1, (0.0, 0.0, 0.0, 0.0), "References", 1, 1, ""),
+        K.Piece(:reference, 1, (0.0, 0.0, 0.0, 0.0), "[1] B. Bard, Fast surveys of reefs, arXiv:2401.00002 (2024). [2] Someone, Elsewhere 1, 2 (2000).", 1, 0, "")],
+        [K.Section(1, 1, "", "References", "References", 1, 1)]))
+    @test startswith(first(K.paper_references(kb, "2401.00001")).text, "B. Bard")
+    close(kb)
+end
+
 @zset "studies" begin
     HTTP, JSON = K.HTTP, K.JSON
     dir = mktempdir()

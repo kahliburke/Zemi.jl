@@ -79,7 +79,8 @@ end
 "The works the knowledge base's papers cite and it does not hold (see [`cited_works`](@ref))."
 function cited_works(kb::KB; min_cited::Integer = 2)
     index = ReferenceIndex(kb)
-    ids = [r.id for r in query(kb, "SELECT p.doc_id AS id FROM papers p JOIN parses x ON x.paper_id = p.id WHERE $(literature_sql(on = "p"))")]
+    ids = [r.id for r in query(kb, """SELECT p.doc_id AS id FROM papers p WHERE $(literature_sql(on = "p")) AND
+                                      (p.id IN (SELECT paper_id FROM parses) OR p.id IN (SELECT paper_id FROM references_fetched WHERE count > 0))""")]
     return cited_works((id => paper_references(kb, id; index) for id in ids); min_cited)
 end
 

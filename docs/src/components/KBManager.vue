@@ -47,6 +47,7 @@ const ACTIONS: Action[] = [
     code: 'Write every file\'s summary again, as for a new summary format, and embed them' },
   { name: 'classify', label: 'Classify', help: 'Set category (uploads: also authors, year, abstract)' },
   { name: 'refresh', label: 'Refresh metadata', help: 'Refetch the arXiv record, or reread an upload\'s metadata' },
+  { name: 'references', label: 'Fetch references', help: 'Fetch reference lists from Semantic Scholar (or OpenAlex) for papers not read in full; nothing is summarized or embedded' },
   { name: 'share', label: 'Publish', help: 'Include in the published dataset' },
   { name: 'unshare', label: 'Unpublish', help: 'Leave out of the published dataset' },
   { name: 'open', label: 'Open to all', help: 'Let every reader see the document', access: 'open' },
