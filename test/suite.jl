@@ -8472,6 +8472,8 @@ end
     @test any(q -> get(q, "cursor", "") == "next", calls)
     @test all(q -> !occursin("2610.10002", q["filter"]), calls)
     @test last(candidates).origins == ["Cites 10.48550/arxiv.2610.10001"]
+    repository_only = K.watch_work(merge(work, Dict("doi" => nothing)), "Example repository")
+    @test K.is_resource(repository_only.doc_id) && repository_only.url == work["id"]
     # An arXiv category and the three OpenAlex filters all found the same paper.
     item = merge(first(candidates), (; doc_id = "2610.10003", origins = ["arXiv: example"]))
     place(c, items, progress) = [(; m, near = [], u = [1.0], area = missing, fit = missing, score = 0.5) for m in items]
@@ -8495,7 +8497,7 @@ end
         oldcopies = K.DOI_COPIES[]
         try
             K.DOI_COPIES[] = (d; contact) -> (; arxiv = "2610.10002", pdfs = String[])
-            private_doi = merge(first(candidates), (; doc_id = "10.1234/private", doi = "10.1234/private", work_id = nothing))
+            private_doi = merge(first(candidates), (; doc_id = "10.1234/private", doi = "10.1234/private", work_id = nothing, url = nothing, aliases = String[]))
             @test K.place_watch_candidates!(kb, [private_doi]; place) == 1
             K.execute!(kb, "UPDATE watch SET relevance = 3 WHERE doc_id = '10.1234/private'")
             @test isempty(K.take_watched!(kb; read_in_full = (args...) -> error("private read")).read)
@@ -8542,5 +8544,54 @@ end
     # A later check must not forget its decisions merely because both references are old.
     @test K.watch!(kb; references = (kb; cancelled) -> [], now = K.DateTime(2026, 12, 1)) == 0
     @test length(K.watch_taken(kb)) == 2
+    close(kb)
+end
+
+@zset "RSS and Atom paper watch" begin
+    rss = """<rss xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>Example journal</title>
+        <item><title>Field notes</title><guid isPermaLink="false">item-1</guid><link>https://EXAMPLE.org:443/Notes#v1</link>
+        <pubDate>Fri, 27 Nov 2026 12:00:00 GMT</pubDate><dc:creator>R. Example</dc:creator>
+        <description><![CDATA[<b>First results</b>]]></description></item></channel></rss>"""
+    port = 19000 + rand(0:999)
+    server = K.HTTP.serve!(req -> K.HTTP.Response(200, rss), "127.0.0.1", port)
+    try
+        @test K.fetch_feed("http://127.0.0.1:$port/feed") == rss
+    finally
+        close(server)
+    end
+    feed = "https://example.org/rss"
+    since = K.Date(2026, 11, 20)
+    kb = open_kb(temp_config(layers = Layer[], watch_categories = String[], watch_feeds = [feed]))
+    entry = only(K.feed_watch(kb, since; fetch = u -> rss))
+    @test K.watch_sources_enabled(kb.config)
+    @test entry.url == "https://example.org/Notes"
+    @test entry.authors == ["R. Example"] && entry.abstract == "First results"
+    @test entry.published == "2026-11-27"
+    @test isempty(K.feed_candidates(rss, feed, K.Date(2026, 11, 28)))
+    place(c, items, progress) = [(; m, near = [], u = [1.0], area = missing, fit = missing, score = 0.5) for m in items]
+    @test K.place_watch_candidates!(kb, [entry]; place) == 1
+    @test only(K.watch_json(kb))["url"] == entry.url
+    K.execute!(kb, "UPDATE watch SET relevance = 3")
+    result = K.take_watched!(kb; read_in_full = (args...) -> error("URL charged"), record = ids -> nothing)
+    @test result.recorded == [entry.doc_id] && isempty(result.read)
+    @test K.resource_row(kb, entry.doc_id).url == entry.url
+    changed = replace(rss, "https://EXAMPLE.org:443/Notes#v1" => "https://example.org/moved",
+                      "</item>" => "<dc:identifier>doi:10.1234/EXAMPLE</dc:identifier></item>")
+    update = only(K.feed_candidates(changed, feed, since))
+    @test K.place_watch_candidates!(kb, [update]; place = (args...) -> error("already placed")) == 0
+    @test K.resource_row(kb, entry.doc_id).doi == "10.1234/example"
+    @test K.scalar(kb, "SELECT count(*) FROM papers") == 1
+    @test isempty(K.watched(kb)) && isempty(K.take_watched!(kb).read)
+    atom = """<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>tag:example.org,2026:7</id>
+        <link rel="self" href="https://example.org/api/7"/><link href="https://example.org/7"/>
+        <title>Field notes</title><author><name>Another Author</name></author></entry></feed>"""
+    second = only(K.feed_candidates(atom, feed, since))
+    @test second.url == "https://example.org/7" && isempty(second.published)
+    @test K.place_watch_candidates!(kb, [second]; place) == 1
+    @test K.add_papers!(kb, [second.doc_id]; source = "watch") == [second.doc_id]
+    @test isempty(K.watched(kb))
+    @test K.watch_url("javascript:alert(1)") === nothing
+    @test isempty(K.feed_candidates(replace(atom, "https://example.org/7" => "file:///secret"), feed, since))
+    @test_throws ErrorException K.feed_candidates("<!DOCTYPE rss><rss/>", feed, since)
     close(kb)
 end

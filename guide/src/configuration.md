@@ -324,8 +324,7 @@ contact setting is sent with requests. Rate-limited requests respect Retry-After
 
 Works identifiable by DOI or arXiv ID go through the existing placement and judge.
 Several matches give the same candidate multiple discovery reasons. A DOI with no
-readable copy stays a bibliography resource and uses no full-reading slot. Works
-without either identifier are skipped. The paper-of-the-day PDF feature continues
+readable copy stays a bibliography resource and uses no full-reading slot. A work identified only by its repository address can be recorded as a linked resource. The paper-of-the-day PDF feature continues
 to choose arXiv papers.
 
 ### Discover missing references
@@ -347,3 +346,18 @@ Discovery defaults to off (`missing_per_check = 0`). The weekly limit counts ful
 reading attempts, within both shared reading limits. Overflow stays recorded for
 a later check. A decision on a missing reference survives the rolling publication
 window, so subsequent checks can consider other references.
+
+### Follow RSS and Atom feeds
+
+Set `feeds` in the existing `[watch]` table to an array of public HTTP or HTTPS
+feed addresses. For example, `feeds = ["https://journal.example.org/articles.atom"]`.
+Choose feeds from journals, repositories or research groups in any discipline.
+The default is an empty list. Each check considers up to 100 entries per feed
+within the watch window and includes undated entries. The feed title appears
+alongside the judge's reason. A failed feed is reported in the job.
+
+An entry with an arXiv ID or DOI uses regular paper ingestion. A link without
+either can be saved as a resource with its title, authors, date, description
+and original address. It uses no full-reading slot. When a later entry supplies
+a DOI under the same URL or feed identifier, the watch can associate it with
+the saved resource. Titles alone never establish identity.

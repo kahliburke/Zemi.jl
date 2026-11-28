@@ -164,11 +164,15 @@ const WATCH_WORK_FIELDS = "id,doi,title,type,publication_date,publication_year,a
 function watch_work(w, reason)
     is_paper(w) && !isempty(something(get(w, "title", nothing), "")) || return nothing
     ref = openalex_reference(w)
-    ref.arxiv === nothing && ref.doi === nothing && return nothing
+    work_id = watch_url(get(w, "id", nothing))
+    landing = watch_url(get(something(w["primary_location"], Dict()), "landing_page_url", nothing))
+    url = something(landing, work_id, Some(nothing))
+    url === nothing && ref.arxiv === nothing && ref.doi === nothing && return nothing
     r = work_record(w)
-    return (; doc_id = something(ref.arxiv, ref.doi), r.title, r.authors, abstract = something(r.abstract, ""),
+    id = ref.arxiv !== nothing ? ref.arxiv : ref.doi !== nothing ? ref.doi : watch_resource_id(url)
+    return (; doc_id = id, r.title, r.authors, abstract = something(r.abstract, ""),
             published = something(w["publication_date"], ""), primary_category = something(r.journal, ""),
-            doi = ref.doi, work_id = w["id"], origins = [reason])
+            doi = ref.doi, work_id, origins = [reason], url, aliases = unique(String[k for k in (landing, work_id) if k !== nothing]))
 end
 
 "Published identifiers for the group's literature whose incoming citations may be watched."

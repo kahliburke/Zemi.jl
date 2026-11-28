@@ -20,6 +20,11 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
     # A DOI is looked up first, outside the transaction: finding its copy or record takes requests.
     works = Dict{String,String}()
     for s in ids
+        if source == "watch" && startswith(s, "res-watch-") && ismissing(paper_id(kb, s))
+            id = add_watch_resource!(kb, s; by, anyway, holder)
+            id === nothing || (works[s] = id)
+            continue
+        end
         d = work_doi(s)
         d === nothing && continue
         try
@@ -33,6 +38,8 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
         for s in ids
             if haskey(works, s)
                 push!(out, works[s])
+                continue
+            elseif source == "watch" && startswith(s, "res-watch-") && ismissing(paper_id(kb, s))
                 continue
             elseif local_kind(s) !== nothing
                 ismissing(paper_id(kb, s)) && not_found("No document $s in the knowledge base")

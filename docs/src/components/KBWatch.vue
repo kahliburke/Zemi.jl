@@ -15,7 +15,7 @@ import { day, when, byline } from './kbFormat'
 import KBJobs from './KBJobs.vue'
 
 type Near = { id: string; slug: string; title: string; score: number }
-type Paper = { id: string; title: string; authors: string[]; abstract: string; published: string; category: string;
+type Paper = { id: string; url?: string | null; title: string; authors: string[]; abstract: string; published: string; category: string;
                origins?: string[]; score: number; area: string | null; area_score: number | null; nearest: Near[]; relevance: number | null; reason: string }
 type Taken = { id: string; slug: string; title: string; relevance: number; reason: string; origins?: string[]; taken: string; taken_at: string; read: boolean }
 type Watch = { checked: string | null; categories: string[]; days: number; papers: Paper[]; taken?: Taken[] }
@@ -106,7 +106,7 @@ async function add(ps: Paper[]) {
       <div v-for="p in promoted" :key="p.id" class="kbw-pick">
         <span :class="['kbw-rel', { central: p.relevance === 3 }]">{{ RELEVANCE[p.relevance ?? 0] }}</span>
         <div>
-          <a :href="sourceUrl(p.id)" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
+          <a :href="p.url || sourceUrl(p.id)" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
           <span v-if="p.area" class="kbw-meta"> · {{ p.area }}</span>
           <button v-if="canAdd" type="button" class="kb-outline kbw-add" :disabled="added.has(p.id)" @click="add([p])">{{ added.has(p.id) ? 'Added' : 'Add' }}</button>
           <div class="kbw-reason">{{ p.reason }}</div>
@@ -127,7 +127,7 @@ async function add(ps: Paper[]) {
       <div class="kbw-head">
         <span class="kbw-score" :title="`${p.area ? `${p.area} ${(p.area_score ?? 0).toFixed(2)} · ` : ''}nearest paper ${(p.nearest[0]?.score ?? 0).toFixed(2)}`">{{ p.score.toFixed(2) }}</span>
         <div>
-          <a :href="sourceUrl(p.id)" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
+          <a :href="p.url || sourceUrl(p.id)" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
           <div class="kbw-meta">{{ byline(p.authors, 4) }} · {{ p.published }} · {{ p.origins?.join(' · ') || p.category }}
             <template v-if="p.area"> · <span class="kbw-area">{{ p.area }}</span></template>
             <button type="button" class="kb-link" @click="toggle(p.id)">{{ open.has(p.id) ? 'hide abstract' : 'abstract' }}</button>

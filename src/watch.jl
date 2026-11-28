@@ -32,13 +32,19 @@ migration!(35, ["ALTER TABLE watch ADD COLUMN doi TEXT",
                 "ALTER TABLE watch ADD COLUMN work_id TEXT",
                 "ALTER TABLE watch ADD COLUMN origins TEXT NOT NULL DEFAULT '[]'"])
 
+migration!(36, ["ALTER TABLE watch ADD COLUMN source_url TEXT",
+                """CREATE TABLE watch_aliases (
+                       alias TEXT PRIMARY KEY,
+                       doc_id TEXT NOT NULL REFERENCES watch(doc_id) ON UPDATE CASCADE ON DELETE CASCADE)""",
+                "CREATE INDEX watch_aliases_doc ON watch_aliases(doc_id)"])
+
 # A DOI candidate can already have been added manually as an uploaded paper or resource.
 unheld_watch_sql() = """watch.doc_id NOT IN (SELECT doc_id FROM papers)
     AND (watch.doi IS NULL OR (NOT EXISTS (SELECT 1 FROM papers p WHERE lower(p.doi) = watch.doi)
         AND NOT EXISTS (SELECT 1 FROM doi_arxiv d JOIN papers p ON p.doc_id = d.doc_id WHERE d.doi = watch.doi)))"""
 
 watch_sources_enabled(c) = !isempty(c.watch_categories) || !isempty(c.watch_venues) ||
-                           !isempty(c.watch_authors) || c.watch_citing_library || c.watch_missing_per_check > 0
+                           !isempty(c.watch_authors) || c.watch_citing_library || c.watch_missing_per_check > 0 || !isempty(c.watch_feeds)
 
 """
     watch!(kb; list = list_new_papers, now = now(UTC), progress, cancelled) -> Int
@@ -53,10 +59,11 @@ are placed again first when the group has changed (see [`replace_watched!`](@ref
 new papers were placed.
 """
 function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c; patience = WATCH_PATIENCE), now::DateTime = Dates.now(UTC),
-                progress = msg -> nothing, cancelled = () -> false, openalex = openalex_watch, references = missing_watch)
+                progress = msg -> nothing, cancelled = () -> false, openalex = openalex_watch, references = missing_watch, feeds = feed_watch)
     c = kb.config
     since = Date(now) - Day(c.watch_days)
-    execute!(kb, """DELETE FROM watch WHERE published < ? AND coalesce(taken, '') NOT IN ('deferred','arriving')
+    execute!(kb, """DELETE FROM watch WHERE (CASE WHEN source_url IS NULL THEN published ELSE substr(found_at,1,10) END) < ?
+                        AND NOT (source_url IS NOT NULL AND doc_id IN (SELECT doc_id FROM papers)) AND coalesce(taken, '') NOT IN ('deferred','arriving')
                         AND NOT EXISTS (SELECT 1 FROM json_each(watch.origins) WHERE value = ?)""", (string(Date(now) - Day(4 * c.watch_days)), MISSING_ORIGIN))
     replace_watched!(kb; progress)
     candidates = []
@@ -72,6 +79,8 @@ function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c;
     append!(candidates, openalex(kb, since; cancelled))
     cancelled() && return 0
     append!(candidates, references(kb; cancelled))
+    cancelled() && return 0
+    append!(candidates, feeds(kb, since; cancelled, progress))
     cancelled() && return 0
     n = place_watch_candidates!(kb, candidates; progress)
     execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('watch_checked_at', ?)", (now_iso(),))
@@ -91,28 +100,60 @@ function place_watch_candidates!(kb, candidates; progress = msg -> nothing, plac
     union!(held, (r.doi for r in query(kb, "SELECT doi FROM doi_arxiv WHERE doc_id IN (SELECT doc_id FROM papers)")))
     aliases = Dict{String,String}()
     origins = Dict{String,Vector{String}}()
+    known_dois = Dict{String,String}()
     for r in query(kb, "SELECT doc_id, doi, work_id, origins FROM watch")
+        ismissing(r.doi) || (known_dois[r.doc_id] = r.doi)
         for k in skipmissing((r.doc_id, r.doi, r.work_id))
             aliases[k] = r.doc_id
         end
         origins[r.doc_id] = json_list(r.origins)
     end
+    for r in query(kb, "SELECT alias, doc_id FROM watch_aliases")
+        aliases[r.alias] = r.doc_id
+    end
+    external = Dict{String,String}()
+    enrich = Dict{String,String}()
     found = []
     updates = Dict{String,NamedTuple}()
-    for m in candidates
+    # Process updates to saved resources before other sources announce their newly
+    # assigned DOI in this same batch.
+    saved(m) = any(k -> get(aliases, k, "") in held, get(m, :aliases, String[]))
+    for m in sort(candidates; by = m -> !saved(m))
         doi = isnothing(m.doi) ? nothing : normalize_doi(m.doi)
         ids = String[k for k in (m.doc_id, doi, m.work_id) if k !== nothing]
-        any(in(held), ids) && continue
+        # Publishers occasionally reuse a link. Conflicting DOIs identify separate works.
+        extra = filter(get(m, :aliases, String[])) do key
+            owner = get(aliases, key, "")
+            doi === nothing || get(known_dois, owner, doi) == doi
+        end
+        append!(ids, extra)
+        # A feed may supply a DOI only after its URL-only resource was recorded.
+        existing_resource = findfirst(k -> get(aliases, k, "") in held, extra)
+        if existing_resource !== nothing
+            id = aliases[extra[existing_resource]]
+            if doi !== nothing && !(doi in held)
+                enrich[id] = doi
+                push!(held, doi)
+            end
+        elseif any(in(held), ids)
+            continue
+        end
         dropped_as(kb; id = m.doc_id, doi = something(doi, "")) === nothing || continue
         existing = findfirst(k -> haskey(aliases, k), ids)
-        id = existing === nothing ? m.doc_id : aliases[ids[existing]]
+        id = existing_resource !== nothing ? aliases[extra[existing_resource]] :
+             existing === nothing ? m.doc_id : aliases[ids[existing]]
+        doi === nothing || (known_dois[id] = doi)
         existing === nothing && push!(found, m)
         for k in ids
             aliases[k] = id
         end
+        for k in extra
+            external[k] = id
+        end
         union!(get!(Vector{String}, origins, id), m.origins)
-        old = get(updates, id, (; doi = missing, work_id = missing))
-        updates[id] = (; doi = something(doi, old.doi), work_id = something(m.work_id, old.work_id))
+        old = get(updates, id, (; doi = missing, work_id = missing, url = missing))
+        updates[id] = (; doi = something(doi, old.doi), work_id = something(m.work_id, old.work_id),
+                       url = something(get(m, :url, nothing), old.url))
     end
     placed = isempty(found) ? [] : place(c, found, progress)
     transaction(kb) do
@@ -123,8 +164,14 @@ function place_watch_candidates!(kb, candidates; progress = msg -> nothing, plac
                  score, area, fit, JSON.json(near), now_iso(), vector_blob(u)))
         end
         for (id, ids) in updates
-            execute!(kb, """UPDATE watch SET doi = coalesce(?,doi), work_id = coalesce(?,work_id), origins = ?
-                            WHERE doc_id = ?""", (ids.doi, ids.work_id, JSON.json(origins[id]), id))
+            execute!(kb, """UPDATE watch SET doi = coalesce(?,doi), work_id = coalesce(?,work_id), source_url = coalesce(?,source_url), origins = ?
+                            WHERE doc_id = ?""", (ids.doi, ids.work_id, ids.url, JSON.json(origins[id]), id))
+        end
+        for (alias, id) in external
+            execute!(kb, "INSERT OR IGNORE INTO watch_aliases(alias, doc_id) VALUES (?, ?)", (alias, id))
+        end
+        for (id, doi) in enrich
+            attach_watch_doi!(kb, id, doi)
         end
     end
     return length(found)
@@ -420,13 +467,13 @@ function watched(kb::KB)
     return map(rows) do r
         near = [(id = String(n["id"]), title = get(titles, n["id"], n["id"]), score = Float64(n["score"]))
                 for n in JSON.parse(r.nearest)]
-        (; id = r.doc_id, r.title, authors = json_list(r.authors), r.abstract, r.published, r.category,
+        (; id = r.doc_id, url = coalesce(r.source_url, nothing), r.title, authors = json_list(r.authors), r.abstract, r.published, r.category,
            origins = json_list(r.origins), r.score, r.area, r.area_score, nearest = near, relevance = r.relevance, reason = coalesce(r.reason, ""))
     end
 end
 
 "The watched papers as the site's list shows them (see [`watched`](@ref))."
-watch_json(kb::KB) = [Dict("id" => w.id, "title" => w.title, "authors" => first(w.authors, 6), "abstract" => w.abstract,
+watch_json(kb::KB) = [Dict("id" => w.id, "url" => w.url, "title" => w.title, "authors" => first(w.authors, 6), "abstract" => w.abstract,
                            "published" => w.published, "category" => w.category, "origins" => w.origins, "score" => w.score, "area" => coalesce(w.area, nothing),
                            "area_score" => coalesce(w.area_score, nothing), "relevance" => coalesce(w.relevance, nothing), "reason" => w.reason,
                            "nearest" => [Dict("id" => n.id, "slug" => page_slug(n.id), "title" => n.title, "score" => n.score)

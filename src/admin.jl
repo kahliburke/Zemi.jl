@@ -35,6 +35,7 @@ const EDITABLE_SETTINGS = [
     (key = "watch.missing_per_check", kind = "int", label = "Missing works per check", help = "Most-cited new references to consider each check. Zero disables discovery."),
     (key = "watch.min_internal_citations", kind = "int", label = "Minimum citing papers", help = "Distinct open papers in the library that must cite a missing work."),
     (key = "watch.missing_weekly_reads", kind = "int", label = "Missing works read per week", help = "Weekly full-reading attempts for missing works, within the shared limits. Zero records only."),
+    (key = "watch.feeds", kind = "strings", label = "RSS and Atom feeds", help = "Public HTTP(S) feed addresses to check for new reading."),
     (key = "watch.record_from", kind = "int", label = "Record from", help = "Lowest rating recorded with title and abstract only. 4 = none."),
     (key = "group.name", kind = "string", label = "Group name", help = "The site's title."),
     (key = "group.field", kind = "string", label = "Field", help = "The group's research field, e.g. coral reef ecology. Agents act as experts in it."),

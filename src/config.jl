@@ -685,6 +685,7 @@ Base.@kwdef struct Config
     watch_missing_per_check::Int = 0
     watch_min_internal_citations::Int = 2
     watch_missing_weekly_reads::Int = 1
+    watch_feeds::Vector{String} = String[]
     watch_record_from::Int = 1
     # The Slate hub the site's notebooks are rendered through, by its port: 0 for KaimonSlate's own
     # (see `slate_env`).
@@ -871,6 +872,7 @@ function load_config(path::AbstractString = config_path())
         watch_missing_per_check = Int(get(get(t, "watch", Dict()), "missing_per_check", d.watch_missing_per_check)),
         watch_min_internal_citations = Int(get(get(t, "watch", Dict()), "min_internal_citations", d.watch_min_internal_citations)),
         watch_missing_weekly_reads = Int(get(get(t, "watch", Dict()), "missing_weekly_reads", d.watch_missing_weekly_reads)),
+        watch_feeds = String.(get(get(t, "watch", Dict()), "feeds", d.watch_feeds)),
         watch_record_from = Int(get(get(t, "watch", Dict()), "record_from", d.watch_record_from)),
         slate_port = Int(get(get(t, "notebooks", Dict()), "slate_port", d.slate_port)),
         media_max_mb = Int(get(get(t, "media", Dict()), "max_mb", d.media_max_mb)),
@@ -954,6 +956,7 @@ manifest_layer(l) = Layer(; name = l["name"], model = l["model"], unit = Symbol(
                           doc_prefix = l["doc_prefix"], max_chars = l["max_chars"], source = l["source"])
 
 function validate(c::Config)
+    all(u -> watch_url(u) !== nothing, c.watch_feeds) || error("[watch] feeds requires HTTP(S) feed URLs")
     all(id -> occursin(r"^S[0-9]+$", id), c.watch_venues) || error("[watch] venues requires OpenAlex source IDs (S...)")
     all(id -> occursin(r"^A[0-9]+$", id) || orcid_uri(id) !== nothing, c.watch_authors) ||
         error("[watch] authors requires OpenAlex author IDs (A...) or valid ORCIDs")
