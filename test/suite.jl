@@ -1956,13 +1956,8 @@ end
     @test [c.id for c in K.daily_candidates(kb)][1:2] == ["2610.00011", "2610.00012"]
     K.execute!(kb, "UPDATE papers SET metadata_at = ?, title = 'Paper 2610.00011' WHERE doc_id = '2610.00011'", (K.now_iso(),))
     post = only(K.paper_json(K.site_paper(kb, "2610.00011"; related = false))["posts"])
-<<<<<<< HEAD
     @test (post["where"], post["rating"], post["reason"]) == ("Added from the paper watch", "central", "The group's own question.")
-    @test K.watch_taken_json(kb)[1]["slug"] == K.page_slug("2610.00011")
-=======
-    @test (post["where"], post["rating"], post["reason"]) == ("Added from the arXiv watch", "central", "The group's own question.")
     @test K.watch_taken_json(kb)[1]["slug"] == K.page_slug("2610.00013")
->>>>>>> feat/watch-read-budget
     # Removed, it leaves the list and is not taken in again.
     K.remove_paper!(kb, "2610.00013")
     @test "2610.00013" ∉ [t.id for t in K.watch_taken(kb)]
@@ -4837,9 +4832,8 @@ end
 @zset "summaries" begin
     HTTP, JSON = K.HTTP, K.JSON
     calls = Ref(0)
-    port = 18000 + rand(0:999)
     # A stand-in for an OpenAI-compatible chat completions endpoint.
-    server = HTTP.serve!("127.0.0.1", port) do req
+    server = HTTP.serve!("127.0.0.1", 0) do req
         calls[] += 1
         content = JSON.parse(String(req.body))["messages"][2]["content"]
         prompt = content isa String ? content : join((p["text"] for p in content if p["type"] == "text"), "\n")
@@ -4855,6 +4849,7 @@ end
         HTTP.Response(200, JSON.json(Dict("choices" => [Dict("message" => Dict("content" => reply))],
             "usage" => Dict("prompt_tokens" => 10, "completion_tokens" => 5))))
     end
+    port = HTTP.port(server)
     try
         s = Summarizer(; name = "fake", url = "http://127.0.0.1:$port", model = "fake-model")
         kb = open_kb(temp_config(summarizers = [s], summarizer = "fake", code_summarizer = "fake", judge = "fake", layers = Layer[]))
@@ -6029,7 +6024,7 @@ end
         @test occursin("<KBPaperList by=\"month\" />", read(joinpath(site, nav.timeline), String))
         listed = Dict(r["id"] => r for r in K.JSON.parsefile(joinpath(public, "papers.json")))
         @test startswith(only(listed[id]["arrivals"])["text"], "uploaded by Ada") &&
-              startswith(only(listed["2609.00001"]["arrivals"])["text"], "added from the arXiv watch by Bea")
+              startswith(only(listed["2609.00001"]["arrivals"])["text"], "added from the paper watch by Bea")
         @test listed["2609.00001"]["category_title"] == "Atmospheric and oceanic physics"
         @test K.JSON.parsefile(joinpath(public, "kb-data", "topics", "physics-ao-ph.json"))["title"] == "Atmospheric and oceanic physics"
         @test read(joinpath(site, "topics", "physics-ao-ph.md"), String) == K.template_markdown("topics")
