@@ -28,6 +28,18 @@ migration!(21, ["""CREATE TABLE watch_new (
 # against changed focus areas without embedding it again.
 migration!(22, ["ALTER TABLE watch ADD COLUMN vector BLOB"])
 
+migration!(35, ["ALTER TABLE watch ADD COLUMN doi TEXT",
+                "ALTER TABLE watch ADD COLUMN work_id TEXT",
+                "ALTER TABLE watch ADD COLUMN origins TEXT NOT NULL DEFAULT '[]'"])
+
+# A DOI candidate can already have been added manually as an uploaded paper or resource.
+unheld_watch_sql() = """watch.doc_id NOT IN (SELECT doc_id FROM papers)
+    AND (watch.doi IS NULL OR (NOT EXISTS (SELECT 1 FROM papers p WHERE lower(p.doi) = watch.doi)
+        AND NOT EXISTS (SELECT 1 FROM doi_arxiv d JOIN papers p ON p.doc_id = d.doc_id WHERE d.doi = watch.doi)))"""
+
+watch_sources_enabled(c) = !isempty(c.watch_categories) || !isempty(c.watch_venues) ||
+                           !isempty(c.watch_authors) || c.watch_citing_library
+
 """
     watch!(kb; list = list_new_papers, now = now(UTC), progress, cancelled) -> Int
 
@@ -41,46 +53,92 @@ are placed again first when the group has changed (see [`replace_watched!`](@ref
 new papers were placed.
 """
 function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c; patience = WATCH_PATIENCE), now::DateTime = Dates.now(UTC),
-                progress = msg -> nothing, cancelled = () -> false)
+                progress = msg -> nothing, cancelled = () -> false, openalex = openalex_watch)
     c = kb.config
-    l = landscape_layer(c)
     since = Date(now) - Day(c.watch_days)
-    execute!(kb, "DELETE FROM watch WHERE published < ?", (string(Date(now) - Day(4 * c.watch_days)),))
+    execute!(kb, "DELETE FROM watch WHERE published < ? AND coalesce(taken, '') NOT IN ('deferred','arriving')", (string(Date(now) - Day(4 * c.watch_days)),))
     replace_watched!(kb; progress)
-    seen = Set{String}(r.id for r in query(kb, "SELECT doc_id AS id FROM papers UNION SELECT doc_id FROM watch"))
-    found = []
+    candidates = []
     for cat in c.watch_categories
         cancelled() && return 0
         progress("asking arXiv for new papers in $cat")
         for m in list(cat, since, c)
-            (m.doc_id in seen || isempty(m.published) || Date(m.published) < since) && continue
-            push!(seen, m.doc_id)
-            push!(found, m)
+            (isempty(m.published) || Date(m.published) < since) && continue
+            push!(candidates, (; m.doc_id, m.title, m.authors, m.abstract, m.published, m.primary_category,
+                                doi = m.doi, work_id = nothing, origins = ["arXiv: $cat"]))
         end
     end
-    # Asked of every category: checked, whether or not there was anything new.
-    checked() = execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('watch_checked_at', ?)", (now_iso(),))
-    isempty(found) && (checked(); return 0)
+    append!(candidates, openalex(kb, since; cancelled))
+    cancelled() && return 0
+    n = place_watch_candidates!(kb, candidates; progress)
+    execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('watch_checked_at', ?)", (now_iso(),))
+    return n
+end
+
+# Match each discovery by all its identifiers before paying for an embedding or a
+# judgment. A later source can add evidence to a previously judged watch entry.
+function place_watch_candidates!(kb, candidates; progress = msg -> nothing, place = place_new_watch)
+    isempty(candidates) && return 0
+    c = kb.config
+    held = Set{String}()
+    for r in query(kb, "SELECT doc_id, doi FROM papers")
+        push!(held, r.doc_id)
+        ismissing(r.doi) || push!(held, normalize_doi(r.doi))
+    end
+    union!(held, (r.doi for r in query(kb, "SELECT doi FROM doi_arxiv WHERE doc_id IN (SELECT doc_id FROM papers)")))
+    aliases = Dict{String,String}()
+    origins = Dict{String,Vector{String}}()
+    for r in query(kb, "SELECT doc_id, doi, work_id, origins FROM watch")
+        for k in skipmissing((r.doc_id, r.doi, r.work_id))
+            aliases[k] = r.doc_id
+        end
+        origins[r.doc_id] = json_list(r.origins)
+    end
+    found = []
+    updates = Dict{String,NamedTuple}()
+    for m in candidates
+        doi = isnothing(m.doi) ? nothing : normalize_doi(m.doi)
+        ids = String[k for k in (m.doc_id, doi, m.work_id) if k !== nothing]
+        any(in(held), ids) && continue
+        dropped_as(kb; id = m.doc_id, doi = something(doi, "")) === nothing || continue
+        existing = findfirst(k -> haskey(aliases, k), ids)
+        id = existing === nothing ? m.doc_id : aliases[ids[existing]]
+        existing === nothing && push!(found, m)
+        for k in ids
+            aliases[k] = id
+        end
+        union!(get!(Vector{String}, origins, id), m.origins)
+        old = get(updates, id, (; doi = missing, work_id = missing))
+        updates[id] = (; doi = something(doi, old.doi), work_id = something(m.work_id, old.work_id))
+    end
+    placed = isempty(found) ? [] : place(c, found, progress)
+    transaction(kb) do
+        for (; m, near, u, area, fit, score) in placed
+            execute!(kb, """INSERT OR IGNORE INTO watch (doc_id, title, authors, abstract, published, category,
+                                score, area, area_score, nearest, found_at, vector) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (m.doc_id, m.title, JSON.json(m.authors), m.abstract, m.published, m.primary_category,
+                 score, area, fit, JSON.json(near), now_iso(), vector_blob(u)))
+        end
+        for (id, ids) in updates
+            execute!(kb, """UPDATE watch SET doi = coalesce(?,doi), work_id = coalesce(?,work_id), origins = ?
+                            WHERE doc_id = ?""", (ids.doi, ids.work_id, JSON.json(origins[id]), id))
+        end
+    end
+    return length(found)
+end
+
+function place_new_watch(c, found, progress)
+    l = landscape_layer(c)
     progress("placing $(length(found)) new papers against the focus areas and the library")
     vectors = watch_vectors(c, l, [(m.title, m.abstract) for m in found])
     areas = focus_vectors(c, l)
     coll = collection_name(c, l)
     # Placed first, then written in one short transaction: the searches are not made holding the lock.
-    placed = map(zip(found, vectors)) do (m, u)
+    return map(zip(found, vectors)) do (m, u)
         near = [(id = String(split(h.key, ':'; limit = 2)[2]), score = round(h.score; digits = 4))
                 for h in vector_search(coll, u; limit = 3)]
         (; m, near, u, place_watched(c, areas, u, isempty(near) ? 0.0 : first(near).score)...)
     end
-    transaction(kb) do
-        for (; m, near, u, area, fit, score) in placed
-            execute!(kb, """INSERT OR REPLACE INTO watch (doc_id, title, authors, abstract, published, category,
-                                score, area, area_score, nearest, found_at, vector) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (m.doc_id, m.title, JSON.json(m.authors), m.abstract, m.published, m.primary_category,
-                 score, area, fit, JSON.json(near), now_iso(), vector_blob(u)))
-        end
-    end
-    checked()
-    return length(found)
 end
 
 "What the watched papers are placed and judged against: the group as agents are told of it (see [`group_brief`](@ref))."
@@ -193,6 +251,35 @@ function fill_from_watch!(kb::KB, ids::Union{AbstractVector{<:AbstractString},No
     end
 end
 
+# One small counter per UTC date and source. Write before checking so competing
+# connections cannot both reserve the last slot. Only this ISO week's rows survive.
+function reserve_watch_read!(kb, source; day = Date(now(UTC)))
+    monday = day - Day(dayofweek(day) - 1)
+    prefix = "watch_reads/"
+    key = "$prefix$day/$source"
+    return transaction(kb) do
+        execute!(kb, "DELETE FROM kv WHERE key >= ? AND key < ?", (prefix, prefix * string(monday)))
+        counts = query(kb, """SELECT key, CAST(value AS INTEGER) AS n FROM kv
+                              WHERE key >= ? AND key < ?""", (prefix * string(monday), prefix * string(day + Day(1))))
+        c = kb.config
+        today = sum((r.n for r in counts if startswith(r.key, "$prefix$day/")); init = 0)
+        week = sum((r.n for r in counts); init = 0)
+        (c.watch_daily_reads >= 0 && today >= c.watch_daily_reads) && return false
+        (c.watch_weekly_reads >= 0 && week >= c.watch_weekly_reads) && return false
+        execute!(kb, """INSERT INTO kv VALUES (?, '1') ON CONFLICT(key)
+                        DO UPDATE SET value = CAST(value AS INTEGER) + 1""", (key,))
+        return true
+    end
+end
+
+function read_watched!(kb, ids, step, cancelled)
+    results = ingest!(kb, ids; progress = step, cancelled, source = "watch")
+    isempty(results) && return false
+    r = only(results)
+    r.ok || error("Reading $(r.id) failed: $(r.error)")
+    return true
+end
+
 """
     take_watched!(kb; progress, cancelled, read_in_full, record) -> (; read, recorded)
 
@@ -200,48 +287,94 @@ Take the judged watched papers into the knowledge base by their rating: those ra
 `watch_read_from` read in full (see [`ingest!`](@ref)) one by one, until `cancelled()` leaves the
 rest to the next watch, and those rated at least `watch_record_from` recorded (the arXiv record
 fetched, the title and abstract embedded, see [`embed_records!`](@ref)).
-Each arrives as "added from the arXiv watch", with its rating and the judge's sentence. Where papers
+Each arrives as "added from the paper watch", with its rating and the judge's sentence. Where papers
 cannot be read here they are recorded instead. Returns the ids taken each way. `read_in_full(ids, progress)`
 and `record(ids)` do the reading and recording (stand-ins in tests, which reach no arXiv).
 """
 function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> false,
-                       read_in_full = (ids, step) -> ingest!(kb, ids; progress = step, cancelled, source = "watch"),
+                       read_in_full = (ids, step) -> read_watched!(kb, ids, step, cancelled),
+                       today = () -> Date(now(UTC)),
                        record = ids -> (refresh_metadata!(kb, ids);
                                         isempty(cannot_run(kb, "embed", ids)) && embed_records!(kb, ids; progress, cancelled)))
     c = kb.config
-    rows = query(kb, """SELECT doc_id AS id, relevance, coalesce(reason, '') AS reason FROM watch
-                        WHERE relevance IS NOT NULL AND taken IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers)
+    rows = query(kb, """SELECT doc_id AS id, relevance, coalesce(reason, '') AS reason, taken FROM watch
+                        WHERE relevance IS NOT NULL AND ((taken IS NULL AND $(unheld_watch_sql())) OR taken = 'arriving'
+                            OR (taken = 'deferred' AND doc_id IN (SELECT doc_id FROM papers WHERE access = 'open')))
                           AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
-                        ORDER BY relevance DESC, score DESC""")
+                        ORDER BY relevance DESC, score DESC, found_at, doc_id""")
     read = [String(r.id) for r in rows if r.relevance >= c.watch_read_from]
     recorded = [String(r.id) for r in rows if c.watch_record_from <= r.relevance < c.watch_read_from]
-    if !isempty(read) && !isempty(cannot_run(kb, "ingest", read))
-        recorded, read = [read; recorded], String[]
+    if !isempty(read) && !isempty(cannot_run(kb, "ingest", PAPER))
+        newly_recorded = [r.id for r in rows if r.relevance >= c.watch_read_from && !isequal(r.taken, "deferred")]
+        recorded, read = [newly_recorded; recorded], String[]
     end
     why = Dict(String(r.id) => "$(RELEVANCE[r.relevance+1]): $(r.reason)" for r in rows)
-    function arrived!(ids, how)
-        add_papers!(kb, ids; source = "watch")
-        transaction(kb) do
-            for id in ids
-                execute!(kb, "UPDATE mentions SET message = ? WHERE paper_id = ? AND source = 'watch'", (why[id], paper_id(kb, id)))
-                execute!(kb, "UPDATE watch SET taken = ?, taken_at = ? WHERE doc_id = ?", (how, now_iso(), id))
+    function arrived!(id, how)
+        # Discovery may name a paper by DOI. In the library its ID can be an arXiv
+        # ID, uploaded PDF or bibliography resource. Keep all later joins on that ID.
+        # Record intent before resolving a DOI, which can involve network I/O.
+        # An interrupted arrival is selected again even if its document now exists.
+        changed!(kb, """UPDATE watch SET taken = 'arriving' WHERE doc_id = ?
+                        AND (taken IS NULL OR taken = 'arriving')""", (id,)) == 0 && return nothing
+        ids = add_papers!(kb, [id]; source = "watch")
+        if isempty(ids)
+            execute!(kb, "DELETE FROM watch WHERE doc_id = ? AND taken = 'arriving'", (id,))
+            return nothing
+        end
+        local_id = only(ids)
+        if !isequal(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (local_id,)), "open")
+            execute!(kb, "DELETE FROM watch WHERE doc_id = ?", (id,))
+            return nothing
+        end
+        return transaction(kb) do
+            execute!(kb, "UPDATE mentions SET message = ? WHERE paper_id = ? AND source = 'watch'", (why[id], paper_id(kb, local_id)))
+            if local_id != id
+                other = query(kb, "SELECT origins, taken FROM watch WHERE doc_id = ?", (local_id,))
+                if !isempty(other)
+                    reasons = union(json_list(scalar(kb, "SELECT origins FROM watch WHERE doc_id = ?", (id,))),
+                                    json_list(only(other).origins))
+                    if !ismissing(only(other).taken)
+                        execute!(kb, "UPDATE watch SET origins = ? WHERE doc_id = ?", (JSON.json(reasons), local_id))
+                        execute!(kb, "DELETE FROM watch WHERE doc_id = ?", (id,))
+                        return nothing
+                    end
+                    execute!(kb, "DELETE FROM watch WHERE doc_id = ?", (local_id,))
+                    execute!(kb, "UPDATE watch SET origins = ? WHERE doc_id = ?", (JSON.json(reasons), id))
+                end
             end
+            execute!(kb, "UPDATE watch SET doc_id = ?, taken = ?, taken_at = ? WHERE doc_id = ?", (local_id, how, now_iso(), id))
+            return local_id
         end
     end
-    if !isempty(recorded)
-        progress("recording $(length(recorded)) new paper(s)")
-        arrived!(recorded, "recorded")
-        record(recorded)
+    records = String[]
+    for id in recorded
+        local_id = arrived!(id, "recorded")
+        local_id === nothing || push!(records, local_id)
     end
-    # One at a time, so that a cancelled watch leaves the rest to be taken by the next.
+    isempty(records) || record(records)
+    deferred = Set(r.id for r in rows if isequal(r.taken, "deferred"))
     done = String[]
     for (i, id) in enumerate(read)
         cancelled() && break
-        arrived!([id], "read")
-        read_in_full([id], m -> progress("reading new paper $i of $(length(read)) in full: $m"))
-        push!(done, id)
+        local_id = id in deferred ? id : arrived!(id, "deferred")
+        local_id === nothing && continue
+        if is_resource(local_id)
+            execute!(kb, "UPDATE watch SET taken = 'recorded' WHERE doc_id = ?", (local_id,))
+            push!(records, local_id)
+            continue
+        end
+        if !reserve_watch_read!(kb, "watch"; day = today())
+            if !(id in deferred)
+                record([local_id])
+                push!(records, local_id)
+            end
+            continue
+        end
+        read_in_full([local_id], m -> progress("reading new paper $i of $(length(read)) in full: $m")) === false && break
+        execute!(kb, "UPDATE watch SET taken = 'read', taken_at = ? WHERE doc_id = ?", (now_iso(), local_id))
+        push!(done, local_id)
     end
-    return (; read = done, recorded)
+    return (; read = done, recorded = records)
 end
 
 """
@@ -253,15 +386,15 @@ is read in full now.
 """
 watch_taken(kb::KB) =
     [(; id = String(r.id), title = String(coalesce(r.title, r.id)), relevance = Int(r.relevance), reason = coalesce(r.reason, ""),
-        taken = String(r.taken), taken_at = String(r.taken_at), read = r.read == 1)
-     for r in query(kb, """SELECT w.doc_id AS id, coalesce(p.title, w.title) AS title, w.relevance, w.reason, w.taken, w.taken_at,
+        origins = json_list(r.origins), taken = String(r.taken), taken_at = String(r.taken_at), read = r.read == 1)
+     for r in query(kb, """SELECT w.doc_id AS id, coalesce(p.title, w.title) AS title, w.relevance, w.reason, w.origins, w.taken, w.taken_at,
                                   EXISTS (SELECT 1 FROM parses x WHERE x.paper_id = p.id) AS read
-                           FROM watch w JOIN papers p ON p.doc_id = w.doc_id WHERE w.taken IS NOT NULL
+                           FROM watch w JOIN papers p ON p.doc_id = w.doc_id WHERE w.taken IS NOT NULL AND p.access = 'open'
                            ORDER BY w.taken_at DESC, w.relevance DESC""")]
 
 "The watched papers taken in, as the New on arXiv page lists them (see [`watch_taken`](@ref))."
 watch_taken_json(kb::KB) = [Dict("id" => t.id, "slug" => page_slug(t.id), "title" => t.title, "relevance" => t.relevance,
-                                 "reason" => t.reason, "taken" => t.taken, "taken_at" => t.taken_at, "read" => t.read)
+                                 "reason" => t.reason, "origins" => t.origins, "taken" => t.taken, "taken_at" => t.taken_at, "read" => t.read)
                             for t in watch_taken(kb)]
 
 """
@@ -273,19 +406,19 @@ papers nearest each (`(; id, title, score)`), `area` and `area_score` `missing` 
 no focus areas, `relevance` the judge's 0–3 (`missing` until judged).
 """
 function watched(kb::KB)
-    rows = query(kb, """SELECT * FROM watch WHERE doc_id NOT IN (SELECT doc_id FROM papers) ORDER BY score DESC""")
+    rows = query(kb, """SELECT * FROM watch WHERE taken IS NULL AND $(unheld_watch_sql()) ORDER BY score DESC""")
     titles = Dict(r.id => coalesce(r.title, r.id) for r in query(kb, "SELECT doc_id AS id, title FROM papers"))
     return map(rows) do r
         near = [(id = String(n["id"]), title = get(titles, n["id"], n["id"]), score = Float64(n["score"]))
                 for n in JSON.parse(r.nearest)]
         (; id = r.doc_id, r.title, authors = json_list(r.authors), r.abstract, r.published, r.category,
-           r.score, r.area, r.area_score, nearest = near, relevance = r.relevance, reason = coalesce(r.reason, ""))
+           origins = json_list(r.origins), r.score, r.area, r.area_score, nearest = near, relevance = r.relevance, reason = coalesce(r.reason, ""))
     end
 end
 
 "The watched papers as the site's list shows them (see [`watched`](@ref))."
 watch_json(kb::KB) = [Dict("id" => w.id, "title" => w.title, "authors" => first(w.authors, 6), "abstract" => w.abstract,
-                           "published" => w.published, "category" => w.category, "score" => w.score, "area" => coalesce(w.area, nothing),
+                           "published" => w.published, "category" => w.category, "origins" => w.origins, "score" => w.score, "area" => coalesce(w.area, nothing),
                            "area_score" => coalesce(w.area_score, nothing), "relevance" => coalesce(w.relevance, nothing), "reason" => w.reason,
                            "nearest" => [Dict("id" => n.id, "slug" => page_slug(n.id), "title" => n.title, "score" => n.score)
                                          for n in w.nearest])
@@ -312,10 +445,10 @@ end
 Run [`watch!`](@ref) as a background job, or return the watch job already running.
 """
 function start_watch(kb::KB)
-    running = filter(j -> j.status == :running && j.name == "watch arXiv", list_jobs())
+    running = filter(j -> j.status == :running && j.name == "paper watch", list_jobs())
     isempty(running) || return first(running)
     # The papers it reads or records, and the watch's own page, change the site.
-    return start_job("watch arXiv"; changes = changes_stamp(kb.config)) do job
+    return start_job("paper watch"; changes = changes_stamp(kb.config)) do job
         n = watch!(kb; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
         # Every new paper is judged and taken in by its rating, and today gets its paper, where the judge can run here.
         judged, taken = 0, (; read = String[], recorded = String[])
@@ -323,9 +456,9 @@ function start_watch(kb::KB)
             report!(job, "judging the new papers")
             judged = judge_watched!(kb)
             taken = take_watched!(kb; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
-            ismissing(scalar(kb, "SELECT 1 FROM daily WHERE day = ?", (utc_today(),))) && start_daily(kb)
+            ismissing(scalar(kb, "SELECT 1 FROM daily WHERE day = ?", (utc_today(),))) && start_daily(kb; automatic = true)
         end
-        "$n new paper(s) placed from $(join(kb.config.watch_categories, ", ")); $judged judged; " *
+        "$n new paper(s) placed by the watch; $judged judged; " *
         "$(length(taken.read)) read in full and $(length(taken.recorded)) recorded."
     end
 end
@@ -346,7 +479,7 @@ embedded.
 """
 function start_watch!(kb::KB)
     c = kb.config
-    (c.watch_hours > 0 && !isempty(c.watch_categories)) || return nothing
+    (c.watch_hours > 0 && watch_sources_enabled(c)) || return nothing
     period = c.watch_hours * 3600
     return Threads.@spawn while !STOPPING[]
         try
@@ -357,7 +490,7 @@ function start_watch!(kb::KB)
                 continue
             end
             if !isempty(cannot_run(kb, "embed", String[]))
-                @info "Not watching arXiv here: papers cannot be embedded on this machine"
+                @info "Paper watch unavailable here: papers cannot be embedded on this machine"
                 pause(period)
                 continue
             end
@@ -369,7 +502,7 @@ function start_watch!(kb::KB)
             job.status == :done || pause(min(WATCH_RETRY, period))
         catch e
             (e isa InterruptException || STOPPING[]) && break
-            @warn "Watching arXiv failed; trying again later" exception = e
+            @warn "Paper watch failed; trying again later" exception = e
             pause(period)
         end
     end

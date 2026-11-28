@@ -50,7 +50,7 @@ see it read-only.
   comparing summarizers, the tutor and how hard it thinks, notebooks, the paper of the day's analysis,
   and rating new arXiv papers. Left empty, the summarizer does it.
 - **Search**: the layers a search uses unless it picks others, and whether keyword ranking joins them.
-- **New on arXiv**: the categories watched, the days of new papers listed, the hours between checks,
+- **Paper watch**: the categories watched, the days of new papers listed, the hours between checks,
   and the ratings read in full (3 central, 2 related, 1 peripheral) or only recorded.
 - **The group**: below.
 - **Sharing**: the dataset this knowledge base publishes to or imports from (see [Datasets](datasets.md)).
@@ -292,3 +292,38 @@ Set `infer_models = true` to also report the selected built-in defaults on an ot
 instance. Use `models` to supplement inferred entries, or set `infer_models = false` and supply the
 entire public list yourself. The privacy page links directly to the models section whenever it has
 entries.
+
+### Automatic reading budget
+
+In `[watch]`, set `daily_reads` and/or `weekly_reads` to cap automatic full reading
+attempts. Both default to -1 (unlimited). Zero only records papers. The limits use UTC
+days and Monday–Sunday weeks. Each automatic paper-of-the-day run also reserves a slot
+because its analyst reads the PDF. Manually requested readings use their usual workflow.
+Title and abstract placement and judging continue when the budget is exhausted.
+High-rated papers are recorded and queued across restarts until a later watch check has
+capacity. Attempts that fail after reservation still count because they may have used tokens.
+
+### Discover papers through OpenAlex
+
+The paper watch accepts these optional settings alongside arXiv categories.
+
+```toml
+[watch]
+venues = ["S18904315"]
+authors = ["A5023888391"]  # OpenAlex author IDs or ORCIDs
+citing_library = true
+days = 14
+hours = 24
+```
+
+The window overlaps between checks to pick up late indexing. Each venue is an OpenAlex
+source ID. A conference can have several sources. Incoming citation checks batch the
+DOIs and arXiv DOI equivalents of literature visible to the whole group. Set
+`OPENALEX_API_KEY` in the service environment for cursor pagination. The existing
+contact setting is sent with requests. Rate-limited requests respect Retry-After.
+
+Works identifiable by DOI or arXiv ID go through the existing placement and judge.
+Several matches give the same candidate multiple discovery reasons. A DOI with no
+readable copy stays a bibliography resource and uses no full-reading slot. Works
+without either identifier are skipped. The paper-of-the-day PDF feature continues
+to choose arXiv papers.

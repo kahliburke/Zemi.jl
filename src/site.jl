@@ -544,7 +544,7 @@ function classification_rows(c::AbstractDict)
     return rows
 end
 
-"How a mention says a paper came: posted in a channel by someone, uploaded, added from the arXiv watch…, and when."
+"How a mention says a paper came: posted in a channel by someone, uploaded, added from the paper watch…, and when."
 function arrival_text(m)
     who = ismissing(m.author) ? "" : " by " * m.author
     when = " " * Dates.format(m.posted, "yyyy-mm-dd")
@@ -880,7 +880,7 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
     foreach(((slug, d),) -> write(joinpath(public, "kb-data", "daily", slug * ".json"), JSON.json(d)), day_pages.data)
     write(joinpath(public, "daily.json"), JSON.json(daily_json(days)))
     write(joinpath(dir, "watch.md"), """
-        # New on arXiv
+        # Paper watch
 
         ```@raw html
         <KBWatch />
@@ -1043,9 +1043,9 @@ function contents_json(kb::KB, records)
                       Dict("name" => l.name, "embeds" => ranking_label(kb.config, l.name), "model" => l.model,
                            "papers" => c.papers, "vectors" => c.n)) for l in kb.config.layers],
         "summaries" => [Dict("summarizer" => r.summarizer, "model" => r.model, "papers" => r.papers, "summaries" => r.n,
-                             "input" => coalesce(r.tin, nothing), "output" => coalesce(r.tout, nothing))
-                        for r in query(kb, """SELECT summarizer, model, count(*) AS n, count(DISTINCT paper_id) AS papers,
-                                              sum(input_tokens) AS tin, sum(output_tokens) AS tout FROM summaries GROUP BY summarizer""")],
+                             "input" => coalesce(r.tin, nothing), "output" => coalesce(r.tout, nothing),
+                             "cache_read" => coalesce(r.cache_read, nothing), "cache_creation" => coalesce(r.cache_creation, nothing))
+                        for r in summary_totals(kb)],
         "shared_by" => [Dict("who" => r.who, "papers" => r.n)
                         for r in query(kb, """SELECT author AS who, count(DISTINCT paper_id) AS n FROM mentions
                                               WHERE author IS NOT NULL GROUP BY who ORDER BY n DESC""")],
