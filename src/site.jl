@@ -880,7 +880,7 @@ function write_site(kb::KB, dir::AbstractString, public::AbstractString; related
     foreach(((slug, d),) -> write(joinpath(public, "kb-data", "daily", slug * ".json"), JSON.json(d)), day_pages.data)
     write(joinpath(public, "daily.json"), JSON.json(daily_json(days)))
     write(joinpath(dir, "watch.md"), """
-        # New on arXiv
+        # Paper watch
 
         ```@raw html
         <KBWatch />

@@ -49,7 +49,8 @@ function judge_batch!(kb::KB, n::Integer)
             rel = get(p, "relevance", nothing)
             rel isa Integer || continue
             # As the judge may write it (`arXiv:2610.01234v1`), and only one it was asked about.
-            id = replace(String(get(p, "id", "")), r"^arXiv:"i => "", r"v\d+$" => "")
+            id = String(get(p, "id", ""))
+            id in asked || (id = replace(id, r"^arXiv:"i => "", r"v\d+$" => ""))
             id in asked || continue
             execute!(kb, "UPDATE watch SET relevance = ?, reason = ?, judged_by = ? WHERE doc_id = ?",
                      (clamp(rel, 0, 3), String(get(p, "reason", "")), s.name, id))
@@ -75,7 +76,7 @@ function daily_candidates(kb::KB; new::Integer = 8, library::Integer = 5)
                  relevance = Int(r.relevance))
            for r in query(kb, """SELECT doc_id AS id, title, abstract, reason, relevance FROM watch
                                  WHERE relevance >= 2 AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
-                                 ORDER BY relevance DESC, score DESC""") if !(r.id in picked)]
+                                 ORDER BY relevance DESC, score DESC""") if is_arxiv_id(r.id) && !(r.id in picked)]
     out = first(out, new)
     land = read_landscape(kb.config)
     near = land === nothing ? Dict{String,Float64}() : Dict(String(p["id"]) => Float64(p["relevance"]) for p in land["papers"])

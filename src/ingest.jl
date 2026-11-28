@@ -78,7 +78,7 @@ uploads are recorded where they are read, the rest by [`add_papers!`](@ref). A m
 elsewhere (a base set's posts in a channel, say) is worded by its source and channel.
 """
 const ARRIVALS = Dict("upload" => "uploaded", "added" => "added",
-                      "cited" => "added from citations", "watch" => "added from the arXiv watch",
+                      "cited" => "added from citations", "watch" => "added from the paper watch",
                       "daily" => "picked as paper of the day", "study" => "found for a study",
                       "library" => "added from a person's library")
 

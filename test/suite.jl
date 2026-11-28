@@ -1953,7 +1953,7 @@ end
     @test [c.id for c in K.daily_candidates(kb)][1:2] == ["2610.00011", "2610.00012"]
     K.execute!(kb, "UPDATE papers SET metadata_at = ?, title = 'Paper 2610.00011' WHERE doc_id = '2610.00011'", (K.now_iso(),))
     post = only(K.paper_json(K.site_paper(kb, "2610.00011"; related = false))["posts"])
-    @test (post["where"], post["rating"], post["reason"]) == ("Added from the arXiv watch", "central", "The group's own question.")
+    @test (post["where"], post["rating"], post["reason"]) == ("Added from the paper watch", "central", "The group's own question.")
     @test K.watch_taken_json(kb)[1]["slug"] == K.page_slug("2610.00011")
     # Removed, it leaves the list and is not taken in again.
     K.remove_paper!(kb, "2610.00013")
@@ -8436,4 +8436,53 @@ end
     @test isempty(take(monday + K.Week(1)).read)
     @test only(K.mentions(kb, "2610.00001")).source == "watch"
     close(kb)
+end
+
+@zset "OpenAlex paper watch" begin
+    kb = open_kb(temp_config(layers = Layer[], watch_venues = ["S123"], watch_authors = ["0000-0002-1825-0097"],
+                            watch_citing_library = true))
+    add_papers!(kb, ["2610.10001", "2610.10002"])
+    K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = '2610.10002'")
+    calls = []
+    work = Dict("id" => "https://openalex.org/W123", "doi" => "https://doi.org/10.1234/example",
+                "title" => "Coral growth", "type" => "article", "publication_date" => "2026-10-01",
+                "publication_year" => 2026, "abstract_inverted_index" => Dict("Corals" => [0]), "biblio" => nothing,
+                "primary_location" => nothing, "authorships" => [], "locations" => [], "referenced_works" => ["https://openalex.org/W99"])
+    function page(params; contact)
+        q = Dict(params)
+        push!(calls, q)
+        startswith(q["filter"], "doi:") && return Dict("results" => [Dict("id" => "https://openalex.org/W99", "doi" => "10.48550/arxiv.2610.10001")])
+        next = q["cursor"] == "*" ? "next" : nothing
+        return Dict("meta" => Dict("next_cursor" => next), "results" => next === nothing ? [] : [work])
+    end
+    candidates = K.openalex_watch(kb, K.Date(2026, 9, 27); page)
+    @test length(candidates) == 3
+    @test any(q -> occursin("author.orcid:", q["filter"]), calls)
+    @test any(q -> get(q, "cursor", "") == "next", calls)
+    @test all(q -> !occursin("2610.10002", q["filter"]), calls)
+    @test last(candidates).origins == ["Cites 10.48550/arxiv.2610.10001"]
+    # An arXiv category and the three OpenAlex filters all found the same paper.
+    item = merge(first(candidates), (; doc_id = "2610.10003", origins = ["arXiv: example"]))
+    place(c, items, progress) = [(; m, near = [], u = [1.0], area = missing, fit = missing, score = 0.5) for m in items]
+    @test K.place_watch_candidates!(kb, [item; candidates]; place) == 1
+    @test length(only(K.watched(kb)).origins) == 4
+    @test K.place_watch_candidates!(kb, candidates; place = (args...) -> error("embedded twice")) == 0
+    # A closed DOI stays a resource, even when the judge asked for a full read.
+    K.execute!(kb, "DELETE FROM watch")
+    @test K.place_watch_candidates!(kb, candidates; place) == 1
+    K.execute!(kb, "UPDATE watch SET relevance = 3")
+    old = K.DOI_RESOURCE[]
+    oldsearch = K.ARXIV_TITLE_SEARCH[]
+    try
+        K.DOI_RESOURCE[] = (d; contact) -> K.Resource(; key = d, doi = d, title = "Coral growth")
+        K.ARXIV_TITLE_SEARCH[] = (args...) -> K.PaperMeta[]
+        result = K.take_watched!(kb; read_in_full = (args...) -> error("closed DOI charged"), record = ids -> nothing)
+        @test isempty(result.read) && K.is_resource(only(result.recorded))
+        @test isempty(K.query(kb, "SELECT key FROM kv WHERE key LIKE 'watch_reads/%'"))
+        @test only(K.watch_taken(kb)).id == only(result.recorded)
+    finally
+        K.DOI_RESOURCE[] = old
+        K.ARXIV_TITLE_SEARCH[] = oldsearch
+        close(kb)
+    end
 end
