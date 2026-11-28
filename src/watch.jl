@@ -32,6 +32,11 @@ migration!(34, ["ALTER TABLE watch ADD COLUMN doi TEXT",
                 "ALTER TABLE watch ADD COLUMN work_id TEXT",
                 "ALTER TABLE watch ADD COLUMN origins TEXT NOT NULL DEFAULT '[]'"])
 
+# A DOI candidate can already have been added manually as an uploaded paper or resource.
+unheld_watch_sql() = """watch.doc_id NOT IN (SELECT doc_id FROM papers)
+    AND (watch.doi IS NULL OR (NOT EXISTS (SELECT 1 FROM papers p WHERE lower(p.doi) = watch.doi)
+        AND NOT EXISTS (SELECT 1 FROM doi_arxiv d JOIN papers p ON p.doc_id = d.doc_id WHERE d.doi = watch.doi)))"""
+
 watch_sources_enabled(c) = !isempty(c.watch_categories) || !isempty(c.watch_venues) ||
                            !isempty(c.watch_authors) || c.watch_citing_library || c.watch_missing_per_check > 0
 
@@ -300,21 +305,28 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
                                         isempty(cannot_run(kb, "embed", ids)) && embed_records!(kb, ids; progress, cancelled)))
     c = kb.config
     rows = query(kb, """SELECT doc_id AS id, relevance, coalesce(reason, '') AS reason, taken, origins FROM watch
-                        WHERE relevance IS NOT NULL AND ((taken IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers))
+                        WHERE relevance IS NOT NULL AND ((taken IS NULL AND $(unheld_watch_sql())) OR taken = 'arriving'
                             OR (taken = 'deferred' AND doc_id IN (SELECT doc_id FROM papers)))
                           AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
                         ORDER BY relevance DESC, score DESC, found_at, doc_id""")
     read = [String(r.id) for r in rows if r.relevance >= c.watch_read_from]
     recorded = [String(r.id) for r in rows if c.watch_record_from <= r.relevance < c.watch_read_from]
     if !isempty(read) && !isempty(cannot_run(kb, "ingest", PAPER))
-        recorded, read = [read; recorded], String[]
+        newly_recorded = [r.id for r in rows if r.relevance >= c.watch_read_from && !isequal(r.taken, "deferred")]
+        recorded, read = [newly_recorded; recorded], String[]
     end
     why = Dict(String(r.id) => "$(RELEVANCE[r.relevance+1]): $(r.reason)" for r in rows)
     function arrived!(id, how)
         # Discovery may name a paper by DOI. In the library its ID can be an arXiv
         # ID, uploaded PDF or bibliography resource. Keep all later joins on that ID.
+        # Record intent before resolving a DOI, which can involve network I/O.
+        # An interrupted arrival is selected again even if its document now exists.
+        execute!(kb, "UPDATE watch SET taken = 'arriving' WHERE doc_id = ?", (id,))
         ids = add_papers!(kb, [id]; source = "watch")
-        isempty(ids) && return nothing
+        if isempty(ids)
+            execute!(kb, "DELETE FROM watch WHERE doc_id = ? AND taken = 'arriving'", (id,))
+            return nothing
+        end
         local_id = only(ids)
         transaction(kb) do
             execute!(kb, "UPDATE mentions SET message = ? WHERE paper_id = ? AND source = 'watch'", (why[id], paper_id(kb, local_id)))
@@ -384,7 +396,7 @@ papers nearest each (`(; id, title, score)`), `area` and `area_score` `missing` 
 no focus areas, `relevance` the judge's 0–3 (`missing` until judged).
 """
 function watched(kb::KB)
-    rows = query(kb, """SELECT * FROM watch WHERE doc_id NOT IN (SELECT doc_id FROM papers) ORDER BY score DESC""")
+    rows = query(kb, """SELECT * FROM watch WHERE taken IS NULL AND $(unheld_watch_sql()) ORDER BY score DESC""")
     titles = Dict(r.id => coalesce(r.title, r.id) for r in query(kb, "SELECT doc_id AS id, title FROM papers"))
     return map(rows) do r
         near = [(id = String(n["id"]), title = get(titles, n["id"], n["id"]), score = Float64(n["score"]))
@@ -423,10 +435,10 @@ end
 Run [`watch!`](@ref) as a background job, or return the watch job already running.
 """
 function start_watch(kb::KB)
-    running = filter(j -> j.status == :running && j.name == "watch arXiv", list_jobs())
+    running = filter(j -> j.status == :running && j.name == "paper watch", list_jobs())
     isempty(running) || return first(running)
     # The papers it reads or records, and the watch's own page, change the site.
-    return start_job("watch arXiv"; changes = changes_stamp(kb.config)) do job
+    return start_job("paper watch"; changes = changes_stamp(kb.config)) do job
         n = watch!(kb; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
         # Every new paper is judged and taken in by its rating, and today gets its paper, where the judge can run here.
         judged, taken = 0, (; read = String[], recorded = String[])
@@ -468,7 +480,7 @@ function start_watch!(kb::KB)
                 continue
             end
             if !isempty(cannot_run(kb, "embed", String[]))
-                @info "Not watching arXiv here: papers cannot be embedded on this machine"
+                @info "Paper watch unavailable here: papers cannot be embedded on this machine"
                 pause(period)
                 continue
             end
@@ -480,7 +492,7 @@ function start_watch!(kb::KB)
             job.status == :done || pause(min(WATCH_RETRY, period))
         catch e
             (e isa InterruptException || STOPPING[]) && break
-            @warn "Watching arXiv failed; trying again later" exception = e
+            @warn "Paper watch failed; trying again later" exception = e
             pause(period)
         end
     end

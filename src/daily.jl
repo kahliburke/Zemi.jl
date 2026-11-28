@@ -31,7 +31,7 @@ end
 # One batch of `judge_watched!`: how many were judged (0 when none is left, or the judge rated none).
 function judge_batch!(kb::KB, n::Integer)
     rows = query(kb, """SELECT doc_id AS id, title, abstract FROM watch
-                        WHERE relevance IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers)
+                        WHERE relevance IS NULL AND taken IS NULL AND $(unheld_watch_sql())
                           AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
                         ORDER BY score DESC LIMIT ?""", (n,))
     isempty(rows) && return 0
