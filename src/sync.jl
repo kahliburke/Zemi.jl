@@ -125,7 +125,7 @@ the number of records fetched and of abstracts embedded, the papers with new ver
 `id => error` pairs for failures outside ingesting (and for work skipped here), what [`pull!`](@ref),
 [`landscape!`](@ref) and [`publish!`](@ref) returned (or `nothing`), and the tasks sync could not act on.
 """
-function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool = true, plan = nothing,
+function sync!(kb::KB; automatic::Bool = false, unread::Bool = false, arxiv::Bool = true, classify::Bool = true, plan = nothing,
                pull::Bool = kb.config.dataset.role != :none, publish::Bool = false, resummarize::Bool = false,
                progress = msg -> nothing, cancelled = () -> false)
     failed = Pair{String,String}[]
@@ -142,6 +142,10 @@ function sync!(kb::KB; unread::Bool = false, arxiv::Bool = true, classify::Bool 
     # Papers known by their id alone, where the watch has their text.
     fill_from_watch!(kb)
     plan === nothing && (plan = sync_plan(kb; unread))
+    if automatic
+        queued = Set(r.doc_id for r in query(kb, "SELECT doc_id FROM watch WHERE taken = 'deferred'"))
+        plan = filter(t -> !(t.action == :ingest && t.id in queued), plan)
+    end
     ids(action) = unique([t.id for t in plan if t.action == action])
     metadata = 0
     if !isempty(ids(:metadata))
@@ -355,14 +359,14 @@ end
 Run [`sync!`](@ref) as a background job working on the planned documents, or return the sync job
 already running: two at once would only do the same work twice.
 """
-function start_sync(kb::KB; unread::Bool = false, publish::Bool = false, resummarize::Bool = false)
+function start_sync(kb::KB; automatic::Bool = false, unread::Bool = false, publish::Bool = false, resummarize::Bool = false)
     running = running_sync()
     running === nothing || return running
     # A consumer's plan depends on what the import brings, so it is made after importing.
     plan = kb.config.dataset.role == :consume ? nothing : sync_plan(kb; unread)
     n = plan === nothing ? "" : ": $(length(unique(t.id for t in plan if t.action != :missing))) document(s)"
     return start_job("sync$n"; ids = plan === nothing ? String[] : unique(t.id for t in plan), changes = changes_stamp(kb.config)) do job
-        format_sync(sync!(kb; unread, plan, publish, resummarize, progress = m -> report!(job, m), cancelled = () -> cancelled(job)))
+        format_sync(sync!(kb; automatic, unread, plan, publish, resummarize, progress = m -> report!(job, m), cancelled = () -> cancelled(job)))
     end
 end
 
