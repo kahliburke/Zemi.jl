@@ -43,7 +43,7 @@ const error = ref('')
 // The job whose result or error is shown.
 const shownJob = ref('')
 type IngestEvent = { at: string; detail: { stage: string; model?: string; summarizer?: string; input?: number | null;
-  output?: number | null; layer?: string; vectors?: number; error?: string } }
+  output?: number | null; cache_read?: number | null; cache_creation?: number | null; layer?: string; vectors?: number; error?: string } }
 type Attempt = { cursor: number; attempt: string; run: string; job: string | null; document: string; at: string; events: IngestEvent[] }
 const ingestions = ref<Attempt[] | null>(null)
 const historyBusy = ref(false)
@@ -230,7 +230,10 @@ const tokens = (u: Record<string, number>) => {
             <p>Run <code>{{ a.run }}</code><template v-if="a.job"> · {{ a.job }}</template></p>
             <ul><li v-for="(e, i) in a.events" :key="i">
               {{ clock(e.at) }} · {{ e.detail.stage }}
-              <template v-if="e.detail.summarizer"> · {{ e.detail.summarizer }} ({{ e.detail.model }}) · recorded tokens {{ e.detail.input ?? '—' }} in / {{ e.detail.output ?? '—' }} out</template>
+              <template v-if="e.detail.summarizer">
+                · {{ e.detail.summarizer }} ({{ e.detail.model }}) · recorded tokens {{ e.detail.input ?? '—' }} in / {{ e.detail.output ?? '—' }} out
+                <template v-if="e.detail.cache_read != null || e.detail.cache_creation != null"> · cache {{ e.detail.cache_read ?? '—' }} read / {{ e.detail.cache_creation ?? '—' }} written</template>
+              </template>
               <template v-if="e.detail.layer"> · {{ e.detail.layer }} ({{ e.detail.model }}, {{ e.detail.vectors }} vectors)</template>
               <template v-if="e.detail.error"> · {{ e.detail.error }}</template>
             </li></ul>

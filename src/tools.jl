@@ -683,10 +683,10 @@ function format_status(kb::KB)
         "$(n("SELECT count(*) FROM papers WHERE metadata_at IS NOT NULL")) with metadata, ",
         "$(n("SELECT count(*) FROM files")) downloaded, $(n("SELECT count(*) FROM parses")) parsed ",
         "($(n("SELECT count(*) FROM chunks")) passages)")
-    for r in query(kb, """SELECT summarizer, model, count(*) AS n, count(DISTINCT paper_id) AS papers,
-                          sum(input_tokens) AS tin, sum(output_tokens) AS tout FROM summaries GROUP BY summarizer""")
+    for r in summary_totals(kb)
         println(io, "Summaries by $(r.summarizer) ($(r.model)): $(r.n) for $(r.papers) paper(s), ",
-            "$(coalesce(r.tin, "unknown")) input / $(coalesce(r.tout, "unknown")) output tokens")
+            "$(coalesce(r.tin, "unknown")) input / $(coalesce(r.tout, "unknown")) output tokens, ",
+            "$(coalesce(r.cache_read, "unknown")) cache read / $(coalesce(r.cache_creation, "unknown")) cache write tokens (reported only)")
     end
     println(io, "\nLayers:")
     counts = Dict(r.layer => r.n for r in query(kb, "SELECT layer, count(*) AS n FROM embeddings GROUP BY layer"))
