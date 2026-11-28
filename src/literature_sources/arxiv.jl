@@ -286,3 +286,17 @@ function download_pdf(doc_id::AbstractString, version::AbstractString, c::Config
         return path
     end
 end
+
+function arxiv_watch(c, since; list, progress, cancelled)
+    candidates = []
+    for cat in c.watch_categories
+        cancelled() && break
+        progress("asking arXiv for new papers in $cat")
+        for m in list(cat, since, c)
+            (isempty(m.published) || Date(m.published) < since) && continue
+            push!(candidates, (; m.doc_id, m.title, m.authors, m.abstract, m.published, m.primary_category,
+                                doi = m.doi, work_id = nothing, origins = ["arXiv: $cat"]))
+        end
+    end
+    return candidates
+end

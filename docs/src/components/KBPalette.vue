@@ -47,7 +47,7 @@ const remember = (i: Item) => {
 // The pages: the knowledge base's, the projects and findings, and the service's pages one's roles open.
 const pages = computed(() => [
   ['Search', kbPage('index')], ['Paper of the Day', kbPage('daily')], ['Landscape', kbPage('landscape')], ['Explore', kbPage('explore')], ['Topics', kbPage('topics')],
-  ['Authors', kbPage('authors')], ['Missing papers', kbPage('missing')], ['New on arXiv', kbPage('watch')], ['Timeline', kbPage('timeline')],
+  ['Authors', kbPage('authors')], ['Missing papers', kbPage('missing')], ['Paper watch', kbPage('watch')], ['Timeline', kbPage('timeline')],
   ['Status', kbPage('status')], ['Documents', kbPage('manage')], ['Codebases', kbPage('code/')],
   ['Projects', pageLink('/projects')], ['Findings', pageLink('/findings')],
   ...(shared.value ? [['Account', pageLink('/service/account')]] : []),

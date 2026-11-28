@@ -61,7 +61,10 @@ them, and a private one is held for them as well; one open already stays open. B
 group, a document of a kind without access is the group's from then on, held for no one and open to
 every reader: a paper is one document, whoever brings it in.
 """
-function bring_in!(kb::KB, id::AbstractString, holder::Union{Integer,Nothing}; new::Bool)
+function bring_in!(kb::KB, id::AbstractString, holder::Union{Integer,Nothing}; new::Bool, source = "")
+    # A discovery can resolve to an existing private paper only after following its DOI or PDF.
+    # Automatic discovery does not change the audience or holders of an existing document.
+    source == "watch" && holder === nothing && !new && return nothing
     access = scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (id,))
     ismissing(access) && return nothing
     if holder === nothing

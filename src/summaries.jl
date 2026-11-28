@@ -1,4 +1,12 @@
 migration!(30, ["ALTER TABLE summaries ADD COLUMN read_mode TEXT"])
+migration!(34, ["ALTER TABLE summaries ADD COLUMN cache_read_tokens INTEGER",
+                "ALTER TABLE summaries ADD COLUMN cache_creation_tokens INTEGER"])
+
+"Reported token counts across stored summaries. An unreported counter sums to NULL."
+summary_totals(kb) = query(kb, """SELECT summarizer, model, count(*) AS n, count(DISTINCT paper_id) AS papers,
+    sum(input_tokens) AS tin, sum(output_tokens) AS tout,
+    sum(cache_read_tokens) AS cache_read, sum(cache_creation_tokens) AS cache_creation
+    FROM summaries GROUP BY summarizer, model ORDER BY summarizer, model""")
 
 # LLM-written summaries of sections and papers. A section summary is written from the section's
 # parsed text; the paper summary from the title, abstract and the section summaries, so it covers
@@ -453,7 +461,7 @@ Store summaries written outside the pipeline (by an agent, say) as the summarize
 `sections` maps a section's `ord` to its summary, and `paper` is the paper summary with its
 "Topics:" line. Sections the pipeline would not summarize are rejected, so imported and generated
 summaries cover the same units and can be compared. Optional `tokens` are the reported input
-and output for the whole turn, stored once on the paper row; `read_mode`, what the writer read for it.
+and output, optionally followed by cache reads and writes, stored once on the paper row; `read_mode`, what the writer read for it.
 Returns the number stored.
 """
 function import_summaries!(kb::KB, s::Summarizer, doc_id::AbstractString; sections::AbstractDict, paper::AbstractString,
@@ -475,9 +483,11 @@ function import_summaries!(kb::KB, s::Summarizer, doc_id::AbstractString; sectio
     return length(sections) + 1
 end
 
-save_summary!(kb, pid, key, s, sha, text, tin, tout; read_mode = missing) =
-    execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (pid, key, s.name, s.model, prompt_version(s), sha, text, tin, tout, now_iso(), read_mode))
+save_summary!(kb, pid, key, s, sha, text, tin, tout, cache_read = missing, cache_creation = missing; read_mode = missing) =
+    execute!(kb, """INSERT OR REPLACE INTO summaries (paper_id, unit_key, summarizer, model, prompt_version, input_sha,
+        text, input_tokens, output_tokens, created_at, read_mode, cache_read_tokens, cache_creation_tokens)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (pid, key, s.name, s.model, prompt_version(s), sha, text, tin, tout, now_iso(), read_mode, cache_read, cache_creation))
 
 """
     shown_summarizer(kb, doc_id) -> Union{String,Nothing}
@@ -501,7 +511,7 @@ A paper's stored summaries, the paper summary first, then sections in order (a c
 """
 function summaries(kb::KB, doc_id::AbstractString; summarizer = nothing)
     rows = query(kb, """
-        SELECT s.summarizer, s.model, s.unit_key, s.text, s.input_tokens, s.output_tokens, x.path
+        SELECT s.summarizer, s.model, s.unit_key, s.text, s.input_tokens, s.output_tokens, s.cache_read_tokens, s.cache_creation_tokens, x.path
         FROM summaries s JOIN papers p ON p.id = s.paper_id
         LEFT JOIN sections x ON x.paper_id = s.paper_id AND 's:' || p.doc_id || ':' || x.ord = s.unit_key
         WHERE p.doc_id = ? AND (? IS NULL OR s.summarizer = ?)""",
@@ -509,5 +519,5 @@ function summaries(kb::KB, doc_id::AbstractString; summarizer = nothing)
     tree = is_kind(k -> k.tree, doc_id)
     order(r) = startswith(r.unit, "p:") ? (-1, "") : tree ? (0, r.section) : (parse(Int, split(r.unit, ':')[3]), "")
     return sort([(; r.summarizer, r.model, unit = r.unit_key, section = coalesce(r.path, "(paper)"), r.text,
-                   r.input_tokens, r.output_tokens) for r in rows]; by = r -> (r.summarizer, order(r)))
+                   r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens) for r in rows]; by = r -> (r.summarizer, order(r)))
 end
