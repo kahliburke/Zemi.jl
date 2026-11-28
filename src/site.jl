@@ -544,7 +544,7 @@ function classification_rows(c::AbstractDict)
     return rows
 end
 
-"How a mention says a paper came: posted in a channel by someone, uploaded, added from the arXiv watch…, and when."
+"How a mention says a paper came: posted in a channel by someone, uploaded, added from the paper watch…, and when."
 function arrival_text(m)
     who = ismissing(m.author) ? "" : " by " * m.author
     when = " " * Dates.format(m.posted, "yyyy-mm-dd")
