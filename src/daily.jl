@@ -202,7 +202,7 @@ Pick and feature today's paper as a job: when today has none yet, or with `anoth
 figures cut anew.
 Returns the job already doing it, if one is.
 """
-function start_daily(kb::KB; another::Bool = false, again::Bool = false, day::AbstractString = "")
+function start_daily(kb::KB; automatic::Bool = false, another::Bool = false, again::Bool = false, day::AbstractString = "")
     again || isempty(day) || error("A day other than today can only have its paper analysed again")
     running = filter(j -> j.status == :running && j.name == "paper of the day", list_jobs())
     isempty(running) || return first(running)
@@ -218,6 +218,7 @@ function start_daily(kb::KB; another::Bool = false, again::Bool = false, day::Ab
         if !another && !ismissing(scalar(kb, "SELECT 1 FROM daily WHERE day = ? AND status = 'done'", (day,)))
             return "Today's paper is already chosen."
         end
+        automatic && !reserve_watch_read!(kb, "daily") && return "Automatic reading budget reached."
         report!(job, "judging the new papers")
         judge_watched!(kb)
         report!(job, "picking the paper of the day")

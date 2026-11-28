@@ -1000,7 +1000,7 @@ function start_autosync!(kb::KB)
         STOPPING[] && break
         try
             execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('dataset_autosync_at', ?)", (now_iso(),))
-            job = start_sync(kb; unread = d.read_unread, publish = true)
+            job = start_sync(kb; automatic = true, unread = d.read_unread, publish = true)
             wait(job)
             job.status == :done || @warn "Autosync did not finish; the next is in $(d.autosync_hours) hours" status = job.status error = job.error
         catch e

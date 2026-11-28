@@ -292,3 +292,13 @@ Set `infer_models = true` to also report the selected built-in defaults on an ot
 instance. Use `models` to supplement inferred entries, or set `infer_models = false` and supply the
 entire public list yourself. The privacy page links directly to the models section whenever it has
 entries.
+
+### Automatic reading budget
+
+In `[watch]`, set `daily_reads` and/or `weekly_reads` to cap automatic full reading
+attempts. Both default to -1 (unlimited). Zero only records papers. The limits use UTC
+days and Monday–Sunday weeks. Each automatic paper-of-the-day run also reserves a slot
+because its analyst reads the PDF. Manually requested readings use their usual workflow.
+Title and abstract placement and judging continue when the budget is exhausted.
+High-rated papers are recorded and queued across restarts until a later watch check has
+capacity. Attempts that fail after reservation still count because they may have used tokens.

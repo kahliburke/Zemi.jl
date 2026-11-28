@@ -8416,3 +8416,24 @@ end
         close(kb)
     end
 end
+
+@zset "automatic watch reading budget" begin
+    c = temp_config(layers = Layer[], watch_daily_reads = 1, watch_weekly_reads = 2)
+    kb = open_kb(c)
+    for (id, rating) in [("2610.00001", 2), ("2610.00002", 3)]
+        K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score,
+            nearest, found_at, relevance) VALUES (?, ?, '[]', '', '2001-01-01', '', 1, '[]', ?, ?)""", (id, id, K.now_iso(), rating))
+    end
+    monday = K.Date(2026, 11, 23)
+    take(day) = K.take_watched!(kb; today = () -> day, read_in_full = (ids, step) -> true, record = ids -> nothing)
+    @test take(monday) == (; read = ["2610.00002"], recorded = ["2610.00001"])
+    close(kb)
+    kb = open_kb(c)
+    @test isempty(take(monday).read)
+    @test K.reserve_watch_read!(kb, "daily"; day = monday + K.Day(1))
+    @test !K.reserve_watch_read!(kb, "watch"; day = monday + K.Day(2))
+    @test take(monday + K.Week(1)).read == ["2610.00001"]
+    @test isempty(take(monday + K.Week(1)).read)
+    @test only(K.mentions(kb, "2610.00001")).source == "watch"
+    close(kb)
+end
