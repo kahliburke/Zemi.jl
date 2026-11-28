@@ -174,7 +174,7 @@ end
 "Published identifiers for the group's literature whose incoming citations may be watched."
 function watch_library_dois(kb)
     out = String[]
-    for r in query(kb, "SELECT doc_id, doi FROM papers WHERE access = 'open' AND $(literature_sql())")
+    for r in query(kb, "SELECT doc_id, doi FROM papers WHERE $(literature_sql())")
         ismissing(r.doi) || push!(out, normalize_doi(r.doi))
         is_arxiv_id(r.doc_id) && push!(out, "10.48550/arxiv." * lowercase(r.doc_id))
     end
