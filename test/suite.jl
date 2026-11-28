@@ -8500,6 +8500,10 @@ end
             K.execute!(kb, "UPDATE watch SET relevance = 3 WHERE doc_id = '10.1234/private'")
             @test isempty(K.take_watched!(kb; read_in_full = (args...) -> error("private read")).read)
             @test K.scalar(kb, "SELECT access FROM papers WHERE doc_id = '2610.10002'") == "private"
+            K.execute!(kb, """INSERT INTO watch (doc_id, title, authors, abstract, published, category, score, nearest,
+                found_at, relevance, taken) VALUES ('2610.10002','Private','[]','','2001-01-01','',1,'[]',?,3,'deferred')""", (K.now_iso(),))
+            @test isempty(K.take_watched!(kb; read_in_full = (args...) -> error("private queued paper")).read)
+            @test all(p -> p.id != "2610.10002", K.daily_candidates(kb))
         finally
             K.DOI_COPIES[] = oldcopies
         end

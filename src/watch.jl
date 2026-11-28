@@ -56,7 +56,7 @@ function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c;
                 progress = msg -> nothing, cancelled = () -> false, openalex = openalex_watch)
     c = kb.config
     since = Date(now) - Day(c.watch_days)
-    execute!(kb, "DELETE FROM watch WHERE published < ? AND coalesce(taken, '') <> 'deferred'", (string(Date(now) - Day(4 * c.watch_days)),))
+    execute!(kb, "DELETE FROM watch WHERE published < ? AND coalesce(taken, '') NOT IN ('deferred','arriving')", (string(Date(now) - Day(4 * c.watch_days)),))
     replace_watched!(kb; progress)
     candidates = []
     for cat in c.watch_categories
@@ -299,7 +299,7 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
     c = kb.config
     rows = query(kb, """SELECT doc_id AS id, relevance, coalesce(reason, '') AS reason, taken FROM watch
                         WHERE relevance IS NOT NULL AND ((taken IS NULL AND $(unheld_watch_sql())) OR taken = 'arriving'
-                            OR (taken = 'deferred' AND doc_id IN (SELECT doc_id FROM papers)))
+                            OR (taken = 'deferred' AND doc_id IN (SELECT doc_id FROM papers WHERE access = 'open')))
                           AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
                         ORDER BY relevance DESC, score DESC, found_at, doc_id""")
     read = [String(r.id) for r in rows if r.relevance >= c.watch_read_from]
