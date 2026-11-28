@@ -67,16 +67,8 @@ function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c;
                         AND NOT EXISTS (SELECT 1 FROM json_each(watch.origins) WHERE value IN (?,?))""",
                    (string(Date(now) - Day(4 * c.watch_days)), MISSING_ORIGIN, RECOMMENDATION_ORIGIN))
     replace_watched!(kb; progress)
-    candidates = []
-    for cat in c.watch_categories
-        cancelled() && return 0
-        progress("asking arXiv for new papers in $cat")
-        for m in list(cat, since, c)
-            (isempty(m.published) || Date(m.published) < since) && continue
-            push!(candidates, (; m.doc_id, m.title, m.authors, m.abstract, m.published, m.primary_category,
-                                doi = m.doi, work_id = nothing, origins = ["arXiv: $cat"]))
-        end
-    end
+    candidates = arxiv_watch(c, since; list, progress, cancelled)
+    cancelled() && return 0
     append!(candidates, openalex(kb, since; cancelled))
     cancelled() && return 0
     append!(candidates, references(kb; cancelled))
@@ -88,6 +80,39 @@ function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c;
     n = place_watch_candidates!(kb, candidates; progress)
     execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('watch_checked_at', ?)", (now_iso(),))
     return n
+end
+
+# The watch and its Add button use the same saved metadata. A DOI supplied while
+# the entry was awaiting review follows normal DOI resolution at arrival.
+function add_watch_resource!(kb, id; by, anyway, holder)
+    rows = query(kb, "SELECT * FROM watch WHERE doc_id = ? AND source_url IS NOT NULL", (id,))
+    isempty(rows) && not_found("No watched document $id")
+    w = only(rows)
+    try
+        ismissing(w.doi) || return add_work!(kb, w.doi; by, anyway, holder, source = "watch")
+        key = chop(id; head = length("res-watch-"), tail = 0)
+        r = Resource(; key, title = w.title, url = w.source_url, authors = json_list(w.authors),
+                     date = w.published, note = w.abstract)
+        local_id, _ = put_resource!(kb, "watch", r; by, anyway, read = false)
+        bring_in!(kb, local_id, holder; new = true, source = "watch")
+        return local_id
+    catch e
+        e isa DroppedError || rethrow()
+        return nothing
+    end
+end
+
+# Run inside the placement transaction. Keep the content fingerprint consistent
+# with resource_content, so an explicit refresh can index the new identifier.
+function attach_watch_doi!(kb, id, doi)
+    row = resource_row(kb, id)
+    (row === nothing || row.source != "watch" || !ismissing(row.doi)) && return
+    changed!(kb, "UPDATE papers SET doi = ? WHERE id = ? AND access = 'open' AND doi IS NULL", (doi, row.pid)) == 0 && return
+    r = Resource(; key = row.key, title = row.title, type = row.type, authors = json_list(row.authors),
+                 organizations = json_list(row.organizations), date = coalesce(row.published, ""), url = row.url,
+                 note = row.note, container = row.container, publisher = row.publisher, accessed = row.accessed, doi)
+    sha = bytes2hex(sha256(JSON.json(resource_content(r))))
+    execute!(kb, "UPDATE resources SET content_sha = ?, updated_at = ? WHERE paper_id = ?", (sha, now_iso(), row.pid))
 end
 
 # Match each discovery by all its identifiers before paying for an embedding or a

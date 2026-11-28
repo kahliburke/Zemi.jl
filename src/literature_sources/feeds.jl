@@ -1,25 +1,3 @@
-# Public links are kept verbatim except for the scheme, host, default port and fragment.
-function watch_url(value)
-    value isa AbstractString || return nothing
-    s = strip(value)
-    occursin(r"[\s\\\x00-\x1f]", s) && return nothing
-    u = try HTTP.URI(s) catch; return nothing end
-    scheme = lowercase(u.scheme)
-    scheme in ("http", "https") && !isempty(u.host) && isempty(u.userinfo) || return nothing
-    port = u.port == (scheme == "https" ? "443" : "80") ? nothing : u.port
-    return try string(HTTP.URI(u; scheme, host = lowercase(u.host), port, fragment = nothing)) catch; nothing end
-end
-
-watch_resource_id(url) = resource_id("watch", bytes2hex(sha256(url))[1:32])
-
-# Only strong identifiers match across sources. Opaque feed GUIDs are scoped to that feed.
-function linked_candidate(; url, key, title, authors, abstract, published, category, origin, doi, arxiv)
-    aliases = unique(filter(!isempty, [url, key]))
-    id = arxiv === nothing ? something(doi, watch_resource_id(url)) : arxiv
-    return (; doc_id = id, title, authors, abstract, published, primary_category = category,
-            origins = [origin], doi, work_id = nothing, aliases, url)
-end
-
 function feed_date(raw)
     iso = match(r"^\d{4}-\d\d-\d\d", raw)
     iso === nothing || return tryparse(Date, iso.match)
@@ -107,37 +85,4 @@ function feed_watch(kb, since; cancelled = () -> false, progress = msg -> nothin
         end
     end
     return items
-end
-
-# The watch and its Add button use the same saved metadata. A DOI supplied while
-# the entry was awaiting review follows normal DOI resolution at arrival.
-function add_watch_resource!(kb, id; by, anyway, holder)
-    rows = query(kb, "SELECT * FROM watch WHERE doc_id = ? AND source_url IS NOT NULL", (id,))
-    isempty(rows) && not_found("No watched document $id")
-    w = only(rows)
-    try
-        ismissing(w.doi) || return add_work!(kb, w.doi; by, anyway, holder, source = "watch")
-        key = chop(id; head = length("res-watch-"), tail = 0)
-        r = Resource(; key, title = w.title, url = w.source_url, authors = json_list(w.authors),
-                     date = w.published, note = w.abstract)
-        local_id, _ = put_resource!(kb, "watch", r; by, anyway, read = false)
-        bring_in!(kb, local_id, holder; new = true, source = "watch")
-        return local_id
-    catch e
-        e isa DroppedError || rethrow()
-        return nothing
-    end
-end
-
-# Run inside the placement transaction. Keep the content fingerprint consistent
-# with resource_content, so an explicit refresh can index the new identifier.
-function attach_watch_doi!(kb, id, doi)
-    row = resource_row(kb, id)
-    (row === nothing || row.source != "watch" || !ismissing(row.doi)) && return
-    changed!(kb, "UPDATE papers SET doi = ? WHERE id = ? AND access = 'open' AND doi IS NULL", (doi, row.pid)) == 0 && return
-    r = Resource(; key = row.key, title = row.title, type = row.type, authors = json_list(row.authors),
-                 organizations = json_list(row.organizations), date = coalesce(row.published, ""), url = row.url,
-                 note = row.note, container = row.container, publisher = row.publisher, accessed = row.accessed, doi)
-    sha = bytes2hex(sha256(JSON.json(resource_content(r))))
-    execute!(kb, "UPDATE resources SET content_sha = ?, updated_at = ? WHERE paper_id = ?", (sha, now_iso(), row.pid))
 end

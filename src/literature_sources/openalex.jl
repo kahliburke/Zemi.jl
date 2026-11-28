@@ -234,3 +234,70 @@ function openalex_watch(kb, since; cancelled = () -> false, page = openalex_page
     end
     return found
 end
+
+"""
+    openalex_references(dois; contact = "", get_works = openalex_get) -> (; found, error)
+
+The reference lists OpenAlex keeps for the works with DOIs `dois`, fifty works at a time, as
+[`Answers`](@ref) keyed by normalized DOI. OpenAlex names the works cited by its own ids, which are
+looked up for their DOIs, titles, authors and years, and their arXiv ids where they are posted there.
+A request that fails stops the asking, as for Semantic Scholar ([`s2_references`](@ref)): only the
+works whose whole list was looked up are answered.
+"""
+function openalex_references(dois::AbstractVector{<:AbstractString}; contact::AbstractString = "", get_works = openalex_get)
+    found = Answers()
+    resting("OpenAlex") && return (; found, error = "OpenAlex failed lately and is not asked for a few minutes")
+    asked = unique(normalize_doi.(dois))
+    cited = Dict{String,Vector{String}}()
+    known = Dict{String,FetchedReference}()
+    try
+        for batch in Iterators.partition(asked, 50)
+            works = get_works(["filter" => "doi:" * join(batch, '|'), "per-page" => "50", "select" => "doi,referenced_works"]; contact)
+            works isa AbstractVector || error("an answer of an unexpected form")
+            for w in works
+                doi = w isa AbstractDict ? answer_text(get(w, "doi", nothing)) : nothing
+                doi === nothing && continue
+                ids = get(w, "referenced_works", nothing)
+                cited[normalize_doi(doi)] = [last(split(u, '/')) for u in (ids isa AbstractVector ? ids : []) if u isa AbstractString]
+            end
+        end
+        for batch in Iterators.partition(unique(reduce(vcat, values(cited); init = String[])), 50)
+            works = get_works(["filter" => "openalex_id:" * join(batch, '|'), "per-page" => "50",
+                               "select" => "id,doi,title,publication_year,authorships,locations"]; contact)
+            works isa AbstractVector || error("an answer of an unexpected form")
+            for w in works
+                id = w isa AbstractDict ? answer_text(get(w, "id", nothing)) : nothing
+                id === nothing || (known[last(split(id, '/'))] = openalex_reference(w))
+            end
+        end
+    catch e
+        e isa InterruptException && rethrow()
+        rest!("OpenAlex")
+        return (; found, error = "OpenAlex: " * failure_message(e))
+    end
+    for d in asked
+        found[d] = haskey(cited, d) ? FetchedReference[known[i] for i in cited[d] if haskey(known, i)] : nothing
+    end
+    return (; found, error = "")
+end
+
+function openalex_reference(w::AbstractDict)
+    doi = answer_text(get(w, "doi", nothing))
+    doi = doi === nothing ? nothing : normalize_doi(doi)
+    arxiv = nothing
+    if doi !== nothing && startswith(doi, "10.48550/arxiv.")
+        arxiv, doi = doi[length("10.48550/arxiv.")+1:end], nothing
+    end
+    locations = get(w, "locations", nothing)
+    for l in (locations isa AbstractVector ? locations : [])
+        arxiv === nothing && l isa AbstractDict || break
+        id = parse_arxiv_id(something(answer_text(get(l, "landing_page_url", nothing)), ""))
+        id === nothing || (arxiv = id.id)
+    end
+    authorships = get(w, "authorships", nothing)
+    authors = String[n for a in (authorships isa AbstractVector ? authorships : []) if a isa AbstractDict
+                     for who in (get(a, "author", nothing),) if who isa AbstractDict
+                     for n in (answer_text(get(who, "display_name", nothing)),) if n !== nothing]
+    return FetchedReference((arxiv, doi, something(answer_text(get(w, "title", nothing)), ""), authors,
+                             answer_year(get(w, "publication_year", nothing))))
+end
