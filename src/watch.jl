@@ -294,7 +294,7 @@ Take the judged watched papers into the knowledge base by their rating: those ra
 `watch_read_from` read in full (see [`ingest!`](@ref)) one by one, until `cancelled()` leaves the
 rest to the next watch, and those rated at least `watch_record_from` recorded (the arXiv record
 fetched, the title and abstract embedded, see [`embed_records!`](@ref)).
-Each arrives as "added from the arXiv watch", with its rating and the judge's sentence. Where papers
+Each arrives as "added from the paper watch", with its rating and the judge's sentence. Where papers
 cannot be read here they are recorded instead. Returns the ids taken each way. `read_in_full(ids, progress)`
 and `record(ids)` do the reading and recording (stand-ins in tests, which reach no arXiv).
 """
