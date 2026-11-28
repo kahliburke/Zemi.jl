@@ -2159,7 +2159,7 @@ end
         pid = K.paper_id(pub, "2609.00001")
         K.execute!(pub, "UPDATE papers SET title = 'Corals' WHERE id = ?", (pid,))
         K.execute!(pub, "INSERT INTO mentions (paper_id, source, channel, posted_at, author) VALUES (?, 'seminar', 'reading-list', 1.7e9, 'Ada')", (pid,))
-        K.execute!(pub, "INSERT INTO summaries VALUES (?, 'p:2609.00001', 'sum', 'm', 1, 'x', 'About corals.', 1, 1, ?, 'pdf')", (pid, K.now_iso()))
+        K.execute!(pub, "INSERT INTO summaries VALUES (?, 'p:2609.00001', 'sum', 'm', 1, 'x', 'About corals.', 1, 1, ?, 'pdf', NULL, NULL)", (pid, K.now_iso()))
         K.execute!(pub, "INSERT INTO classifications VALUES (?, 'sum', 'm', '{\"category\": \"physics.ao-ph\"}', ?)", (pid, K.now_iso()))
         coll = K.ensure_layer!(pub, layer, 3)
         units = K.units(pub, layer, "2609.00001")
@@ -2311,7 +2311,7 @@ end
         K.store_parse!(kb, id, K.ParsedPaper(1, [head("1. Body"), body(text)], [K.Section(1, 1, "1", "1. Body", "1. Body", 1, 1)]))
         K.execute!(kb, "UPDATE papers SET title = ? WHERE doc_id = ?", (text, id))
     end
-    summarize!(kb, id, text) = K.execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, 'sum', 'm', 1, 'x', ?, 1, 1, ?, NULL)",
+    summarize!(kb, id, text) = K.execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, 'sum', 'm', 1, 'x', ?, 1, 1, ?, NULL, NULL, NULL)",
                                           (K.paper_id(kb, id), "p:$id", text, K.now_iso()))
     streams_of(kb) = Dict(r.doc_id => r.stream for r in K.query(kb, "SELECT doc_id, stream FROM dataset_docs"))
     store = DirStore(mktempdir())
@@ -4371,6 +4371,7 @@ end
     opened = Dict{String,String}()
     replies = Dict{String,String}()
     sent = String[]
+    usage = Dict("inputTokens" => 37, "outputTokens" => 11, "cacheReadTokens" => 2100, "cacheCreationTokens" => 380)
     skip_file = Ref(false)         # the next code batch leaves out a file
     fake(name, args) = if name == :agent_open
         opened[args["id"]] = args["cwd"]
@@ -4425,7 +4426,7 @@ end
         K.JSON.json(Dict("status" => haskey(opened, args["agent_id"]) ? "idle" : "dead"))
     elseif name == :agent_output
         K.JSON.json(Dict("done" => true, "status" => "idle", "text" => replies[args["agent_id"]],
-                         "usage" => Dict("inputTokens" => 37, "outputTokens" => 11)))
+                         "usage" => usage))
     else
         "{}"
     end
@@ -4442,10 +4443,11 @@ end
                                                           piece(:heading, "2. Two", 2), piece(:paragraph, repeat("Second words. ", 30), 2)], sections))
         function total(summary, doc)
             rs = summaries(kb, doc; summarizer = summary.name)
-            return (sum(skipmissing(r.input_tokens for r in rs)), sum(skipmissing(r.output_tokens for r in rs)))
+            return map(k -> sum(skipmissing(getproperty(r, k) for r in rs)),
+                       (:input_tokens, :output_tokens, :cache_read_tokens, :cache_creation_tokens))
         end
         @test summarize_paper!(kb, s, "2609.00001") == 3                  # two sections and the paper
-        @test total(s, "2609.00001") == (37, 11)
+        @test total(s, "2609.00001") == (37, 11, 2100, 380)
         @test [x.text for x in summaries(kb, "2609.00001"; summarizer = "agent-t")] ==
               ["The paper.\nTopics: a, b", "Section 1, read whole.", "Section 2, read whole."]
         source = K.paper_json(K.site_paper(kb, "2609.00001"; related = false))["provenance"]
@@ -4471,7 +4473,7 @@ end
         n = length(opened)
         @test K.agent_summarize_long!(kb, s, "2609.00001", K.section_texts(kb, "2609.00001"); batch_chars = 10) == 2
         @test length(opened) == n + 2 && K.agent_summaries(kb, s, "2609.00001") == :current
-        @test total(s, "2609.00001") == (74, 22)
+        @test total(s, "2609.00001") == (74, 22, 4200, 760)
         @test [x.text for x in summaries(kb, "2609.00001"; summarizer = "agent-t")] ==
               ["The document.\nTopics: x", "Part section 1.", "Section 2, read whole."]
         # An agent that sees images but not a PDF is given the paper's figures, as cut from it, with their captions.
@@ -4499,15 +4501,17 @@ end
         @test K.agent_summaries(kb, pdf, "2609.00001") == :current
         # External imports have no usage report. A PDF worker reports one total for the whole paper.
         counts = only(r for r in K.contents_json(kb, [])["summaries"] if r["summarizer"] == pdf.name)
-        @test counts["input"] === counts["output"] === nothing
+        @test counts["input"] === counts["output"] === counts["cache_read"] === counts["cache_creation"] === nothing
         source = joinpath(mktempdir(), "source.pdf")
         write(source, "%PDF-1.4")
         K.execute!(kb, "INSERT INTO files VALUES (?, ?, 'pdf-1', 8, ?)", (pid, source, K.now_iso()))
         K.execute!(kb, "DELETE FROM summaries WHERE summarizer = ?", (pdf.name,))
         @test summarize_paper!(kb, pdf, "2609.00001") == 3
-        @test total(pdf, "2609.00001") == (37, 11)
-        @test summarize_paper!(kb, pdf, "2609.00001") == 0 && total(pdf, "2609.00001") == (37, 11)
-        @test occursin("Summaries by agent-pdf (opus): 3 for 1 paper(s), 37 input / 11 output tokens", K.format_status(kb))
+        @test total(pdf, "2609.00001") == (37, 11, 2100, 380)
+        @test summarize_paper!(kb, pdf, "2609.00001") == 0 && total(pdf, "2609.00001") == (37, 11, 2100, 380)
+        @test occursin("Summaries by agent-pdf (opus): 3 for 1 paper(s), 37 input / 11 output tokens, 2100 cache read / 380 cache write tokens (reported only)", K.format_status(kb))
+        counts = only(r for r in K.contents_json(kb, [])["summaries"] if r["summarizer"] == pdf.name)
+        @test (counts["cache_read"], counts["cache_creation"]) == (2100, 380)
         K.execute!(kb, "UPDATE blocks SET text = text || ' Read better.' WHERE paper_id = ? AND kind = 'paragraph'", (pid,))
         @test K.agent_summaries(kb, pdf, "2609.00001") == :current && K.agent_summaries(kb, s, "2609.00001") == :stale
         K.execute!(kb, "UPDATE parses SET file_sha = 'pdf-2' WHERE paper_id = ?", (pid,))
@@ -4602,7 +4606,7 @@ end
         before = length(opened)
         @test K.agent_summarize_code!(kb, s, code; batch_chars = 400) == 3 + 1 + 1   # 3 files, src/, the codebase
         calls = length(opened) - before
-        @test total(s, code) == (37 * calls, 11 * calls)
+        @test total(s, code) == (37 * calls, 11 * calls, 2100 * calls, 380 * calls)
         @test K.agent_summarize_code!(kb, s, code) == 0
         write(joinpath(repo, "src", "More.jl"), join("more$i() = $i + 1\n" for i in 1:40))
         K.parse_code!(kb, code)
@@ -4612,8 +4616,14 @@ end
         K.parse_code!(kb, code)
         skip_file[] = true
         @test K.agent_summarize_code!(kb, s, code) == 1 + 1 + 1 && !skip_file[]
+        retried = only(r for r in summaries(kb, code; summarizer = s.name) if isequal(r.input_tokens, 74))
+        @test (retried.cache_read_tokens, retried.cache_creation_tokens) == (4200, 760)
         @test any(startswith(f, "files-1-again") for f in readdir(K.agents_dir("agent-t", code)))
         @test only(x.text for x in summaries(kb, code; summarizer = "agent-t") if startswith(x.unit, "p:")) == "A demo.\nTopics: demo"
+        # Agents that return only the older counters still have measurable input and output.
+        delete!(usage, "cacheReadTokens")
+        delete!(usage, "cacheCreationTokens")
+        @test isequal(K.summary_turn(s, mktempdir(), "Read the folder."; system = "Test"), (37, 11, missing, missing))
         close(kb)
     end
     finally
@@ -4797,7 +4807,7 @@ end
                                                           piece(:heading, "2. Two", 2), piece(:paragraph, repeat("Second words. ", 30), 2)], sections))
         pid = K.paper_id(kb, "2609.00001")
         for ord in 1:2, (name, text) in ("careful" => "A careful summary.", "sloppy" => "A sloppy summary.")
-            K.execute!(kb, "INSERT INTO summaries VALUES (?, ?, ?, 'm', 1, 'x', ?, 1, 1, ?, NULL)", (pid, "s:2609.00001:$ord", name, text, K.now_iso()))
+            K.execute!(kb, "INSERT INTO summaries VALUES (?, ?, ?, 'm', 1, 'x', ?, 1, 1, ?, NULL, NULL, NULL)", (pid, "s:2609.00001:$ord", name, text, K.now_iso()))
         end
         judge = Summarizer(; name = "judge", url = "http://127.0.0.1:$port", model = "m")
         r = judge_summaries(kb, judge, ["sloppy", "careful"]; ids = ["2609.00001"], sections = 5)
@@ -8309,14 +8319,15 @@ end
 
         s = Summarizer(; name = "test-writer", model = "test-model")
         marker = K.summary_usage_marker(kb, id, s)
-        K.save_summary!(kb, K.paper_id(kb, id), "p:$id", s, "first", "first", 20, 6)
+        K.save_summary!(kb, K.paper_id(kb, id), "p:$id", s, "first", "first", 20, 6, 0, 319)
         counts = K.ingest_summary_usage(kb, id, s, marker)
         @test (counts.input, counts.output, counts.summaries) == (20, 6, 1)
+        @test (counts.cache_read, counts.cache_creation) == (0, 319)
         marker = K.summary_usage_marker(kb, id, s)
         @test K.ingest_summary_usage(kb, id, s, marker).input === nothing
         K.save_summary!(kb, K.paper_id(kb, id), "p:$id", s, "second", "second", 0, missing)
         counts = K.ingest_summary_usage(kb, id, s, marker)
-        @test counts.input === 0 && counts.output === nothing
+        @test counts.input === 0 && counts.output === counts.cache_read === counts.cache_creation === nothing
 
         K.execute!(kb, "UPDATE papers SET access = 'private' WHERE doc_id = ?", (id,))
         viewer = K.Caller(nothing, "Viewer", "", Set(["audit.view"]), :token, nothing)
@@ -8480,6 +8491,18 @@ end
         @test isempty(result.read) && K.is_resource(only(result.recorded))
         @test isempty(K.query(kb, "SELECT key FROM kv WHERE key LIKE 'watch_reads/%'"))
         @test only(K.watch_taken(kb)).id == only(result.recorded)
+        # A DOI that unexpectedly resolves to an existing private arXiv paper must not share it.
+        oldcopies = K.DOI_COPIES[]
+        try
+            K.DOI_COPIES[] = (d; contact) -> (; arxiv = "2610.10002", pdfs = String[])
+            private_doi = merge(first(candidates), (; doc_id = "10.1234/private", doi = "10.1234/private", work_id = nothing))
+            @test K.place_watch_candidates!(kb, [private_doi]; place) == 1
+            K.execute!(kb, "UPDATE watch SET relevance = 3 WHERE doc_id = '10.1234/private'")
+            @test isempty(K.take_watched!(kb; read_in_full = (args...) -> error("private read")).read)
+            @test K.scalar(kb, "SELECT access FROM papers WHERE doc_id = '2610.10002'") == "private"
+        finally
+            K.DOI_COPIES[] = oldcopies
+        end
     finally
         K.DOI_RESOURCE[] = old
         K.ARXIV_TITLE_SEARCH[] = oldsearch

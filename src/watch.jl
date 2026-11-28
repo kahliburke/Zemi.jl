@@ -28,7 +28,7 @@ migration!(21, ["""CREATE TABLE watch_new (
 # against changed focus areas without embedding it again.
 migration!(22, ["ALTER TABLE watch ADD COLUMN vector BLOB"])
 
-migration!(34, ["ALTER TABLE watch ADD COLUMN doi TEXT",
+migration!(35, ["ALTER TABLE watch ADD COLUMN doi TEXT",
                 "ALTER TABLE watch ADD COLUMN work_id TEXT",
                 "ALTER TABLE watch ADD COLUMN origins TEXT NOT NULL DEFAULT '[]'"])
 
@@ -321,18 +321,37 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
         # ID, uploaded PDF or bibliography resource. Keep all later joins on that ID.
         # Record intent before resolving a DOI, which can involve network I/O.
         # An interrupted arrival is selected again even if its document now exists.
-        execute!(kb, "UPDATE watch SET taken = 'arriving' WHERE doc_id = ?", (id,))
+        changed!(kb, """UPDATE watch SET taken = 'arriving' WHERE doc_id = ?
+                        AND (taken IS NULL OR taken = 'arriving')""", (id,)) == 0 && return nothing
         ids = add_papers!(kb, [id]; source = "watch")
         if isempty(ids)
             execute!(kb, "DELETE FROM watch WHERE doc_id = ? AND taken = 'arriving'", (id,))
             return nothing
         end
         local_id = only(ids)
-        transaction(kb) do
-            execute!(kb, "UPDATE mentions SET message = ? WHERE paper_id = ? AND source = 'watch'", (why[id], paper_id(kb, local_id)))
-            execute!(kb, "UPDATE watch SET doc_id = ?, taken = ?, taken_at = ? WHERE doc_id = ?", (local_id, how, now_iso(), id))
+        if !isequal(scalar(kb, "SELECT access FROM papers WHERE doc_id = ?", (local_id,)), "open")
+            execute!(kb, "DELETE FROM watch WHERE doc_id = ?", (id,))
+            return nothing
         end
-        return local_id
+        return transaction(kb) do
+            execute!(kb, "UPDATE mentions SET message = ? WHERE paper_id = ? AND source = 'watch'", (why[id], paper_id(kb, local_id)))
+            if local_id != id
+                other = query(kb, "SELECT origins, taken FROM watch WHERE doc_id = ?", (local_id,))
+                if !isempty(other)
+                    reasons = union(json_list(scalar(kb, "SELECT origins FROM watch WHERE doc_id = ?", (id,))),
+                                    json_list(only(other).origins))
+                    if !ismissing(only(other).taken)
+                        execute!(kb, "UPDATE watch SET origins = ? WHERE doc_id = ?", (JSON.json(reasons), local_id))
+                        execute!(kb, "DELETE FROM watch WHERE doc_id = ?", (id,))
+                        return nothing
+                    end
+                    execute!(kb, "DELETE FROM watch WHERE doc_id = ?", (local_id,))
+                    execute!(kb, "UPDATE watch SET origins = ? WHERE doc_id = ?", (JSON.json(reasons), id))
+                end
+            end
+            execute!(kb, "UPDATE watch SET doc_id = ?, taken = ?, taken_at = ? WHERE doc_id = ?", (local_id, how, now_iso(), id))
+            return local_id
+        end
     end
     records = String[]
     for id in recorded

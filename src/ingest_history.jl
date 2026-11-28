@@ -57,7 +57,7 @@ end
 # Re-parsing may remove the highest rowid before new summaries are written. Compare
 # each unit with its old row to count replacements and leave cached summaries out.
 function summary_rows(kb, id, s)
-    return query(kb, """SELECT rowid AS revision, unit_key, input_sha, input_tokens, output_tokens
+    return query(kb, """SELECT rowid AS revision, unit_key, input_sha, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
                         FROM summaries WHERE paper_id = ? AND summarizer = ?""", (paper_id(kb, id), s.name))
 end
 
@@ -72,5 +72,6 @@ function ingest_summary_usage(kb, id, s, marker)
         return isempty(known) ? nothing : sum(known)
     end
     return (; model = s.model, summarizer = s.name, summaries = length(changed),
-            input = reported(r.input_tokens for r in changed), output = reported(r.output_tokens for r in changed))
+            input = reported(r.input_tokens for r in changed), output = reported(r.output_tokens for r in changed),
+            cache_read = reported(r.cache_read_tokens for r in changed), cache_creation = reported(r.cache_creation_tokens for r in changed))
 end
