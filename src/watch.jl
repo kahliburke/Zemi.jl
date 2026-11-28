@@ -44,7 +44,7 @@ unheld_watch_sql() = """watch.doc_id NOT IN (SELECT doc_id FROM papers)
         AND NOT EXISTS (SELECT 1 FROM doi_arxiv d JOIN papers p ON p.doc_id = d.doc_id WHERE d.doi = watch.doi)))"""
 
 watch_sources_enabled(c) = !isempty(c.watch_categories) || !isempty(c.watch_venues) ||
-                           !isempty(c.watch_authors) || c.watch_citing_library || c.watch_missing_per_check > 0 || !isempty(c.watch_feeds)
+                           !isempty(c.watch_authors) || c.watch_citing_library || c.watch_missing_per_check > 0 || !isempty(c.watch_feeds) || !isempty(c.watch_recommend_like)
 
 """
     watch!(kb; list = list_new_papers, now = now(UTC), progress, cancelled) -> Int
@@ -59,12 +59,13 @@ are placed again first when the group has changed (see [`replace_watched!`](@ref
 new papers were placed.
 """
 function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c; patience = WATCH_PATIENCE), now::DateTime = Dates.now(UTC),
-                progress = msg -> nothing, cancelled = () -> false, openalex = openalex_watch, references = missing_watch, feeds = feed_watch)
+                progress = msg -> nothing, cancelled = () -> false, openalex = openalex_watch, references = missing_watch, feeds = feed_watch, recommendations = recommended_watch)
     c = kb.config
     since = Date(now) - Day(c.watch_days)
     execute!(kb, """DELETE FROM watch WHERE (CASE WHEN source_url IS NULL THEN published ELSE substr(found_at,1,10) END) < ?
                         AND NOT (source_url IS NOT NULL AND doc_id IN (SELECT doc_id FROM papers)) AND coalesce(taken, '') NOT IN ('deferred','arriving')
-                        AND NOT EXISTS (SELECT 1 FROM json_each(watch.origins) WHERE value = ?)""", (string(Date(now) - Day(4 * c.watch_days)), MISSING_ORIGIN))
+                        AND NOT EXISTS (SELECT 1 FROM json_each(watch.origins) WHERE value IN (?,?))""",
+                   (string(Date(now) - Day(4 * c.watch_days)), MISSING_ORIGIN, RECOMMENDATION_ORIGIN))
     replace_watched!(kb; progress)
     candidates = []
     for cat in c.watch_categories
@@ -81,6 +82,8 @@ function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c;
     append!(candidates, references(kb; cancelled))
     cancelled() && return 0
     append!(candidates, feeds(kb, since; cancelled, progress))
+    cancelled() && return 0
+    append!(candidates, recommendations(kb; cancelled, progress))
     cancelled() && return 0
     n = place_watch_candidates!(kb, candidates; progress)
     execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('watch_checked_at', ?)", (now_iso(),))

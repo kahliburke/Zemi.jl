@@ -300,3 +300,68 @@ function fetched_text(r)
     who = isempty(names) ? "" : length(names) > 3 ? join(names[1:3], ", ") * " et al." : join(names, ", ")
     return join(filter(!isempty, [who * (ismissing(r.year) ? "" : " ($(r.year))"), strip(r.title)]), ". ")
 end
+
+const RECOMMENDATION_ORIGIN = "Semantic Scholar recommendations"
+
+# Only the bibliographic identifiers an administrator selects leave the instance.
+function recommendation_seed(value)
+    value = strip(value)
+    occursin(r"^[a-fA-F0-9]{40}$", value) && return lowercase(value)
+    m = match(r"^CorpusId:(\d+)$"i, value)
+    m === nothing || return "CorpusId:" * m[1]
+    arxiv = parse_arxiv_id(value)
+    arxiv === nothing || return "ARXIV:" * arxiv.id
+    doi = parse_doi(value)
+    doi === nothing || return "DOI:" * doi
+    error("[watch] a recommendation seed must be a DOI, arXiv ID, CorpusId or Semantic Scholar paper ID")
+end
+
+recommendation_seeds(c) = (; positive = unique(recommendation_seed.(c.watch_recommend_like)),
+                             negative = unique(recommendation_seed.(c.watch_recommend_avoid)))
+
+function s2_recommendations(seeds; key, limit)
+    endpoint = "https://api.semanticscholar.org/recommendations/v1/papers/"
+    fields = "title,abstract,publicationDate,year,venue,authors,externalIds,url"
+    headers = ["Content-Type" => "application/json"]
+    isempty(key) || push!(headers, "x-api-key" => key)
+    body = JSON.json((; positivePaperIds = seeds.positive, negativePaperIds = seeds.negative))
+    response = with_retry("Semantic Scholar recommendations"; tries = 2, patience = 30, pause = 2.0) do
+        HTTP.post(endpoint, headers, body; query = ["fields" => fields, "limit" => string(limit)], retry = false,
+                  connect_timeout = 10, response_header_timeout = 30, read_idle_timeout = 30)
+    end
+    return JSON.parse(body_text(response.body))
+end
+
+function recommended_watch(kb; cancelled = () -> false, progress = msg -> nothing, post = s2_recommendations)
+    c = kb.config
+    (isempty(c.watch_recommend_like) || cancelled()) && return []
+    seeds = recommendation_seeds(c)
+    found = []
+    try
+        key = resolve_key(c.semantic_scholar_key, "semantic_scholar_key")
+        result = post(seeds; key, limit = c.watch_recommend_limit)
+        papers = result["recommendedPapers"]
+        papers isa AbstractVector || error("unexpected recommendations response")
+        for paper in Iterators.take(papers, c.watch_recommend_limit)
+            cancelled() && break
+            paper isa AbstractDict || continue
+            id = answer_text(get(paper, "paperId", nothing))
+            (id === nothing || !occursin(r"^[a-fA-F0-9]{40}$", id)) && continue
+            ref = s2_reference(paper)
+            isempty(strip(ref.title)) && continue
+            url = something(watch_url(get(paper, "url", nothing)), "https://www.semanticscholar.org/paper/$id")
+            arxiv = parse_arxiv_id(something(ref.arxiv, ""))
+            doi = parse_doi(something(ref.doi, ""))
+            published = something(answer_text(get(paper, "publicationDate", nothing)),
+                                  ref.year === nothing ? "" : string(ref.year))
+            push!(found, linked_candidate(; url, key = "s2:" * lowercase(id), ref.title, ref.authors,
+                abstract = something(answer_text(get(paper, "abstract", nothing)), ""), published,
+                category = something(answer_text(get(paper, "venue", nothing)), ""), origin = RECOMMENDATION_ORIGIN,
+                doi, arxiv = arxiv === nothing ? nothing : arxiv.id))
+        end
+    catch e
+        e isa InterruptException && rethrow()
+        progress("Skipped Semantic Scholar recommendations: $(failure_message(e))")
+    end
+    return found
+end

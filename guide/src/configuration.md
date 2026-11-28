@@ -361,3 +361,26 @@ either can be saved as a resource with its title, authors, date, description
 and original address. It uses no full-reading slot. When a later entry supplies
 a DOI under the same URL or feed identifier, the watch can associate it with
 the saved resource. Titles alone never establish identity.
+
+### Discover related reading with Semantic Scholar
+
+Choose a few public papers that exemplify what the group would like to read.
+Put their identifiers in the existing `[watch]` table. Optionally supply papers
+whose subject you would like the recommendations to move away from.
+
+```toml
+[watch]
+recommend_like = ["10.18653/v1/2020.acl-main.447"]
+recommend_avoid = []
+recommend_limit = 10
+```
+
+Zemi sends only these selected identifiers in its recommendation request. It
+accepts DOIs, arXiv IDs, Semantic Scholar paper IDs and `CorpusId:…`. An empty
+positive list disables this source. Each check requests up to `recommend_limit`
+suggestions (1–100). The optional `semantic_scholar_key` also applies here.
+
+Recommendations can include older works. They enter the same watch judge and
+reading budget as recent discoveries. A suggestion already in the library is
+skipped. The watch keeps its decision on a recommendation across the publication
+window so a recurring suggestion does not incur another judgment.

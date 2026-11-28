@@ -8595,3 +8595,36 @@ end
     @test_throws ErrorException K.feed_candidates("<!DOCTYPE rss><rss/>", feed, since)
     close(kb)
 end
+
+@zset "Semantic Scholar recommendation watch" begin
+    kb = open_kb(temp_config(layers = Layer[], watch_categories = String[], watch_recommend_limit = 2,
+                            watch_recommend_like = ["arXiv:2001.12345v2"], watch_recommend_avoid = ["10.1234/AVOID"]))
+    @test K.watch_sources_enabled(kb.config)
+    seeds = K.recommendation_seeds(kb.config)
+    @test seeds == (; positive = ["ARXIV:2001.12345"], negative = ["DOI:10.1234/avoid"])
+    @test_throws ErrorException K.recommendation_seed("private project note")
+    existing = "2101.10001"
+    add_papers!(kb, [existing])
+    papers = [
+        Dict("paperId" => "a"^40, "externalIds" => Dict("ArXiv" => existing), "title" => "Known work"),
+        Dict("paperId" => "b"^40, "title" => "Repository-only work", "year" => 1990),
+        Dict("paperId" => "c"^40, "title" => "Over the cap")]
+    function post(s; key, limit)
+        @test s == seeds && isempty(key) && limit == 2
+        return Dict("recommendedPapers" => papers)
+    end
+    candidates = K.recommended_watch(kb; post)
+    @test length(candidates) == 2 && last(candidates).published == "1990"
+    place(c, items, progress) = [(; m, near = [], u = [1.0], area = missing, fit = missing, score = 0.5) for m in items]
+    @test K.place_watch_candidates!(kb, candidates; place) == 1
+    w = only(K.watched(kb))
+    @test w.origins == [K.RECOMMENDATION_ORIGIN] && w.url == "https://www.semanticscholar.org/paper/" * "b"^40
+    K.execute!(kb, "UPDATE watch SET found_at = '1990-01-01', relevance = 1")
+    @test K.watch!(kb; recommendations = (args...; kwargs...) -> candidates) == 0
+    @test only(K.watched(kb)).relevance == 1
+    @test isempty(K.recommended_watch(kb; post = (args...; kwargs...) -> error("cancelled"), cancelled = () -> true))
+    errors = String[]
+    @test isempty(K.recommended_watch(kb; post = (args...; kwargs...) -> error("unavailable"), progress = m -> push!(errors, m)))
+    @test occursin("unavailable", only(errors))
+    close(kb)
+end
