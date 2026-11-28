@@ -247,12 +247,13 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
     read = [String(r.id) for r in rows if r.relevance >= c.watch_read_from]
     recorded = [String(r.id) for r in rows if c.watch_record_from <= r.relevance < c.watch_read_from]
     if !isempty(read) && !isempty(cannot_run(kb, "ingest", read))
-        recorded, read = [read; recorded], String[]
+        newly_recorded = [r.id for r in rows if r.id in read && ismissing(r.taken)]
+        recorded, read = [newly_recorded; recorded], String[]
     end
     why = Dict(String(r.id) => "$(RELEVANCE[r.relevance+1]): $(r.reason)" for r in rows)
     function arrived!(ids, how)
-        add_papers!(kb, ids; source = "watch")
         transaction(kb) do
+            add_papers!(kb, ids; source = "watch")
             for id in ids
                 execute!(kb, "UPDATE mentions SET message = ? WHERE paper_id = ? AND source = 'watch'", (why[id], paper_id(kb, id)))
                 execute!(kb, "UPDATE watch SET taken = ?, taken_at = ? WHERE doc_id = ?", (how, now_iso(), id))
