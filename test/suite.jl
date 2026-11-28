@@ -1946,15 +1946,18 @@ end
     @test took.read == read == ["2610.00011", "2610.00012"] && took.recorded == recorded == ["2610.00013"]
     @test ismissing(K.paper_id(kb, "2610.00014"))
     @test only(K.mentions(kb, "2610.00011")).source == "watch" && only(K.mentions(kb, "2610.00011")).message == "central: The group's own question."
+    # History is newest first, then relevance within the same second.
+    K.execute!(kb, """UPDATE watch SET taken_at = CASE WHEN relevance = 1 THEN '2026-10-10T10:00:01Z'
+                        ELSE '2026-10-10T10:00:00Z' END WHERE taken IS NOT NULL""")
     @test [(t.id, t.taken, t.read) for t in K.watch_taken(kb)][1:3] ==
-          [("2610.00011", "read", false), ("2610.00012", "read", false), ("2610.00013", "recorded", false)]
+          [("2610.00013", "recorded", false), ("2610.00011", "read", false), ("2610.00012", "read", false)]
     @test isempty(K.take_watched!(kb; read_in_full = (ids, _) -> error("again"), record = ids -> error("again")).read)   # each once
     # Taken in, they are still the paper of the day's candidates; their pages say how they came.
     @test [c.id for c in K.daily_candidates(kb)][1:2] == ["2610.00011", "2610.00012"]
     K.execute!(kb, "UPDATE papers SET metadata_at = ?, title = 'Paper 2610.00011' WHERE doc_id = '2610.00011'", (K.now_iso(),))
     post = only(K.paper_json(K.site_paper(kb, "2610.00011"; related = false))["posts"])
     @test (post["where"], post["rating"], post["reason"]) == ("Added from the arXiv watch", "central", "The group's own question.")
-    @test K.watch_taken_json(kb)[1]["slug"] == K.page_slug("2610.00011")
+    @test K.watch_taken_json(kb)[1]["slug"] == K.page_slug("2610.00013")
     # Removed, it leaves the list and is not taken in again.
     K.remove_paper!(kb, "2610.00013")
     @test "2610.00013" ∉ [t.id for t in K.watch_taken(kb)]
