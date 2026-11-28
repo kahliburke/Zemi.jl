@@ -8491,6 +8491,18 @@ end
         @test isempty(result.read) && K.is_resource(only(result.recorded))
         @test isempty(K.query(kb, "SELECT key FROM kv WHERE key LIKE 'watch_reads/%'"))
         @test only(K.watch_taken(kb)).id == only(result.recorded)
+        # A DOI that unexpectedly resolves to an existing private arXiv paper must not share it.
+        oldcopies = K.DOI_COPIES[]
+        try
+            K.DOI_COPIES[] = (d; contact) -> (; arxiv = "2610.10002", pdfs = String[])
+            private_doi = merge(first(candidates), (; doc_id = "10.1234/private", doi = "10.1234/private", work_id = nothing))
+            @test K.place_watch_candidates!(kb, [private_doi]; place) == 1
+            K.execute!(kb, "UPDATE watch SET relevance = 3 WHERE doc_id = '10.1234/private'")
+            @test isempty(K.take_watched!(kb; read_in_full = (args...) -> error("private read")).read)
+            @test K.scalar(kb, "SELECT access FROM papers WHERE doc_id = '2610.10002'") == "private"
+        finally
+            K.DOI_COPIES[] = oldcopies
+        end
     finally
         K.DOI_RESOURCE[] = old
         K.ARXIV_TITLE_SEARCH[] = oldsearch
