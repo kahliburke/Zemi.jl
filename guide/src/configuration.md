@@ -327,3 +327,23 @@ Several matches give the same candidate multiple discovery reasons. A DOI with n
 readable copy stays a bibliography resource and uses no full-reading slot. Works
 without either identifier are skipped. The paper-of-the-day PDF feature continues
 to choose arXiv papers.
+
+### Discover missing references
+
+```toml
+[watch]
+missing_per_check = 4
+min_internal_citations = 3
+missing_weekly_reads = 2
+```
+
+At each check, consider the most frequently cited works absent from the library,
+counting distinct citing papers visible to the group. References need a DOI or
+arXiv ID to be selected. Zemi fetches their bibliographic metadata, places them,
+and asks the watch judge to rate them alongside new publications. Older publication
+dates are eligible. Unresolved records are tried again after a week.
+
+Discovery defaults to off (`missing_per_check = 0`). The weekly limit counts full
+reading attempts, within both shared reading limits. Overflow stays recorded for
+a later check. A decision on a missing reference survives the rolling publication
+window, so subsequent checks can consider other references.

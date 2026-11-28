@@ -33,7 +33,7 @@ migration!(34, ["ALTER TABLE watch ADD COLUMN doi TEXT",
                 "ALTER TABLE watch ADD COLUMN origins TEXT NOT NULL DEFAULT '[]'"])
 
 watch_sources_enabled(c) = !isempty(c.watch_categories) || !isempty(c.watch_venues) ||
-                           !isempty(c.watch_authors) || c.watch_citing_library
+                           !isempty(c.watch_authors) || c.watch_citing_library || c.watch_missing_per_check > 0
 
 """
     watch!(kb; list = list_new_papers, now = now(UTC), progress, cancelled) -> Int
@@ -48,10 +48,11 @@ are placed again first when the group has changed (see [`replace_watched!`](@ref
 new papers were placed.
 """
 function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c; patience = WATCH_PATIENCE), now::DateTime = Dates.now(UTC),
-                progress = msg -> nothing, cancelled = () -> false, openalex = openalex_watch)
+                progress = msg -> nothing, cancelled = () -> false, openalex = openalex_watch, references = missing_watch)
     c = kb.config
     since = Date(now) - Day(c.watch_days)
-    execute!(kb, "DELETE FROM watch WHERE published < ? AND coalesce(taken, '') <> 'deferred'", (string(Date(now) - Day(4 * c.watch_days)),))
+    execute!(kb, """DELETE FROM watch WHERE published < ? AND coalesce(taken, '') <> 'deferred'
+                        AND NOT EXISTS (SELECT 1 FROM json_each(watch.origins) WHERE value = ?)""", (string(Date(now) - Day(4 * c.watch_days)), MISSING_ORIGIN))
     replace_watched!(kb; progress)
     candidates = []
     for cat in c.watch_categories
@@ -64,6 +65,8 @@ function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c;
         end
     end
     append!(candidates, openalex(kb, since; cancelled))
+    cancelled() && return 0
+    append!(candidates, references(kb; cancelled))
     cancelled() && return 0
     n = place_watch_candidates!(kb, candidates; progress)
     execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('watch_checked_at', ?)", (now_iso(),))
@@ -261,6 +264,10 @@ function reserve_watch_read!(kb, source; day = Date(now(UTC)))
         week = sum((r.n for r in counts); init = 0)
         (c.watch_daily_reads >= 0 && today >= c.watch_daily_reads) && return false
         (c.watch_weekly_reads >= 0 && week >= c.watch_weekly_reads) && return false
+        if source == "missing"
+            used = sum((r.n for r in counts if endswith(r.key, "/missing")); init = 0)
+            used >= c.watch_missing_weekly_reads && return false
+        end
         execute!(kb, """INSERT INTO kv VALUES (?, '1') ON CONFLICT(key)
                         DO UPDATE SET value = CAST(value AS INTEGER) + 1""", (key,))
         return true
@@ -292,7 +299,7 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
                        record = ids -> (refresh_metadata!(kb, ids);
                                         isempty(cannot_run(kb, "embed", ids)) && embed_records!(kb, ids; progress, cancelled)))
     c = kb.config
-    rows = query(kb, """SELECT doc_id AS id, relevance, coalesce(reason, '') AS reason, taken FROM watch
+    rows = query(kb, """SELECT doc_id AS id, relevance, coalesce(reason, '') AS reason, taken, origins FROM watch
                         WHERE relevance IS NOT NULL AND ((taken IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers))
                             OR (taken = 'deferred' AND doc_id IN (SELECT doc_id FROM papers)))
                           AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
@@ -321,6 +328,7 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
         local_id === nothing || push!(records, local_id)
     end
     isempty(records) || record(records)
+    missing_ids = Set(r.id for r in rows if MISSING_ORIGIN in json_list(r.origins))
     deferred = Set(r.id for r in rows if isequal(r.taken, "deferred"))
     done = String[]
     for (i, id) in enumerate(read)
@@ -332,7 +340,8 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
             push!(records, local_id)
             continue
         end
-        if !reserve_watch_read!(kb, "watch"; day = today())
+        source = id in missing_ids ? "missing" : "watch"
+        if !reserve_watch_read!(kb, source; day = today())
             if !(id in deferred)
                 record([local_id])
                 push!(records, local_id)

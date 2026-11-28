@@ -70,8 +70,12 @@ into the knowledge base or not; see [`take_watched!`](@ref)) and the library's p
 not read, those the landscape places nearest the focus areas first, leaving out papers picked before. `(; id, title, abstract, source, why, relevance)`, `relevance`
 the judge's rating of a new paper (`nothing` for one from the library).
 """
-function daily_candidates(kb::KB; new::Integer = 8, library::Integer = 5)
+function daily_candidates(kb::KB; automatic::Bool = false, new::Integer = 8, library::Integer = 5)
     picked = Set(r.id for r in query(kb, "SELECT doc_id AS id FROM daily"))
+    if automatic
+        union!(picked, (r.doc_id for r in query(kb, """SELECT doc_id FROM watch WHERE taken = 'deferred'
+            OR EXISTS (SELECT 1 FROM json_each(watch.origins) WHERE value = ?)""", (MISSING_ORIGIN,))))
+    end
     out = Any[(; id = r.id, title = r.title, abstract = r.abstract, source = "new", why = coalesce(r.reason, ""),
                  relevance = Int(r.relevance))
            for r in query(kb, """SELECT doc_id AS id, title, abstract, reason, relevance FROM watch
@@ -99,8 +103,7 @@ reading, and record it as the paper of `day` (a day can have several: the latest
 with how much it matters to the group: a new paper's rating, or the judge's rating of a library paper
 as it picks it. Returns `(; id, why, source, relevance)`.
 """
-function pick_daily!(kb::KB; day::AbstractString = utc_today())
-    cands = daily_candidates(kb)
+function pick_daily!(kb::KB; day::AbstractString = utc_today(), cands = daily_candidates(kb))
     isempty(cands) && error("Nothing to pick a paper of the day from: no promoted new papers, and no unread papers in the library")
     prompt = group_brief(kb.config) * "\nCandidates:\n\n" *
         join(("[$(c.id)] ($(c.source == "new" ? "new on arXiv" : "in the library, unread")) $(c.title)\n$(c.abstract)" *
@@ -219,11 +222,13 @@ function start_daily(kb::KB; automatic::Bool = false, another::Bool = false, aga
         if !another && !ismissing(scalar(kb, "SELECT 1 FROM daily WHERE day = ? AND status = 'done'", (day,)))
             return "Today's paper is already chosen."
         end
-        automatic && !reserve_watch_read!(kb, "daily") && return "Automatic reading budget reached."
         report!(job, "judging the new papers")
         judge_watched!(kb)
         report!(job, "picking the paper of the day")
-        p = pick_daily!(kb; day)
+        cands = daily_candidates(kb; automatic)
+        automatic && isempty(cands) && return "No eligible paper of the day."
+        automatic && !reserve_watch_read!(kb, "daily") && return "Automatic reading budget reached."
+        p = pick_daily!(kb; day, cands)
         r = feature_daily!(kb, day, p.id; progress = m -> report!(job, m))
         "Paper of the day: $(p.id), with $(r.figures) figure(s)."
     end

@@ -8486,3 +8486,34 @@ end
         close(kb)
     end
 end
+
+@zset "missing references enter the paper watch" begin
+    c = temp_config(layers = Layer[], watch_missing_per_check = 2, watch_min_internal_citations = 3,
+                    watch_missing_weekly_reads = 1, watch_daily_reads = 4)
+    kb = open_kb(c)
+    refs = [K.CitedWork(; key = "first", arxiv = "0101.12345", text = "One", cited_by = ["a","b","c","d"]),
+            K.CitedWork(; key = "second", arxiv = "0101.12346", text = "Two", cited_by = ["a","b","c"]),
+            K.CitedWork(; key = "third", arxiv = "0101.12347", text = "Three", cited_by = ["a","b"])]
+    ranked(kb; min_cited) = filter(r -> length(r.cited_by) >= min_cited, refs)
+    arxiv(ids, c) = Dict(id => K.PaperMeta(; doc_id = id, version = "", title = id, abstract = "Old work",
+                      authors = ["Rowan"], published = "2001-01-01", updated = "", primary_category = "", categories = String[]) for id in ids)
+    found = K.missing_watch(kb; ranked, arxiv)
+    @test getproperty.(found, :doc_id) == ["0101.12345", "0101.12346"]
+    place(c, items, progress) = [(; m, near = [], u = [1.0], area = missing, fit = missing, score = 1.0) for m in items]
+    @test K.place_watch_candidates!(kb, found; place) == 2
+    @test isempty(K.missing_watch(kb; ranked, arxiv))
+    @test all(p -> ismissing(p.relevance), K.watched(kb))
+    K.execute!(kb, "UPDATE watch SET relevance = 3")
+    day = K.Date(2026, 11, 23)
+    take(at) = K.take_watched!(kb; today = () -> at, read_in_full = (ids, step) -> true, record = ids -> nothing)
+    firstpass = take(day)
+    @test length(firstpass.read) == length(firstpass.recorded) == 1
+    @test isempty(take(day + K.Day(1)).read)
+    @test K.reserve_watch_read!(kb, "watch"; day)
+    @test isempty(K.daily_candidates(kb; automatic = true))
+    @test take(day + K.Week(1)).read == firstpass.recorded
+    # A later check must not forget its decisions merely because both references are old.
+    @test K.watch!(kb; references = (kb; cancelled) -> [], now = K.DateTime(2026, 12, 1)) == 0
+    @test length(K.watch_taken(kb)) == 2
+    close(kb)
+end

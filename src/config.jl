@@ -682,6 +682,9 @@ Base.@kwdef struct Config
     watch_venues::Vector{String} = String[]
     watch_authors::Vector{String} = String[]
     watch_citing_library::Bool = false
+    watch_missing_per_check::Int = 0
+    watch_min_internal_citations::Int = 2
+    watch_missing_weekly_reads::Int = 1
     watch_record_from::Int = 1
     # The Slate hub the site's notebooks are rendered through, by its port: 0 for KaimonSlate's own
     # (see `slate_env`).
@@ -865,6 +868,9 @@ function load_config(path::AbstractString = config_path())
         watch_venues = String.(get(get(t, "watch", Dict()), "venues", d.watch_venues)),
         watch_authors = String.(get(get(t, "watch", Dict()), "authors", d.watch_authors)),
         watch_citing_library = Bool(get(get(t, "watch", Dict()), "citing_library", d.watch_citing_library)),
+        watch_missing_per_check = Int(get(get(t, "watch", Dict()), "missing_per_check", d.watch_missing_per_check)),
+        watch_min_internal_citations = Int(get(get(t, "watch", Dict()), "min_internal_citations", d.watch_min_internal_citations)),
+        watch_missing_weekly_reads = Int(get(get(t, "watch", Dict()), "missing_weekly_reads", d.watch_missing_weekly_reads)),
         watch_record_from = Int(get(get(t, "watch", Dict()), "record_from", d.watch_record_from)),
         slate_port = Int(get(get(t, "notebooks", Dict()), "slate_port", d.slate_port)),
         media_max_mb = Int(get(get(t, "media", Dict()), "max_mb", d.media_max_mb)),
@@ -951,6 +957,8 @@ function validate(c::Config)
     all(id -> occursin(r"^S[0-9]+$", id), c.watch_venues) || error("[watch] venues requires OpenAlex source IDs (S...)")
     all(id -> occursin(r"^A[0-9]+$", id) || orcid_uri(id) !== nothing, c.watch_authors) ||
         error("[watch] authors requires OpenAlex author IDs (A...) or valid ORCIDs")
+    min(c.watch_missing_per_check, c.watch_missing_weekly_reads) >= 0 || error("[watch] missing work limits must be nonnegative")
+    c.watch_min_internal_citations >= 1 || error("[watch] min_internal_citations must be positive")
     min(c.watch_daily_reads, c.watch_weekly_reads) >= -1 || error("[watch] read limits must be -1 or nonnegative")
     names = [l.name for l in c.layers]
     allunique(names) || error("Layer names must be unique: $names")
