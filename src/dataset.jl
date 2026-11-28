@@ -821,8 +821,9 @@ function import_document!(kb::KB, doc::AbstractDict, vectors::AbstractVector{UIn
             execute!(kb, "DELETE FROM summaries WHERE paper_id = ? AND summarizer = ?", (pid, name))
         end
         for x in doc["summaries"]
-            execute!(kb, "INSERT OR REPLACE INTO summaries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (pid, x["unit_key"], x["summarizer"], x["model"], x["prompt_version"], x["input_sha"], x["text"], missing, missing, x["created_at"], val(get(x, "read_mode", nothing))))
+            execute!(kb, """INSERT OR REPLACE INTO summaries (paper_id, unit_key, summarizer, model, prompt_version,
+                input_sha, text, created_at, read_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (pid, x["unit_key"], x["summarizer"], x["model"], x["prompt_version"], x["input_sha"], x["text"], x["created_at"], val(get(x, "read_mode", nothing))))
         end
         c = doc["classification"]
         c === nothing || execute!(kb, "INSERT OR REPLACE INTO classifications VALUES (?, ?, ?, ?, ?)",
@@ -1000,7 +1001,7 @@ function start_autosync!(kb::KB)
         STOPPING[] && break
         try
             execute!(kb, "INSERT OR REPLACE INTO kv VALUES ('dataset_autosync_at', ?)", (now_iso(),))
-            job = start_sync(kb; unread = d.read_unread, publish = true)
+            job = start_sync(kb; automatic = true, unread = d.read_unread, publish = true)
             wait(job)
             job.status == :done || @warn "Autosync did not finish; the next is in $(d.autosync_hours) hours" status = job.status error = job.error
         catch e

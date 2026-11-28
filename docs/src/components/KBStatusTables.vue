@@ -12,14 +12,15 @@ type Contents = {
   at: string
   papers: { recorded: number; full: number; uploaded: number; sections: number; passages: number }
   layers: { name: string; embeds: string; model: string; papers: number; vectors: number }[]
-  summaries: { summarizer: string; model: string; papers: number; summaries: number; input: number | null; output: number | null }[]
+  summaries: { summarizer: string; model: string; papers: number; summaries: number; input: number | null; output: number | null;
+    cache_read?: number | null; cache_creation?: number | null }[]
   shared_by: { who: string; papers: number }[]
   years: { year: string; papers: number }[]
 }
 const route = useRoute()
 const c = ref<Contents | null>(null)
 const error = ref('')
-const num = (n: number | null) => n == null ? 'Unknown' : n.toLocaleString('en-GB')
+const num = (n: number | null | undefined) => n == null ? 'Unknown' : n.toLocaleString('en-GB')
 
 onMounted(async () => {
   try {
@@ -56,12 +57,15 @@ onMounted(async () => {
 
     <template v-if="c.summaries.length">
       <h3 id="summaries">Summaries</h3>
+      <p>Token counts include reported usage only. Older summaries may lack cache measurements.</p>
       <table>
         <thead><tr><th style="text-align: left">Summarizer</th><th style="text-align: left">Model</th><th style="text-align: right">Papers</th>
-          <th style="text-align: right">Summaries</th><th style="text-align: right">Input tokens</th><th style="text-align: right">Output tokens</th></tr></thead>
-        <tbody><tr v-for="s in c.summaries" :key="s.summarizer"><td>{{ s.summarizer }}</td><td>{{ s.model }}</td>
+          <th style="text-align: right">Summaries</th><th style="text-align: right">Input tokens</th><th style="text-align: right">Output tokens</th>
+          <th style="text-align: right">Cache read tokens</th><th style="text-align: right">Cache write tokens</th></tr></thead>
+        <tbody><tr v-for="s in c.summaries" :key="JSON.stringify([s.summarizer, s.model])"><td>{{ s.summarizer }}</td><td>{{ s.model }}</td>
           <td style="text-align: right">{{ num(s.papers) }}</td><td style="text-align: right">{{ num(s.summaries) }}</td>
-          <td style="text-align: right">{{ num(s.input) }}</td><td style="text-align: right">{{ num(s.output) }}</td></tr></tbody>
+          <td style="text-align: right">{{ num(s.input) }}</td><td style="text-align: right">{{ num(s.output) }}</td>
+          <td style="text-align: right">{{ num(s.cache_read) }}</td><td style="text-align: right">{{ num(s.cache_creation) }}</td></tr></tbody>
       </table>
     </template>
 

@@ -86,7 +86,7 @@ function seed_figures!(kb)
     # Its second page as a section, whose text and PDF its page offers.
     K.execute!(kb, "INSERT OR REPLACE INTO sections VALUES (?, 1, 1, '1', 'Results', 'Results', 2, 2)", (pid,))
     K.execute!(kb, "UPDATE blocks SET section = 1 WHERE paper_id = ? AND page = 2", (pid,))
-    K.execute!(kb, "INSERT INTO summaries VALUES (?, ?, ?, 'm', 'v1', 'x', ?, NULL, NULL, ?, NULL)",
+    K.execute!(kb, "INSERT INTO summaries VALUES (?, ?, ?, 'm', 'v1', 'x', ?, NULL, NULL, ?, NULL, NULL, NULL)",
                (pid, "p:$id", kb.config.summarizer, "Two boxes, as Fig. 2 shows, and a table.\nTopics: boxes", K.now_iso()))
     analysis = "## What it does\n\nAn opening paragraph that names no figure.\n\nThe blue box in Fig. 1 is the first result.\n\n" *
                "Table 1 lists the numbers, and Figs. 1 and 2 compare them.\n"

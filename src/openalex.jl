@@ -7,23 +7,28 @@ const OPENALEX_WORKS = "https://api.openalex.org/works"
     openalex_get(query; contact = "", timeout = 30) -> Vector
 
 The works OpenAlex finds for `query` (its parameters), asked as [`with_retry`](@ref) does: a busy
-spell waited out for a while, a failure tried once more. `contact`, an email address, puts the
-request in OpenAlex's polite pool.
+spell waited out for a while, a failure tried once more. `contact`, an email address, identifies the caller. OPENALEX_API_KEY authenticates paginated requests.
 """
 function openalex_get(query::AbstractVector; contact::AbstractString = "", timeout::Real = 30)
+    return openalex_page(query; contact, timeout)["results"]
+end
+
+function openalex_page(query; contact = "", timeout = 30)
+    key = get(ENV, "OPENALEX_API_KEY", "")
+    headers = isempty(key) ? Pair{String,String}[] : ["Authorization" => "Bearer $key"]
     isempty(contact) || (query = [query; "mailto" => contact])
     r = with_retry("OpenAlex"; tries = 2, patience = 30) do
-        HTTP.get(OPENALEX_WORKS; query, retry = false, connect_timeout = 20, response_header_timeout = timeout,
+        HTTP.get(OPENALEX_WORKS, headers; query, retry = false, connect_timeout = 20, response_header_timeout = timeout,
                  read_idle_timeout = timeout)
     end
-    return JSON.parse(body_text(r.body))["results"]
+    return JSON.parse(body_text(r.body))
 end
 
 """
     openalex_work(; doi = nothing, title = nothing, contact = "") -> Union{AbstractDict,Nothing}
 
 OpenAlex's record of a work, by its DOI or by its exact title, or `nothing` when it has none.
-`contact`, an email address, puts the request in OpenAlex's polite pool.
+`contact`, an email address, identifies the caller.
 """
 function openalex_work(; doi = nothing, title = nothing, contact::AbstractString = "")
     query = doi !== nothing ? ["filter" => "doi:" * doi] : ["filter" => "title.search:" * replace(title, r"[,:|]" => " ")]
@@ -133,7 +138,7 @@ const DOI_RESOURCE = Ref{Function}(doi_resource)
 
 What each of `dois` (at most 50) is on arXiv as, by OpenAlex's record of where the work is posted:
 an arXiv id, or `nothing` when OpenAlex knows the work but not on arXiv. A DOI OpenAlex does not
-know is left out. `contact`, an email address, puts the request in OpenAlex's polite pool.
+know is left out. `contact`, an email address, identifies the caller.
 """
 function openalex_arxiv(dois::AbstractVector{<:AbstractString}, contact::AbstractString = "")
     query = ["filter" => "doi:" * join(dois, '|'), "per-page" => "50", "select" => "doi,locations"]
@@ -152,3 +157,80 @@ function openalex_arxiv(dois::AbstractVector{<:AbstractString}, contact::Abstrac
     return out
 end
 
+
+# Each result uses the same title/abstract placement as an arXiv discovery.
+const WATCH_WORK_FIELDS = "id,doi,title,type,publication_date,publication_year,authorships,primary_location,locations,biblio,abstract_inverted_index,referenced_works"
+
+function watch_work(w, reason)
+    is_paper(w) && !isempty(something(get(w, "title", nothing), "")) || return nothing
+    ref = openalex_reference(w)
+    work_id = watch_url(get(w, "id", nothing))
+    landing = watch_url(get(something(w["primary_location"], Dict()), "landing_page_url", nothing))
+    url = something(landing, work_id, Some(nothing))
+    url === nothing && ref.arxiv === nothing && ref.doi === nothing && return nothing
+    r = work_record(w)
+    id = ref.arxiv !== nothing ? ref.arxiv : ref.doi !== nothing ? ref.doi : watch_resource_id(url)
+    return (; doc_id = id, r.title, r.authors, abstract = something(r.abstract, ""),
+            published = something(w["publication_date"], ""), primary_category = something(r.journal, ""),
+            doi = ref.doi, work_id, origins = [reason], url, aliases = unique(String[k for k in (landing, work_id) if k !== nothing]))
+end
+
+"Published identifiers for the group's literature whose incoming citations may be watched."
+function watch_library_dois(kb)
+    out = String[]
+    for r in query(kb, "SELECT doc_id, doi FROM papers WHERE $(literature_sql())")
+        ismissing(r.doi) || push!(out, normalize_doi(r.doi))
+        is_arxiv_id(r.doc_id) && push!(out, "10.48550/arxiv." * lowercase(r.doc_id))
+    end
+    return unique!(out)
+end
+
+function openalex_watch(kb, since; cancelled = () -> false, page = openalex_page)
+    c = kb.config
+    filters = Pair{String,String}[]
+    for s in unique(c.watch_venues)
+        push!(filters, "primary_location.source.id:$s" => "OpenAlex venue $s")
+    end
+    for a in unique(c.watch_authors)
+        orcid = orcid_uri(a)
+        filter = orcid === nothing ? "author.id:$a" : "author.orcid:$orcid"
+        push!(filters, filter => "OpenAlex author $a")
+    end
+    seeds = Dict{String,String}()
+    if c.watch_citing_library
+        for batch in Iterators.partition(watch_library_dois(kb), 50)
+            cancelled() && return []
+            data = page(["filter" => "doi:" * join(batch, '|'), "select" => "id,doi", "per_page" => "100"]; c.contact)
+            for w in data["results"]
+                seeds[last(split(w["id"], '/'))] = normalize_doi(w["doi"])
+            end
+        end
+        for ids in Iterators.partition(sort!(collect(keys(seeds))), 50)
+            push!(filters, "cites:" * join(ids, '|') => "Cites the library")
+        end
+    end
+    found = []
+    for (filter, reason) in filters
+        cursor = "*"
+        while true
+            cancelled() && return found
+            data = page(["filter" => "$filter,from_publication_date:$since", "cursor" => cursor,
+                         "per_page" => "100", "select" => WATCH_WORK_FIELDS]; c.contact)
+            for w in data["results"]
+                m = watch_work(w, reason)
+                m === nothing && continue
+                if startswith(filter, "cites:")
+                    matches = [seeds[id] for url in something(get(w, "referenced_works", nothing), [])
+                               for id in (last(split(url, '/')),) if haskey(seeds, id)]
+                    isempty(matches) || (m = merge(m, (; origins = ["Cites $doi" for doi in matches])))
+                end
+                push!(found, m)
+            end
+            next = get(data["meta"], "next_cursor", nothing)
+            (next === nothing || isempty(data["results"])) && break
+            next == cursor && error("OpenAlex repeated its pagination cursor")
+            cursor = next
+        end
+    end
+    return found
+end
