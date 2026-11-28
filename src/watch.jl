@@ -45,7 +45,7 @@ function watch!(kb::KB; list = (cat, since, c) -> list_new_papers(cat, since, c;
     c = kb.config
     l = landscape_layer(c)
     since = Date(now) - Day(c.watch_days)
-    execute!(kb, "DELETE FROM watch WHERE published < ?", (string(Date(now) - Day(4 * c.watch_days)),))
+    execute!(kb, "DELETE FROM watch WHERE published < ? AND coalesce(taken, '') <> 'deferred'", (string(Date(now) - Day(4 * c.watch_days)),))
     replace_watched!(kb; progress)
     seen = Set{String}(r.id for r in query(kb, "SELECT doc_id AS id FROM papers UNION SELECT doc_id FROM watch"))
     found = []
@@ -193,6 +193,35 @@ function fill_from_watch!(kb::KB, ids::Union{AbstractVector{<:AbstractString},No
     end
 end
 
+# One small counter per UTC date and source. Write before checking so competing
+# connections cannot both reserve the last slot. Only this ISO week's rows survive.
+function reserve_watch_read!(kb, source; day = Date(now(UTC)))
+    monday = day - Day(dayofweek(day) - 1)
+    prefix = "watch_reads/"
+    key = "$prefix$day/$source"
+    return transaction(kb) do
+        execute!(kb, "DELETE FROM kv WHERE key >= ? AND key < ?", (prefix, prefix * string(monday)))
+        counts = query(kb, """SELECT key, CAST(value AS INTEGER) AS n FROM kv
+                              WHERE key >= ? AND key < ?""", (prefix * string(monday), prefix * string(day + Day(1))))
+        c = kb.config
+        today = sum((r.n for r in counts if startswith(r.key, "$prefix$day/")); init = 0)
+        week = sum((r.n for r in counts); init = 0)
+        (c.watch_daily_reads >= 0 && today >= c.watch_daily_reads) && return false
+        (c.watch_weekly_reads >= 0 && week >= c.watch_weekly_reads) && return false
+        execute!(kb, """INSERT INTO kv VALUES (?, '1') ON CONFLICT(key)
+                        DO UPDATE SET value = CAST(value AS INTEGER) + 1""", (key,))
+        return true
+    end
+end
+
+function read_watched!(kb, ids, step, cancelled)
+    results = ingest!(kb, ids; progress = step, cancelled, source = "watch")
+    isempty(results) && return false
+    r = only(results)
+    r.ok || error("Reading $(r.id) failed: $(r.error)")
+    return true
+end
+
 """
     take_watched!(kb; progress, cancelled, read_in_full, record) -> (; read, recorded)
 
@@ -205,23 +234,26 @@ cannot be read here they are recorded instead. Returns the ids taken each way. `
 and `record(ids)` do the reading and recording (stand-ins in tests, which reach no arXiv).
 """
 function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> false,
-                       read_in_full = (ids, step) -> ingest!(kb, ids; progress = step, cancelled, source = "watch"),
+                       read_in_full = (ids, step) -> read_watched!(kb, ids, step, cancelled),
+                       today = () -> Date(now(UTC)),
                        record = ids -> (refresh_metadata!(kb, ids);
                                         isempty(cannot_run(kb, "embed", ids)) && embed_records!(kb, ids; progress, cancelled)))
     c = kb.config
-    rows = query(kb, """SELECT doc_id AS id, relevance, coalesce(reason, '') AS reason FROM watch
-                        WHERE relevance IS NOT NULL AND taken IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers)
+    rows = query(kb, """SELECT doc_id AS id, relevance, coalesce(reason, '') AS reason, taken FROM watch
+                        WHERE relevance IS NOT NULL AND ((taken IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers))
+                            OR (taken = 'deferred' AND doc_id IN (SELECT doc_id FROM papers)))
                           AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
-                        ORDER BY relevance DESC, score DESC""")
+                        ORDER BY relevance DESC, score DESC, found_at, doc_id""")
     read = [String(r.id) for r in rows if r.relevance >= c.watch_read_from]
     recorded = [String(r.id) for r in rows if c.watch_record_from <= r.relevance < c.watch_read_from]
     if !isempty(read) && !isempty(cannot_run(kb, "ingest", read))
-        recorded, read = [read; recorded], String[]
+        newly_recorded = [r.id for r in rows if r.id in read && ismissing(r.taken)]
+        recorded, read = [newly_recorded; recorded], String[]
     end
     why = Dict(String(r.id) => "$(RELEVANCE[r.relevance+1]): $(r.reason)" for r in rows)
     function arrived!(ids, how)
-        add_papers!(kb, ids; source = "watch")
         transaction(kb) do
+            add_papers!(kb, ids; source = "watch")
             for id in ids
                 execute!(kb, "UPDATE mentions SET message = ? WHERE paper_id = ? AND source = 'watch'", (why[id], paper_id(kb, id)))
                 execute!(kb, "UPDATE watch SET taken = ?, taken_at = ? WHERE doc_id = ?", (how, now_iso(), id))
@@ -234,11 +266,20 @@ function take_watched!(kb::KB; progress = msg -> nothing, cancelled = () -> fals
         record(recorded)
     end
     # One at a time, so that a cancelled watch leaves the rest to be taken by the next.
+    deferred = Set(r.id for r in rows if isequal(r.taken, "deferred"))
     done = String[]
     for (i, id) in enumerate(read)
         cancelled() && break
-        arrived!([id], "read")
-        read_in_full([id], m -> progress("reading new paper $i of $(length(read)) in full: $m"))
+        id in deferred || arrived!([id], "deferred")
+        if !reserve_watch_read!(kb, "watch"; day = today())
+            if !(id in deferred)
+                record([id])
+                push!(recorded, id)
+            end
+            continue
+        end
+        read_in_full([id], m -> progress("reading new paper $i of $(length(read)) in full: $m")) === false && break
+        execute!(kb, "UPDATE watch SET taken = 'read', taken_at = ? WHERE doc_id = ?", (now_iso(), id))
         push!(done, id)
     end
     return (; read = done, recorded)
@@ -323,7 +364,7 @@ function start_watch(kb::KB)
             report!(job, "judging the new papers")
             judged = judge_watched!(kb)
             taken = take_watched!(kb; progress = m -> report!(job, m), cancelled = () -> cancelled(job))
-            ismissing(scalar(kb, "SELECT 1 FROM daily WHERE day = ?", (utc_today(),))) && start_daily(kb)
+            ismissing(scalar(kb, "SELECT 1 FROM daily WHERE day = ?", (utc_today(),))) && start_daily(kb; automatic = true)
         end
         "$n new paper(s) placed from $(join(kb.config.watch_categories, ", ")); $judged judged; " *
         "$(length(taken.read)) read in full and $(length(taken.recorded)) recorded."

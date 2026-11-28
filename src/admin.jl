@@ -27,6 +27,8 @@ const EDITABLE_SETTINGS = [
     (key = "watch.hours", kind = "float", label = "Check interval (h)", help = "Hours between arXiv checks."),
     (key = "watch.judge", kind = "summarizer?", label = "Watch judge", help = "Rates new papers and picks the paper of the day. Default: the summarizer."),
     (key = "watch.read_from", kind = "int", label = "Read in full from", help = "Lowest rating read in full: 3 central, 2 related, 1 peripheral, 4 none."),
+    (key = "watch.daily_reads", kind = "int", label = "Full reads per day", help = "Automatic full reads per UTC day. -1 is unlimited, 0 records only."),
+    (key = "watch.weekly_reads", kind = "int", label = "Full reads per week", help = "Automatic full reads per UTC week. -1 is unlimited, 0 records only."),
     (key = "watch.record_from", kind = "int", label = "Record from", help = "Lowest rating recorded with title and abstract only. 4 = none."),
     (key = "group.name", kind = "string", label = "Group name", help = "The site's title."),
     (key = "group.field", kind = "string", label = "Field", help = "The group's research field, e.g. coral reef ecology. Agents act as experts in it."),

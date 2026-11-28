@@ -98,8 +98,7 @@ reading, and record it as the paper of `day` (a day can have several: the latest
 with how much it matters to the group: a new paper's rating, or the judge's rating of a library paper
 as it picks it. Returns `(; id, why, source, relevance)`.
 """
-function pick_daily!(kb::KB; day::AbstractString = utc_today())
-    cands = daily_candidates(kb)
+function pick_daily!(kb::KB; day::AbstractString = utc_today(), cands = daily_candidates(kb))
     isempty(cands) && error("Nothing to pick a paper of the day from: no promoted new papers, and no unread papers in the library")
     prompt = group_brief(kb.config) * "\nCandidates:\n\n" *
         join(("[$(c.id)] ($(c.source == "new" ? "new on arXiv" : "in the library, unread")) $(c.title)\n$(c.abstract)" *
@@ -202,7 +201,7 @@ Pick and feature today's paper as a job: when today has none yet, or with `anoth
 figures cut anew.
 Returns the job already doing it, if one is.
 """
-function start_daily(kb::KB; another::Bool = false, again::Bool = false, day::AbstractString = "")
+function start_daily(kb::KB; automatic::Bool = false, another::Bool = false, again::Bool = false, day::AbstractString = "")
     again || isempty(day) || error("A day other than today can only have its paper analysed again")
     running = filter(j -> j.status == :running && j.name == "paper of the day", list_jobs())
     isempty(running) || return first(running)
@@ -221,7 +220,10 @@ function start_daily(kb::KB; another::Bool = false, again::Bool = false, day::Ab
         report!(job, "judging the new papers")
         judge_watched!(kb)
         report!(job, "picking the paper of the day")
-        p = pick_daily!(kb; day)
+        cands = daily_candidates(kb)
+        automatic && isempty(cands) && return "No eligible paper of the day."
+        automatic && !reserve_watch_read!(kb, "daily") && return "Automatic reading budget reached."
+        p = pick_daily!(kb; day, cands)
         r = feature_daily!(kb, day, p.id; progress = m -> report!(job, m))
         "Paper of the day: $(p.id), with $(r.figures) figure(s)."
     end

@@ -91,7 +91,7 @@ async function add(ps: Paper[]) {
         <span :class="['kbw-rel', { central: t.relevance === 3 }]">{{ RELEVANCE[t.relevance] }}</span>
         <div>
           <a :href="paperHref(t.slug)" class="kbw-title"><KBTitle :text="t.title" /></a>
-          <span class="kbw-meta"> · {{ t.read ? 'read in full' : 'recorded' }} · {{ day(t.taken_at) }}</span>
+          <span class="kbw-meta"> · {{ t.read ? 'read in full' : t.taken === 'deferred' ? 'queued for full reading' : 'recorded' }} · {{ day(t.taken_at) }}</span>
           <template v-if="manages">
             <button v-if="!t.read" type="button" class="kb-outline kbw-add" :disabled="acting.has(t.id)" @click="act('ingest', t)">Read in full</button>
             <button type="button" class="kb-outline kbw-add" :disabled="acting.has(t.id)" @click="act('drop', t)">Drop</button>
