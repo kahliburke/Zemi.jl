@@ -16,9 +16,10 @@ import KBJobs from './KBJobs.vue'
 
 type Near = { id: string; slug: string; title: string; score: number }
 type Paper = { id: string; title: string; authors: string[]; abstract: string; published: string; category: string;
-               score: number; area: string | null; area_score: number | null; nearest: Near[]; relevance: number | null; reason: string }
-type Taken = { id: string; slug: string; title: string; relevance: number; reason: string; taken: string; taken_at: string; read: boolean }
+               origins?: string[]; score: number; area: string | null; area_score: number | null; nearest: Near[]; relevance: number | null; reason: string }
+type Taken = { id: string; slug: string; title: string; relevance: number; reason: string; origins?: string[]; taken: string; taken_at: string; read: boolean }
 type Watch = { checked: string | null; categories: string[]; days: number; papers: Paper[]; taken?: Taken[] }
+const sourceUrl = (id: string) => /^10\.\d+\//.test(id) ? `https://doi.org/${id}` : `https://arxiv.org/abs/${id}`
 const data = ref<Watch | null>(null)
 const area = ref('')
 const shown = ref(25)
@@ -82,7 +83,7 @@ async function add(ps: Paper[]) {
   <div class="kbw">
     <p v-if="error" class="kb-error">{{ error }}</p>
     <p v-if="data" class="kbw-dim">
-      Watching {{ data.categories.join(', ') }} (last {{ data.days }} days) · checked {{ when(data.checked, 'not yet') }}
+      Paper watch (last {{ data.days }} days)<template v-if="data.categories.length"> · {{ data.categories.join(', ') }}</template> · checked {{ when(data.checked, 'not yet') }}
       <button v-if="mode === 'live'" type="button" class="kb-outline kbw-add" :disabled="checking" @click="check">{{ checking ? 'Checking…' : 'Check now' }}</button>
     </p>
     <div v-if="taken.length" class="kbw-promoted kbw-taken">
@@ -91,7 +92,7 @@ async function add(ps: Paper[]) {
         <span :class="['kbw-rel', { central: t.relevance === 3 }]">{{ RELEVANCE[t.relevance] }}</span>
         <div>
           <a :href="paperHref(t.slug)" class="kbw-title"><KBTitle :text="t.title" /></a>
-          <span class="kbw-meta"> · {{ t.read ? 'read in full' : 'recorded' }} · {{ day(t.taken_at) }}</span>
+          <span class="kbw-meta"> · {{ t.read ? 'read in full' : t.taken === 'deferred' ? 'queued for full reading' : 'recorded' }} · {{ day(t.taken_at) }}<template v-if="t.origins?.length"> · {{ t.origins.join(' · ') }}</template></span>
           <template v-if="manages">
             <button v-if="!t.read" type="button" class="kb-outline kbw-add" :disabled="acting.has(t.id)" @click="act('ingest', t)">Read in full</button>
             <button type="button" class="kb-outline kbw-add" :disabled="acting.has(t.id)" @click="act('drop', t)">Drop</button>
@@ -105,7 +106,7 @@ async function add(ps: Paper[]) {
       <div v-for="p in promoted" :key="p.id" class="kbw-pick">
         <span :class="['kbw-rel', { central: p.relevance === 3 }]">{{ RELEVANCE[p.relevance ?? 0] }}</span>
         <div>
-          <a :href="`https://arxiv.org/abs/${p.id}`" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
+          <a :href="sourceUrl(p.id)" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
           <span v-if="p.area" class="kbw-meta"> · {{ p.area }}</span>
           <button v-if="canAdd" type="button" class="kb-outline kbw-add" :disabled="added.has(p.id)" @click="add([p])">{{ added.has(p.id) ? 'Added' : 'Add' }}</button>
           <div class="kbw-reason">{{ p.reason }}</div>
@@ -126,8 +127,8 @@ async function add(ps: Paper[]) {
       <div class="kbw-head">
         <span class="kbw-score" :title="`${p.area ? `${p.area} ${(p.area_score ?? 0).toFixed(2)} · ` : ''}nearest paper ${(p.nearest[0]?.score ?? 0).toFixed(2)}`">{{ p.score.toFixed(2) }}</span>
         <div>
-          <a :href="`https://arxiv.org/abs/${p.id}`" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
-          <div class="kbw-meta">{{ byline(p.authors, 4) }} · {{ p.published }} · {{ p.category }}
+          <a :href="sourceUrl(p.id)" target="_blank" rel="noopener" class="kbw-title"><KBTitle :text="p.title" /></a>
+          <div class="kbw-meta">{{ byline(p.authors, 4) }} · {{ p.published }} · {{ p.origins?.join(' · ') || p.category }}
             <template v-if="p.area"> · <span class="kbw-area">{{ p.area }}</span></template>
             <button type="button" class="kb-link" @click="toggle(p.id)">{{ open.has(p.id) ? 'hide abstract' : 'abstract' }}</button>
             <button v-if="canAdd" type="button" class="kb-outline kbw-add" :disabled="added.has(p.id)" @click="add([p])">{{ added.has(p.id) ? 'Added' : 'Add' }}</button>

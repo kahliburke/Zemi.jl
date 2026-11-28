@@ -157,3 +157,62 @@ function works_json(kb::KB, works::AbstractVector{CitedWork})
                  "cited_by" => [Dict("id" => id, "slug" => page_slug(id), "title" => get(titles, id, id)) for id in w.cited_by])
             for w in works]
 end
+
+const MISSING_ORIGIN = "Library references"
+
+"Place up to the configured number of new, identifiable missing works on each watch pass."
+function missing_watch(kb; cancelled = () -> false, ranked = cited_works, arxiv = fetch_metadata_api, works = openalex_get,
+                       today = Date(now(UTC)))
+    c = kb.config
+    c.watch_missing_per_check == 0 && return []
+    seen = Set{String}()
+    for row in query(kb, "SELECT doc_id, doi FROM papers UNION ALL SELECT doc_id, doi FROM watch")
+        push!(seen, row.doc_id)
+        ismissing(row.doi) || push!(seen, normalize_doi(row.doi))
+    end
+    prefix = "missing_lookup/"
+    execute!(kb, "DELETE FROM kv WHERE key GLOB 'missing_lookup/*' AND value <= ?", (string(today),))
+    waiting = Set(r.key for r in query(kb, "SELECT key FROM kv WHERE key GLOB 'missing_lookup/*'"))
+    picks = CitedWork[]
+    for w in on_arxiv(kb, ranked(kb; min_cited = c.watch_min_internal_citations))
+        cancelled() && return []
+        ids = String[id for id in (w.arxiv, w.doi === nothing ? nothing : normalize_doi(w.doi)) if id !== nothing]
+        (isempty(ids) || any(in(seen), ids) || prefix * w.key in waiting) && continue
+        dropped_as(kb; id = something(w.arxiv, ""), doi = something(w.doi, "")) === nothing || continue
+        union!(seen, ids)
+        push!(picks, w)
+        length(picks) == c.watch_missing_per_check && break
+    end
+    isempty(picks) && return []
+    ids = String[w.arxiv for w in picks if w.arxiv !== nothing]
+    metas = isempty(ids) ? Dict() : arxiv(ids, c)
+    dois = String[normalize_doi(w.doi) for w in picks if w.doi !== nothing && !haskey(metas, w.arxiv)]
+    by_doi = Dict{String,Any}()
+    for batch in Iterators.partition(dois, 50)
+        cancelled() && return []
+        for row in works(["filter" => "doi:" * join(batch, '|'), "select" => WATCH_WORK_FIELDS, "per_page" => "100"]; c.contact)
+            doi = get(row, "doi", nothing)
+            doi === nothing || (by_doi[normalize_doi(doi)] = row)
+        end
+    end
+    out = []
+    for w in picks
+        cancelled() && return []
+        reason = "Cited by $(length(w.cited_by)) library papers"
+        if w.arxiv !== nothing && haskey(metas, w.arxiv)
+            m = metas[w.arxiv]
+            push!(out, (; m.doc_id, m.title, m.authors, m.abstract, m.published, m.primary_category,
+                         doi = something(m.doi, w.doi, Some(nothing)), work_id = nothing, origins = [MISSING_ORIGIN, reason]))
+            continue
+        end
+        row = w.doi === nothing ? nothing : get(by_doi, normalize_doi(w.doi), nothing)
+        candidate = row === nothing ? nothing : watch_work(row, reason)
+        if candidate === nothing
+            # One unresolvable reference must not starve the rest of the ranked list.
+            execute!(kb, "INSERT OR REPLACE INTO kv VALUES (?, ?)", (prefix * w.key, string(today + Day(7))))
+        else
+            push!(out, merge(candidate, (; origins = [MISSING_ORIGIN, reason])))
+        end
+    end
+    return out
+end

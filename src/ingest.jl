@@ -37,7 +37,7 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
             elseif local_kind(s) !== nothing
                 ismissing(paper_id(kb, s)) && not_found("No document $s in the knowledge base")
                 # A document here named by its id stays whose it is, but for a person bringing it in too.
-                holder === nothing || bring_in!(kb, s, holder; new = false)
+                holder === nothing || bring_in!(kb, s, holder; new = false, source)
                 push!(out, String(s))
                 continue
             end
@@ -56,7 +56,7 @@ function add_papers!(kb::KB, ids::AbstractVector{<:AbstractString}; source::Abst
             execute!(kb, "INSERT OR IGNORE INTO papers (doc_id, version, added_at) VALUES (?, ?, ?)",
                 (id.id, id.version, now_iso()))
             new && record_arrival!(kb, paper_id(kb, id.id), source, by)
-            bring_in!(kb, id.id, holder; new)
+            bring_in!(kb, id.id, holder; new, source)
             push!(out, id.id)
         end
     end
@@ -78,7 +78,7 @@ uploads are recorded where they are read, the rest by [`add_papers!`](@ref). A m
 elsewhere (a base set's posts in a channel, say) is worded by its source and channel.
 """
 const ARRIVALS = Dict("upload" => "uploaded", "added" => "added",
-                      "cited" => "added from citations", "watch" => "added from the arXiv watch",
+                      "cited" => "added from citations", "watch" => "added from the paper watch",
                       "daily" => "picked as paper of the day", "study" => "found for a study",
                       "library" => "added from a person's library")
 
@@ -163,7 +163,7 @@ function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::Abstra
         same = rec === nothing || rec.doi === nothing ? missing : paper_with_doi(kb, rec.doi)
         if !ismissing(same)
             copied && rm(dest; force = true)
-            bring_in!(kb, same, holder; new = false)
+            bring_in!(kb, same, holder; new = false, source)
             return same
         end
     end
@@ -192,7 +192,7 @@ function add_pdf!(kb::KB, path::AbstractString; title = nothing, authors::Abstra
         ismissing(scalar(kb, "SELECT 1 FROM mentions WHERE paper_id = ? AND source = ?", (pid, source))) && execute!(kb, """
             INSERT INTO mentions (paper_id, source, channel, posted_at, author, url, message)
             VALUES (?, ?, NULL, ?, ?, NULL, ?)""", (pid, source, time(), something(added_by, missing), basename(path)))
-        bring_in!(kb, id, holder; new)
+        bring_in!(kb, id, holder; new, source)
     end
     # A lookup that failed is left for heal_uploads! to try again.
     looked && heal_upload!(kb, id; parsed, lookup = (_; contact) -> rec)
@@ -218,7 +218,7 @@ function add_doi!(kb::KB, doi::AbstractString; title = nothing, authors::Abstrac
     d = normalize_doi(doi)
     isempty(d) && error("Not a DOI: $(repr(doi))")
     here = paper_with_doi(kb, d)
-    ismissing(here) || (bring_in!(kb, here, holder; new = false); return here)
+    ismissing(here) || (bring_in!(kb, here, holder; new = false, source); return here)
     keep_out!(kb, anyway; by, doi = d)
     c = DOI_COPIES[](d; contact = kb.config.contact)
     arxiv = c.arxiv
@@ -275,7 +275,7 @@ function add_work!(kb::KB, doi::AbstractString; source::AbstractString = "added"
                    holder::Union{Integer,Nothing} = nothing)
     d = normalize_doi(doi)
     here = paper_with_doi(kb, d)
-    ismissing(here) || (bring_in!(kb, here, holder; new = false); return here)
+    ismissing(here) || (bring_in!(kb, here, holder; new = false, source); return here)
     kept = document_with_doi(kb, d)
     r = ismissing(kept) ? DOI_RESOURCE[](d; contact = kb.config.contact) : nothing
     known = ismissing(kept) ? r : (k = resource_row(kb, kept); (; k.title, authors = json_list(k.authors), date = coalesce(k.published, "")))
@@ -283,10 +283,10 @@ function add_work!(kb::KB, doi::AbstractString; source::AbstractString = "added"
         add_doi!(kb, d; title = known.title, authors = known.authors, published = isempty(known.date) ? nothing : known.date,
                  source, by, anyway, holder)
     id === nothing || return id
-    ismissing(kept) || (bring_in!(kb, kept, holder; new = false); return kept)
+    ismissing(kept) || (bring_in!(kb, kept, holder; new = false, source); return kept)
     r === nothing && not_found("OpenAlex knows no work with DOI $d")
     id, _ = put_resource!(kb, "doi", r; by, anyway, arrival = source, read = false)
-    bring_in!(kb, id, holder; new = true)
+    bring_in!(kb, id, holder; new = true, source)
     return id
 end
 

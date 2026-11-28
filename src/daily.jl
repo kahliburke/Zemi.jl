@@ -31,7 +31,7 @@ end
 # One batch of `judge_watched!`: how many were judged (0 when none is left, or the judge rated none).
 function judge_batch!(kb::KB, n::Integer)
     rows = query(kb, """SELECT doc_id AS id, title, abstract FROM watch
-                        WHERE relevance IS NULL AND doc_id NOT IN (SELECT doc_id FROM papers)
+                        WHERE relevance IS NULL AND taken IS NULL AND $(unheld_watch_sql())
                           AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
                         ORDER BY score DESC LIMIT ?""", (n,))
     isempty(rows) && return 0
@@ -49,7 +49,8 @@ function judge_batch!(kb::KB, n::Integer)
             rel = get(p, "relevance", nothing)
             rel isa Integer || continue
             # As the judge may write it (`arXiv:2610.01234v1`), and only one it was asked about.
-            id = replace(String(get(p, "id", "")), r"^arXiv:"i => "", r"v\d+$" => "")
+            id = String(get(p, "id", ""))
+            id in asked || (id = replace(id, r"^arXiv:"i => "", r"v\d+$" => ""))
             id in asked || continue
             execute!(kb, "UPDATE watch SET relevance = ?, reason = ?, judged_by = ? WHERE doc_id = ?",
                      (clamp(rel, 0, 3), String(get(p, "reason", "")), s.name, id))
@@ -69,13 +70,18 @@ into the knowledge base or not; see [`take_watched!`](@ref)) and the library's p
 not read, those the landscape places nearest the focus areas first, leaving out papers picked before. `(; id, title, abstract, source, why, relevance)`, `relevance`
 the judge's rating of a new paper (`nothing` for one from the library).
 """
-function daily_candidates(kb::KB; new::Integer = 8, library::Integer = 5)
+function daily_candidates(kb::KB; automatic::Bool = false, new::Integer = 8, library::Integer = 5)
     picked = Set(r.id for r in query(kb, "SELECT doc_id AS id FROM daily"))
+    if automatic
+        union!(picked, (r.doc_id for r in query(kb, """SELECT doc_id FROM watch WHERE taken = 'deferred'
+            OR EXISTS (SELECT 1 FROM json_each(watch.origins) WHERE value = ?)""", (MISSING_ORIGIN,))))
+    end
     out = Any[(; id = r.id, title = r.title, abstract = r.abstract, source = "new", why = coalesce(r.reason, ""),
                  relevance = Int(r.relevance))
            for r in query(kb, """SELECT doc_id AS id, title, abstract, reason, relevance FROM watch
-                                 WHERE relevance >= 2 AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
-                                 ORDER BY relevance DESC, score DESC""") if !(r.id in picked)]
+                                 WHERE relevance >= 2 AND NOT EXISTS (SELECT 1 FROM papers p WHERE p.doc_id = watch.doc_id AND p.access <> 'open')
+                                   AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
+                                 ORDER BY relevance DESC, score DESC""") if is_arxiv_id(r.id) && !(r.id in picked)]
     out = first(out, new)
     land = read_landscape(kb.config)
     near = land === nothing ? Dict{String,Float64}() : Dict(String(p["id"]) => Float64(p["relevance"]) for p in land["papers"])
@@ -98,8 +104,7 @@ reading, and record it as the paper of `day` (a day can have several: the latest
 with how much it matters to the group: a new paper's rating, or the judge's rating of a library paper
 as it picks it. Returns `(; id, why, source, relevance)`.
 """
-function pick_daily!(kb::KB; day::AbstractString = utc_today())
-    cands = daily_candidates(kb)
+function pick_daily!(kb::KB; day::AbstractString = utc_today(), cands = daily_candidates(kb))
     isempty(cands) && error("Nothing to pick a paper of the day from: no promoted new papers, and no unread papers in the library")
     prompt = group_brief(kb.config) * "\nCandidates:\n\n" *
         join(("[$(c.id)] ($(c.source == "new" ? "new on arXiv" : "in the library, unread")) $(c.title)\n$(c.abstract)" *
@@ -202,7 +207,7 @@ Pick and feature today's paper as a job: when today has none yet, or with `anoth
 figures cut anew.
 Returns the job already doing it, if one is.
 """
-function start_daily(kb::KB; another::Bool = false, again::Bool = false, day::AbstractString = "")
+function start_daily(kb::KB; automatic::Bool = false, another::Bool = false, again::Bool = false, day::AbstractString = "")
     again || isempty(day) || error("A day other than today can only have its paper analysed again")
     running = filter(j -> j.status == :running && j.name == "paper of the day", list_jobs())
     isempty(running) || return first(running)
@@ -221,7 +226,10 @@ function start_daily(kb::KB; another::Bool = false, again::Bool = false, day::Ab
         report!(job, "judging the new papers")
         judge_watched!(kb)
         report!(job, "picking the paper of the day")
-        p = pick_daily!(kb; day)
+        cands = daily_candidates(kb; automatic)
+        automatic && isempty(cands) && return "No eligible paper of the day."
+        automatic && !reserve_watch_read!(kb, "daily") && return "Automatic reading budget reached."
+        p = pick_daily!(kb; day, cands)
         r = feature_daily!(kb, day, p.id; progress = m -> report!(job, m))
         "Paper of the day: $(p.id), with $(r.figures) figure(s)."
     end
