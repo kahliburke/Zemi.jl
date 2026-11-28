@@ -79,7 +79,8 @@ function daily_candidates(kb::KB; automatic::Bool = false, new::Integer = 8, lib
     out = Any[(; id = r.id, title = r.title, abstract = r.abstract, source = "new", why = coalesce(r.reason, ""),
                  relevance = Int(r.relevance))
            for r in query(kb, """SELECT doc_id AS id, title, abstract, reason, relevance FROM watch
-                                 WHERE relevance >= 2 AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
+                                 WHERE relevance >= 2 AND NOT EXISTS (SELECT 1 FROM papers p WHERE p.doc_id = watch.doc_id AND p.access <> 'open')
+                                   AND doc_id NOT IN (SELECT doc_id FROM dropped WHERE restored_at IS NULL)
                                  ORDER BY relevance DESC, score DESC""") if is_arxiv_id(r.id) && !(r.id in picked)]
     out = first(out, new)
     land = read_landscape(kb.config)
