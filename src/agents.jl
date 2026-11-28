@@ -341,6 +341,8 @@ function agent_summarize_paper!(kb::KB, s::Summarizer, doc_id::AbstractString; p
     return import_summaries!(kb, s, doc_id; sections = written, paper = String(d["paper"]), tokens, read_mode = String(reads))
 end
 
+const UNKNOWN_AGENT_TOKENS = (missing, missing, missing, missing)
+
 # A summary worker opens a fresh Kaimon session for a single turn. Its final session
 # counters therefore measure the complete batch, even if agent_output was polled many times.
 function summary_turn(s::Summarizer, dir, prompt; system)
@@ -348,12 +350,12 @@ function summary_turn(s::Summarizer, dir, prompt; system)
         agent_turn_result(agent, prompt; timeout = s.timeout)
     end
     usage = get(out, "usage", nothing)
-    usage isa AbstractDict || return (missing, missing)
+    usage isa AbstractDict || return UNKNOWN_AGENT_TOKENS
     function counter(k)
         value = get(usage, k, nothing)
         return value isa Integer && !(value isa Bool) && value >= 0 ? value : missing
     end
-    return (counter("inputTokens"), counter("outputTokens"))
+    return (counter("inputTokens"), counter("outputTokens"), counter("cacheReadTokens"), counter("cacheCreationTokens"))
 end
 
 # ── Long documents ──────────────────────────────────────────────────────────────────────────────
@@ -437,7 +439,7 @@ function agent_summarize_long!(kb::KB, s::Summarizer, id::AbstractString, sectio
             for (i, t) in enumerate(batch)
                 text = get(got, string(t.ord), nothing)
                 text === nothing && error("The $(s.name) agent left out section $(t.ord), $(t.path)")
-                usage = i == 1 ? batch_tokens : (missing, missing)
+                usage = i == 1 ? batch_tokens : UNKNOWN_AGENT_TOKENS
                 save_summary!(kb, p.id, key(t.ord), s, sha(t.text), strip(String(text)), usage...)
             end
         end
@@ -583,7 +585,7 @@ function agent_summarize_code!(kb::KB, s::Summarizer, id::AbstractString; batch_
         end
         progress("$(s.model) agents reading $(length(changed_files)) files in $(length(batches)) batch(es)")
         # A batch read by an agent: the summaries it wrote are kept, and the files it left out returned.
-        function read_batch(name, batch, carry = (missing, missing))
+        function read_batch(name, batch, carry = UNKNOWN_AGENT_TOKENS)
             write(joinpath(dir, "$name.md"), "Write the result to $name.json.\n\nFiles to summarize (ord: path under repo/):\n" *
                 join(("- $(f.ord): $(f.path)\n" for f in batch)))
             reported = summary_turn(s, dir, "Read BRIEF-files.md and follow it for the files in $name.md."; system = CODE_AGENT_SYSTEM)
@@ -596,7 +598,7 @@ function agent_summarize_code!(kb::KB, s::Summarizer, id::AbstractString; batch_
                     text = get(got, string(f.ord), nothing)
                     text === nothing && continue
                     save_summary!(kb, p.id, key(f.ord), s, sha(f.text), strip(String(text)), batch_tokens...)
-                    batch_tokens = (missing, missing)
+                    batch_tokens = UNKNOWN_AGENT_TOKENS
                 end
             end
             return [f for f in batch if !haskey(got, string(f.ord))], batch_tokens

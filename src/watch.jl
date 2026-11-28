@@ -28,7 +28,7 @@ migration!(21, ["""CREATE TABLE watch_new (
 # against changed focus areas without embedding it again.
 migration!(22, ["ALTER TABLE watch ADD COLUMN vector BLOB"])
 
-migration!(34, ["ALTER TABLE watch ADD COLUMN doi TEXT",
+migration!(35, ["ALTER TABLE watch ADD COLUMN doi TEXT",
                 "ALTER TABLE watch ADD COLUMN work_id TEXT",
                 "ALTER TABLE watch ADD COLUMN origins TEXT NOT NULL DEFAULT '[]'"])
 
